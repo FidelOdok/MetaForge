@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__linear-server__update_issue",
+      "mcp__linear-server__update_project",
+      "mcp__linear-server__list_projects",
+      "Bash(git ls-tree:*)",
+      "mcp__linear-server__list_documents",
+      "mcp__github__get_file_contents",
+      "mcp__linear-server__list_issues",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(bash)"
+    ]
+  }
+}
