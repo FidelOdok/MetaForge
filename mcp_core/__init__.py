@@ -1,6 +1,7 @@
 """MCP core -- Model Context Protocol client layer for MetaForge."""
 
 from mcp_core.client import InMemoryTransport, McpClient, Transport
+from mcp_core.transports import LoopbackTransport
 from mcp_core.protocol import (
     McpError,
     ToolExecutionError,
@@ -20,6 +21,7 @@ from mcp_core.schemas import (
 __all__ = [
     "HealthStatus",
     "InMemoryTransport",
+    "LoopbackTransport",
     "JsonRpcErrorResponse",
     "JsonRpcRequest",
     "JsonRpcSuccessResponse",

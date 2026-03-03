@@ -8,6 +8,7 @@ from skill_registry.mcp_bridge import (
     McpTimeoutError,
     McpToolError,
 )
+from skill_registry.mcp_client_bridge import McpClientBridge
 from skill_registry.registry import (
     SkillRegistration,
     SkillRegistry,
@@ -26,6 +27,7 @@ __all__ = [
     "InMemoryMcpBridge",
     "LoadedSkill",
     "McpBridge",
+    "McpClientBridge",
     "McpTimeoutError",
     "McpToolError",
     "SchemaValidator",
