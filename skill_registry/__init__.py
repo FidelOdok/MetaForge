@@ -6,6 +6,11 @@ from skill_registry.mcp_bridge import (
     McpTimeoutError,
     McpToolError,
 )
+from skill_registry.registry import (
+    SkillLoadError,
+    SkillRegistration,
+    SkillRegistry,
+)
 from skill_registry.schema_validator import (
     SchemaValidator,
     SkillDefinition,
@@ -22,6 +27,9 @@ __all__ = [
     "SkillBase",
     "SkillContext",
     "SkillDefinition",
+    "SkillLoadError",
+    "SkillRegistration",
+    "SkillRegistry",
     "SkillResult",
     "ToolRef",
 ]
