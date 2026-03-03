@@ -99,6 +99,27 @@ CLI binary is `forge` (or `metaforge`), entry point at `cli/index.ts`.
 5. **Merge** — Merge the PR into `main` (squash or merge commit)
 6. **Test main** — Verify `main` passes all checks after merge
 
+## Commit Convention
+
+Use **Conventional Commits** format:
+
+```
+type(scope): description
+```
+
+**Types**: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `style`, `perf`, `build`
+
+**Scope** (optional): module name — `twin-core`, `skill-system`, `mcp`, `cli`, `gateway`, `orchestrator`
+
+**Examples**:
+```
+feat(twin-core): implement Twin API facade
+fix(skill-system): handle missing definition.json gracefully
+docs: update twin_schema.md to v0.2
+test(constraint-engine): add cross-domain validation tests
+chore: add .gitignore
+```
+
 ## Platform Source Repository Structure (Modular Monorepo)
 
 This repo follows the canonical layout defined in `FidelOdok/MetaForge-Planner` at `docs/architecture/repository-structure.md`. Each top-level directory maps to an architectural layer:
