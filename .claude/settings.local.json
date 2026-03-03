@@ -10,7 +10,10 @@
       "mcp__linear-server__list_issues",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(bash)"
+      "Bash(bash)",
+      "Bash(git add pyproject.toml && git rebase --continue)",
+      "Bash(GIT_EDITOR=true git rebase --continue)",
+      "Bash(git add -A && git rebase --continue)"
     ]
   }
 }
