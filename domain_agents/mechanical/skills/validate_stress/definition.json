@@ -1,1 +1,21 @@
-{}
+{
+  "name": "validate_stress",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Validates stress analysis results against design constraints using CalculiX FEA.",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "calculix.run_fea",
+      "capability": "stress_analysis",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.ValidateStressInput",
+  "output_schema": "schema.ValidateStressOutput",
+  "timeout_seconds": 300,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["fea", "stress", "validation", "mechanical"]
+}
