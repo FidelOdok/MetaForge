@@ -1,4 +1,4 @@
-"""Chat persistence layer — models, schema, and Temporal activities for agent chat."""
+"""Chat persistence layer — models, schemas, routes, and activities for agent chat."""
 
 from api_gateway.chat.activity import (
     ChatContextAssembler,
