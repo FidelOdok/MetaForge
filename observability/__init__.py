@@ -1,1 +1,26 @@
-"""Observability package — metrics, tracing, and health for MetaForge."""
+"""MetaForge Observability -- OTel bootstrap, config, structlog bridge, metrics, and middleware."""
+
+from observability.bootstrap import (
+    ObservabilityState,
+    init_observability,
+    shutdown_observability,
+)
+from observability.config import (
+    GrafanaConfig,
+    ObservabilityConfig,
+    OtlpExporterConfig,
+    PrometheusConfig,
+)
+from observability.logging import add_trace_context, configure_logging
+
+__all__ = [
+    "ObservabilityConfig",
+    "ObservabilityState",
+    "OtlpExporterConfig",
+    "PrometheusConfig",
+    "GrafanaConfig",
+    "init_observability",
+    "shutdown_observability",
+    "add_trace_context",
+    "configure_logging",
+]
