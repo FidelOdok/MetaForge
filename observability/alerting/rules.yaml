@@ -1,0 +1,84 @@
+groups:
+  - name: metaforge_critical
+    rules:
+      - alert: GatewayDown
+        expr: up{job="metaforge-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MetaForge Gateway is down"
+          description: "Gateway has been unreachable for more than 1 minute."
+          runbook_url: "https://docs.metaforge.dev/runbooks/gateway-down"
+
+      - alert: KafkaConsumerStopped
+        expr: rate(metaforge_kafka_messages_consumed_total[5m]) == 0 and metaforge_kafka_consumer_lag > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka consumer {{ $labels.consumer_group }} has stopped"
+          description: "Consumer group {{ $labels.consumer_group }} has zero consumption rate but non-zero lag."
+
+      - alert: Neo4jUnreachable
+        expr: metaforge_neo4j_active_connections == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Neo4j is unreachable"
+          description: "No active Neo4j connections for more than 1 minute."
+
+  - name: metaforge_warning
+    rules:
+      - alert: HighAgentFailureRate
+        expr: rate(metaforge_agent_execution_total{status="error"}[10m]) / rate(metaforge_agent_execution_total[10m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High agent failure rate for {{ $labels.agent_code }}"
+          description: "Agent {{ $labels.agent_code }} has >10% failure rate over 10 minutes."
+
+      - alert: KafkaConsumerLagHigh
+        expr: metaforge_kafka_consumer_lag > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag is high"
+          description: "Consumer group {{ $labels.consumer_group }} topic {{ $labels.topic }} has lag > 5000."
+
+      - alert: ErrorBudgetBurnRate
+        expr: |
+          (
+            1 - (
+              sum(rate(metaforge_gateway_request_total{status_code!~"5.."}[1h]))
+              /
+              sum(rate(metaforge_gateway_request_total[1h]))
+            )
+          ) * 720 > 14.4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error budget burn rate is too high"
+          description: "Gateway error budget is being consumed at 14.4x the sustainable rate."
+
+      - alert: LLMCostSpike
+        expr: sum(rate(metaforge_agent_llm_cost_usd_total[1h])) * 3600 > 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM cost spike detected"
+          description: "Projected hourly LLM cost exceeds $10."
+
+      - alert: OscillationDetected
+        expr: rate(metaforge_oscillation_detected_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Design oscillation detected"
+          description: "Agent feedback loop detected for {{ $labels.node_type }}."

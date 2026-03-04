@@ -1,0 +1,476 @@
+{
+  "uid": "metaforge-agent-performance",
+  "title": "MetaForge Agent Performance",
+  "tags": ["metaforge", "agents", "performance"],
+  "timezone": "browser",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]
+  },
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(metaforge_agent_execution_total, agent_code)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "agent_code",
+        "options": [],
+        "query": {
+          "query": "label_values(metaforge_agent_execution_total, agent_code)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query",
+        "label": "Agent"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Agent Success Rate",
+      "description": "Percentage of successful agent executions over the last 30 minutes",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(metaforge_agent_execution_total{agent_code=~\"$agent_code\", status=\"success\"}[30m])) / sum(rate(metaforge_agent_execution_total{agent_code=~\"$agent_code\"}[30m])) * 100",
+          "legendFormat": "Success Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Execution Duration Heatmap",
+      "description": "Heatmap of agent execution durations",
+      "type": "heatmap",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(metaforge_agent_execution_duration_seconds_bucket{agent_code=~\"$agent_code\"}[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "scaleDistribution": {
+              "type": "log",
+              "log": 2
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "s"
+        },
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "steps": 64
+        },
+        "cellGap": 1,
+        "tooltip": {
+          "show": true,
+          "yHistogram": true
+        },
+        "legend": {
+          "show": true
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "LLM Token Usage",
+      "description": "Stacked bar chart of LLM token consumption by agent and type",
+      "type": "barchart",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (agent_code, token_type) (increase(metaforge_agent_llm_tokens_total{agent_code=~\"$agent_code\"}[1h]))",
+          "legendFormat": "{{agent_code}} - {{token_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": -45,
+        "showValue": "auto",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "stacking": "normal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "LLM Cost Over Time",
+      "description": "LLM cost in USD accumulated over time by agent",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (agent_code) (rate(metaforge_agent_llm_cost_usd_total{agent_code=~\"$agent_code\"}[5m])) * 3600",
+          "legendFormat": "{{agent_code}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "lineWidth": 2,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": ["sum"]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Skill Execution Breakdown",
+      "description": "Table of skill execution counts and durations by skill name and domain",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (skill_name, domain) (increase(metaforge_skill_execution_total[1h]))",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (skill_name, domain, le) (rate(metaforge_skill_execution_duration_seconds_bucket[1h])))",
+          "legendFormat": "",
+          "refId": "B",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value #A" },
+            "properties": [
+              { "id": "displayName", "value": "Executions (1h)" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #B" },
+            "properties": [
+              { "id": "displayName", "value": "p95 Duration" },
+              { "id": "unit", "value": "s" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Executions (1h)",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": false,
+          "reducer": ["sum"]
+        }
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "MCP Tool Call Latency",
+      "description": "Heatmap of MCP tool call latencies",
+      "type": "heatmap",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(metaforge_skill_execution_duration_seconds_bucket{domain=~\".*\"}[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "scaleDistribution": {
+              "type": "log",
+              "log": 2
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "s"
+        },
+        "color": {
+          "mode": "scheme",
+          "scheme": "Blues",
+          "steps": 64
+        },
+        "cellGap": 1,
+        "tooltip": {
+          "show": true,
+          "yHistogram": true
+        },
+        "legend": {
+          "show": true
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Agent Trace Explorer",
+      "description": "Recent agent execution traces and logs",
+      "type": "logs",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (agent_code, status) (rate(metaforge_agent_execution_total{agent_code=~\"$agent_code\"}[5m]))",
+          "legendFormat": "{{agent_code}} [{{status}}]",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,457 @@
+{
+  "uid": "metaforge-slo-overview",
+  "title": "MetaForge SLO Overview",
+  "tags": ["metaforge", "slo", "reliability"],
+  "timezone": "browser",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "style": "dark",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["30s", "1m", "5m", "15m"]
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Gateway Availability (30d)",
+      "description": "Gateway uptime percentage over the last 30 days. SLO target: 99.9%",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(metaforge_gateway_request_total{status_code!~\"5..\"}[30d])) / sum(rate(metaforge_gateway_request_total[30d])) * 100",
+          "legendFormat": "Availability",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 99,
+          "max": 100,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99.5 },
+              { "color": "green", "value": 99.9 }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Gateway Latency p99",
+      "description": "99th percentile gateway response latency. SLO target: <100ms",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(metaforge_gateway_request_duration_seconds_bucket[30d])) by (le)) * 1000",
+          "legendFormat": "p99 Latency",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 100 }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Agent Success Rate (30d)",
+      "description": "Overall agent success rate over the last 30 days. SLO target: 95%",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(metaforge_agent_execution_total{status=\"success\"}[30d])) / sum(rate(metaforge_agent_execution_total[30d])) * 100",
+          "legendFormat": "Success Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 90,
+          "max": 100,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 93 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Error Budget Remaining",
+      "description": "Remaining error budget for each SLO as a percentage",
+      "type": "gauge",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "(1 - ((1 - (sum(rate(metaforge_gateway_request_total{status_code!~\"5..\"}[30d])) / sum(rate(metaforge_gateway_request_total[30d])))) / (1 - 0.999))) * 100",
+          "legendFormat": "Gateway Availability (99.9%)",
+          "refId": "A"
+        },
+        {
+          "expr": "(1 - ((1 - (sum(rate(metaforge_agent_execution_total{status=\"success\"}[30d])) / sum(rate(metaforge_agent_execution_total[30d])))) / (1 - 0.95))) * 100",
+          "legendFormat": "Agent Success Rate (95%)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 25 },
+              { "color": "green", "value": 50 }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Error Budget Burn Rate",
+      "description": "Rate at which error budget is being consumed over time (1x = sustainable)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "(1 - (sum(rate(metaforge_gateway_request_total{status_code!~\"5..\"}[1h])) / sum(rate(metaforge_gateway_request_total[1h])))) / (1 - 0.999) * (720 / 720)",
+          "legendFormat": "Gateway (1h window)",
+          "refId": "A"
+        },
+        {
+          "expr": "(1 - (sum(rate(metaforge_gateway_request_total{status_code!~\"5..\"}[6h])) / sum(rate(metaforge_gateway_request_total[6h])))) / (1 - 0.999) * (720 / 720)",
+          "legendFormat": "Gateway (6h window)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "lineWidth": 2,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "unit": "x",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 14.4 }
+            ]
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "SLO Compliance History",
+      "description": "Weekly SLO compliance tracking table",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(metaforge_gateway_request_total{status_code!~\"5..\"}[7d])) / sum(rate(metaforge_gateway_request_total[7d])) * 100",
+          "legendFormat": "Gateway Availability %",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(metaforge_gateway_request_duration_seconds_bucket[7d])) by (le)) * 1000",
+          "legendFormat": "Gateway p99 Latency (ms)",
+          "refId": "B",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "sum(rate(metaforge_agent_execution_total{status=\"success\"}[7d])) / sum(rate(metaforge_agent_execution_total[7d])) * 100",
+          "legendFormat": "Agent Success Rate %",
+          "refId": "C",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value #A" },
+            "properties": [
+              { "id": "displayName", "value": "Gateway Availability %" },
+              { "id": "unit", "value": "percent" },
+              { "id": "decimals", "value": 3 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "green", "value": 99.9 }
+                  ]
+                }
+              },
+              { "id": "custom.displayMode", "value": "color-background" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #B" },
+            "properties": [
+              { "id": "displayName", "value": "Gateway p99 Latency (ms)" },
+              { "id": "unit", "value": "ms" },
+              { "id": "decimals", "value": 1 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "red", "value": 100 }
+                  ]
+                }
+              },
+              { "id": "custom.displayMode", "value": "color-background" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #C" },
+            "properties": [
+              { "id": "displayName", "value": "Agent Success Rate %" },
+              { "id": "unit", "value": "percent" },
+              { "id": "decimals", "value": 2 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "green", "value": 95 }
+                  ]
+                }
+              },
+              { "id": "custom.displayMode", "value": "color-background" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [],
+        "footer": {
+          "show": false,
+          "reducer": ["sum"]
+        }
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "version": 1
+}
