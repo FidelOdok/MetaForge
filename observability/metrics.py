@@ -167,6 +167,83 @@ class MetricsRegistry:
         labels=["consumer_group"],
     )
 
+    # ── Data store metrics (MET-112) ──────────────────────────────────
+    NEO4J_QUERY_DURATION = MetricDefinition(
+        name="metaforge_neo4j_query_duration_seconds",
+        type="histogram",
+        description="Neo4j query duration in seconds",
+        labels=["operation", "node_type"],
+        unit="s",
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+    )
+    NEO4J_ACTIVE_CONNECTIONS = MetricDefinition(
+        name="metaforge_neo4j_active_connections",
+        type="gauge",
+        description="Active Neo4j database connections",
+        labels=[],
+    )
+    NEO4J_QUERY_TOTAL = MetricDefinition(
+        name="metaforge_neo4j_query_total",
+        type="counter",
+        description="Total Neo4j queries",
+        labels=["operation", "status"],
+    )
+    PGVECTOR_SEARCH_DURATION = MetricDefinition(
+        name="metaforge_pgvector_search_duration_seconds",
+        type="histogram",
+        description="pgvector search duration in seconds",
+        labels=["knowledge_type"],
+        unit="s",
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+    )
+    PGVECTOR_SEARCH_TOTAL = MetricDefinition(
+        name="metaforge_pgvector_search_total",
+        type="counter",
+        description="Total pgvector searches",
+        labels=["knowledge_type", "status"],
+    )
+    MINIO_OPERATION_DURATION = MetricDefinition(
+        name="metaforge_minio_operation_duration_seconds",
+        type="histogram",
+        description="MinIO operation duration in seconds",
+        labels=["operation"],
+        unit="s",
+        buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    )
+    MINIO_OPERATION_TOTAL = MetricDefinition(
+        name="metaforge_minio_operation_total",
+        type="counter",
+        description="Total MinIO operations",
+        labels=["operation", "status"],
+    )
+
+    # ── Constraint & Policy metrics (MET-113) ─────────────────────────
+    CONSTRAINT_EVALUATION_TOTAL = MetricDefinition(
+        name="metaforge_constraint_evaluation_total",
+        type="counter",
+        description="Total constraint evaluations",
+        labels=["domain", "result"],
+    )
+    CONSTRAINT_EVALUATION_DURATION = MetricDefinition(
+        name="metaforge_constraint_evaluation_duration_seconds",
+        type="histogram",
+        description="Constraint evaluation duration in seconds",
+        labels=["domain"],
+        unit="s",
+    )
+    OPA_DECISION_TOTAL = MetricDefinition(
+        name="metaforge_opa_decision_total",
+        type="counter",
+        description="Total OPA policy decisions",
+        labels=["policy", "result"],
+    )
+    OSCILLATION_DETECTED_TOTAL = MetricDefinition(
+        name="metaforge_oscillation_detected_total",
+        type="counter",
+        description="Total oscillation detections in the constraint graph",
+        labels=["node_type"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -177,6 +254,8 @@ class MetricsRegistry:
             + cls.agent_metrics()
             + cls.skill_metrics()
             + cls.kafka_metrics()
+            + cls.datastore_metrics()
+            + cls.constraint_metrics()
         )
 
     @classmethod
@@ -220,6 +299,29 @@ class MetricsRegistry:
             cls.KAFKA_MESSAGES_CONSUMED,
             cls.KAFKA_DEAD_LETTERS,
             cls.KAFKA_REBALANCE_TOTAL,
+        ]
+
+    @classmethod
+    def datastore_metrics(cls) -> list[MetricDefinition]:
+        """Return the 7 data store metrics (Neo4j, pgvector, MinIO)."""
+        return [
+            cls.NEO4J_QUERY_DURATION,
+            cls.NEO4J_ACTIVE_CONNECTIONS,
+            cls.NEO4J_QUERY_TOTAL,
+            cls.PGVECTOR_SEARCH_DURATION,
+            cls.PGVECTOR_SEARCH_TOTAL,
+            cls.MINIO_OPERATION_DURATION,
+            cls.MINIO_OPERATION_TOTAL,
+        ]
+
+    @classmethod
+    def constraint_metrics(cls) -> list[MetricDefinition]:
+        """Return the 4 constraint and policy metrics."""
+        return [
+            cls.CONSTRAINT_EVALUATION_TOTAL,
+            cls.CONSTRAINT_EVALUATION_DURATION,
+            cls.OPA_DECISION_TOTAL,
+            cls.OSCILLATION_DETECTED_TOTAL,
         ]
 
 
@@ -414,3 +516,79 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.KAFKA_REBALANCE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"consumer_group": group})
+
+    # ── Data store (Neo4j, pgvector, MinIO) ───────────────────────────
+
+    def record_neo4j_query(
+        self, operation: str, node_type: str, status: str, duration: float
+    ) -> None:
+        """Record a Neo4j query (counter + histogram)."""
+        counter = self._instruments.get(MetricsRegistry.NEO4J_QUERY_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"operation": operation, "status": status})
+        hist = self._instruments.get(MetricsRegistry.NEO4J_QUERY_DURATION.name)
+        if hist is not None:
+            hist.record(
+                duration, attributes={"operation": operation, "node_type": node_type}
+            )
+
+    def set_neo4j_connections(self, count: int) -> None:
+        """Set the current number of active Neo4j connections."""
+        gauge = self._instruments.get(MetricsRegistry.NEO4J_ACTIVE_CONNECTIONS.name)
+        if gauge is not None:
+            gauge.add(count, attributes={})
+
+    def record_pgvector_search(
+        self, knowledge_type: str, status: str, duration: float
+    ) -> None:
+        """Record a pgvector search (counter + histogram)."""
+        counter = self._instruments.get(MetricsRegistry.PGVECTOR_SEARCH_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1, attributes={"knowledge_type": knowledge_type, "status": status}
+            )
+        hist = self._instruments.get(MetricsRegistry.PGVECTOR_SEARCH_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes={"knowledge_type": knowledge_type})
+
+    def record_minio_operation(
+        self, operation: str, status: str, duration: float
+    ) -> None:
+        """Record a MinIO operation (counter + histogram)."""
+        counter = self._instruments.get(MetricsRegistry.MINIO_OPERATION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"operation": operation, "status": status})
+        hist = self._instruments.get(MetricsRegistry.MINIO_OPERATION_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes={"operation": operation})
+
+    # ── Constraint & Policy ───────────────────────────────────────────
+
+    def record_constraint_evaluation(
+        self, domain: str, result: str, duration: float
+    ) -> None:
+        """Record a constraint evaluation (counter + histogram)."""
+        counter = self._instruments.get(
+            MetricsRegistry.CONSTRAINT_EVALUATION_TOTAL.name
+        )
+        if counter is not None:
+            counter.add(1, attributes={"domain": domain, "result": result})
+        hist = self._instruments.get(
+            MetricsRegistry.CONSTRAINT_EVALUATION_DURATION.name
+        )
+        if hist is not None:
+            hist.record(duration, attributes={"domain": domain})
+
+    def record_opa_decision(self, policy: str, result: str) -> None:
+        """Record an OPA policy decision."""
+        counter = self._instruments.get(MetricsRegistry.OPA_DECISION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"policy": policy, "result": result})
+
+    def record_oscillation_detected(self, node_type: str) -> None:
+        """Record an oscillation detection in the constraint graph."""
+        counter = self._instruments.get(
+            MetricsRegistry.OSCILLATION_DETECTED_TOTAL.name
+        )
+        if counter is not None:
+            counter.add(1, attributes={"node_type": node_type})

@@ -10,6 +10,9 @@ services:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
       - "8889:8889"   # Prometheus metrics exporter
+    depends_on:
+      - tempo
+      - loki
     networks:
       - metaforge-obs
 
@@ -40,12 +43,53 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    networks:
+      - metaforge-obs
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo API
+      - "14317:4317"  # OTLP gRPC (internal, mapped to 14317 on host to avoid collision)
+    networks:
+      - metaforge-obs
+
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - metaforge-obs
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    command: ["--config.file=/etc/alertmanager/alertmanager.yaml"]
+    volumes:
+      - ./observability/alertmanager.yaml:/etc/alertmanager/alertmanager.yaml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
     networks:
       - metaforge-obs
 
 volumes:
   prometheus-data:
   grafana-data:
+  tempo-data:
+  loki-data:
+  alertmanager-data:
 
 networks:
   metaforge-obs:
