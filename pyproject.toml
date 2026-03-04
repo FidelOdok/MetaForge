@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway"]
+packages = ["twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability"]
 
 [project]
 name = "metaforge"
