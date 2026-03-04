@@ -21,6 +21,12 @@ from domain_agents.mechanical.skills.check_tolerance.schema import (
     ManufacturingProcess,
     ToleranceSpec,
 )
+from domain_agents.mechanical.skills.generate_mesh.handler import (
+    GenerateMeshHandler,
+)
+from domain_agents.mechanical.skills.generate_mesh.schema import (
+    GenerateMeshInput,
+)
 from skill_registry.mcp_bridge import McpBridge
 from skill_registry.skill_base import SkillContext
 
@@ -272,12 +278,61 @@ class MechanicalAgent:
         )
 
     async def _run_generate_mesh(self, request: TaskRequest) -> TaskResult:
-        """Run mesh generation (placeholder for future implementation)."""
+        """Run mesh generation using the generate_mesh skill."""
+        ctx = self._create_skill_context(request.branch)
+
+        cad_file: str = request.parameters.get("cad_file", "")
+        if not cad_file:
+            return TaskResult(
+                task_type=request.task_type,
+                artifact_id=request.artifact_id,
+                success=False,
+                errors=["Missing required parameter: cad_file"],
+            )
+
+        skill_input = GenerateMeshInput(
+            artifact_id=str(request.artifact_id),
+            cad_file=cad_file,
+            element_size=request.parameters.get("element_size", 1.0),
+            algorithm=request.parameters.get("algorithm", "netgen"),
+            output_format=request.parameters.get("output_format", "inp"),
+            min_angle_threshold=request.parameters.get("min_angle_threshold", 15.0),
+            max_aspect_ratio_threshold=request.parameters.get(
+                "max_aspect_ratio_threshold", 10.0
+            ),
+            refinement_regions=request.parameters.get("refinement_regions", []),
+        )
+
+        handler = GenerateMeshHandler(ctx)
+        result = await handler.run(skill_input)
+
+        if not result.success:
+            return TaskResult(
+                task_type=request.task_type,
+                artifact_id=request.artifact_id,
+                success=False,
+                errors=result.errors,
+            )
+
+        output = result.data
         return TaskResult(
             task_type=request.task_type,
             artifact_id=request.artifact_id,
-            success=False,
-            errors=["generate_mesh skill not yet implemented"],
+            success=output.quality_acceptable,
+            skill_results=[
+                {
+                    "skill": "generate_mesh",
+                    "mesh_file": output.mesh_file,
+                    "num_nodes": output.num_nodes,
+                    "num_elements": output.num_elements,
+                    "element_types": output.element_types,
+                    "quality_acceptable": output.quality_acceptable,
+                    "quality_issues": output.quality_issues,
+                    "algorithm_used": output.algorithm_used,
+                    "element_size_used": output.element_size_used,
+                }
+            ],
+            warnings=output.quality_issues if not output.quality_acceptable else [],
         )
 
     async def _run_full_validation(self, request: TaskRequest) -> TaskResult:

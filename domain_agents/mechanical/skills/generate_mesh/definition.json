@@ -1,1 +1,21 @@
-{}
+{
+  "name": "generate_mesh",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Generate finite element mesh from CAD geometry using FreeCAD",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "freecad.generate_mesh",
+      "capability": "mesh_generation",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.GenerateMeshInput",
+  "output_schema": "schema.GenerateMeshOutput",
+  "timeout_seconds": 300,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["mesh", "fea", "cad", "freecad"]
+}
