@@ -268,6 +268,17 @@ Key architectural rules:
 - **MCP**: Model Context Protocol — the wire protocol for tool access
 - **Domain Agent**: Specialist agent for one engineering discipline (1:1 ratio)
 
+## Observability Requirements
+
+**Every module must include observability.** When creating or modifying any Python module, always add:
+
+1. **Structured logging** via `structlog`: `logger = structlog.get_logger(__name__)` — log key operations with keyword arguments
+2. **Tracing spans** via OpenTelemetry: `tracer = get_tracer("module.name")` from `observability.tracing` — wrap key operations with `tracer.start_as_current_span()`, set relevant attributes
+3. **Metrics** via `observability.metrics`: register counters, histograms, and gauges in `MetricsRegistry` for throughput, latency, and error rates where applicable
+4. **Exception recording**: call `span.record_exception(exc)` in except blocks within traced spans
+
+Follow existing patterns in `observability/tracing.py` (get_tracer, NoOpTracer fallback) and `observability/metrics.py` (MetricDefinition, MetricsRegistry). The system degrades gracefully without the OTel SDK installed.
+
 ## Critical Constraints
 
 1. Never claim Phase 1 has KiCad schematic generation (that's Phase 2 write capability)
