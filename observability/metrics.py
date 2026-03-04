@@ -217,6 +217,41 @@ class MetricsRegistry:
         labels=["operation", "status"],
     )
 
+    # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
+    MQTT_MESSAGES_RECEIVED_TOTAL = MetricDefinition(
+        name="metaforge_mqtt_messages_received_total",
+        type="counter",
+        description="Total MQTT messages received from devices",
+        labels=["device_id", "topic"],
+    )
+    TELEMETRY_ROUTER_DURATION = MetricDefinition(
+        name="metaforge_telemetry_router_duration_seconds",
+        type="histogram",
+        description="Telemetry routing duration in seconds",
+        labels=["device_type"],
+        unit="s",
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+    )
+    TELEMETRY_INGESTION_TOTAL = MetricDefinition(
+        name="metaforge_telemetry_ingestion_total",
+        type="counter",
+        description="Total telemetry ingestion attempts",
+        labels=["status"],
+    )
+    TELEMETRY_INGESTION_ERRORS_TOTAL = MetricDefinition(
+        name="metaforge_telemetry_ingestion_errors_total",
+        type="counter",
+        description="Total telemetry ingestion errors",
+        labels=["error_type"],
+    )
+    TELEMETRY_LAG_SECONDS = MetricDefinition(
+        name="metaforge_telemetry_lag_seconds",
+        type="gauge",
+        description="Telemetry processing lag in seconds per device",
+        labels=["device_id"],
+        unit="s",
+    )
+
     # ── Constraint & Policy metrics (MET-113) ─────────────────────────
     CONSTRAINT_EVALUATION_TOTAL = MetricDefinition(
         name="metaforge_constraint_evaluation_total",
@@ -255,6 +290,7 @@ class MetricsRegistry:
             + cls.skill_metrics()
             + cls.kafka_metrics()
             + cls.datastore_metrics()
+            + cls.telemetry_metrics()
             + cls.constraint_metrics()
         )
 
@@ -312,6 +348,17 @@ class MetricsRegistry:
             cls.PGVECTOR_SEARCH_TOTAL,
             cls.MINIO_OPERATION_DURATION,
             cls.MINIO_OPERATION_TOTAL,
+        ]
+
+    @classmethod
+    def telemetry_metrics(cls) -> list[MetricDefinition]:
+        """Return the 5 MQTT/telemetry metrics."""
+        return [
+            cls.MQTT_MESSAGES_RECEIVED_TOTAL,
+            cls.TELEMETRY_ROUTER_DURATION,
+            cls.TELEMETRY_INGESTION_TOTAL,
+            cls.TELEMETRY_INGESTION_ERRORS_TOTAL,
+            cls.TELEMETRY_LAG_SECONDS,
         ]
 
     @classmethod
@@ -561,6 +608,48 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.MINIO_OPERATION_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"operation": operation})
+
+    # ── Telemetry / MQTT ─────────────────────────────────────────────
+
+    def record_mqtt_message(self, device_id: str, topic: str) -> None:
+        """Record an MQTT message received from a device."""
+        counter = self._instruments.get(
+            MetricsRegistry.MQTT_MESSAGES_RECEIVED_TOTAL.name
+        )
+        if counter is not None:
+            counter.add(1, attributes={"device_id": device_id, "topic": topic})
+
+    def record_telemetry_routing(self, device_type: str, duration: float) -> None:
+        """Record telemetry routing duration."""
+        hist = self._instruments.get(
+            MetricsRegistry.TELEMETRY_ROUTER_DURATION.name
+        )
+        if hist is not None:
+            hist.record(duration, attributes={"device_type": device_type})
+
+    def record_telemetry_ingestion(self, status: str) -> None:
+        """Record a telemetry ingestion attempt (status: success/error)."""
+        counter = self._instruments.get(
+            MetricsRegistry.TELEMETRY_INGESTION_TOTAL.name
+        )
+        if counter is not None:
+            counter.add(1, attributes={"status": status})
+
+    def record_telemetry_error(self, error_type: str) -> None:
+        """Record a telemetry ingestion error (error_type: malformed/write_failure)."""
+        counter = self._instruments.get(
+            MetricsRegistry.TELEMETRY_INGESTION_ERRORS_TOTAL.name
+        )
+        if counter is not None:
+            counter.add(1, attributes={"error_type": error_type})
+
+    def set_telemetry_lag(self, device_id: str, lag_seconds: float) -> None:
+        """Set the telemetry processing lag for a device."""
+        gauge = self._instruments.get(
+            MetricsRegistry.TELEMETRY_LAG_SECONDS.name
+        )
+        if gauge is not None:
+            gauge.add(lag_seconds, attributes={"device_id": device_id})
 
     # ── Constraint & Policy ───────────────────────────────────────────
 

@@ -85,10 +85,10 @@ class TestAlertingRules:
         assert "metaforge_warning" in group_names
 
     def test_total_alert_rules_count(self) -> None:
-        """There must be exactly 8 alert rules in total."""
+        """There must be exactly 13 alert rules in total (8 original + 5 anomaly)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 8
+        assert len(rules) == 13
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -103,19 +103,19 @@ class TestAlertingRules:
             assert "annotations" in rule, f"Missing 'annotations' in {rule['alert']}"
             assert "summary" in rule["annotations"], f"Missing 'summary' annotation in {rule['alert']}"
 
-    def test_three_critical_rules(self) -> None:
-        """There must be exactly 3 critical rules."""
+    def test_five_critical_rules(self) -> None:
+        """There must be exactly 5 critical rules (3 original + 2 anomaly)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         critical = [r for r in rules if r["labels"]["severity"] == "critical"]
-        assert len(critical) == 3
+        assert len(critical) == 5
 
-    def test_five_warning_rules(self) -> None:
-        """There must be exactly 5 warning rules."""
+    def test_eight_warning_rules(self) -> None:
+        """There must be exactly 8 warning rules (5 original + 3 anomaly)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 5
+        assert len(warnings) == 8
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -125,7 +125,13 @@ class TestAlertingRules:
             r["alert"] for r in rules if r["labels"]["severity"] == "critical"
         )
         assert critical_names == sorted(
-            ["GatewayDown", "KafkaConsumerStopped", "Neo4jUnreachable"]
+            [
+                "DeviceTelemetryStopped",
+                "FleetAnomalyPattern",
+                "GatewayDown",
+                "KafkaConsumerStopped",
+                "Neo4jUnreachable",
+            ]
         )
 
     def test_warning_rule_names(self) -> None:
@@ -137,11 +143,14 @@ class TestAlertingRules:
         )
         assert warning_names == sorted(
             [
+                "DeviceOffline",
                 "ErrorBudgetBurnRate",
                 "HighAgentFailureRate",
                 "KafkaConsumerLagHigh",
                 "LLMCostSpike",
                 "OscillationDetected",
+                "SensorOutOfRange",
+                "TSDBIngestionFailing",
             ]
         )
 

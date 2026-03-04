@@ -82,3 +82,52 @@ groups:
         annotations:
           summary: "Design oscillation detected"
           description: "Agent feedback loop detected for {{ $labels.node_type }}."
+
+  - name: metaforge_anomaly
+    rules:
+      - alert: DeviceTelemetryStopped
+        expr: absent_over_time(metaforge_mqtt_messages_received_total{device_id=~".+"}[5m])
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Device telemetry has stopped"
+          description: "No MQTT messages received from any device in the last 5 minutes."
+          runbook_url: "https://docs.metaforge.dev/runbooks/device-telemetry-stopped"
+
+      - alert: SensorOutOfRange
+        expr: metaforge_telemetry_lag_seconds > 300
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sensor out of range for device {{ $labels.device_id }}"
+          description: "Device {{ $labels.device_id }} telemetry lag exceeds safe threshold (>300s)."
+
+      - alert: DeviceOffline
+        expr: changes(metaforge_mqtt_messages_received_total[2m]) == 0 and metaforge_mqtt_messages_received_total > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Device {{ $labels.device_id }} appears offline"
+          description: "Device {{ $labels.device_id }} stopped sending MQTT messages without graceful shutdown."
+
+      - alert: FleetAnomalyPattern
+        expr: (sum(rate(metaforge_telemetry_ingestion_total{status="error"}[5m])) / sum(rate(metaforge_telemetry_ingestion_total[5m]))) > 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fleet-wide anomaly pattern detected"
+          description: "More than 10% of fleet devices are reporting errors simultaneously."
+          runbook_url: "https://docs.metaforge.dev/runbooks/fleet-anomaly-pattern"
+
+      - alert: TSDBIngestionFailing
+        expr: (sum(rate(metaforge_telemetry_ingestion_errors_total[5m])) / sum(rate(metaforge_telemetry_ingestion_total[5m]))) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TSDB ingestion failure rate is elevated"
+          description: "Telemetry write error rate exceeds 1% over the last 5 minutes."
