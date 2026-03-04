@@ -175,9 +175,9 @@ class TestValidateStress:
 
 
 class TestCheckTolerances:
-    """Tests for the check_tolerances task type (placeholder)."""
+    """Tests for the check_tolerances task type."""
 
-    async def test_not_yet_implemented(self, agent: MechanicalAgent):
+    async def test_missing_manufacturing_process(self, agent: MechanicalAgent):
         request = TaskRequest(
             task_type="check_tolerances",
             artifact_id=uuid4(),
@@ -185,7 +185,7 @@ class TestCheckTolerances:
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("not yet implemented" in e for e in result.errors)
+        assert any("manufacturing_process" in e for e in result.errors)
 
 
 # --- Mesh generation ---
