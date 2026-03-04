@@ -1,5 +1,9 @@
 """Constraint engine — cross-domain validation for the Digital Twin."""
 
+from twin_core.constraint_engine.cross_domain import (
+    CrossDomainCheck,
+    CrossDomainValidator,
+)
 from twin_core.constraint_engine.models import (
     ConstraintEvaluationResult,
     ConstraintViolation,
@@ -14,4 +18,6 @@ __all__ = [
     "InMemoryConstraintEngine",
     "ConstraintEvaluationResult",
     "ConstraintViolation",
+    "CrossDomainCheck",
+    "CrossDomainValidator",
 ]
