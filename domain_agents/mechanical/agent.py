@@ -13,6 +13,14 @@ from uuid import UUID, uuid4
 import structlog
 from pydantic import BaseModel
 
+from domain_agents.mechanical.skills.check_tolerance.handler import (
+    CheckToleranceHandler,
+)
+from domain_agents.mechanical.skills.check_tolerance.schema import (
+    CheckToleranceInput,
+    ManufacturingProcess,
+    ToleranceSpec,
+)
 from skill_registry.mcp_bridge import McpBridge
 from skill_registry.skill_base import SkillContext
 
@@ -193,12 +201,74 @@ class MechanicalAgent:
         )
 
     async def _run_check_tolerances(self, request: TaskRequest) -> TaskResult:
-        """Run tolerance checking (placeholder for future implementation)."""
+        """Run tolerance checking using the check_tolerance skill."""
+        ctx = self._create_skill_context(request.branch)
+
+        # Build tolerance specs from request parameters
+        raw_tolerances: list[dict[str, Any]] = request.parameters.get("tolerances", [])
+        tolerances = [ToleranceSpec.model_validate(t) for t in raw_tolerances]
+
+        raw_process: dict[str, Any] = request.parameters.get(
+            "manufacturing_process", {}
+        )
+        if not raw_process:
+            return TaskResult(
+                task_type=request.task_type,
+                artifact_id=request.artifact_id,
+                success=False,
+                errors=["Missing required parameter: manufacturing_process"],
+            )
+
+        try:
+            process = ManufacturingProcess.model_validate(raw_process)
+        except Exception as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                artifact_id=request.artifact_id,
+                success=False,
+                errors=[f"Invalid manufacturing_process: {exc}"],
+            )
+
+        skill_input = CheckToleranceInput(
+            artifact_id=str(request.artifact_id),
+            tolerances=tolerances,
+            manufacturing_process=process,
+            material=request.parameters.get("material", "aluminum_6061"),
+            check_stack_up=request.parameters.get("check_stack_up", False),
+        )
+
+        handler = CheckToleranceHandler(ctx)
+        result = await handler.run(skill_input)
+
+        if not result.success:
+            return TaskResult(
+                task_type=request.task_type,
+                artifact_id=request.artifact_id,
+                success=False,
+                errors=result.errors,
+            )
+
+        output = result.data
         return TaskResult(
             task_type=request.task_type,
             artifact_id=request.artifact_id,
-            success=False,
-            errors=["check_tolerances skill not yet implemented"],
+            success=output.overall_status != "fail",
+            skill_results=[
+                {
+                    "skill": "check_tolerance",
+                    "overall_status": output.overall_status,
+                    "total_dimensions_checked": output.total_dimensions_checked,
+                    "passed": output.passed,
+                    "warnings": output.warnings,
+                    "failures": output.failures,
+                    "summary": output.summary,
+                }
+            ],
+            warnings=(
+                [output.summary]
+                if output.overall_status == "marginal"
+                else []
+            ),
         )
 
     async def _run_generate_mesh(self, request: TaskRequest) -> TaskResult:
@@ -215,11 +285,22 @@ class MechanicalAgent:
         # Run stress validation first
         stress_result = await self._run_validate_stress(request)
 
-        all_results = stress_result.skill_results
+        all_results = list(stress_result.skill_results)
         all_errors = list(stress_result.errors)
         all_warnings = list(stress_result.warnings)
 
         overall_success = stress_result.success
+
+        # Run tolerance check if tolerance parameters are provided
+        if request.parameters.get("tolerances") and request.parameters.get(
+            "manufacturing_process"
+        ):
+            tol_result = await self._run_check_tolerances(request)
+            all_results.extend(tol_result.skill_results)
+            all_errors.extend(tol_result.errors)
+            all_warnings.extend(tol_result.warnings)
+            if not tol_result.success:
+                overall_success = False
 
         return TaskResult(
             task_type="full_validation",

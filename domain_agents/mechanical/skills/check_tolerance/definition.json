@@ -1,1 +1,15 @@
-{}
+{
+  "name": "check_tolerance",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Analyzes dimensional tolerances against manufacturing process capabilities and DFM rules",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.CheckToleranceInput",
+  "output_schema": "schema.CheckToleranceOutput",
+  "timeout_seconds": 60,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["tolerance", "dfm", "manufacturing", "quality"]
+}
