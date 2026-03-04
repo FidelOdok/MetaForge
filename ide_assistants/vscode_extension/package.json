@@ -1,1 +1,91 @@
-{}
+{
+  "name": "metaforge-assistant",
+  "displayName": "MetaForge Assistant",
+  "description": "MetaForge IDE assistant for firmware development — connects to the MetaForge gateway for Digital Twin browsing and AI-assisted chat.",
+  "version": "0.1.0",
+  "publisher": "metaforge",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "metaforge",
+          "title": "MetaForge",
+          "icon": "resources/metaforge-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "metaforge": [
+        {
+          "id": "metaforge-twin",
+          "name": "Digital Twin",
+          "type": "tree"
+        },
+        {
+          "id": "metaforge-chat",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "metaforge.refresh",
+        "title": "MetaForge: Refresh Digital Twin",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "metaforge.connect",
+        "title": "MetaForge: Connect to Gateway"
+      },
+      {
+        "command": "metaforge.disconnect",
+        "title": "MetaForge: Disconnect from Gateway"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "metaforge.refresh",
+          "when": "view == metaforge-twin",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MetaForge",
+      "properties": {
+        "metaforge.gatewayUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "URL of the MetaForge gateway service."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "MetaForge Chat",
+  "description": "MetaForge AI assistant plugin for KiCad PCB editor — enables real-time chat with MetaForge agents for design guidance, BOM review, and DRC/ERC assistance.",
+  "version": "0.1.0",
+  "author": "MetaForge",
+  "license": "MIT",
+  "kicad_version": "7.0",
+  "entry_point": "__init__.py",
+  "category": "MetaForge",
+  "dependencies": {
+    "python": ">=3.9",
+    "pyqt5": ">=5.15"
+  },
+  "repository": "https://github.com/MetaForge-HA/MetaForge"
+}
