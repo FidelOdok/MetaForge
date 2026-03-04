@@ -192,9 +192,10 @@ class TestCheckTolerances:
 
 
 class TestGenerateMesh:
-    """Tests for the generate_mesh task type (placeholder)."""
+    """Tests for the generate_mesh task type."""
 
-    async def test_not_yet_implemented(self, agent: MechanicalAgent):
+    async def test_missing_cad_file_parameter(self, agent: MechanicalAgent):
+        """Agent should return error when cad_file parameter is missing."""
         request = TaskRequest(
             task_type="generate_mesh",
             artifact_id=uuid4(),
@@ -202,7 +203,7 @@ class TestGenerateMesh:
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("not yet implemented" in e for e in result.errors)
+        assert any("cad_file" in e for e in result.errors)
 
 
 # --- Full validation ---
