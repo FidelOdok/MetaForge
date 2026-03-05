@@ -1,1 +1,15 @@
-{}
+{
+  "name": "configure_rtos",
+  "version": "0.1.0",
+  "domain": "firmware",
+  "agent": "firmware",
+  "description": "Generate RTOS configuration from task definitions and memory constraints",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.ConfigureRtosInput",
+  "output_schema": "schema.ConfigureRtosOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["rtos", "configuration", "firmware", "memory"]
+}

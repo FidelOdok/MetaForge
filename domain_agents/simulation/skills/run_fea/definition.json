@@ -1,1 +1,21 @@
-{}
+{
+  "name": "run_fea",
+  "version": "0.1.0",
+  "domain": "simulation",
+  "agent": "simulation",
+  "description": "Run finite element analysis using CalculiX solver",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "calculix.run_fea",
+      "capability": "structural_analysis",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.RunFeaInput",
+  "output_schema": "schema.RunFeaOutput",
+  "timeout_seconds": 300,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["fea", "stress", "structural", "calculix"]
+}

@@ -1,1 +1,15 @@
-{}
+{
+  "name": "scaffold_driver",
+  "version": "0.1.0",
+  "domain": "firmware",
+  "agent": "firmware",
+  "description": "Scaffold a peripheral driver with header, source, and register map",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.ScaffoldDriverInput",
+  "output_schema": "schema.ScaffoldDriverOutput",
+  "timeout_seconds": 60,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["driver", "peripheral", "firmware", "code-generation"]
+}
