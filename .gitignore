@@ -57,12 +57,12 @@ node_modules/
 # Ripgrep config
 .ripgreprc
 
-# Bare git objects (WSL artifact)
-HEAD
-config
-hooks
-objects
-refs
+# Bare git objects (WSL artifact — root-only)
+/HEAD
+/config
+/hooks
+/objects
+/refs
 
 # Pytest temp dirs
 pytest-of-*/
