@@ -20,8 +20,8 @@ htmlcov/
 .mypy_cache/
 
 # IDEs
-.vscode/
-.idea/
+.vscode
+.idea
 *.swp
 *.swo
 
@@ -30,11 +30,39 @@ htmlcov/
 Thumbs.db
 
 # Claude Code
-.claude/plan.md
+.claude/
 
 # Node (CLI)
 node_modules/
 
 # Environment
 .env
-.env.*
+.env.local
+!.env.example
+
+# Shell dotfiles
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+
+# Git config (user-local)
+.gitconfig
+.gitmodules
+
+# MCP config
+.mcp.json
+
+# Ripgrep config
+.ripgreprc
+
+# Bare git objects (WSL artifact)
+HEAD
+config
+hooks
+objects
+refs
+
+# Pytest temp dirs
+pytest-of-*/
