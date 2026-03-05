@@ -14,7 +14,11 @@ dependencies = [
     "pydantic>=2.0",
     "structlog>=24.0",
     "fastapi>=0.100",
+    "uvicorn[standard]>=0.30",
 ]
+
+[project.scripts]
+forge-server = "api_gateway.server:main"
 
 [project.optional-dependencies]
 dev = [

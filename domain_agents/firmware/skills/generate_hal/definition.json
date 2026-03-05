@@ -1,1 +1,15 @@
-{}
+{
+  "name": "generate_hal",
+  "version": "0.1.0",
+  "domain": "firmware",
+  "agent": "firmware",
+  "description": "Generate Hardware Abstraction Layer for target MCU and peripherals",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.GenerateHalInput",
+  "output_schema": "schema.GenerateHalOutput",
+  "timeout_seconds": 60,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["hal", "mcu", "firmware", "code-generation"]
+}

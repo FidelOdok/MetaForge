@@ -1,1 +1,21 @@
-{}
+{
+  "name": "run_spice",
+  "version": "0.1.0",
+  "domain": "simulation",
+  "agent": "simulation",
+  "description": "Run SPICE circuit simulation (DC, AC, or transient analysis)",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "spice.run_simulation",
+      "capability": "circuit_simulation",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.RunSpiceInput",
+  "output_schema": "schema.RunSpiceOutput",
+  "timeout_seconds": 180,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["spice", "circuit", "simulation", "electronics"]
+}

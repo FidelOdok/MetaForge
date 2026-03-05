@@ -1,1 +1,21 @@
-{}
+{
+  "name": "run_cfd",
+  "version": "0.1.0",
+  "domain": "simulation",
+  "agent": "simulation",
+  "description": "Run computational fluid dynamics analysis using CalculiX thermal solver",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "calculix.run_thermal",
+      "capability": "cfd_analysis",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.RunCfdInput",
+  "output_schema": "schema.RunCfdOutput",
+  "timeout_seconds": 600,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["cfd", "thermal", "flow", "calculix"]
+}
