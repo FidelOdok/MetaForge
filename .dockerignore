@@ -1,0 +1,48 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.mypy_cache
+.pytest_cache
+.ruff_cache
+htmlcov
+.coverage
+
+# Node (CLI / Dashboard)
+node_modules
+cli/node_modules
+dashboard/node_modules
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Env
+.env
+.env.local
+
+# Docs / non-runtime
+docs
+examples
+tests
+*.md
+LICENSE
+
+# Claude
+.claude
+
+# Misc
+pytest-of-*

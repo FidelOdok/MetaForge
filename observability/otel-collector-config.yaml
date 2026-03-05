@@ -21,26 +21,26 @@ exporters:
     namespace: ""
     send_timestamps: true
     metric_expiration: 5m
-  logging:
-    loglevel: info
+  debug:
+    verbosity: basic
   otlp/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
 
 service:
   pipelines:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp/tempo, logging]
+      exporters: [otlp/tempo, debug]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [loki, logging]
+      exporters: [otlphttp/loki, debug]
