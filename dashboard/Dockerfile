@@ -11,7 +11,7 @@ COPY package.json ./
 RUN npm install
 
 COPY . .
-RUN npm run build
+RUN npx vite build
 
 # ── Stage 2: serve ──────────────────────────────────────────────────
 FROM nginx:alpine AS production
