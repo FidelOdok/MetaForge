@@ -537,3 +537,343 @@ class TestTwinIntegrationE2E:
             )
         )
         assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Test class: Check tolerances through MechanicalAgent
+# ---------------------------------------------------------------------------
+
+
+class TestCheckTolerancesE2E:
+    """E2E tests for tolerance checking pipeline (pure computation, no MCP)."""
+
+    @pytest.fixture
+    async def stack(self):
+        """Set up Twin + MCP + Agent for tolerance checking."""
+        twin = InMemoryTwinAPI.create()
+        client, bridge, server = await _setup_mcp_stack()
+        artifact = _make_bracket_artifact()
+        created = await twin.create_artifact(artifact)
+        agent = MechanicalAgent(twin=twin, mcp=bridge)
+        return {"twin": twin, "agent": agent, "artifact": created}
+
+    async def test_tolerances_all_pass(self, stack):
+        """All tolerances pass CNC milling capabilities (Cp >= 1.33)."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="check_tolerances",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "manufacturing_process": {
+                        "process_type": "cnc_milling",
+                        "achievable_tolerance": 0.01,
+                    },
+                    "tolerances": [
+                        {
+                            "dimension_id": "D1",
+                            "feature_name": "bore_diameter",
+                            "nominal_value": 8.0,
+                            "upper_tolerance": 0.05,
+                            "lower_tolerance": -0.05,
+                        },
+                        {
+                            "dimension_id": "D2",
+                            "feature_name": "mounting_hole_spacing",
+                            "nominal_value": 25.0,
+                            "upper_tolerance": 0.1,
+                            "lower_tolerance": -0.1,
+                        },
+                    ],
+                },
+            )
+        )
+
+        assert result.success is True
+        assert result.task_type == "check_tolerances"
+        assert len(result.skill_results) == 1
+
+        tol_result = result.skill_results[0]
+        assert tol_result["skill"] == "check_tolerance"
+        assert tol_result["overall_status"] == "pass"
+        assert tol_result["total_dimensions_checked"] == 2
+        assert tol_result["passed"] == 2
+        assert tol_result["failures"] == 0
+
+    async def test_tolerance_too_tight_fails(self, stack):
+        """Tolerance tighter than process capability triggers failure."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="check_tolerances",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "manufacturing_process": {
+                        "process_type": "3d_printing_fdm",
+                        "achievable_tolerance": 0.3,
+                    },
+                    "tolerances": [
+                        {
+                            "dimension_id": "D1",
+                            "feature_name": "pin_hole",
+                            "nominal_value": 4.0,
+                            "upper_tolerance": 0.01,
+                            "lower_tolerance": -0.01,
+                        },
+                    ],
+                },
+            )
+        )
+
+        assert result.success is False
+        assert result.skill_results[0]["overall_status"] == "fail"
+        assert result.skill_results[0]["failures"] >= 1
+
+    async def test_tolerance_marginal_warns(self, stack):
+        """Marginal Cp (1.0 <= Cp < 1.33) yields marginal status with warnings."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="check_tolerances",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "manufacturing_process": {
+                        "process_type": "cnc_milling",
+                        "achievable_tolerance": 0.05,
+                    },
+                    "tolerances": [
+                        {
+                            "dimension_id": "D1",
+                            "feature_name": "slot_width",
+                            "nominal_value": 10.0,
+                            "upper_tolerance": 0.06,
+                            "lower_tolerance": -0.06,
+                        },
+                    ],
+                },
+            )
+        )
+
+        assert result.success is True
+        assert result.skill_results[0]["overall_status"] == "marginal"
+        assert result.skill_results[0]["warnings"] >= 1
+        assert len(result.warnings) > 0
+
+    async def test_tolerance_missing_process_fails(self, stack):
+        """Missing manufacturing_process returns error."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="check_tolerances",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "tolerances": [
+                        {
+                            "dimension_id": "D1",
+                            "feature_name": "bore",
+                            "nominal_value": 8.0,
+                            "upper_tolerance": 0.05,
+                            "lower_tolerance": -0.05,
+                        }
+                    ],
+                },
+            )
+        )
+
+        assert result.success is False
+        assert any("manufacturing_process" in e for e in result.errors)
+
+    async def test_tolerance_stack_up_analysis(self, stack):
+        """Stack-up analysis runs when check_stack_up is True."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="check_tolerances",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "manufacturing_process": {
+                        "process_type": "cnc_milling",
+                        "achievable_tolerance": 0.01,
+                    },
+                    "tolerances": [
+                        {
+                            "dimension_id": "D1",
+                            "feature_name": "part_a",
+                            "nominal_value": 10.0,
+                            "upper_tolerance": 0.05,
+                            "lower_tolerance": -0.05,
+                        },
+                        {
+                            "dimension_id": "D2",
+                            "feature_name": "part_b",
+                            "nominal_value": 15.0,
+                            "upper_tolerance": 0.05,
+                            "lower_tolerance": -0.05,
+                        },
+                    ],
+                    "check_stack_up": True,
+                },
+            )
+        )
+
+        assert result.success is True
+        assert result.skill_results[0]["total_dimensions_checked"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Test class: Generate mesh through MechanicalAgent
+# ---------------------------------------------------------------------------
+
+
+FREECAD_MESH_RESULT = {
+    "mesh_file": "output/motor_mount_bracket.inp",
+    "num_nodes": 24500,
+    "num_elements": 65000,
+    "element_types": ["C3D10"],
+    "quality_metrics": {
+        "min_angle": 22.5,
+        "max_aspect_ratio": 5.8,
+        "avg_quality": 0.87,
+        "jacobian_ratio": 0.92,
+    },
+}
+
+FREECAD_MESH_BAD_QUALITY = {
+    "mesh_file": "output/motor_mount_bracket.inp",
+    "num_nodes": 12000,
+    "num_elements": 30000,
+    "element_types": ["C3D4"],
+    "quality_metrics": {
+        "min_angle": 8.0,
+        "max_aspect_ratio": 18.0,
+        "avg_quality": 0.45,
+        "jacobian_ratio": 0.6,
+    },
+}
+
+
+class TestGenerateMeshE2E:
+    """E2E tests for mesh generation pipeline via FreeCAD MCP."""
+
+    @pytest.fixture
+    async def stack(self):
+        """Set up Twin + MCP (with FreeCAD tool) + Agent."""
+        from skill_registry.mcp_bridge import InMemoryMcpBridge
+
+        twin = InMemoryTwinAPI.create()
+        mcp = InMemoryMcpBridge()
+        mcp.register_tool(
+            "freecad.generate_mesh", capability="mesh_generation", name="Generate Mesh"
+        )
+        mcp.register_tool_response("freecad.generate_mesh", FREECAD_MESH_RESULT)
+
+        artifact = _make_bracket_artifact()
+        created = await twin.create_artifact(artifact)
+        agent = MechanicalAgent(twin=twin, mcp=mcp)
+        return {"twin": twin, "mcp": mcp, "agent": agent, "artifact": created}
+
+    async def test_generate_mesh_good_quality(self, stack):
+        """Mesh generation succeeds with acceptable quality metrics."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="generate_mesh",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "cad_file": "models/motor_mount_bracket.step",
+                    "element_size": 0.5,
+                    "algorithm": "netgen",
+                    "output_format": "inp",
+                },
+            )
+        )
+
+        assert result.success is True
+        assert result.task_type == "generate_mesh"
+        assert len(result.skill_results) == 1
+
+        mesh_result = result.skill_results[0]
+        assert mesh_result["skill"] == "generate_mesh"
+        assert mesh_result["num_nodes"] == 24500
+        assert mesh_result["num_elements"] == 65000
+        assert mesh_result["quality_acceptable"] is True
+        assert mesh_result["algorithm_used"] == "netgen"
+        assert mesh_result["quality_issues"] == []
+
+    async def test_generate_mesh_bad_quality_fails(self):
+        """Mesh fails quality thresholds (low min_angle, high aspect ratio)."""
+        from skill_registry.mcp_bridge import InMemoryMcpBridge
+
+        twin = InMemoryTwinAPI.create()
+        mcp = InMemoryMcpBridge()
+        mcp.register_tool(
+            "freecad.generate_mesh", capability="mesh_generation", name="Generate Mesh"
+        )
+        mcp.register_tool_response("freecad.generate_mesh", FREECAD_MESH_BAD_QUALITY)
+
+        artifact = await twin.create_artifact(_make_bracket_artifact())
+        agent = MechanicalAgent(twin=twin, mcp=mcp)
+
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="generate_mesh",
+                artifact_id=artifact.id,
+                parameters={
+                    "cad_file": "models/motor_mount_bracket.step",
+                    "min_angle_threshold": 15.0,
+                    "max_aspect_ratio_threshold": 10.0,
+                },
+            )
+        )
+
+        assert result.success is False
+        assert result.skill_results[0]["quality_acceptable"] is False
+        assert len(result.skill_results[0]["quality_issues"]) > 0
+        assert len(result.warnings) > 0
+
+    async def test_generate_mesh_missing_cad_file(self, stack):
+        """Missing cad_file parameter returns error."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="generate_mesh",
+                artifact_id=s["artifact"].id,
+                parameters={},
+            )
+        )
+
+        assert result.success is False
+        assert any("cad_file" in e for e in result.errors)
+
+    async def test_generate_mesh_unsupported_extension(self, stack):
+        """Unsupported CAD file extension returns error."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="generate_mesh",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "cad_file": "models/bracket.dwg",
+                },
+            )
+        )
+
+        assert result.success is False
+
+    async def test_generate_mesh_gmsh_algorithm(self, stack):
+        """Mesh generation works with gmsh algorithm."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="generate_mesh",
+                artifact_id=s["artifact"].id,
+                parameters={
+                    "cad_file": "models/motor_mount_bracket.stp",
+                    "algorithm": "gmsh",
+                    "output_format": "unv",
+                },
+            )
+        )
+
+        assert result.success is True
+        assert result.skill_results[0]["algorithm_used"] == "gmsh"
