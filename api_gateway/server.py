@@ -6,6 +6,7 @@ and lifecycle hooks.  Run with ``uvicorn api_gateway.server:app``.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,9 +17,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.chat.routes import router as chat_router
+from api_gateway.convert.routes import router as convert_router
 from api_gateway.health import health_router
+from api_gateway.projects.routes import router as projects_router
+from api_gateway.sessions.routes import router as sessions_router
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
+from observability.bootstrap import init_observability, shutdown_observability
+from observability.config import ObservabilityConfig, OtlpExporterConfig
+from observability.metrics import MetricsCollector, MetricsRegistry
 from observability.middleware import ObservabilityMiddleware
 from observability.tracing import get_tracer
 from orchestrator.dependency_engine import DependencyGraph
@@ -34,6 +41,31 @@ from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.server")
+
+# ---------------------------------------------------------------------------
+# OTel bootstrap (module-level so providers are active before first request)
+# ---------------------------------------------------------------------------
+
+_otel_config = ObservabilityConfig(
+    service_name="metaforge-gateway",
+    environment=os.getenv("METAFORGE_ENV", "development"),
+    otlp=OtlpExporterConfig(
+        endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+    ),
+)
+_otel_state = init_observability(_otel_config)
+
+
+def _create_collector() -> MetricsCollector:
+    """Create a MetricsCollector backed by a real OTel meter (or no-op)."""
+    if _otel_state.is_active and _otel_state.meter_provider is not None:
+        meter = _otel_state.meter_provider.get_meter("metaforge-gateway")
+        collector = MetricsCollector(meter=meter)
+        collector.create_instruments(MetricsRegistry.all_metrics())
+        logger.info("metrics_collector_initialized", instruments=len(MetricsRegistry.all_metrics()))
+        return collector
+    logger.info("metrics_collector_noop", reason="OTel SDK not available or disabled")
+    return MetricsCollector()
 
 # ---------------------------------------------------------------------------
 # Workflow definitions registry
@@ -95,10 +127,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
             app.state.action_workflows = ACTION_WORKFLOWS
         return
 
+    _collector = getattr(app.state, "collector", None)
     workflow_engine = InMemoryWorkflowEngine.create()
-    twin = InMemoryTwinAPI.create()
+    twin = InMemoryTwinAPI.create_with_collector(_collector)
     mcp = InMemoryMcpBridge()
-    event_bus = create_default_bus(workflow_engine)
+    event_bus = create_default_bus(workflow_engine, collector=_collector)
 
     # Register all workflow definitions
     for defn in ACTION_WORKFLOWS.values():
@@ -118,6 +151,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         event_bus=event_bus,
         dependency_graph=dep_graph,
         max_concurrency=4,
+        collector=_collector,
     )
     scheduler.register_agent("MECH", mech_agent)
     scheduler.register_agent("EE", ee_agent)
@@ -141,12 +175,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle handler."""
-    logger.info("gateway_starting", version="0.1.0")
+    logger.info("gateway_starting", version="0.1.0", otel_active=_otel_state.is_active)
     await _init_orchestrator(app)
     yield
     logger.info("gateway_stopping")
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
+    shutdown_observability(_otel_state)
 
 
 def create_app(
@@ -176,6 +211,9 @@ def create_app(
         lifespan=lifespan,
     )
 
+    # Store collector on app.state for use by orchestrator subsystems
+    app.state.collector = collector
+
     # Store test-injected components (lifespan will skip init if present)
     if workflow_engine is not None:
         app.state.workflow_engine = workflow_engine
@@ -199,18 +237,30 @@ def create_app(
     app.include_router(health_router)
     app.include_router(assistant_router)
     app.include_router(chat_router)
+    app.include_router(convert_router)
+    app.include_router(sessions_router)
+    app.include_router(projects_router)
+
+    # -- FastAPI auto-instrumentation (traces all routes automatically) ----
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("fastapi_auto_instrumented")
+    except ImportError:
+        pass
 
     logger.info(
         "gateway_configured",
         cors_origins=origins,
-        routers=["health", "assistant", "chat"],
+        routers=["health", "assistant", "chat", "convert", "sessions", "projects"],
     )
 
     return app
 
 
 # Module-level app for ``uvicorn api_gateway.server:app``
-app = create_app()
+app = create_app(collector=_create_collector())
 
 
 def main() -> None:

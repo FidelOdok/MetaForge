@@ -94,8 +94,15 @@ class ConstraintEngine(ABC):
 class InMemoryConstraintEngine(ConstraintEngine):
     """In-memory constraint engine backed by a GraphEngine."""
 
-    def __init__(self, graph: GraphEngine) -> None:
+    def __init__(
+        self,
+        graph: GraphEngine,
+        collector: "MetricsCollector | None" = None,
+    ) -> None:
+        from observability.metrics import MetricsCollector  # noqa: F811
+
         self._graph = graph
+        self._collector: MetricsCollector | None = collector
 
     async def evaluate(
         self, artifact_ids: list[UUID]
@@ -159,6 +166,11 @@ class InMemoryConstraintEngine(ConstraintEngine):
                     )
 
         elapsed = (time.monotonic() - start) * 1000
+        if self._collector:
+            result_label = "pass" if len(violations) == 0 else "fail"
+            self._collector.record_constraint_evaluation(
+                "cross-domain", result_label, elapsed / 1000
+            )
         return ConstraintEvaluationResult(
             passed=len(violations) == 0,
             violations=violations,

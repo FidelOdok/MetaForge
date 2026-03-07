@@ -70,6 +70,8 @@ def mock_context() -> SkillContext:
     ctx.logger.bind.return_value = ctx.logger
     ctx.session_id = uuid4()
     ctx.branch = "main"
+    ctx.metrics_collector = None
+    ctx.domain = "unknown"
     return ctx
 
 

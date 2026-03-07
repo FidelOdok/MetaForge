@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 from orchestrator.event_bus.events import Event, EventType
 
@@ -51,9 +52,10 @@ class EventSubscriber(ABC):
 class EventBus:
     """In-memory event bus with filtered dispatch and audit log."""
 
-    def __init__(self) -> None:
+    def __init__(self, collector: MetricsCollector | None = None) -> None:
         self._subscribers: dict[str, EventSubscriber] = {}
         self._event_log: deque[Event] = deque(maxlen=_MAX_EVENT_LOG)
+        self._collector = collector
 
     def subscribe(self, subscriber: EventSubscriber) -> None:
         self._subscribers[subscriber.subscriber_id] = subscriber
@@ -99,6 +101,9 @@ class EventBus:
             elapsed_ms = (time.monotonic() - t0) * 1000
             span.set_attribute("eventbus.dispatched_count", dispatched)
             span.set_attribute("eventbus.duration_ms", elapsed_ms)
+
+            if self._collector:
+                self._collector.record_message_produced(topic="eventbus")
 
             logger.info(
                 "event_published",
@@ -211,9 +216,12 @@ class WorkflowEventSubscriber(EventSubscriber):
         )
 
 
-def create_default_bus(workflow_engine: WorkflowEngine | None = None) -> EventBus:
+def create_default_bus(
+    workflow_engine: WorkflowEngine | None = None,
+    collector: MetricsCollector | None = None,
+) -> EventBus:
     """Create an event bus with the standard subscriber set."""
-    bus = EventBus()
+    bus = EventBus(collector=collector)
     bus.subscribe(AuditEventSubscriber())
     if workflow_engine is not None:
         bus.subscribe(WorkflowEventSubscriber(workflow_engine))

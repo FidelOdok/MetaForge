@@ -18,6 +18,7 @@ from uuid import UUID
 import structlog
 from pydantic import BaseModel, Field
 
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 from orchestrator.dependency_engine import DependencyGraph
 from orchestrator.event_bus.events import Event, EventType
@@ -110,10 +111,12 @@ class InMemoryScheduler(Scheduler):
         event_bus: EventBus | None = None,
         dependency_graph: DependencyGraph | None = None,
         max_concurrency: int = 4,
+        collector: MetricsCollector | None = None,
     ) -> None:
         self._engine = workflow_engine
         self._bus = event_bus
         self._dep_graph = dependency_graph
+        self._collector = collector
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._queue: asyncio.PriorityQueue[tuple[int, float, ScheduledStep]] = (
             asyncio.PriorityQueue()
@@ -240,11 +243,19 @@ class InMemoryScheduler(Scheduler):
                 )
                 elapsed = time.monotonic() - t0
                 span.set_attribute("scheduler.duration_s", round(elapsed, 3))
+                if self._collector:
+                    self._collector.record_agent_execution(
+                        step.agent_code, "success", elapsed
+                    )
                 await self._report_step_success(step, result)
 
             except TimeoutError:
                 elapsed = time.monotonic() - t0
                 span.set_attribute("scheduler.duration_s", round(elapsed, 3))
+                if self._collector:
+                    self._collector.record_agent_execution(
+                        step.agent_code, "timeout", elapsed
+                    )
                 logger.warning(
                     "step_timeout",
                     run_id=step.run_id,
@@ -262,6 +273,10 @@ class InMemoryScheduler(Scheduler):
                 elapsed = time.monotonic() - t0
                 span.set_attribute("scheduler.duration_s", round(elapsed, 3))
                 span.record_exception(exc)
+                if self._collector:
+                    self._collector.record_agent_execution(
+                        step.agent_code, "error", elapsed
+                    )
                 logger.error(
                     "step_execution_error",
                     run_id=step.run_id,

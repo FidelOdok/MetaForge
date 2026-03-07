@@ -186,6 +186,18 @@ class InMemoryTwinAPI(TwinAPI):
         constraints = InMemoryConstraintEngine(graph)
         return cls(graph=graph, version=version, constraints=constraints)
 
+    @classmethod
+    def create_with_collector(
+        cls, collector: "MetricsCollector | None" = None
+    ) -> InMemoryTwinAPI:
+        """Factory that passes a MetricsCollector to graph and constraint engines."""
+        from observability.metrics import MetricsCollector  # noqa: F811
+
+        graph = InMemoryGraphEngine(collector=collector)
+        version = InMemoryVersionEngine(graph)
+        constraints = InMemoryConstraintEngine(graph, collector=collector)
+        return cls(graph=graph, version=version, constraints=constraints)
+
     # --- Artifacts ---
 
     async def create_artifact(self, artifact: Artifact, branch: str = "main") -> Artifact:

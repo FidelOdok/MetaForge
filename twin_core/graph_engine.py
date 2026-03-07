@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from datetime import UTC, datetime
@@ -109,35 +110,62 @@ class GraphEngine(ABC):
 class InMemoryGraphEngine(GraphEngine):
     """Dict-based in-memory graph engine for development and testing."""
 
-    def __init__(self) -> None:
+    def __init__(self, collector: "MetricsCollector | None" = None) -> None:
+        from observability.metrics import MetricsCollector  # noqa: F811
+
         self._nodes: dict[UUID, NodeBase] = {}
         self._outgoing: dict[UUID, list[EdgeBase]] = defaultdict(list)
         self._incoming: dict[UUID, list[EdgeBase]] = defaultdict(list)
+        self._collector: MetricsCollector | None = collector
 
     # --- Node operations ---
 
+    def _record_query(
+        self, operation: str, node_type: str, status: str, duration: float
+    ) -> None:
+        if self._collector:
+            self._collector.record_neo4j_query(operation, node_type, status, duration)
+
     async def add_node(self, node: NodeBase) -> NodeBase:
-        if node.id in self._nodes:
-            raise ValueError(f"Node with ID {node.id} already exists")
-        self._nodes[node.id] = node
-        return node
+        t0 = time.monotonic()
+        ntype = getattr(node, "node_type", "unknown")
+        try:
+            if node.id in self._nodes:
+                raise ValueError(f"Node with ID {node.id} already exists")
+            self._nodes[node.id] = node
+            self._record_query("add_node", str(ntype), "success", time.monotonic() - t0)
+            return node
+        except Exception:
+            self._record_query("add_node", str(ntype), "error", time.monotonic() - t0)
+            raise
 
     async def get_node(self, node_id: UUID) -> NodeBase | None:
-        return self._nodes.get(node_id)
+        t0 = time.monotonic()
+        result = self._nodes.get(node_id)
+        ntype = str(getattr(result, "node_type", "unknown")) if result else "unknown"
+        self._record_query("get_node", ntype, "success", time.monotonic() - t0)
+        return result
 
     async def update_node(self, node_id: UUID, updates: dict) -> NodeBase:
+        t0 = time.monotonic()
         node = self._nodes.get(node_id)
         if node is None:
+            self._record_query("update_node", "unknown", "error", time.monotonic() - t0)
             raise KeyError(f"Node {node_id} not found")
         if hasattr(node, "updated_at") and "updated_at" not in updates:
             updates["updated_at"] = datetime.now(UTC)
         updated = node.model_copy(update=updates)
         self._nodes[node_id] = updated
+        ntype = str(getattr(updated, "node_type", "unknown"))
+        self._record_query("update_node", ntype, "success", time.monotonic() - t0)
         return updated
 
     async def delete_node(self, node_id: UUID) -> bool:
+        t0 = time.monotonic()
         if node_id not in self._nodes:
+            self._record_query("delete_node", "unknown", "error", time.monotonic() - t0)
             return False
+        ntype = str(getattr(self._nodes[node_id], "node_type", "unknown"))
         del self._nodes[node_id]
         # Remove all edges connected to this node
         for edge in list(self._outgoing.get(node_id, [])):
@@ -150,6 +178,7 @@ class InMemoryGraphEngine(GraphEngine):
             ]
         self._outgoing.pop(node_id, None)
         self._incoming.pop(node_id, None)
+        self._record_query("delete_node", ntype, "success", time.monotonic() - t0)
         return True
 
     async def list_nodes(
@@ -157,6 +186,7 @@ class InMemoryGraphEngine(GraphEngine):
         node_type: NodeType | None = None,
         filters: dict | None = None,
     ) -> list[NodeBase]:
+        t0 = time.monotonic()
         results = list(self._nodes.values())
         if node_type is not None:
             results = [n for n in results if n.node_type == node_type]
@@ -165,18 +195,30 @@ class InMemoryGraphEngine(GraphEngine):
                 results = [
                     n for n in results if hasattr(n, key) and getattr(n, key) == value
                 ]
+        ntype = str(node_type) if node_type else "all"
+        self._record_query("list_nodes", ntype, "success", time.monotonic() - t0)
         return results
 
     # --- Edge operations ---
 
     async def add_edge(self, edge: EdgeBase) -> EdgeBase:
-        if edge.source_id not in self._nodes:
-            raise ValueError(f"Source node {edge.source_id} does not exist")
-        if edge.target_id not in self._nodes:
-            raise ValueError(f"Target node {edge.target_id} does not exist")
-        self._outgoing[edge.source_id].append(edge)
-        self._incoming[edge.target_id].append(edge)
-        return edge
+        t0 = time.monotonic()
+        try:
+            if edge.source_id not in self._nodes:
+                raise ValueError(f"Source node {edge.source_id} does not exist")
+            if edge.target_id not in self._nodes:
+                raise ValueError(f"Target node {edge.target_id} does not exist")
+            self._outgoing[edge.source_id].append(edge)
+            self._incoming[edge.target_id].append(edge)
+            self._record_query(
+                "add_edge", str(edge.edge_type), "success", time.monotonic() - t0
+            )
+            return edge
+        except Exception:
+            self._record_query(
+                "add_edge", str(edge.edge_type), "error", time.monotonic() - t0
+            )
+            raise
 
     async def get_edges(
         self,
