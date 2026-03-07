@@ -57,12 +57,27 @@ node_modules/
 # Ripgrep config
 .ripgreprc
 
-# Bare git objects (WSL artifact — root-only)
+# Bare git objects (WSL artifact — root and dashboard)
 /HEAD
 /config
 /hooks
 /objects
 /refs
+/dashboard/HEAD
+/dashboard/config
+/dashboard/hooks
+/dashboard/objects
+/dashboard/refs
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Vite build artifacts
+vite.config.js
+vite.config.d.ts
+
+# Dashboard build output
+dashboard/dist/
 
 # Pytest temp dirs
 pytest-of-*/
