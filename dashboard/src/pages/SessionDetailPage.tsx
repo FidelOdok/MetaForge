@@ -1,92 +1,18 @@
 import { Link, useParams } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { formatRelativeTime } from '../utils/format-time';
 import { EmptyState } from '../components/ui/EmptyState';
-import type { AgentSession, AgentEvent } from '../types/session';
-
-/** Mock session data until real SSE/polling is wired. */
-const MOCK_SESSIONS: Record<string, AgentSession> = {
-  'sess-001': {
-    id: 'sess-001',
-    agentCode: 'MECH',
-    taskType: 'validate_stress',
-    status: 'completed',
-    startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    completedAt: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
-    runId: 'run-001',
-    events: [
-      {
-        id: 'evt-1',
-        timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        type: 'task_started',
-        agentCode: 'MECH',
-        message: 'Started stress validation on bracket assembly',
-      },
-      {
-        id: 'evt-2',
-        timestamp: new Date(Date.now() - 29 * 60 * 1000).toISOString(),
-        type: 'proposal_created',
-        agentCode: 'MECH',
-        message: 'Proposed stress report for review',
-      },
-      {
-        id: 'evt-3',
-        timestamp: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
-        type: 'task_completed',
-        agentCode: 'MECH',
-        message: 'Stress validation completed — all constraints met',
-      },
-    ],
-  },
-  'sess-002': {
-    id: 'sess-002',
-    agentCode: 'EE',
-    taskType: 'run_erc',
-    status: 'running',
-    startedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    runId: 'run-002',
-    events: [
-      {
-        id: 'evt-4',
-        timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-        type: 'task_started',
-        agentCode: 'EE',
-        message: 'Started ERC check on power supply schematic',
-      },
-    ],
-  },
-  'sess-003': {
-    id: 'sess-003',
-    agentCode: 'MECH',
-    taskType: 'generate_mesh',
-    status: 'failed',
-    startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    completedAt: new Date(Date.now() - 58 * 60 * 1000).toISOString(),
-    events: [
-      {
-        id: 'evt-5',
-        timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-        type: 'task_started',
-        agentCode: 'MECH',
-        message: 'Started mesh generation for housing',
-      },
-      {
-        id: 'evt-6',
-        timestamp: new Date(Date.now() - 58 * 60 * 1000).toISOString(),
-        type: 'task_failed',
-        agentCode: 'MECH',
-        message: 'Mesh generation failed — geometry too complex for target element size',
-      },
-    ],
-  },
-};
+import { formatRelativeTime } from '../utils/format-time';
+import { useSession } from '../hooks/use-sessions';
+import { useScopedChat } from '../hooks/use-scoped-chat';
+import { SessionChatPanel } from '../components/chat/integrations/SessionChatPanel';
+import type { AgentEvent } from '../types/session';
 
 const EVENT_ICONS: Record<AgentEvent['type'], string> = {
-  task_started: '▶',
-  task_completed: '✓',
-  task_failed: '✗',
-  proposal_created: '◆',
+  task_started: '\u25B6',
+  task_completed: '\u2713',
+  task_failed: '\u2717',
+  proposal_created: '\u25C6',
 };
 
 const EVENT_COLORS: Record<AgentEvent['type'], string> = {
@@ -98,7 +24,16 @@ const EVENT_COLORS: Record<AgentEvent['type'], string> = {
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const session = id ? MOCK_SESSIONS[id] : undefined;
+  const { data: session, isLoading } = useSession(id);
+
+  const chat = useScopedChat({
+    scopeKind: 'session',
+    entityId: id ?? '',
+  });
+
+  if (isLoading) {
+    return <div className="text-sm text-zinc-500">Loading session...</div>;
+  }
 
   if (!session) {
     return (
@@ -144,13 +79,13 @@ export function SessionDetailPage() {
         </Card>
         <Card>
           <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {session.runId ?? '—'}
+            {session.runId ?? '\u2014'}
           </div>
           <div className="text-xs text-zinc-500">Run ID</div>
         </Card>
         <Card>
           <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {session.completedAt ? formatRelativeTime(session.completedAt) : '—'}
+            {session.completedAt ? formatRelativeTime(session.completedAt) : '\u2014'}
           </div>
           <div className="text-xs text-zinc-500">Completed</div>
         </Card>
@@ -181,6 +116,19 @@ export function SessionDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Session Chat Panel */}
+      <div className="mt-6">
+        <SessionChatPanel
+          sessionId={session.id}
+          sessionTitle={session.taskType.replace(/_/g, ' ')}
+          thread={chat.thread}
+          messages={chat.messages}
+          isTyping={chat.isTyping}
+          onSendMessage={chat.sendMessage}
+          onCreateThread={chat.createThread}
+        />
+      </div>
     </div>
   );
 }

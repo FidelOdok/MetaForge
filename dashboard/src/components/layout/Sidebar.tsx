@@ -2,9 +2,11 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 const NAV_ITEMS = [
-  { to: '/projects', label: 'Projects', icon: '📦' },
-  { to: '/sessions', label: 'Sessions', icon: '⚡' },
-  { to: '/approvals', label: 'Approvals', icon: '✅' },
+  { to: '/projects', label: 'Projects', icon: '\uD83D\uDCE6' },
+  { to: '/sessions', label: 'Sessions', icon: '\u26A1' },
+  { to: '/approvals', label: 'Approvals', icon: '\u2705' },
+  { to: '/bom', label: 'BOM', icon: '\uD83D\uDCCB' },
+  { to: '/twin', label: 'Digital Twin', icon: '\uD83E\uDDE0' },
 ];
 
 export function Sidebar() {

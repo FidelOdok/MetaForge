@@ -14,6 +14,14 @@ const STATUS_MAP: Record<string, { variant: 'success' | 'warning' | 'error' | 'i
   unknown: { variant: 'default', label: 'Unknown' },
   approved: { variant: 'success', label: 'Approved' },
   rejected: { variant: 'error', label: 'Rejected' },
+  available: { variant: 'success', label: 'Available' },
+  low_stock: { variant: 'warning', label: 'Low Stock' },
+  out_of_stock: { variant: 'error', label: 'Out of Stock' },
+  alternate_needed: { variant: 'info', label: 'Alternate Needed' },
+  ready: { variant: 'info', label: 'Ready' },
+  waiting: { variant: 'default', label: 'Waiting' },
+  skipped: { variant: 'default', label: 'Skipped' },
+  cancelled: { variant: 'default', label: 'Cancelled' },
 };
 
 interface StatusBadgeProps {

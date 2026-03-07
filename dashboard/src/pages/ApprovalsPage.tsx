@@ -1,14 +1,24 @@
+import { useState } from 'react';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
+import { useScopedChat } from '../hooks/use-scoped-chat';
+import { ApprovalChatPanel } from '../components/chat/integrations/ApprovalChatPanel';
 import type { Proposal } from '../api/endpoints/assistant';
 
 function ProposalCard({ proposal }: { proposal: Proposal }) {
   const decide = useDecideProposal();
+  const [chatOpen, setChatOpen] = useState(false);
   const isPending = proposal.status === 'pending';
+
+  const chat = useScopedChat({
+    scopeKind: 'approval',
+    entityId: proposal.change_id,
+    defaultAgentCode: proposal.agent_code,
+  });
 
   function handleDecision(decision: 'approve' | 'reject') {
     decide.mutate({
@@ -28,7 +38,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           </div>
           <div className="mt-1 text-xs text-zinc-400">
             Agent: <span className="font-medium">{proposal.agent_code}</span>
-            {' · '}
+            {' \u00B7 '}
             Created {formatRelativeTime(proposal.created_at)}
           </div>
         </div>
@@ -66,6 +76,13 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           >
             Reject
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setChatOpen(!chatOpen)}
+          >
+            {chatOpen ? 'Hide Chat' : 'Discuss'}
+          </Button>
         </div>
       )}
 
@@ -73,7 +90,21 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
         <div className="text-xs text-zinc-400">
           Decided {formatRelativeTime(proposal.decided_at)}
           {proposal.reviewer && ` by ${proposal.reviewer}`}
-          {proposal.decision_reason && ` — ${proposal.decision_reason}`}
+          {proposal.decision_reason && ` \u2014 ${proposal.decision_reason}`}
+        </div>
+      )}
+
+      {chatOpen && (
+        <div className="mt-2">
+          <ApprovalChatPanel
+            approvalId={proposal.change_id}
+            agentCode={proposal.agent_code}
+            thread={chat.thread}
+            messages={chat.messages}
+            isTyping={chat.isTyping}
+            onSendMessage={chat.sendMessage}
+            onCreateThread={chat.createThread}
+          />
         </div>
       )}
     </Card>
