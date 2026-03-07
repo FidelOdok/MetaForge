@@ -1,52 +1,63 @@
-import type { Project } from '../../types/project';
+import apiClient from '../client';
+import type { Project, ProjectArtifact } from '../../types/project';
 
-/** Mock project data until project endpoints exist in the Gateway. */
-const MOCK_PROJECTS: Project[] = [
-  {
-    id: 'proj-001',
-    name: 'Drone Flight Controller',
-    description: 'STM32-based flight controller with IMU, barometer, and GPS integration.',
-    status: 'active',
-    agentCount: 3,
-    lastUpdated: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    artifacts: [
-      { id: 'art-001', name: 'Main Schematic', type: 'schematic', status: 'valid', updatedAt: new Date().toISOString() },
-      { id: 'art-002', name: 'PCB Layout', type: 'pcb', status: 'warning', updatedAt: new Date().toISOString() },
-      { id: 'art-003', name: 'Enclosure CAD', type: 'cad_model', status: 'valid', updatedAt: new Date().toISOString() },
-    ],
-  },
-  {
-    id: 'proj-002',
-    name: 'IoT Sensor Hub',
-    description: 'ESP32-based sensor aggregation board with LoRa and WiFi connectivity.',
-    status: 'active',
-    agentCount: 2,
-    lastUpdated: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    artifacts: [
-      { id: 'art-004', name: 'Sensor Board Schematic', type: 'schematic', status: 'valid', updatedAt: new Date().toISOString() },
-      { id: 'art-005', name: 'Firmware', type: 'firmware', status: 'unknown', updatedAt: new Date().toISOString() },
-    ],
-  },
-  {
-    id: 'proj-003',
-    name: 'Power Supply Module',
-    description: 'High-efficiency buck converter module for 5V/3.3V output.',
-    status: 'draft',
-    agentCount: 0,
-    lastUpdated: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    artifacts: [],
-  },
-];
+interface ProjectArtifactRaw {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  updated_at: string;
+}
+
+interface ProjectResponseRaw {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  artifacts: ProjectArtifactRaw[];
+  agent_count: number;
+  last_updated: string;
+  created_at: string;
+}
+
+interface ProjectListResponseRaw {
+  projects: ProjectResponseRaw[];
+  total: number;
+}
+
+function mapArtifact(raw: ProjectArtifactRaw): ProjectArtifact {
+  return {
+    id: raw.id,
+    name: raw.name,
+    type: raw.type as ProjectArtifact['type'],
+    status: raw.status as ProjectArtifact['status'],
+    updatedAt: raw.updated_at,
+  };
+}
+
+function mapProject(raw: ProjectResponseRaw): Project {
+  return {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description,
+    status: raw.status as Project['status'],
+    artifacts: raw.artifacts.map(mapArtifact),
+    agentCount: raw.agent_count,
+    lastUpdated: raw.last_updated,
+    createdAt: raw.created_at,
+  };
+}
 
 export async function getProjects(): Promise<Project[]> {
-  // TODO: Replace with real API call when project endpoints exist
-  return MOCK_PROJECTS;
+  const { data } = await apiClient.get<ProjectListResponseRaw>('/projects');
+  return data.projects.map(mapProject);
 }
 
 export async function getProject(id: string): Promise<Project | undefined> {
-  // TODO: Replace with real API call
-  return MOCK_PROJECTS.find((p) => p.id === id);
+  try {
+    const { data } = await apiClient.get<ProjectResponseRaw>(`/projects/${id}`);
+    return mapProject(data);
+  } catch {
+    return undefined;
+  }
 }
