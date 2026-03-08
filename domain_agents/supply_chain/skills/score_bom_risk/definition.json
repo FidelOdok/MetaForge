@@ -1,0 +1,21 @@
+{
+  "name": "score_bom_risk",
+  "version": "0.1.0",
+  "domain": "supply_chain",
+  "agent": "supply_chain",
+  "description": "Scores supply chain risk for a BOM based on single-source, lead time, lifecycle, price volatility, stock level, and compliance factors.",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "distributor_search",
+      "capability": "part_lookup",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.ScoreBomRiskInput",
+  "output_schema": "schema.ScoreBomRiskOutput",
+  "timeout_seconds": 60,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["bom", "risk", "supply-chain", "scoring"]
+}

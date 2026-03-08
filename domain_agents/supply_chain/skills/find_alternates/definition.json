@@ -1,0 +1,21 @@
+{
+  "name": "find_alternates",
+  "version": "0.1.0",
+  "domain": "supply_chain",
+  "agent": "supply_chain",
+  "description": "Finds and ranks alternate parts for supply chain risk mitigation based on compatibility, availability, price, and risk reduction.",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "distributor_search",
+      "capability": "part_search",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.FindAlternatesInput",
+  "output_schema": "schema.FindAlternatesOutput",
+  "timeout_seconds": 60,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["bom", "alternates", "supply-chain", "sourcing"]
+}

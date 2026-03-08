@@ -1,0 +1,1 @@
+"""Score BOM risk skill."""
