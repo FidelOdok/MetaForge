@@ -1,0 +1,50 @@
+domain: cross_domain
+version: "1.0"
+rules:
+  - name: pcb_fits_enclosure
+    description: "PCB dimensions must fit within enclosure with clearance"
+    severity: critical
+    condition: "pcb_width_mm + 2 * clearance_mm <= enclosure_inner_width_mm"
+    message_template: "PCB width {pcb_width_mm}mm + clearance exceeds enclosure {enclosure_inner_width_mm}mm"
+    remediation_hint: "Reduce PCB dimensions or enlarge enclosure"
+    tags: [mechanical, electronics, fit]
+
+  - name: pcb_height_fits_enclosure
+    description: "PCB height must fit within enclosure with clearance"
+    severity: critical
+    condition: "pcb_height_mm + 2 * clearance_mm <= enclosure_inner_height_mm"
+    message_template: "PCB height {pcb_height_mm}mm + clearance exceeds enclosure {enclosure_inner_height_mm}mm"
+    remediation_hint: "Reduce PCB dimensions or enlarge enclosure"
+    tags: [mechanical, electronics, fit]
+
+  - name: thermal_budget_balanced
+    description: "Total electronics heat dissipation must not exceed thermal design capacity"
+    severity: critical
+    condition: "total_heat_dissipation_w <= thermal_capacity_w"
+    message_template: "Heat dissipation {total_heat_dissipation_w}W exceeds thermal capacity {thermal_capacity_w}W"
+    remediation_hint: "Add heatsinks, improve ventilation, or reduce component power"
+    tags: [thermal, electronics, mechanical]
+
+  - name: connector_cutout_aligned
+    description: "External connector positions must align with enclosure cutouts"
+    severity: critical
+    condition: "misaligned_connectors == 0"
+    message_template: "{misaligned_connectors} connector(s) do not align with enclosure cutouts"
+    remediation_hint: "Adjust PCB connector placement or enclosure cutout positions"
+    tags: [mechanical, electronics, assembly]
+
+  - name: total_weight_within_budget
+    description: "Combined weight of all domains must stay within product weight budget"
+    severity: warning
+    condition: "total_weight_g <= weight_budget_g"
+    message_template: "Total weight {total_weight_g}g exceeds budget {weight_budget_g}g"
+    remediation_hint: "Use lighter materials, reduce component count, or increase budget"
+    tags: [mass, budget, system]
+
+  - name: firmware_matches_hardware_revision
+    description: "Firmware pin map must match the current hardware revision"
+    severity: critical
+    condition: "firmware_hw_revision == hardware_revision"
+    message_template: "Firmware targets hw rev {firmware_hw_revision} but hardware is rev {hardware_revision}"
+    remediation_hint: "Update firmware pin map to match current hardware revision"
+    tags: [firmware, electronics, revision]

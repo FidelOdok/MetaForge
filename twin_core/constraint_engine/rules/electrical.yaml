@@ -1,0 +1,66 @@
+domain: electrical
+version: "1.0"
+rules:
+  - name: voltage_margin
+    description: "Operating voltage must be within rated range with 10% margin"
+    severity: critical
+    condition: "operating_voltage_v <= rated_voltage_v * 0.9"
+    message_template: "Voltage {operating_voltage_v}V exceeds 90% of rated {rated_voltage_v}V"
+    remediation_hint: "Select a component rated for higher voltage or reduce operating voltage"
+    tags: [power, voltage]
+
+  - name: current_below_limit
+    description: "Operating current must not exceed component rated current"
+    severity: critical
+    condition: "operating_current_a <= rated_current_a"
+    message_template: "Current {operating_current_a}A exceeds rated {rated_current_a}A"
+    remediation_hint: "Reduce load current or select a higher-rated component"
+    tags: [power, current]
+
+  - name: trace_width_adequate
+    description: "PCB trace width must handle expected current per IPC-2221"
+    severity: critical
+    condition: "trace_width_mm >= min_trace_width_mm"
+    message_template: "Trace width {trace_width_mm}mm below minimum {min_trace_width_mm}mm for {trace_current_a}A"
+    remediation_hint: "Increase trace width or add copper pours"
+    tags: [pcb, trace, ipc]
+
+  - name: power_budget_within_supply
+    description: "Total power draw must not exceed supply capacity"
+    severity: critical
+    condition: "total_power_draw_w <= supply_power_w"
+    message_template: "Total power draw {total_power_draw_w}W exceeds supply capacity {supply_power_w}W"
+    remediation_hint: "Reduce power consumption or upgrade power supply"
+    tags: [power, budget]
+
+  - name: decoupling_cap_present
+    description: "Every IC must have at least one decoupling capacitor"
+    severity: warning
+    condition: "decoupling_cap_count >= ic_count"
+    message_template: "{ic_count} ICs but only {decoupling_cap_count} decoupling caps"
+    remediation_hint: "Add a 100nF ceramic capacitor close to each IC power pin"
+    tags: [pcb, bypass, emc]
+
+  - name: emi_clearance_adequate
+    description: "High-speed signal clearance from board edge meets EMI requirements"
+    severity: warning
+    condition: "edge_clearance_mm >= 2.5"
+    message_template: "Edge clearance {edge_clearance_mm}mm below 2.5mm EMI minimum"
+    remediation_hint: "Route high-speed traces at least 2.5mm from board edges"
+    tags: [emc, pcb, routing]
+
+  - name: thermal_pad_area_sufficient
+    description: "Thermal pad area must meet minimum for heat dissipation"
+    severity: warning
+    condition: "thermal_pad_area_mm2 >= min_thermal_pad_area_mm2"
+    message_template: "Thermal pad area {thermal_pad_area_mm2}mm2 below minimum {min_thermal_pad_area_mm2}mm2"
+    remediation_hint: "Increase thermal pad area or add thermal vias"
+    tags: [thermal, pcb]
+
+  - name: esd_protection_present
+    description: "External-facing connectors must have ESD protection"
+    severity: warning
+    condition: "esd_protected_connectors >= external_connectors"
+    message_template: "{external_connectors} external connectors but only {esd_protected_connectors} ESD-protected"
+    remediation_hint: "Add TVS diodes or ESD protection ICs to unprotected connectors"
+    tags: [esd, protection, connectors]

@@ -1,0 +1,66 @@
+domain: mechanical
+version: "1.0"
+rules:
+  - name: stress_below_yield
+    description: "Von Mises stress must not exceed material yield strength"
+    severity: critical
+    condition: "stress_mpa < yield_strength_mpa * 0.85"
+    message_template: "Stress {stress_mpa} MPa exceeds 85% of yield ({yield_strength_mpa} MPa)"
+    remediation_hint: "Increase wall thickness or change to stronger material"
+    tags: [structural, fea]
+
+  - name: minimum_wall_thickness
+    description: "Wall thickness must meet DFM requirements"
+    severity: warning
+    condition: "wall_thickness_mm >= 1.0"
+    message_template: "Wall thickness {wall_thickness_mm}mm below DFM minimum 1.0mm"
+    remediation_hint: "Increase wall thickness to at least 1.0mm for injection molding"
+    tags: [dfm, geometry]
+
+  - name: tolerance_stack_within_budget
+    description: "Cumulative tolerance stack-up must stay within budget"
+    severity: critical
+    condition: "tolerance_stack_mm <= tolerance_budget_mm"
+    message_template: "Tolerance stack {tolerance_stack_mm}mm exceeds budget {tolerance_budget_mm}mm"
+    remediation_hint: "Tighten individual tolerances or redesign mating features"
+    tags: [tolerance, assembly]
+
+  - name: draft_angle_sufficient
+    description: "Draft angle must be at least 1 degree for moldability"
+    severity: warning
+    condition: "draft_angle_deg >= 1.0"
+    message_template: "Draft angle {draft_angle_deg} deg below minimum 1.0 deg"
+    remediation_hint: "Add at least 1 degree of draft to molded surfaces"
+    tags: [dfm, molding]
+
+  - name: fillet_radius_minimum
+    description: "Internal fillet radius must meet minimum for stress concentration"
+    severity: warning
+    condition: "fillet_radius_mm >= 0.5"
+    message_template: "Fillet radius {fillet_radius_mm}mm below minimum 0.5mm"
+    remediation_hint: "Increase fillet radius to reduce stress concentration"
+    tags: [structural, geometry]
+
+  - name: safety_factor_adequate
+    description: "Safety factor must be at least 2.0 for structural components"
+    severity: critical
+    condition: "safety_factor >= 2.0"
+    message_template: "Safety factor {safety_factor} below minimum 2.0"
+    remediation_hint: "Increase material strength or reduce applied loads"
+    tags: [structural, safety]
+
+  - name: mass_within_budget
+    description: "Part mass must not exceed allocated mass budget"
+    severity: warning
+    condition: "part_mass_g <= mass_budget_g"
+    message_template: "Part mass {part_mass_g}g exceeds budget {mass_budget_g}g"
+    remediation_hint: "Reduce material volume, use lighter material, or increase budget"
+    tags: [mass, budget]
+
+  - name: flatness_within_tolerance
+    description: "Surface flatness must be within specified tolerance"
+    severity: warning
+    condition: "flatness_mm <= flatness_tolerance_mm"
+    message_template: "Flatness {flatness_mm}mm exceeds tolerance {flatness_tolerance_mm}mm"
+    remediation_hint: "Add machining operation or tighten mold tolerances"
+    tags: [tolerance, surface]

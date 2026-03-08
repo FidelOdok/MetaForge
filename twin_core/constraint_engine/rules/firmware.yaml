@@ -1,0 +1,66 @@
+domain: firmware
+version: "1.0"
+rules:
+  - name: flash_usage
+    description: "Flash memory usage must not exceed 90% capacity"
+    severity: warning
+    condition: "flash_used_bytes < flash_total_bytes * 0.9"
+    message_template: "Flash usage {flash_used_bytes} bytes exceeds 90% of {flash_total_bytes} bytes"
+    remediation_hint: "Optimize code size, remove unused libraries, or select MCU with more flash"
+    tags: [memory, flash]
+
+  - name: ram_usage
+    description: "RAM usage must not exceed 80% capacity"
+    severity: warning
+    condition: "ram_used_bytes < ram_total_bytes * 0.8"
+    message_template: "RAM usage {ram_used_bytes} bytes exceeds 80% of {ram_total_bytes} bytes"
+    remediation_hint: "Reduce global variables, use stack allocation, or select MCU with more RAM"
+    tags: [memory, ram]
+
+  - name: stack_size_adequate
+    description: "Stack size must accommodate worst-case call depth with 25% margin"
+    severity: critical
+    condition: "stack_size_bytes >= worst_case_stack_bytes * 1.25"
+    message_template: "Stack size {stack_size_bytes} bytes insufficient for worst case {worst_case_stack_bytes} bytes"
+    remediation_hint: "Increase stack allocation or reduce recursive call depth"
+    tags: [memory, stack, safety]
+
+  - name: interrupt_latency_within_budget
+    description: "Worst-case interrupt latency must meet real-time requirements"
+    severity: critical
+    condition: "interrupt_latency_us <= max_interrupt_latency_us"
+    message_template: "Interrupt latency {interrupt_latency_us}us exceeds maximum {max_interrupt_latency_us}us"
+    remediation_hint: "Reduce interrupt handler complexity or raise interrupt priority"
+    tags: [realtime, interrupt]
+
+  - name: watchdog_enabled
+    description: "Watchdog timer must be enabled for safety-critical firmware"
+    severity: warning
+    condition: "watchdog_enabled == True"
+    message_template: "Watchdog timer is not enabled"
+    remediation_hint: "Enable hardware watchdog timer with appropriate timeout"
+    tags: [safety, watchdog]
+
+  - name: boot_time_within_budget
+    description: "Boot time must not exceed specified maximum"
+    severity: warning
+    condition: "boot_time_ms <= max_boot_time_ms"
+    message_template: "Boot time {boot_time_ms}ms exceeds maximum {max_boot_time_ms}ms"
+    remediation_hint: "Defer non-essential initialization or optimize startup sequence"
+    tags: [performance, boot]
+
+  - name: task_cpu_utilization
+    description: "Total CPU utilization across all RTOS tasks must stay below 85%"
+    severity: warning
+    condition: "total_cpu_utilization_pct < 85.0"
+    message_template: "CPU utilization {total_cpu_utilization_pct}% exceeds 85% threshold"
+    remediation_hint: "Optimize task periods or offload processing"
+    tags: [performance, rtos, cpu]
+
+  - name: heap_fragmentation_low
+    description: "Heap fragmentation must stay below 20% to prevent allocation failures"
+    severity: warning
+    condition: "heap_fragmentation_pct < 20.0"
+    message_template: "Heap fragmentation {heap_fragmentation_pct}% exceeds 20% threshold"
+    remediation_hint: "Use fixed-size memory pools or reduce dynamic allocation"
+    tags: [memory, heap, reliability]
