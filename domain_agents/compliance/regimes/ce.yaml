@@ -1,0 +1,87 @@
+regime: CE
+name: "Conformite Europeenne"
+categories:
+  - name: lvd
+    items:
+      - id: "CE-LVD-001"
+        requirement: "Low Voltage Directive safety assessment"
+        standard: "2014/35/EU"
+        evidence_type: test_report
+      - id: "CE-LVD-002"
+        requirement: "Product safety per EN 62368-1"
+        standard: "EN 62368-1:2020"
+        evidence_type: test_report
+      - id: "CE-LVD-003"
+        requirement: "LVD Declaration of Conformity"
+        standard: "2014/35/EU Annex IV"
+        evidence_type: declaration
+  - name: emc
+    items:
+      - id: "CE-EMC-001"
+        requirement: "EMC emissions per EN 55032"
+        standard: "EN 55032:2015+A1:2020"
+        evidence_type: test_report
+      - id: "CE-EMC-002"
+        requirement: "EMC immunity per EN 55035"
+        standard: "EN 55035:2017+A11:2020"
+        evidence_type: test_report
+      - id: "CE-EMC-003"
+        requirement: "EMC Declaration of Conformity"
+        standard: "2014/30/EU"
+        evidence_type: declaration
+  - name: red
+    items:
+      - id: "CE-RED-001"
+        requirement: "Radio Equipment Directive conformity"
+        standard: "2014/53/EU"
+        evidence_type: certificate
+      - id: "CE-RED-002"
+        requirement: "Radio spectrum efficiency"
+        standard: "EN 300 328 V2.2.2"
+        evidence_type: test_report
+      - id: "CE-RED-003"
+        requirement: "RED Declaration of Conformity"
+        standard: "2014/53/EU Annex VI"
+        evidence_type: declaration
+      - id: "CE-RED-004"
+        requirement: "Notified body opinion for non-harmonised"
+        standard: "2014/53/EU Article 17"
+        evidence_type: certificate
+  - name: rohs
+    items:
+      - id: "CE-ROHS-001"
+        requirement: "RoHS compliance declaration"
+        standard: "2011/65/EU"
+        evidence_type: declaration
+      - id: "CE-ROHS-002"
+        requirement: "Material composition analysis"
+        standard: "EN IEC 63000:2018"
+        evidence_type: test_report
+      - id: "CE-ROHS-003"
+        requirement: "Supplier RoHS declarations"
+        standard: "2011/65/EU Annex II"
+        evidence_type: declaration
+  - name: weee
+    items:
+      - id: "CE-WEEE-001"
+        requirement: "WEEE producer registration in target EU states"
+        standard: "2012/19/EU"
+        evidence_type: certificate
+      - id: "CE-WEEE-002"
+        requirement: "WEEE marking (crossed-out wheelie bin)"
+        standard: "EN 50419:2022"
+        evidence_type: declaration
+  - name: reach
+    items:
+      - id: "CE-REACH-001"
+        requirement: "REACH SVHC substance screening"
+        standard: "EC 1907/2006"
+        evidence_type: test_report
+      - id: "CE-REACH-002"
+        requirement: "REACH SCIP database notification"
+        standard: "EC 1907/2006 Article 33"
+        evidence_type: declaration
+      - id: "CE-REACH-003"
+        requirement: "Substance risk assessment"
+        standard: "EC 1907/2006 Annex XV"
+        evidence_type: risk_assessment

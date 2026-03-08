@@ -1,0 +1,73 @@
+regime: UKCA
+name: "UK Conformity Assessment"
+categories:
+  - name: safety
+    items:
+      - id: "UKCA-SAF-001"
+        requirement: "Product safety per EN 62368-1"
+        standard: "EN 62368-1:2020"
+        evidence_type: test_report
+      - id: "UKCA-SAF-002"
+        requirement: "Electrical safety — insulation and grounding"
+        standard: "BS 7671:2018"
+        evidence_type: test_report
+      - id: "UKCA-SAF-003"
+        requirement: "Battery safety per IEC 62133"
+        standard: "IEC 62133-2:2017"
+        evidence_type: test_report
+  - name: emc
+    items:
+      - id: "UKCA-EMC-001"
+        requirement: "EMC emissions per EN 55032"
+        standard: "EN 55032:2015+A1:2020"
+        evidence_type: test_report
+      - id: "UKCA-EMC-002"
+        requirement: "EMC immunity per EN 55035"
+        standard: "EN 55035:2017+A11:2020"
+        evidence_type: test_report
+      - id: "UKCA-EMC-003"
+        requirement: "EMC technical documentation"
+        standard: "SI 2016/1091"
+        evidence_type: technical_file
+  - name: radio
+    items:
+      - id: "UKCA-RAD-001"
+        requirement: "Radio equipment conformity"
+        standard: "SI 2017/1206"
+        evidence_type: certificate
+      - id: "UKCA-RAD-002"
+        requirement: "Radio spectrum efficiency"
+        standard: "EN 300 328 V2.2.2"
+        evidence_type: test_report
+      - id: "UKCA-RAD-003"
+        requirement: "Radio receiver performance"
+        standard: "EN 303 345 V1.1.7"
+        evidence_type: test_report
+  - name: rohs
+    items:
+      - id: "UKCA-ROHS-001"
+        requirement: "Restriction of hazardous substances"
+        standard: "SI 2012/3032"
+        evidence_type: declaration
+      - id: "UKCA-ROHS-002"
+        requirement: "RoHS material declarations from suppliers"
+        standard: "SI 2012/3032 Schedule 2"
+        evidence_type: declaration
+      - id: "UKCA-ROHS-003"
+        requirement: "Lead-free soldering compliance"
+        standard: "IEC 61249-2-21"
+        evidence_type: test_report
+  - name: weee
+    items:
+      - id: "UKCA-WEEE-001"
+        requirement: "WEEE producer registration"
+        standard: "SI 2013/3113"
+        evidence_type: certificate
+      - id: "UKCA-WEEE-002"
+        requirement: "WEEE marking and labeling"
+        standard: "SI 2013/3113 Regulation 14"
+        evidence_type: declaration
+      - id: "UKCA-WEEE-003"
+        requirement: "Product recyclability documentation"
+        standard: "BS EN 50625-1:2014"
+        evidence_type: technical_file

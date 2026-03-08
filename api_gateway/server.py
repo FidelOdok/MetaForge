@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.chat.routes import router as chat_router
+from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.health import health_router
 from api_gateway.knowledge.routes import router as knowledge_router
@@ -247,6 +248,7 @@ def create_app(
     app.include_router(convert_router)
     app.include_router(sessions_router)
     app.include_router(projects_router)
+    app.include_router(compliance_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:
@@ -262,7 +264,7 @@ def create_app(
     logger.info(
         "gateway_configured",
         cors_origins=origins,
-        routers=["health", "assistant", "chat", "convert", "sessions", "projects", "knowledge"],
+        routers=["health", "assistant", "chat", "convert", "sessions", "projects", "knowledge", "compliance"],
     )
 
     return app

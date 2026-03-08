@@ -1,0 +1,43 @@
+regime: PSTI
+name: "Product Security and Telecommunications Infrastructure"
+categories:
+  - name: passwords
+    items:
+      - id: "PSTI-PWD-001"
+        requirement: "No universal default passwords"
+        standard: "PSTI Act 2022 Schedule 1(1)"
+        evidence_type: test_report
+      - id: "PSTI-PWD-002"
+        requirement: "Unique per-device passwords or user-set on first use"
+        standard: "ETSI EN 303 645 5.1-1"
+        evidence_type: test_report
+  - name: vulnerability_disclosure
+    items:
+      - id: "PSTI-VDP-001"
+        requirement: "Published vulnerability disclosure policy"
+        standard: "PSTI Act 2022 Schedule 1(2)"
+        evidence_type: declaration
+      - id: "PSTI-VDP-002"
+        requirement: "Contact point for security researchers"
+        standard: "ETSI EN 303 645 5.2-1"
+        evidence_type: declaration
+  - name: updates
+    items:
+      - id: "PSTI-UPD-001"
+        requirement: "Defined minimum security update period"
+        standard: "PSTI Act 2022 Schedule 1(3)"
+        evidence_type: declaration
+      - id: "PSTI-UPD-002"
+        requirement: "Secure update delivery mechanism"
+        standard: "ETSI EN 303 645 5.3-1"
+        evidence_type: technical_file
+  - name: secure_boot
+    items:
+      - id: "PSTI-SBT-001"
+        requirement: "Secure boot chain verification"
+        standard: "ETSI EN 303 645 5.7-1"
+        evidence_type: test_report
+      - id: "PSTI-SBT-002"
+        requirement: "Software integrity validation at boot"
+        standard: "ETSI EN 303 645 5.7-2"
+        evidence_type: technical_file

@@ -1,0 +1,15 @@
+{
+  "name": "generate_checklist",
+  "version": "0.1.0",
+  "domain": "compliance",
+  "agent": "compliance",
+  "description": "Generates a compliance checklist for target markets, deduplicating shared standards across regimes.",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.GenerateChecklistInput",
+  "output_schema": "schema.GenerateChecklistOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["compliance", "checklist", "regulatory", "certification"]
+}

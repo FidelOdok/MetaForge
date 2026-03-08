@@ -1,0 +1,51 @@
+regime: FCC
+name: "Federal Communications Commission"
+categories:
+  - name: part15_subpartb
+    items:
+      - id: "FCC-15B-001"
+        requirement: "Unintentional radiator emissions (Class B)"
+        standard: "47 CFR Part 15 Subpart B"
+        evidence_type: test_report
+      - id: "FCC-15B-002"
+        requirement: "Conducted emissions measurement"
+        standard: "ANSI C63.4-2014"
+        evidence_type: test_report
+      - id: "FCC-15B-003"
+        requirement: "Radiated emissions measurement"
+        standard: "ANSI C63.4-2014 Section 8"
+        evidence_type: test_report
+      - id: "FCC-15B-004"
+        requirement: "FCC Part 15 Declaration of Conformity"
+        standard: "47 CFR 15.19"
+        evidence_type: declaration
+  - name: part15_subpartc
+    items:
+      - id: "FCC-15C-001"
+        requirement: "Intentional radiator certification"
+        standard: "47 CFR Part 15 Subpart C"
+        evidence_type: certificate
+      - id: "FCC-15C-002"
+        requirement: "Transmitter spurious emissions"
+        standard: "47 CFR 15.209"
+        evidence_type: test_report
+      - id: "FCC-15C-003"
+        requirement: "Occupied bandwidth compliance"
+        standard: "47 CFR 15.247"
+        evidence_type: test_report
+  - name: sar
+    items:
+      - id: "FCC-SAR-001"
+        requirement: "SAR evaluation for portable devices"
+        standard: "47 CFR 2.1093"
+        evidence_type: test_report
+  - name: labeling
+    items:
+      - id: "FCC-LBL-001"
+        requirement: "FCC ID labeling on device"
+        standard: "47 CFR 2.925"
+        evidence_type: declaration
+      - id: "FCC-LBL-002"
+        requirement: "Electronic labeling (e-label) compliance"
+        standard: "47 CFR 2.925(e)"
+        evidence_type: technical_file
