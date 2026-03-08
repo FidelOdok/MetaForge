@@ -2,7 +2,7 @@
 
 Exports all public types for the orchestrator layer:
 event bus, workflow engine, dependency engine, scheduler,
-and iteration controller.
+iteration controller, Temporal activities, and workflows.
 """
 
 from orchestrator.dependency_engine import CyclicDependencyError, DependencyGraph
@@ -38,6 +38,26 @@ from orchestrator.workflow_dag import (
     WorkflowStatus,
     WorkflowStep,
 )
+from orchestrator.activities import (
+    AgentActivityInput,
+    AgentActivityOutput,
+    ApprovalRequest,
+    ApprovalResult,
+    get_default_retry_policy,
+    run_mechanical_agent,
+    run_electronics_agent,
+    run_firmware_agent,
+    run_simulation_agent,
+    wait_for_approval,
+)
+from orchestrator.workflows import (
+    SingleAgentWorkflow,
+    SingleAgentWorkflowInput,
+    SingleAgentWorkflowOutput,
+    HardwareDesignWorkflow,
+    HardwareDesignWorkflowInput,
+    HardwareDesignWorkflowOutput,
+)
 
 __all__ = [
     # Event bus
@@ -71,4 +91,22 @@ __all__ = [
     "IterationRecord",
     "IterationResult",
     "IterationStatus",
+    # Temporal activities
+    "AgentActivityInput",
+    "AgentActivityOutput",
+    "ApprovalRequest",
+    "ApprovalResult",
+    "get_default_retry_policy",
+    "run_mechanical_agent",
+    "run_electronics_agent",
+    "run_firmware_agent",
+    "run_simulation_agent",
+    "wait_for_approval",
+    # Temporal workflows
+    "SingleAgentWorkflow",
+    "SingleAgentWorkflowInput",
+    "SingleAgentWorkflowOutput",
+    "HardwareDesignWorkflow",
+    "HardwareDesignWorkflowInput",
+    "HardwareDesignWorkflowOutput",
 ]

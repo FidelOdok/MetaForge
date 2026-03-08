@@ -41,6 +41,9 @@ dev = [
     "mypy>=1.13",
     "httpx>=0.27",
 ]
+temporal = [
+    "temporalio>=1.5",
+]
 
 knowledge = [
     "asyncpg>=0.29",
