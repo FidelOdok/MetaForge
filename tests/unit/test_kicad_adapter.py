@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import tempfile
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tool_registry.tools.kicad.adapter import KicadServer
+from tool_registry.tools.kicad.adapter import (
+    KicadCliError,
+    KicadCliNotFoundError,
+    KicadCliTimeoutError,
+    KicadServer,
+    _check_kicad_cli,
+    _count_drc_unconnected,
+    _extract_field,
+    _list_gerber_files,
+    _parse_bom_csv,
+    _parse_drc_violations,
+    _parse_erc_violations,
+    _parse_netlist_stats,
+    _parse_pin_mapping_from_netlist,
+    _run_kicad_cli,
+)
 from tool_registry.tools.kicad.config import KicadConfig
 
 # ---------------------------------------------------------------------------
@@ -202,6 +220,116 @@ def _make_jsonrpc(
         "params": params or {},
     }
     return json.dumps(msg)
+
+
+# Sample KiCad ERC JSON report
+SAMPLE_ERC_REPORT = {
+    "source": "test.kicad_sch",
+    "date": "2025-01-15",
+    "kicad_version": "8.0.0",
+    "sheets": [],
+    "violations": [
+        {
+            "type": "pin_not_connected",
+            "description": "Pin not connected",
+            "severity": "error",
+            "items": [
+                {
+                    "description": "U1: pin VCC not connected",
+                    "sheet": "/Root",
+                    "pos": {"x": 100.0, "y": 50.0},
+                },
+                {
+                    "description": "VCC",
+                    "sheet": "/Root",
+                    "pos": {"x": 100.0, "y": 50.0},
+                },
+            ],
+        },
+        {
+            "type": "power_pin_not_driven",
+            "description": "Power pin not driven",
+            "severity": "warning",
+            "items": [
+                {
+                    "description": "U2: power pin VDDIO",
+                    "sheet": "/Sheet1",
+                    "pos": {"x": 200.0, "y": 75.0},
+                },
+            ],
+        },
+        {
+            "type": "duplicate_net",
+            "description": "Duplicate net name",
+            "severity": "warning",
+            "items": [
+                {
+                    "description": "NET1",
+                    "sheet": "/Root",
+                    "pos": {"x": 50.0, "y": 25.0},
+                },
+            ],
+        },
+    ],
+}
+
+# Sample KiCad DRC JSON report
+SAMPLE_DRC_REPORT = {
+    "source": "test.kicad_pcb",
+    "date": "2025-01-15",
+    "kicad_version": "8.0.0",
+    "violations": [
+        {
+            "type": "clearance",
+            "description": "Clearance violation between track and pad",
+            "severity": "error",
+            "items": [
+                {
+                    "description": "Track on F.Cu",
+                    "pos": {"x": 10.5, "y": 20.3},
+                    "layer": "F.Cu",
+                },
+            ],
+        },
+        {
+            "type": "silk_over_pad",
+            "description": "Silk text overlaps pad",
+            "severity": "warning",
+            "items": [
+                {
+                    "description": "Text on F.SilkS",
+                    "pos": {"x": 30.0, "y": 15.0},
+                    "layer": "F.SilkS",
+                },
+            ],
+        },
+    ],
+    "unresolved": [
+        {
+            "type": "unconnected",
+            "description": "Unconnected pad",
+            "severity": "error",
+            "items": [],
+        },
+    ],
+}
+
+# Sample BOM CSV content
+SAMPLE_BOM_CSV = (
+    '"Reference";"Value";"Footprint";"Qty"\n'
+    '"R1, R2, R3";"10k";"0402";"3"\n'
+    '"C1, C2";"100nF";"0402";"2"\n'
+    '"U1";"STM32F405";"LQFP-64";"1"\n'
+)
+
+
+def _make_mock_process(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
+    """Create a mock asyncio subprocess."""
+    proc = AsyncMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(stdout, stderr))
+    proc.kill = MagicMock()
+    return proc
 
 
 # ---------------------------------------------------------------------------
@@ -492,41 +620,41 @@ class TestGetPinMapping:
 
 
 # ---------------------------------------------------------------------------
-# TestUnmockedMethodsRaise
+# TestKicadCliNotAvailable
 # ---------------------------------------------------------------------------
 
 
-class TestUnmockedMethodsRaise:
-    """Verify that calling internal methods without mocks raises NotImplementedError."""
+class TestKicadCliNotAvailable:
+    """Verify that real execute methods raise KicadCliNotFoundError when kicad-cli is missing."""
 
-    async def test_erc_not_implemented(self, server: KicadServer) -> None:
-        with pytest.raises(NotImplementedError, match="kicad-cli binary"):
+    async def test_erc_cli_not_found(self, server: KicadServer) -> None:
+        with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
             await server._execute_erc("/designs/test.kicad_sch", "all")
 
-    async def test_drc_not_implemented(self, server: KicadServer) -> None:
-        with pytest.raises(NotImplementedError, match="kicad-cli binary"):
+    async def test_drc_cli_not_found(self, server: KicadServer) -> None:
+        with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
             await server._execute_drc("/designs/test.kicad_pcb", "all", None)
 
-    async def test_bom_export_not_implemented(self, server: KicadServer) -> None:
-        with pytest.raises(NotImplementedError, match="kicad-cli binary"):
+    async def test_bom_export_cli_not_found(self, server: KicadServer) -> None:
+        with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
             await server._execute_bom_export(
                 "/designs/test.kicad_sch", "csv", "value"
             )
 
-    async def test_gerber_export_not_implemented(self, server: KicadServer) -> None:
-        with pytest.raises(NotImplementedError, match="kicad-cli binary"):
+    async def test_gerber_export_cli_not_found(self, server: KicadServer) -> None:
+        with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
             await server._execute_gerber_export(
                 "/designs/test.kicad_pcb", "/tmp/gerber", ["F.Cu"]
             )
 
-    async def test_netlist_export_not_implemented(self, server: KicadServer) -> None:
-        with pytest.raises(NotImplementedError, match="kicad-cli binary"):
+    async def test_netlist_export_cli_not_found(self, server: KicadServer) -> None:
+        with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
             await server._execute_netlist_export(
                 "/designs/test.kicad_sch", "kicad"
             )
 
-    async def test_pin_mapping_not_implemented(self, server: KicadServer) -> None:
-        with pytest.raises(NotImplementedError, match="kicad-cli binary"):
+    async def test_pin_mapping_cli_not_found(self, server: KicadServer) -> None:
+        with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
             await server._execute_pin_mapping(
                 "/designs/test.kicad_sch", None
             )
@@ -599,3 +727,542 @@ class TestJsonRpcIntegration:
         tools = response["result"]["tools"]
         assert len(tools) == 1
         assert tools[0]["tool_id"] == "kicad.run_erc"
+
+
+# ---------------------------------------------------------------------------
+# TestRealKicadExecution - tests with mocked subprocess
+# ---------------------------------------------------------------------------
+
+
+class TestRealKicadExecution:
+    """Tests for real kicad-cli execution with mocked subprocess calls."""
+
+    # -- Helper functions tests --
+
+    async def test_check_kicad_cli_success(self) -> None:
+        """_check_kicad_cli returns path when binary exists."""
+        mock_proc = _make_mock_process(0, b"KiCad 8.0.0\n")
+
+        with patch("tool_registry.tools.kicad.adapter.asyncio.create_subprocess_exec",
+                    return_value=mock_proc):
+            result = await _check_kicad_cli("kicad-cli")
+            assert result == "kicad-cli"
+
+    async def test_check_kicad_cli_not_found(self) -> None:
+        """_check_kicad_cli raises KicadCliNotFoundError when binary missing."""
+        with patch(
+            "tool_registry.tools.kicad.adapter.asyncio.create_subprocess_exec",
+            side_effect=FileNotFoundError("No such file"),
+        ):
+            with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
+                await _check_kicad_cli("kicad-cli")
+
+    async def test_run_kicad_cli_success(self) -> None:
+        """_run_kicad_cli returns stdout/stderr from successful execution."""
+        mock_proc = _make_mock_process(0, b"output data", b"")
+
+        with patch("tool_registry.tools.kicad.adapter.asyncio.create_subprocess_exec",
+                    return_value=mock_proc):
+            rc, stdout, stderr = await _run_kicad_cli("kicad-cli", ["sch", "erc"], 120.0)
+            assert rc == 0
+            assert stdout == "output data"
+            assert stderr == ""
+
+    async def test_run_kicad_cli_not_found(self) -> None:
+        """_run_kicad_cli raises KicadCliNotFoundError when binary missing."""
+        with patch(
+            "tool_registry.tools.kicad.adapter.asyncio.create_subprocess_exec",
+            side_effect=FileNotFoundError("No such file"),
+        ):
+            with pytest.raises(KicadCliNotFoundError):
+                await _run_kicad_cli("kicad-cli", ["sch", "erc"], 120.0)
+
+    async def test_run_kicad_cli_timeout(self) -> None:
+        """_run_kicad_cli raises KicadCliTimeoutError on timeout."""
+        mock_proc = _make_mock_process(0)
+        mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+        # After kill, communicate should succeed
+        mock_proc.communicate.side_effect = [asyncio.TimeoutError(), (b"", b"")]
+
+        async def mock_communicate_with_timeout():
+            raise asyncio.TimeoutError()
+
+        mock_proc = _make_mock_process(0)
+
+        with patch("tool_registry.tools.kicad.adapter.asyncio.create_subprocess_exec",
+                    return_value=mock_proc):
+            with patch("tool_registry.tools.kicad.adapter.asyncio.wait_for",
+                       side_effect=asyncio.TimeoutError()):
+                with pytest.raises(KicadCliTimeoutError, match="timed out"):
+                    await _run_kicad_cli("kicad-cli", ["sch", "erc"], 5.0)
+
+    # -- ERC parsing tests --
+
+    def test_parse_erc_violations_all(self) -> None:
+        """Parse all ERC violations from sample report."""
+        violations = _parse_erc_violations(SAMPLE_ERC_REPORT, "all")
+        assert len(violations) == 3
+        assert violations[0]["severity"] == "error"
+        assert violations[0]["rule_id"] == "pin_not_connected"
+        assert violations[0]["message"] == "Pin not connected"
+        assert violations[1]["severity"] == "warning"
+        assert violations[2]["severity"] == "warning"
+
+    def test_parse_erc_violations_error_only(self) -> None:
+        """Parse only error-severity ERC violations."""
+        violations = _parse_erc_violations(SAMPLE_ERC_REPORT, "error")
+        assert len(violations) == 1
+        assert violations[0]["severity"] == "error"
+
+    def test_parse_erc_violations_warning_only(self) -> None:
+        """Parse only warning-severity ERC violations."""
+        violations = _parse_erc_violations(SAMPLE_ERC_REPORT, "warning")
+        assert len(violations) == 2
+        assert all(v["severity"] == "warning" for v in violations)
+
+    def test_parse_erc_violations_empty_report(self) -> None:
+        """Empty report returns no violations."""
+        violations = _parse_erc_violations({}, "all")
+        assert len(violations) == 0
+
+    # -- DRC parsing tests --
+
+    def test_parse_drc_violations_all(self) -> None:
+        """Parse all DRC violations from sample report."""
+        violations = _parse_drc_violations(SAMPLE_DRC_REPORT, "all")
+        assert len(violations) == 2
+        assert violations[0]["severity"] == "error"
+        assert violations[0]["rule_id"] == "clearance"
+        assert violations[0]["location"]["x"] == 10.5
+        assert violations[0]["location"]["layer"] == "F.Cu"
+        assert violations[1]["severity"] == "warning"
+
+    def test_parse_drc_violations_error_only(self) -> None:
+        """Parse only error-severity DRC violations."""
+        violations = _parse_drc_violations(SAMPLE_DRC_REPORT, "error")
+        assert len(violations) == 1
+        assert violations[0]["severity"] == "error"
+
+    def test_count_drc_unconnected(self) -> None:
+        """Count unconnected items from DRC report."""
+        assert _count_drc_unconnected(SAMPLE_DRC_REPORT) == 1
+        assert _count_drc_unconnected({}) == 0
+
+    # -- BOM parsing tests --
+
+    def test_parse_bom_csv(self, tmp_path) -> None:
+        """Parse BOM CSV to count components."""
+        bom_file = tmp_path / "bom.csv"
+        bom_file.write_text(SAMPLE_BOM_CSV, encoding="utf-8")
+        total, unique = _parse_bom_csv(str(bom_file))
+        assert total == 6  # 3 + 2 + 1
+        assert unique == 3  # 10k, 100nF, STM32F405
+
+    def test_parse_bom_csv_missing_file(self) -> None:
+        """Missing BOM file returns zeros."""
+        total, unique = _parse_bom_csv("/nonexistent/bom.csv")
+        assert total == 0
+        assert unique == 0
+
+    # -- Gerber file listing tests --
+
+    def test_list_gerber_files(self, tmp_path) -> None:
+        """List Gerber files in output directory."""
+        (tmp_path / "board-F_Cu.gtl").touch()
+        (tmp_path / "board-B_Cu.gbl").touch()
+        (tmp_path / "board.drl").touch()
+        (tmp_path / "readme.txt").touch()  # should be excluded
+        files = _list_gerber_files(str(tmp_path))
+        assert len(files) == 3
+        assert "board-F_Cu.gtl" in files
+        assert "readme.txt" not in files
+
+    def test_list_gerber_files_missing_dir(self) -> None:
+        """Missing directory returns empty list."""
+        files = _list_gerber_files("/nonexistent/dir")
+        assert files == []
+
+    # -- Netlist stats tests --
+
+    def test_parse_netlist_stats(self, tmp_path) -> None:
+        """Parse netlist to count nets and components."""
+        netlist = tmp_path / "test.net"
+        content = (
+            "(export (version D)\n"
+            "  (components\n"
+            "    (comp (ref U1) (value STM32))\n"
+            "    (comp (ref R1) (value 10k))\n"
+            "  )\n"
+            "  (nets\n"
+            "    (net (code 1) (name VCC))\n"
+            "    (net (code 2) (name GND))\n"
+            "    (net (code 3) (name SDA))\n"
+            "  )\n"
+            ")\n"
+        )
+        netlist.write_text(content, encoding="utf-8")
+        nets, comps = _parse_netlist_stats(str(netlist))
+        assert nets == 3
+        assert comps == 2
+
+    def test_parse_netlist_stats_missing_file(self) -> None:
+        """Missing netlist file returns zeros."""
+        nets, comps = _parse_netlist_stats("/nonexistent/file.net")
+        assert nets == 0
+        assert comps == 0
+
+    # -- Pin mapping parser tests --
+
+    def test_parse_pin_mapping_from_netlist(self, tmp_path) -> None:
+        """Parse pin mapping from a KiCad netlist."""
+        netlist = tmp_path / "test.net"
+        content = (
+            '(export (version D)\n'
+            '  (components\n'
+            '    (comp (ref U1) (value STM32) (footprint LQFP-64))\n'
+            '    (comp (ref R1) (value 10k) (footprint 0402))\n'
+            '  )\n'
+            '  (nets\n'
+            '    (net (code 1) (name "VCC")\n'
+            '      (node (ref U1) (pin 1) (pinfunction "VCC") (pintype "power_in")))\n'
+            '    (net (code 2) (name "GND")\n'
+            '      (node (ref U1) (pin 2) (pinfunction "GND") (pintype "power_in"))\n'
+            '      (node (ref R1) (pin 1) (pinfunction "1") (pintype "passive")))\n'
+            '  )\n'
+            ')\n'
+        )
+        netlist.write_text(content, encoding="utf-8")
+        components = _parse_pin_mapping_from_netlist(str(netlist), None)
+        assert len(components) == 2
+        assert components[0]["reference"] == "U1"
+        assert len(components[0]["pins"]) == 2
+        assert components[0]["pins"][0]["net"] == "VCC"
+
+    def test_parse_pin_mapping_with_filter(self, tmp_path) -> None:
+        """Pin mapping with component filter only returns matching components."""
+        netlist = tmp_path / "test.net"
+        content = (
+            '(export (version D)\n'
+            '  (components\n'
+            '    (comp (ref U1) (value STM32) (footprint LQFP-64))\n'
+            '    (comp (ref R1) (value 10k) (footprint 0402))\n'
+            '  )\n'
+            '  (nets\n'
+            '    (net (code 1) (name "VCC")\n'
+            '      (node (ref U1) (pin 1) (pinfunction "VCC") (pintype "power_in")))\n'
+            '  )\n'
+            ')\n'
+        )
+        netlist.write_text(content, encoding="utf-8")
+        components = _parse_pin_mapping_from_netlist(str(netlist), "U")
+        assert len(components) == 1
+        assert components[0]["reference"] == "U1"
+
+    def test_parse_pin_mapping_missing_file(self) -> None:
+        """Missing netlist file returns empty list."""
+        components = _parse_pin_mapping_from_netlist("/nonexistent/file.net", None)
+        assert components == []
+
+    # -- S-expression field extraction tests --
+
+    def test_extract_field_quoted(self) -> None:
+        """Extract a quoted field value."""
+        text = '(ref "U1") (value "STM32")'
+        assert _extract_field(text, "ref") == "U1"
+        assert _extract_field(text, "value") == "STM32"
+
+    def test_extract_field_unquoted(self) -> None:
+        """Extract an unquoted field value."""
+        text = "(ref U1) (value 10k)"
+        assert _extract_field(text, "ref") == "U1"
+        assert _extract_field(text, "value") == "10k"
+
+    def test_extract_field_missing(self) -> None:
+        """Missing field returns empty string."""
+        assert _extract_field("(ref U1)", "value") == ""
+
+    # -- Full ERC execution with mocked subprocess --
+
+    async def test_execute_erc_with_mocked_subprocess(self, tmp_path) -> None:
+        """Full ERC execution with mocked kicad-cli subprocess."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        # Mock _check_kicad_cli to succeed
+        mock_check = AsyncMock(return_value="kicad-cli")
+
+        # Mock _run_kicad_cli to succeed
+        async def mock_run(cli, args, timeout, cwd=None):
+            # Write the JSON report to the output file path
+            # The output path is in args after --output
+            output_idx = args.index("--output") + 1
+            output_path = args[output_idx]
+            with open(output_path, "w") as f:
+                json.dump(SAMPLE_ERC_REPORT, f)
+            return 0, "", ""
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli", mock_check):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_erc("/designs/test.kicad_sch", "all")
+
+        assert result["schematic_file"] == "/designs/test.kicad_sch"
+        assert result["total_violations"] == 3
+        assert result["errors"] == 1
+        assert result["warnings"] == 2
+        assert result["passed"] is False
+        assert len(result["violations"]) == 3
+
+    async def test_execute_erc_severity_filter(self, tmp_path) -> None:
+        """ERC with severity filter returns only matching violations."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            output_idx = args.index("--output") + 1
+            output_path = args[output_idx]
+            with open(output_path, "w") as f:
+                json.dump(SAMPLE_ERC_REPORT, f)
+            return 0, "", ""
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_erc("/designs/test.kicad_sch", "error")
+
+        assert result["total_violations"] == 1
+        assert result["errors"] == 1
+        assert result["warnings"] == 0
+
+    # -- Full DRC execution with mocked subprocess --
+
+    async def test_execute_drc_with_mocked_subprocess(self, tmp_path) -> None:
+        """Full DRC execution with mocked kicad-cli subprocess."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            output_idx = args.index("--output") + 1
+            output_path = args[output_idx]
+            with open(output_path, "w") as f:
+                json.dump(SAMPLE_DRC_REPORT, f)
+            return 0, "", ""
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_drc("/designs/test.kicad_pcb", "all", None)
+
+        assert result["pcb_file"] == "/designs/test.kicad_pcb"
+        assert result["total_violations"] == 2
+        assert result["errors"] == 1
+        assert result["warnings"] == 1
+        assert result["unconnected_items"] == 1
+        assert result["passed"] is False
+
+    # -- Full BOM export execution with mocked subprocess --
+
+    async def test_execute_bom_export_with_mocked_subprocess(self, tmp_path) -> None:
+        """Full BOM export with mocked kicad-cli subprocess."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            # Write the BOM CSV to the output file path
+            output_idx = args.index("--output") + 1
+            output_path = args[output_idx]
+            with open(output_path, "w") as f:
+                f.write(SAMPLE_BOM_CSV)
+            return 0, "", ""
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_bom_export(
+                    "/designs/test.kicad_sch", "csv", "value"
+                )
+
+        assert result["format"] == "csv"
+        assert result["total_components"] == 6
+        assert result["unique_parts"] == 3
+
+    # -- Full Gerber export execution with mocked subprocess --
+
+    async def test_execute_gerber_export_with_mocked_subprocess(self, tmp_path) -> None:
+        """Full Gerber export with mocked kicad-cli subprocess."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        output_dir = str(tmp_path / "gerber_out")
+        os.makedirs(output_dir, exist_ok=True)
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            # Create some fake Gerber files
+            for name in ["board-F_Cu.gtl", "board-B_Cu.gbl", "board.drl"]:
+                (tmp_path / "gerber_out" / name).touch()
+            return 0, "", ""
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_gerber_export(
+                    "/designs/test.kicad_pcb", output_dir, ["F.Cu", "B.Cu"]
+                )
+
+        assert result["output_dir"] == output_dir
+        assert result["total_files"] == 3
+        assert "board-F_Cu.gtl" in result["files_generated"]
+        assert result["layers_exported"] == ["F.Cu", "B.Cu"]
+
+    # -- kicad-cli not found during execution --
+
+    async def test_execute_erc_cli_not_found(self) -> None:
+        """ERC raises KicadCliNotFoundError when kicad-cli is missing."""
+        server = KicadServer()
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    side_effect=KicadCliNotFoundError("kicad-cli")):
+            with pytest.raises(KicadCliNotFoundError, match="kicad-cli not found"):
+                await server._execute_erc("/designs/test.kicad_sch", "all")
+
+    # -- kicad-cli timeout during execution --
+
+    async def test_execute_erc_timeout(self, tmp_path) -> None:
+        """ERC raises KicadCliTimeoutError when kicad-cli times out."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli",
+                       side_effect=KicadCliTimeoutError(120.0)):
+                with pytest.raises(KicadCliTimeoutError, match="timed out"):
+                    await server._execute_erc("/designs/test.kicad_sch", "all")
+
+    # -- kicad-cli non-zero exit with no output file --
+
+    async def test_execute_erc_nonzero_exit_no_output(self, tmp_path) -> None:
+        """ERC raises KicadCliError on non-zero exit with no output file."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            # Don't write any output file
+            return 1, "", "Fatal error: invalid schematic"
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                with pytest.raises(KicadCliError, match="exited with code 1"):
+                    await server._execute_erc("/designs/test.kicad_sch", "all")
+
+    # -- kicad-cli non-zero exit with partial output --
+
+    async def test_execute_erc_nonzero_exit_with_partial_output(self, tmp_path) -> None:
+        """ERC returns partial results when kicad-cli exits non-zero but produces output."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        partial_report = {
+            "violations": [
+                {
+                    "type": "pin_not_connected",
+                    "description": "Pin not connected",
+                    "severity": "error",
+                    "items": [{"description": "U1: pin VCC", "sheet": "/Root", "pos": {"x": 0, "y": 0}}],
+                }
+            ]
+        }
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            output_idx = args.index("--output") + 1
+            output_path = args[output_idx]
+            with open(output_path, "w") as f:
+                json.dump(partial_report, f)
+            return 1, "", "Warning: some errors encountered"
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                # Should succeed since we got valid JSON output
+                result = await server._execute_erc("/designs/test.kicad_sch", "all")
+
+        assert result["total_violations"] == 1
+        assert result["passed"] is False
+
+    # -- DRC non-zero exit --
+
+    async def test_execute_drc_nonzero_exit_no_output(self, tmp_path) -> None:
+        """DRC raises KicadCliError on non-zero exit with no output."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            return 1, "", "Fatal error: invalid PCB"
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                with pytest.raises(KicadCliError):
+                    await server._execute_drc("/designs/test.kicad_pcb", "all", None)
+
+    # -- BOM export non-zero exit --
+
+    async def test_execute_bom_export_nonzero_exit(self, tmp_path) -> None:
+        """BOM export raises KicadCliError on non-zero exit."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli",
+                       AsyncMock(return_value=(1, "", "Error"))):
+                with pytest.raises(KicadCliError):
+                    await server._execute_bom_export("/designs/test.kicad_sch", "csv", "value")
+
+    # -- Gerber export non-zero exit --
+
+    async def test_execute_gerber_export_nonzero_exit(self, tmp_path) -> None:
+        """Gerber export raises KicadCliError on non-zero exit."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli",
+                       AsyncMock(return_value=(1, "", "Error"))):
+                with pytest.raises(KicadCliError):
+                    await server._execute_gerber_export(
+                        "/designs/test.kicad_pcb", str(tmp_path / "out"), ["F.Cu"]
+                    )
+
+    # -- Custom error types --
+
+    def test_kicad_cli_not_found_error_message(self) -> None:
+        """KicadCliNotFoundError has helpful message."""
+        err = KicadCliNotFoundError("/usr/bin/kicad-cli")
+        assert "/usr/bin/kicad-cli" in str(err)
+        assert "install KiCad" in str(err)
+
+    def test_kicad_cli_error_message(self) -> None:
+        """KicadCliError includes return code and stderr."""
+        err = KicadCliError(2, "something went wrong")
+        assert "code 2" in str(err)
+        assert "something went wrong" in str(err)
+
+    def test_kicad_cli_timeout_error_message(self) -> None:
+        """KicadCliTimeoutError includes timeout value."""
+        err = KicadCliTimeoutError(120.0)
+        assert "120.0" in str(err)
+        assert "timed out" in str(err)
+
+    # -- ERC temp file cleanup --
+
+    async def test_execute_erc_cleans_up_temp_file(self, tmp_path) -> None:
+        """ERC cleans up temporary report file even on success."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        created_files: list[str] = []
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            output_idx = args.index("--output") + 1
+            output_path = args[output_idx]
+            created_files.append(output_path)
+            with open(output_path, "w") as f:
+                json.dump({"violations": []}, f)
+            return 0, "", ""
+
+        with patch("tool_registry.tools.kicad.adapter._check_kicad_cli",
+                    AsyncMock(return_value="kicad-cli")):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                await server._execute_erc("/designs/test.kicad_sch", "all")
+
+        # Temp file should have been cleaned up
+        assert len(created_files) == 1
+        assert not os.path.exists(created_files[0])
