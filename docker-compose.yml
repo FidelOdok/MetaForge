@@ -198,6 +198,61 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── KiCad Adapter (Phase 1 — read-only ERC/DRC/BOM/Gerber) ──────
+  kicad-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/kicad/Dockerfile
+    image: metaforge/kicad-adapter:latest
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - KICAD_WORK_DIR=/workspace
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "kicad-cli", "version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── FreeCAD Adapter (CAD export, meshing, boolean ops) ──────────
+  freecad-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/freecad/Dockerfile
+    image: metaforge/freecad-adapter:latest
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - FREECAD_WORK_DIR=/workspace
+      - QT_QPA_PLATFORM=offscreen
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "freecadcmd", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── Observability (opt-in via --profile) ─────────────────────────
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -299,6 +354,7 @@ volumes:
   zookeeper-data:
   kafka-data:
   temporal-db-data:
+  adapter-workspace:
   prometheus-data:
   grafana-data:
   tempo-data:
