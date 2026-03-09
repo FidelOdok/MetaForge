@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from twin_core.constraint_engine import InMemoryConstraintEngine
-from twin_core.constraint_engine.yaml_loader import load_yaml_rules
+from twin_core.constraint_engine.yaml_loader import convert_to_constraints, load_rules_from_file
 from twin_core.gate_engine.engine import InMemoryGateEngine
 from twin_core.gate_engine.models import GateCriterion, GateDefinition, GatePhase
 from twin_core.graph_engine import InMemoryGraphEngine
@@ -226,23 +226,24 @@ class TestEndToEndGateWorkflow:
         rule_file = tmp_path / "test_rules.yaml"
         rule_file.write_text(
             """
+domain: mechanical
+version: "1.0"
 rules:
   - name: has_artifacts
-    expression: "len(ctx.artifacts()) > 0"
-    severity: error
-    domain: mechanical
-    message: "Must have at least one artifact"
+    description: "Must have at least one artifact"
+    condition: "len(ctx.artifacts()) > 0"
+    severity: critical
 """,
             encoding="utf-8",
         )
 
         # Load and register rules
-        yaml_rules = load_yaml_rules(rule_file)
-        assert len(yaml_rules) == 1
+        ruleset = load_rules_from_file(rule_file)
+        constraints = convert_to_constraints(ruleset)
+        assert len(constraints) == 1
 
         art = await graph.add_node(_make_artifact("test_part"))
-        constraint = yaml_rules[0].to_constraint()
-        await constraint_engine.add_constraint(constraint, [art.id])
+        await constraint_engine.add_constraint(constraints[0], [art.id])
 
         # Evaluate
         result = await constraint_engine.evaluate_all()
