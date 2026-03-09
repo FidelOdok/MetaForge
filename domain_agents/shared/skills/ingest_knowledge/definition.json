@@ -2,8 +2,8 @@
   "name": "ingest_knowledge",
   "version": "0.1.0",
   "domain": "shared",
-  "agent": "any",
-  "description": "Ingests new knowledge into the knowledge store by chunking, embedding, and persisting content.",
+  "agent": "*",
+  "description": "Ingest text content into the cross-agent knowledge store with automatic chunking and embedding.",
   "phase": 1,
   "tools_required": [],
   "input_schema": "schema.IngestKnowledgeInput",
@@ -11,5 +11,5 @@
   "timeout_seconds": 60,
   "retries": 1,
   "idempotent": false,
-  "tags": ["knowledge", "ingestion", "embedding"]
+  "tags": ["knowledge", "ingest", "shared", "cross-agent", "embedding"]
 }

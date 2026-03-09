@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import structlog
 
-from digital_twin.knowledge.embedding_service import EmbeddingService
-from digital_twin.knowledge.store import KnowledgeStore
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
+from twin_core.knowledge.models import KnowledgeType
+from twin_core.knowledge.store import KnowledgeStore
 
 from .schema import KnowledgeResult, RetrieveKnowledgeInput, RetrieveKnowledgeOutput
 
@@ -16,60 +16,65 @@ tracer = get_tracer("skill.retrieve_knowledge")
 
 
 class RetrieveKnowledgeHandler(SkillBase[RetrieveKnowledgeInput, RetrieveKnowledgeOutput]):
-    """Retrieves relevant knowledge entries via semantic search."""
+    """Searches the knowledge store using semantic similarity."""
 
     input_type = RetrieveKnowledgeInput
     output_type = RetrieveKnowledgeOutput
 
-    def __init__(
-        self,
-        context: object,
-        store: KnowledgeStore,
-        embedding_service: EmbeddingService,
-    ) -> None:
+    def __init__(self, context: object, knowledge_store: KnowledgeStore) -> None:
         super().__init__(context)  # type: ignore[arg-type]
-        self._store = store
-        self._embedding = embedding_service
+        self._store = knowledge_store
 
     async def execute(self, input_data: RetrieveKnowledgeInput) -> RetrieveKnowledgeOutput:
-        """Embed the query and search the knowledge store."""
+        """Execute semantic search over the knowledge store."""
         with tracer.start_as_current_span("retrieve_knowledge.execute") as span:
             span.set_attribute("skill.name", "retrieve_knowledge")
-            span.set_attribute("skill.domain", "shared")
+            span.set_attribute("knowledge.query_length", len(input_data.query))
+            span.set_attribute("knowledge.limit", input_data.limit)
+
+            # Resolve optional knowledge_type filter
+            knowledge_type_filter: KnowledgeType | None = None
+            if input_data.knowledge_type:
+                try:
+                    knowledge_type_filter = KnowledgeType(input_data.knowledge_type)
+                except ValueError:
+                    self.logger.warning(
+                        "Unknown knowledge_type filter, searching all types",
+                        knowledge_type=input_data.knowledge_type,
+                    )
 
             self.logger.info(
-                "retrieve_knowledge_start",
+                "Searching knowledge store",
                 query=input_data.query[:100],
-                knowledge_type=str(input_data.knowledge_type) if input_data.knowledge_type else None,
+                knowledge_type=input_data.knowledge_type,
                 limit=input_data.limit,
             )
 
-            query_embedding = await self._embedding.embed(input_data.query)
-            entries = await self._store.search(
-                embedding=query_embedding,
-                knowledge_type=input_data.knowledge_type,
+            search_results = await self._store.search(
+                query=input_data.query,
+                knowledge_type=knowledge_type_filter,
                 limit=input_data.limit,
             )
 
             results = [
                 KnowledgeResult(
-                    id=e.id,
-                    content=e.content,
-                    knowledge_type=e.knowledge_type,
-                    metadata=e.metadata,
-                    source_artifact_id=e.source_artifact_id,
-                    created_at=e.created_at,
+                    entry_id=str(r.entry.id),
+                    content=r.entry.content,
+                    knowledge_type=r.entry.knowledge_type.value,
+                    source=r.entry.source,
+                    score=r.score,
+                    metadata=r.entry.metadata,
                 )
-                for e in entries
+                for r in search_results
             ]
 
             self.logger.info(
-                "retrieve_knowledge_done",
-                total_found=len(results),
+                "Knowledge search completed",
+                results_count=len(results),
             )
 
             return RetrieveKnowledgeOutput(
                 results=results,
                 query=input_data.query,
-                total_found=len(results),
+                total_results=len(results),
             )

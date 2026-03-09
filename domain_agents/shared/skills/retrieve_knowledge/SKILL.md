@@ -1,27 +1,38 @@
 # retrieve_knowledge
 
-Retrieves relevant knowledge entries from the knowledge store using semantic
-similarity search.  Agents use this skill to find prior design decisions,
-component datasheets, failure modes, constraints, and session context that
-may inform the current task.
+Semantic search over the cross-agent knowledge store. Returns ranked knowledge results matching a natural-language query.
 
-## Usage
+## What it does
 
-Provide a natural-language query describing what you need.  Optionally filter
-by `knowledge_type` and control the number of results with `limit`.
+1. Accepts a natural-language query and optional filters
+2. Computes a vector embedding of the query
+3. Performs cosine-similarity search against all stored knowledge entries
+4. Returns the top-N results ranked by relevance score
 
-## Inputs
+## Tools Required
 
-| Field            | Type                    | Required | Description                     |
-|------------------|-------------------------|----------|---------------------------------|
-| `query`          | `str`                   | yes      | Natural-language search query   |
-| `knowledge_type` | `KnowledgeType \| None` | no       | Filter by knowledge category    |
-| `limit`          | `int`                   | no       | Max results (default 5)         |
+None -- this skill operates directly on the KnowledgeStore (in-process).
 
-## Outputs
+## Input
 
-| Field         | Type                   | Description                         |
-|---------------|------------------------|-------------------------------------|
-| `results`     | `list[KnowledgeResult]`| Ranked list of matching entries     |
-| `query`       | `str`                  | Echo of the original query          |
-| `total_found` | `int`                  | Number of results returned          |
+- `query` -- Natural language search query (required)
+- `knowledge_type` -- Optional filter by category (e.g. "design_rule", "material_property")
+- `limit` -- Maximum results to return (default: 5, max: 50)
+
+## Output
+
+- `results` -- List of KnowledgeResult objects, each containing:
+  - `entry_id` -- UUID of the knowledge entry
+  - `content` -- The knowledge text
+  - `knowledge_type` -- Category
+  - `source` -- Where this knowledge came from
+  - `score` -- Relevance score (0-1, higher is better)
+  - `metadata` -- Additional key-value metadata
+- `query` -- Echo of the original query
+- `total_results` -- Count of results returned
+
+## Limitations
+
+- Relevance depends on the quality of the embedding service
+- The default local hash embedding is deterministic but not semantically meaningful
+- In-memory store does not persist across restarts

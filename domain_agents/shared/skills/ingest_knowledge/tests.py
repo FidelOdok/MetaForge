@@ -1,4 +1,7 @@
-"""Skill-specific tests for ingest_knowledge."""
+"""Skill-specific tests for ingest_knowledge.
+
+These tests live alongside the skill for co-location.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +10,9 @@ from uuid import uuid4
 
 import pytest
 
-from digital_twin.knowledge.store import InMemoryKnowledgeStore, KnowledgeType
 from skill_registry.skill_base import SkillContext
+from twin_core.knowledge.models import KnowledgeEntry, KnowledgeType
+from twin_core.knowledge.store import KnowledgeStore
 
 from .handler import IngestKnowledgeHandler
 from .schema import IngestKnowledgeInput
@@ -27,77 +31,146 @@ def mock_context() -> SkillContext:
 
 
 @pytest.fixture()
-def knowledge_store() -> InMemoryKnowledgeStore:
-    return InMemoryKnowledgeStore()
-
-
-@pytest.fixture()
-def mock_embedding() -> AsyncMock:
-    svc = AsyncMock()
-    svc.embed.return_value = [0.5, 0.5, 0.0]
-    svc.embed_batch.return_value = [[0.5, 0.5, 0.0]]
-    return svc
+def mock_store() -> KnowledgeStore:
+    return MagicMock(spec=KnowledgeStore)
 
 
 class TestIngestKnowledgeSkill:
-    """Smoke tests for the ingest_knowledge handler."""
+    """Co-located tests for the ingest_knowledge handler."""
 
-    async def test_execute_stores_entry(
-        self,
-        mock_context: SkillContext,
-        knowledge_store: InMemoryKnowledgeStore,
-        mock_embedding: AsyncMock,
+    async def test_execute_ingests_content(
+        self, mock_context: SkillContext, mock_store: KnowledgeStore
     ) -> None:
-        handler = IngestKnowledgeHandler(mock_context, knowledge_store, mock_embedding)
-        inp = IngestKnowledgeInput(
-            content="Use M3 screws for the enclosure",
-            knowledge_type=KnowledgeType.DESIGN_DECISION,
-            metadata={"source": "review"},
+        entry = KnowledgeEntry(
+            content="Aluminum 6061-T6 yield strength is 276 MPa",
+            knowledge_type=KnowledgeType.MATERIAL_PROPERTY,
+            source="materials-db",
+            embedding=[0.1] * 128,
         )
-        output = await handler.execute(inp)
+        mock_store.ingest_chunked = AsyncMock(return_value=[entry])
 
+        handler = IngestKnowledgeHandler(mock_context, mock_store)
+        input_data = IngestKnowledgeInput(
+            content="Aluminum 6061-T6 yield strength is 276 MPa",
+            knowledge_type="material_property",
+            source="materials-db",
+        )
+        output = await handler.execute(input_data)
+
+        assert output.entry_id == str(entry.id)
         assert output.embedded is True
-        assert output.entry_id is not None
+        assert output.chunk_count == 1
+        assert output.content_length == len(input_data.content)
 
-        stored = await knowledge_store.get(output.entry_id)
-        assert stored is not None
-        assert stored.content == "Use M3 screws for the enclosure"
-
-    async def test_execute_handles_embed_failure(
-        self,
-        mock_context: SkillContext,
-        knowledge_store: InMemoryKnowledgeStore,
+    async def test_execute_with_metadata(
+        self, mock_context: SkillContext, mock_store: KnowledgeStore
     ) -> None:
-        failing_embedding = AsyncMock()
-        failing_embedding.embed.side_effect = RuntimeError("model not loaded")
+        entry = KnowledgeEntry(
+            content="IPC-2221 minimum trace width for 1A is 10mil",
+            knowledge_type=KnowledgeType.DESIGN_RULE,
+            source="IPC-2221",
+            embedding=[0.2] * 128,
+        )
+        mock_store.ingest_chunked = AsyncMock(return_value=[entry])
 
-        handler = IngestKnowledgeHandler(mock_context, knowledge_store, failing_embedding)
-        inp = IngestKnowledgeInput(
+        handler = IngestKnowledgeHandler(mock_context, mock_store)
+        input_data = IngestKnowledgeInput(
+            content="IPC-2221 minimum trace width for 1A is 10mil",
+            knowledge_type="design_rule",
+            source="IPC-2221",
+            metadata={"standard_version": "2012", "section": "6.2"},
+        )
+        output = await handler.execute(input_data)
+
+        mock_store.ingest_chunked.assert_awaited_once_with(
+            content=input_data.content,
+            knowledge_type=KnowledgeType.DESIGN_RULE,
+            source="IPC-2221",
+            metadata={"standard_version": "2012", "section": "6.2"},
+        )
+        assert output.embedded is True
+
+    async def test_execute_with_unknown_type_defaults_to_general(
+        self, mock_context: SkillContext, mock_store: KnowledgeStore
+    ) -> None:
+        entry = KnowledgeEntry(
             content="Some content",
-            knowledge_type=KnowledgeType.SESSION,
+            knowledge_type=KnowledgeType.GENERAL,
+            source="test",
+            embedding=[0.3] * 128,
         )
-        output = await handler.execute(inp)
+        mock_store.ingest_chunked = AsyncMock(return_value=[entry])
 
-        # Entry should still be stored, just not embedded
-        assert output.embedded is False
-        stored = await knowledge_store.get(output.entry_id)
-        assert stored is not None
+        handler = IngestKnowledgeHandler(mock_context, mock_store)
+        input_data = IngestKnowledgeInput(
+            content="Some content",
+            knowledge_type="totally_unknown_type",
+            source="test",
+        )
+        output = await handler.execute(input_data)
 
-    async def test_execute_with_artifact_id(
-        self,
-        mock_context: SkillContext,
-        knowledge_store: InMemoryKnowledgeStore,
-        mock_embedding: AsyncMock,
+        # Should fall back to GENERAL
+        mock_store.ingest_chunked.assert_awaited_once_with(
+            content="Some content",
+            knowledge_type=KnowledgeType.GENERAL,
+            source="test",
+            metadata={},
+        )
+        assert output.entry_id == str(entry.id)
+
+    async def test_execute_chunked_content(
+        self, mock_context: SkillContext, mock_store: KnowledgeStore
     ) -> None:
-        artifact_id = uuid4()
-        handler = IngestKnowledgeHandler(mock_context, knowledge_store, mock_embedding)
-        inp = IngestKnowledgeInput(
-            content="Component datasheet content",
-            knowledge_type=KnowledgeType.COMPONENT,
-            source_artifact_id=artifact_id,
-        )
-        output = await handler.execute(inp)
+        entries = [
+            KnowledgeEntry(
+                content=f"chunk {i}",
+                knowledge_type=KnowledgeType.BEST_PRACTICE,
+                source="docs",
+                embedding=[0.1 * i] * 128,
+            )
+            for i in range(3)
+        ]
+        mock_store.ingest_chunked = AsyncMock(return_value=entries)
 
-        stored = await knowledge_store.get(output.entry_id)
-        assert stored is not None
-        assert stored.source_artifact_id == artifact_id
+        handler = IngestKnowledgeHandler(mock_context, mock_store)
+        input_data = IngestKnowledgeInput(
+            content="A very long document " * 100,
+            knowledge_type="best_practice",
+            source="docs",
+        )
+        output = await handler.execute(input_data)
+
+        assert output.chunk_count == 3
+        assert output.entry_id == str(entries[0].id)
+
+    async def test_run_validates_input(
+        self, mock_context: SkillContext, mock_store: KnowledgeStore
+    ) -> None:
+        entry = KnowledgeEntry(
+            content="test",
+            knowledge_type=KnowledgeType.GENERAL,
+            source="test",
+            embedding=[0.1] * 128,
+        )
+        mock_store.ingest_chunked = AsyncMock(return_value=[entry])
+
+        handler = IngestKnowledgeHandler(mock_context, mock_store)
+        input_data = IngestKnowledgeInput(
+            content="test content",
+            knowledge_type="general",
+            source="test",
+        )
+        result = await handler.run(input_data)
+        assert result.success is True
+
+    async def test_schema_validation_rejects_empty_content(self) -> None:
+        with pytest.raises(Exception):
+            IngestKnowledgeInput(
+                content="", knowledge_type="general", source="test"
+            )
+
+    async def test_schema_validation_rejects_empty_source(self) -> None:
+        with pytest.raises(Exception):
+            IngestKnowledgeInput(
+                content="some content", knowledge_type="general", source=""
+            )

@@ -1,1 +1,1 @@
-"""Shared skill implementations."""
+"""Shared cross-agent skills."""

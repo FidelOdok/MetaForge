@@ -2,8 +2,8 @@
   "name": "retrieve_knowledge",
   "version": "0.1.0",
   "domain": "shared",
-  "agent": "any",
-  "description": "Retrieves relevant knowledge entries from the knowledge store using semantic search over embedded design knowledge.",
+  "agent": "*",
+  "description": "Semantic search over the cross-agent knowledge store. Returns ranked knowledge results matching a natural-language query.",
   "phase": 1,
   "tools_required": [],
   "input_schema": "schema.RetrieveKnowledgeInput",
@@ -11,5 +11,5 @@
   "timeout_seconds": 30,
   "retries": 1,
   "idempotent": true,
-  "tags": ["knowledge", "search", "retrieval", "semantic"]
+  "tags": ["knowledge", "search", "shared", "cross-agent"]
 }
