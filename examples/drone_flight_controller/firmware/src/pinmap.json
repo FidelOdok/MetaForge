@@ -1,0 +1,82 @@
+{
+  "mcu": "STM32F405RGT6",
+  "package": "LQFP-64",
+  "clock": {
+    "hse_mhz": 8,
+    "sysclk_mhz": 168,
+    "ahb_mhz": 168,
+    "apb1_mhz": 42,
+    "apb2_mhz": 84
+  },
+  "pins": {
+    "SPI1": {
+      "function": "IMU (MPU6050)",
+      "SCK":  { "pin": "PA5",  "af": "AF5" },
+      "MISO": { "pin": "PA6",  "af": "AF5" },
+      "MOSI": { "pin": "PA7",  "af": "AF5" },
+      "CS":   { "pin": "PA4",  "af": "GPIO", "mode": "output_push_pull", "active": "low" }
+    },
+    "I2C1": {
+      "function": "Barometer (BMP280), external peripherals",
+      "SCL": { "pin": "PB6", "af": "AF4" },
+      "SDA": { "pin": "PB7", "af": "AF4" }
+    },
+    "USART1": {
+      "function": "GPS (NEO-M8N)",
+      "TX": { "pin": "PA9",  "af": "AF7" },
+      "RX": { "pin": "PA10", "af": "AF7" },
+      "baud": 115200
+    },
+    "USART2": {
+      "function": "Telemetry / OSD",
+      "TX": { "pin": "PA2", "af": "AF7" },
+      "RX": { "pin": "PA3", "af": "AF7" },
+      "baud": 115200
+    },
+    "USART3": {
+      "function": "RC Receiver (SBUS/CRSF)",
+      "TX": { "pin": "PB10", "af": "AF7" },
+      "RX": { "pin": "PB11", "af": "AF7" },
+      "baud": 420000,
+      "notes": "CRSF at 420000 baud; SBUS at 100000 baud (inverted)"
+    },
+    "USART6": {
+      "function": "Spare / peripheral expansion",
+      "TX": { "pin": "PC6", "af": "AF8" },
+      "RX": { "pin": "PC7", "af": "AF8" },
+      "baud": 115200
+    },
+    "TIM1": {
+      "function": "Motor PWM / DShot600 outputs",
+      "CH1": { "pin": "PE9",  "af": "AF1", "motor": 1 },
+      "CH2": { "pin": "PE11", "af": "AF1", "motor": 2 },
+      "CH3": { "pin": "PE13", "af": "AF1", "motor": 3 },
+      "CH4": { "pin": "PE14", "af": "AF1", "motor": 4 }
+    },
+    "ADC1": {
+      "function": "Battery voltage sensing",
+      "IN10": { "pin": "PC0", "divider_ratio": "10:1", "max_voltage_v": 33.0 }
+    },
+    "USB_OTG_FS": {
+      "function": "USB-C (Full Speed, CDC)",
+      "DM": { "pin": "PA11", "af": "AF10" },
+      "DP": { "pin": "PA12", "af": "AF10" }
+    },
+    "SDIO": {
+      "function": "Micro-SD card (blackbox logging)",
+      "CMD": { "pin": "PD2",  "af": "AF12" },
+      "CLK": { "pin": "PC12", "af": "AF12" },
+      "D0":  { "pin": "PC8",  "af": "AF12" },
+      "D1":  { "pin": "PC9",  "af": "AF12" },
+      "D2":  { "pin": "PC10", "af": "AF12" },
+      "D3":  { "pin": "PC11", "af": "AF12" }
+    },
+    "GPIO": {
+      "STATUS_LED": { "pin": "PC13", "mode": "output_push_pull", "active": "low" },
+      "BUZZER":     { "pin": "PB0",  "mode": "output_open_drain", "active": "low" },
+      "WS2812_LED": { "pin": "PA8",  "mode": "output_push_pull", "timer": "TIM1_CH1N_remap" },
+      "IMU_INT":    { "pin": "PC4",  "mode": "input", "trigger": "rising_edge", "exti": "EXTI4" },
+      "BOOT0":      { "pin": "BOOT0", "mode": "input", "pull": "down", "notes": "Active high for DFU bootloader" }
+    }
+  }
+}

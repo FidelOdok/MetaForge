@@ -1,0 +1,311 @@
+{
+  "project": "drone_flight_controller",
+  "version": "1.0",
+  "currency": "USD",
+  "generated": "2026-03-09",
+  "components": [
+    {
+      "ref": "U1",
+      "description": "Microcontroller, ARM Cortex-M4F, 168 MHz, 1 MB Flash, 192 KB SRAM",
+      "mpn": "STM32F405RGT6",
+      "manufacturer": "STMicroelectronics",
+      "package": "LQFP-64",
+      "quantity": 1,
+      "unit_price": 6.42,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "497-14186-ND",
+        "stock": 12500,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "U2",
+      "description": "6-axis IMU, 3-axis gyroscope + 3-axis accelerometer",
+      "mpn": "MPU-6050",
+      "manufacturer": "TDK InvenSense",
+      "package": "QFN-24 (4x4mm)",
+      "quantity": 1,
+      "unit_price": 2.48,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "1428-1008-1-ND",
+        "stock": 8700,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "U3",
+      "description": "Digital barometric pressure sensor",
+      "mpn": "BMP280",
+      "manufacturer": "Bosch Sensortec",
+      "package": "LGA-8 (2x2.5mm)",
+      "quantity": 1,
+      "unit_price": 1.65,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "828-1063-1-ND",
+        "stock": 15200,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "U4",
+      "description": "GPS/GNSS receiver module (external, via UART)",
+      "mpn": "NEO-M8N-0",
+      "manufacturer": "u-blox",
+      "package": "LCC-24 (12.2x16mm)",
+      "quantity": 1,
+      "unit_price": 12.85,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "672-1003-1-ND",
+        "stock": 3200,
+        "lead_time_days": 7
+      }
+    },
+    {
+      "ref": "U5",
+      "description": "5V 3A synchronous step-down converter",
+      "mpn": "TPS54302DDCR",
+      "manufacturer": "Texas Instruments",
+      "package": "SOT-23-6",
+      "quantity": 1,
+      "unit_price": 0.98,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "296-50420-1-ND",
+        "stock": 45000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "U6",
+      "description": "3.3V 500mA LDO voltage regulator",
+      "mpn": "AMS1117-3.3",
+      "manufacturer": "Advanced Monolithic Systems",
+      "package": "SOT-223",
+      "quantity": 1,
+      "unit_price": 0.22,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "AMS1117-3.3-ND",
+        "stock": 82000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "U7",
+      "description": "USB ESD protection, dual-channel TVS diode array",
+      "mpn": "USBLC6-2SC6",
+      "manufacturer": "STMicroelectronics",
+      "package": "SOT-23-6",
+      "quantity": 1,
+      "unit_price": 0.35,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "497-5235-1-ND",
+        "stock": 67000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "Q1",
+      "description": "P-channel MOSFET for reverse polarity protection, 30V 12A",
+      "mpn": "SI2301CDS-T1-GE3",
+      "manufacturer": "Vishay Siliconix",
+      "package": "SOT-23",
+      "quantity": 1,
+      "unit_price": 0.42,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "SI2301CDS-T1-GE3CT-ND",
+        "stock": 120000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "Y1",
+      "description": "8 MHz crystal oscillator, 20 ppm, 18 pF load",
+      "mpn": "ABM8-8.000MHZ-B2-T",
+      "manufacturer": "Abracon",
+      "package": "HC49/SMD (3.2x2.5mm)",
+      "quantity": 1,
+      "unit_price": 0.45,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "535-9115-1-ND",
+        "stock": 28000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "Y2",
+      "description": "32.768 kHz crystal, RTC oscillator, 12.5 pF",
+      "mpn": "ABS07-32.768KHZ-T",
+      "manufacturer": "Abracon",
+      "package": "2012 (2.0x1.2mm)",
+      "quantity": 1,
+      "unit_price": 0.32,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "535-11899-1-ND",
+        "stock": 35000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "L1",
+      "description": "22 uH shielded power inductor, 3A saturation, buck converter",
+      "mpn": "SRN4018-220M",
+      "manufacturer": "Bourns",
+      "package": "4x4x1.8mm",
+      "quantity": 1,
+      "unit_price": 0.38,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "SRN4018-220MCT-ND",
+        "stock": 52000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "J1",
+      "description": "USB Type-C receptacle, 2.0 Full Speed, SMT mid-mount",
+      "mpn": "USB4135-GF-A",
+      "manufacturer": "GCT (Global Connector Technology)",
+      "package": "SMT mid-mount",
+      "quantity": 1,
+      "unit_price": 0.68,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "2073-USB4135-GF-ACT-ND",
+        "stock": 18000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "J2",
+      "description": "JST-SH 4-pin connector, GPS UART",
+      "mpn": "SM04B-SRSS-TB(LF)(SN)",
+      "manufacturer": "JST",
+      "package": "SMT, 1.0mm pitch",
+      "quantity": 3,
+      "unit_price": 0.28,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "455-1804-1-ND",
+        "stock": 95000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "J5",
+      "description": "Micro-SD card slot, push-push, SMT",
+      "mpn": "DM3AT-SF-PEJM5",
+      "manufacturer": "Hirose",
+      "package": "SMT",
+      "quantity": 1,
+      "unit_price": 1.85,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "HR1964CT-ND",
+        "stock": 22000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "C1-C6",
+      "description": "100 nF MLCC, 50V, X7R, bypass capacitor",
+      "mpn": "GRM155R71H104KE14D",
+      "manufacturer": "Murata",
+      "package": "0402",
+      "quantity": 6,
+      "unit_price": 0.02,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "490-6328-1-ND",
+        "stock": 2500000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "C7-C8",
+      "description": "22 uF MLCC, 25V, X5R, buck converter output",
+      "mpn": "GRM188R61E226ME15D",
+      "manufacturer": "Murata",
+      "package": "0603",
+      "quantity": 2,
+      "unit_price": 0.12,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "490-10748-1-ND",
+        "stock": 180000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "C9",
+      "description": "10 uF MLCC, 50V, X5R, buck converter input",
+      "mpn": "GRM21BR61H106KE43L",
+      "manufacturer": "Murata",
+      "package": "0805",
+      "quantity": 2,
+      "unit_price": 0.18,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "490-10515-1-ND",
+        "stock": 320000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "R1-R2",
+      "description": "5.1 kohm resistor, 1%, USB-C CC pull-down",
+      "mpn": "RC0402FR-075K1L",
+      "manufacturer": "Yageo",
+      "package": "0402",
+      "quantity": 2,
+      "unit_price": 0.01,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "311-5.1KLRCT-ND",
+        "stock": 4000000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "R3-R4",
+      "description": "10 kohm resistor, 1%, voltage divider / pull-up",
+      "mpn": "RC0402FR-0710KL",
+      "manufacturer": "Yageo",
+      "package": "0402",
+      "quantity": 4,
+      "unit_price": 0.01,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "311-10.0KLRCT-ND",
+        "stock": 5000000,
+        "lead_time_days": 0
+      }
+    },
+    {
+      "ref": "D1",
+      "description": "Blue LED, status indicator, 20 mA",
+      "mpn": "LTST-C171TBKT",
+      "manufacturer": "Lite-On",
+      "package": "0603",
+      "quantity": 1,
+      "unit_price": 0.12,
+      "distributor": {
+        "name": "Digi-Key",
+        "part_number": "160-1646-1-ND",
+        "stock": 75000,
+        "lead_time_days": 0
+      }
+    }
+  ],
+  "total_component_count": 31,
+  "estimated_bom_cost": 32.15,
+  "notes": "Prices are for qty 1 from Digi-Key as of 2026-03. Volume pricing (qty 1000+) reduces total BOM cost by approximately 25-35%. GPS module (NEO-M8N) is external and may be sold separately."
+}

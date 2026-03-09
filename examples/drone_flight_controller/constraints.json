@@ -1,0 +1,87 @@
+{
+  "project": "drone_flight_controller",
+  "version": "1.0",
+  "mechanical": {
+    "board_dimensions": {
+      "width_mm": 36,
+      "height_mm": 36,
+      "max_thickness_mm": 8
+    },
+    "mounting_pattern": "30.5x30.5mm, M3",
+    "max_weight_g": 15,
+    "vibration_isolation": true,
+    "pcb_layers": 4,
+    "pcb_thickness_mm": 1.6,
+    "copper_weight_oz": 1,
+    "surface_finish": "ENIG"
+  },
+  "electrical": {
+    "input_voltage": {
+      "min_v": 10.8,
+      "max_v": 25.2
+    },
+    "max_current_a": 2.0,
+    "power_budget_w": 3.5,
+    "emc_class": "B",
+    "voltage_rails": [
+      {
+        "name": "VIN",
+        "nominal_v": null,
+        "min_v": 10.8,
+        "max_v": 25.2
+      },
+      {
+        "name": "5V_BEC",
+        "nominal_v": 5.0,
+        "tolerance_pct": 3,
+        "max_current_a": 3.0
+      },
+      {
+        "name": "3V3_LDO",
+        "nominal_v": 3.3,
+        "tolerance_pct": 2,
+        "max_current_a": 0.5
+      }
+    ],
+    "esd_protection": {
+      "usb": "TVS_diode",
+      "external_io": "TVS_diode"
+    }
+  },
+  "firmware": {
+    "max_flash_kb": 1024,
+    "max_ram_kb": 192,
+    "loop_rate_hz": 8000,
+    "max_interrupt_latency_us": 10,
+    "clock_speed_mhz": 168,
+    "required_peripherals": [
+      "SPI1",
+      "I2C1",
+      "USART1",
+      "USART2",
+      "USART3",
+      "USART6",
+      "TIM1",
+      "TIM2",
+      "ADC1",
+      "USB_OTG_FS",
+      "SDIO"
+    ]
+  },
+  "environmental": {
+    "operating_temp_min_c": -10,
+    "operating_temp_max_c": 60,
+    "storage_temp_min_c": -40,
+    "storage_temp_max_c": 85,
+    "humidity_max_pct": 85,
+    "ip_rating": "IP20",
+    "vibration_g_rms": 5
+  },
+  "compliance": {
+    "fcc_part_15": true,
+    "ce_marking": true,
+    "rohs": true,
+    "reach": true,
+    "ul94_rating": "V-0"
+  }
+}
