@@ -9,6 +9,7 @@ import { SessionDetailPage } from './pages/SessionDetailPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { BomPage } from './pages/BomPage';
 import { TwinViewerPage } from './pages/TwinViewerPage';
+import { DesignAssistantPage } from './pages/DesignAssistantPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -29,6 +30,7 @@ export function App() {
               <Route path="approvals" element={<ApprovalsPage />} />
               <Route path="bom" element={<BomPage />} />
               <Route path="twin" element={<TwinViewerPage />} />
+              <Route path="assistant" element={<DesignAssistantPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

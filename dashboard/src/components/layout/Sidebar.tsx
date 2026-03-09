@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/approvals', label: 'Approvals', icon: '\u2705' },
   { to: '/bom', label: 'BOM', icon: '\uD83D\uDCCB' },
   { to: '/twin', label: 'Digital Twin', icon: '\uD83E\uDDE0' },
+  { to: '/assistant', label: 'Design Assistant', icon: '\uD83E\uDD16' },
 ];
 
 export function Sidebar() {
