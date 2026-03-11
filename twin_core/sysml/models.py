@@ -34,9 +34,7 @@ class SysMLElement(BaseModel):
     """
 
     element_id: UUID = Field(default_factory=uuid4, alias="@id")
-    element_type: SysMLElementType = Field(
-        default=SysMLElementType.ELEMENT, alias="@type"
-    )
+    element_type: SysMLElementType = Field(default=SysMLElementType.ELEMENT, alias="@type")
     name: str = ""
     qualified_name: str = Field(default="", alias="qualifiedName")
     owner_id: UUID | None = Field(default=None, alias="ownerId")
@@ -49,9 +47,7 @@ class SysMLElement(BaseModel):
 class Package(SysMLElement):
     """SysML v2 Package — a namespace container for owned elements."""
 
-    element_type: SysMLElementType = Field(
-        default=SysMLElementType.PACKAGE, alias="@type"
-    )
+    element_type: SysMLElementType = Field(default=SysMLElementType.PACKAGE, alias="@type")
     members: list[UUID] = Field(default_factory=list)
     description: str = ""
 
@@ -63,9 +59,7 @@ class PartUsage(SysMLElement):
     PCB_LAYOUT, BOM, etc.) and to Component nodes.
     """
 
-    element_type: SysMLElementType = Field(
-        default=SysMLElementType.PART_USAGE, alias="@type"
-    )
+    element_type: SysMLElementType = Field(default=SysMLElementType.PART_USAGE, alias="@type")
     part_definition_id: UUID | None = None
     domain: str = ""
     file_path: str = ""
@@ -94,9 +88,7 @@ class ConstraintUsage(SysMLElement):
     Maps to MetaForge Constraint nodes.
     """
 
-    element_type: SysMLElementType = Field(
-        default=SysMLElementType.CONSTRAINT_USAGE, alias="@type"
-    )
+    element_type: SysMLElementType = Field(default=SysMLElementType.CONSTRAINT_USAGE, alias="@type")
     expression: str = ""
     severity: str = ""
     status: str = ""
@@ -109,9 +101,7 @@ class ConnectionUsage(SysMLElement):
     Maps to MetaForge Relationship edges (EdgeBase with various EdgeTypes).
     """
 
-    element_type: SysMLElementType = Field(
-        default=SysMLElementType.CONNECTION_USAGE, alias="@type"
-    )
+    element_type: SysMLElementType = Field(default=SysMLElementType.CONNECTION_USAGE, alias="@type")
     source_id: UUID | None = None
     target_id: UUID | None = None
     connection_kind: str = ""
@@ -124,9 +114,7 @@ class InterfaceUsage(SysMLElement):
     mounting interface, firmware-to-hardware pin interface).
     """
 
-    element_type: SysMLElementType = Field(
-        default=SysMLElementType.INTERFACE_USAGE, alias="@type"
-    )
+    element_type: SysMLElementType = Field(default=SysMLElementType.INTERFACE_USAGE, alias="@type")
     source_id: UUID | None = None
     target_id: UUID | None = None
     interface_kind: str = ""

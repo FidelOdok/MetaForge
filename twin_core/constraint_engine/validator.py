@@ -5,7 +5,11 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from observability.metrics import MetricsCollector
 
 from twin_core.constraint_engine.context import ConstraintContext, build_context
 from twin_core.constraint_engine.models import (
@@ -59,9 +63,7 @@ class ConstraintEngine(ABC):
     """Abstract interface for constraint evaluation against the Digital Twin graph."""
 
     @abstractmethod
-    async def evaluate(
-        self, artifact_ids: list[UUID]
-    ) -> ConstraintEvaluationResult:
+    async def evaluate(self, artifact_ids: list[UUID]) -> ConstraintEvaluationResult:
         """Evaluate constraints relevant to the given artifacts.
 
         Returns a result indicating whether all ERROR-severity constraints pass.
@@ -74,9 +76,7 @@ class ConstraintEngine(ABC):
         ...
 
     @abstractmethod
-    async def add_constraint(
-        self, constraint: Constraint, artifact_ids: list[UUID]
-    ) -> Constraint:
+    async def add_constraint(self, constraint: Constraint, artifact_ids: list[UUID]) -> Constraint:
         """Register a constraint and create CONSTRAINED_BY edges to the given artifacts."""
         ...
 
@@ -97,24 +97,18 @@ class InMemoryConstraintEngine(ConstraintEngine):
     def __init__(
         self,
         graph: GraphEngine,
-        collector: "MetricsCollector | None" = None,
+        collector: MetricsCollector | None = None,
     ) -> None:
-        from observability.metrics import MetricsCollector  # noqa: F811
-
         self._graph = graph
         self._collector: MetricsCollector | None = collector
 
-    async def evaluate(
-        self, artifact_ids: list[UUID]
-    ) -> ConstraintEvaluationResult:
+    async def evaluate(self, artifact_ids: list[UUID]) -> ConstraintEvaluationResult:
         start = time.monotonic()
 
         constraints = await resolve_constraints(self._graph, artifact_ids)
         if not constraints:
             elapsed = (time.monotonic() - start) * 1000
-            return ConstraintEvaluationResult(
-                passed=True, evaluated_count=0, duration_ms=elapsed
-            )
+            return ConstraintEvaluationResult(passed=True, evaluated_count=0, duration_ms=elapsed)
 
         ctx = await build_context(self._graph)
 
@@ -128,16 +122,12 @@ class InMemoryConstraintEngine(ConstraintEngine):
 
             if status == ConstraintStatus.SKIPPED:
                 skipped_count += 1
-                await self._update_constraint_status(
-                    constraint.id, ConstraintStatus.SKIPPED, now
-                )
+                await self._update_constraint_status(constraint.id, ConstraintStatus.SKIPPED, now)
                 continue
 
             # Determine new status based on expression result
             if status == ConstraintStatus.PASS:
-                await self._update_constraint_status(
-                    constraint.id, ConstraintStatus.PASS, now
-                )
+                await self._update_constraint_status(constraint.id, ConstraintStatus.PASS, now)
             else:
                 # Expression returned False — it's a failure
                 artifact_ids_for_constraint = await find_constrained_artifacts(
@@ -155,15 +145,11 @@ class InMemoryConstraintEngine(ConstraintEngine):
 
                 if constraint.severity == ConstraintSeverity.ERROR:
                     violations.append(violation)
-                    await self._update_constraint_status(
-                        constraint.id, ConstraintStatus.FAIL, now
-                    )
+                    await self._update_constraint_status(constraint.id, ConstraintStatus.FAIL, now)
                 else:
                     # WARNING or INFO
                     warnings.append(violation)
-                    await self._update_constraint_status(
-                        constraint.id, ConstraintStatus.WARN, now
-                    )
+                    await self._update_constraint_status(constraint.id, ConstraintStatus.WARN, now)
 
         elapsed = (time.monotonic() - start) * 1000
         if self._collector:
@@ -185,9 +171,7 @@ class InMemoryConstraintEngine(ConstraintEngine):
         artifact_ids = [a.id for a in all_artifacts]
         return await self.evaluate(artifact_ids)
 
-    async def add_constraint(
-        self, constraint: Constraint, artifact_ids: list[UUID]
-    ) -> Constraint:
+    async def add_constraint(self, constraint: Constraint, artifact_ids: list[UUID]) -> Constraint:
         # Verify constraint doesn't already exist
         existing = await self._graph.get_node(constraint.id)
         if existing is not None:
@@ -238,9 +222,7 @@ class InMemoryConstraintEngine(ConstraintEngine):
             pass  # Constraint was deleted between resolve and update
 
     @staticmethod
-    def _eval_expression(
-        expression: str, ctx: ConstraintContext
-    ) -> tuple[ConstraintStatus, str]:
+    def _eval_expression(expression: str, ctx: ConstraintContext) -> tuple[ConstraintStatus, str]:
         """Compile and evaluate a constraint expression with restricted builtins.
 
         Returns (ConstraintStatus, message) where message describes failures.

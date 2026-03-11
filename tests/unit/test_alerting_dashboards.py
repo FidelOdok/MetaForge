@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 import yaml
 
 # ---------------------------------------------------------------------------
@@ -101,7 +100,9 @@ class TestAlertingRules:
             assert "labels" in rule, f"Missing 'labels' in {rule['alert']}"
             assert "severity" in rule["labels"], f"Missing 'severity' label in {rule['alert']}"
             assert "annotations" in rule, f"Missing 'annotations' in {rule['alert']}"
-            assert "summary" in rule["annotations"], f"Missing 'summary' annotation in {rule['alert']}"
+            assert "summary" in rule["annotations"], (
+                f"Missing 'summary' annotation in {rule['alert']}"
+            )
 
     def test_five_critical_rules(self) -> None:
         """There must be exactly 5 critical rules (3 original + 2 anomaly)."""
@@ -121,9 +122,7 @@ class TestAlertingRules:
         """Verify the names of all critical alert rules."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        critical_names = sorted(
-            r["alert"] for r in rules if r["labels"]["severity"] == "critical"
-        )
+        critical_names = sorted(r["alert"] for r in rules if r["labels"]["severity"] == "critical")
         assert critical_names == sorted(
             [
                 "DeviceTelemetryStopped",
@@ -138,9 +137,7 @@ class TestAlertingRules:
         """Verify the names of all warning alert rules."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        warning_names = sorted(
-            r["alert"] for r in rules if r["labels"]["severity"] == "warning"
-        )
+        warning_names = sorted(r["alert"] for r in rules if r["labels"]["severity"] == "warning")
         assert warning_names == sorted(
             [
                 "DeviceOffline",
@@ -208,46 +205,30 @@ class TestAlertmanagerRoutes:
         """Critical alerts should route to pagerduty-critical."""
         data = _load_yaml(_ROUTES_PATH)
         routes = data["route"]["routes"]
-        critical_routes = [
-            r for r in routes
-            if r.get("match", {}).get("severity") == "critical"
-        ]
-        pagerduty_route = [
-            r for r in critical_routes if r["receiver"] == "pagerduty-critical"
-        ]
+        critical_routes = [r for r in routes if r.get("match", {}).get("severity") == "critical"]
+        pagerduty_route = [r for r in critical_routes if r["receiver"] == "pagerduty-critical"]
         assert len(pagerduty_route) == 1
 
     def test_critical_routes_to_slack(self) -> None:
         """Critical alerts should also route to slack-critical."""
         data = _load_yaml(_ROUTES_PATH)
         routes = data["route"]["routes"]
-        critical_routes = [
-            r for r in routes
-            if r.get("match", {}).get("severity") == "critical"
-        ]
-        slack_route = [
-            r for r in critical_routes if r["receiver"] == "slack-critical"
-        ]
+        critical_routes = [r for r in routes if r.get("match", {}).get("severity") == "critical"]
+        slack_route = [r for r in critical_routes if r["receiver"] == "slack-critical"]
         assert len(slack_route) == 1
 
     def test_warning_routes_to_slack(self) -> None:
         """Warning alerts should route to slack-warning."""
         data = _load_yaml(_ROUTES_PATH)
         routes = data["route"]["routes"]
-        warning_routes = [
-            r for r in routes
-            if r.get("match", {}).get("severity") == "warning"
-        ]
+        warning_routes = [r for r in routes if r.get("match", {}).get("severity") == "warning"]
         assert any(r["receiver"] == "slack-warning" for r in warning_routes)
 
     def test_info_routes_to_slack(self) -> None:
         """Info alerts should route to slack-info."""
         data = _load_yaml(_ROUTES_PATH)
         routes = data["route"]["routes"]
-        info_routes = [
-            r for r in routes
-            if r.get("match", {}).get("severity") == "info"
-        ]
+        info_routes = [r for r in routes if r.get("match", {}).get("severity") == "info"]
         assert any(r["receiver"] == "slack-info" for r in info_routes)
 
     def test_inhibit_rules_exist(self) -> None:
@@ -269,7 +250,8 @@ class TestAlertmanagerRoutes:
         data = _load_yaml(_ROUTES_PATH)
         routes = data["route"]["routes"]
         pagerduty_route = [
-            r for r in routes
+            r
+            for r in routes
             if r.get("match", {}).get("severity") == "critical"
             and r["receiver"] == "pagerduty-critical"
         ]

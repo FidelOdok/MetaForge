@@ -64,9 +64,7 @@ class ValidateStressHandler(SkillBase[ValidateStressInput, ValidateStressOutput]
             for region, stress_val_raw in stress_data.items():
                 stress_val = float(stress_val_raw)
                 sf_achieved = (
-                    constraint.max_von_mises_mpa / stress_val
-                    if stress_val > 0
-                    else float("inf")
+                    constraint.max_von_mises_mpa / stress_val if stress_val > 0 else float("inf")
                 )
                 passed = stress_val <= allowable
 

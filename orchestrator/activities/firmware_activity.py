@@ -50,8 +50,8 @@ async def run_firmware_agent(input: AgentActivityInput) -> AgentActivityOutput:
 
         try:
             from domain_agents.firmware.agent import FirmwareAgent, TaskRequest
-            from twin_core.api import InMemoryTwinAPI
             from skill_registry.mcp_bridge import InMemoryMcpBridge
+            from twin_core.api import InMemoryTwinAPI
 
             twin = InMemoryTwinAPI.create()
             mcp = InMemoryMcpBridge()

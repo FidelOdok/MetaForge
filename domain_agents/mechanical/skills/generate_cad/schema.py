@@ -53,9 +53,7 @@ class GenerateCadOutput(BaseModel):
     cad_file: str = Field(..., description="Path to generated STEP file")
     shape_type: str = Field(..., description="Shape type that was generated")
     volume_mm3: float = Field(..., ge=0, description="Volume in cubic millimeters")
-    surface_area_mm2: float = Field(
-        ..., ge=0, description="Surface area in square millimeters"
-    )
+    surface_area_mm2: float = Field(..., ge=0, description="Surface area in square millimeters")
     bounding_box: BoundingBox = Field(
         default_factory=BoundingBox, description="Axis-aligned bounding box"
     )

@@ -8,26 +8,18 @@ scheduler + workflow engine + event bus, and a Gateway HTTP test client.
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api_gateway.server import create_app
 from domain_agents.electronics.agent import ElectronicsAgent
-from domain_agents.electronics.agent import TaskRequest as EETaskRequest
-from domain_agents.electronics.agent import TaskResult as EETaskResult
 from domain_agents.mechanical.agent import MechanicalAgent
-from domain_agents.mechanical.agent import TaskRequest as MechTaskRequest
-from domain_agents.mechanical.agent import TaskResult as MechTaskResult
-from orchestrator.dependency_engine import DependencyGraph
 from orchestrator.event_bus.subscribers import EventBus
-from orchestrator.scheduler import AgentProtocol, InMemoryScheduler
+from orchestrator.scheduler import InMemoryScheduler
 from orchestrator.workflow_dag import InMemoryWorkflowEngine
 from skill_registry.mcp_bridge import InMemoryMcpBridge
-from tests.conftest import SpySubscriber
 from twin_core.api import InMemoryTwinAPI
-
 
 # ---------------------------------------------------------------------------
 # Realistic tool response constants

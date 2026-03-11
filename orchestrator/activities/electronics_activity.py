@@ -50,8 +50,8 @@ async def run_electronics_agent(input: AgentActivityInput) -> AgentActivityOutpu
 
         try:
             from domain_agents.electronics.agent import ElectronicsAgent, TaskRequest
-            from twin_core.api import InMemoryTwinAPI
             from skill_registry.mcp_bridge import InMemoryMcpBridge
+            from twin_core.api import InMemoryTwinAPI
 
             twin = InMemoryTwinAPI.create()
             mcp = InMemoryMcpBridge()

@@ -6,12 +6,11 @@ the KiCad Python environment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Literal, Optional
 import json
 import uuid
-
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Literal
 
 # ---------------------------------------------------------------------------
 # Actor
@@ -26,7 +25,7 @@ class ChatActor:
 
     kind: ActorKind
     display_name: str
-    agent_code: Optional[str] = None
+    agent_code: str | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"kind": self.kind, "displayName": self.display_name}
@@ -35,7 +34,7 @@ class ChatActor:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ChatActor":
+    def from_dict(cls, data: dict) -> ChatActor:
         return cls(
             kind=data.get("kind", "system"),
             display_name=data.get("displayName", "Unknown"),
@@ -55,8 +54,8 @@ class ChatScope:
     """Defines the context scope for a chat thread."""
 
     kind: ScopeKind
-    entity_id: Optional[str] = None
-    label: Optional[str] = None
+    entity_id: str | None = None
+    label: str | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"kind": self.kind}
@@ -67,7 +66,7 @@ class ChatScope:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ChatScope":
+    def from_dict(cls, data: dict) -> ChatScope:
         return cls(
             kind=data.get("kind", "project"),
             entity_id=data.get("entityId"),
@@ -89,7 +88,7 @@ class ChatMessage:
     actor: ChatActor
     content: str
     created_at: str
-    status: Optional[str] = None
+    status: str | None = None
 
     @classmethod
     def create(
@@ -97,14 +96,14 @@ class ChatMessage:
         thread_id: str,
         actor: ChatActor,
         content: str,
-    ) -> "ChatMessage":
+    ) -> ChatMessage:
         """Factory that generates an id and timestamp automatically."""
         return cls(
             id=str(uuid.uuid4()),
             thread_id=thread_id,
             actor=actor,
             content=content,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
 
     def to_dict(self) -> dict:
@@ -120,7 +119,7 @@ class ChatMessage:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ChatMessage":
+    def from_dict(cls, data: dict) -> ChatMessage:
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             thread_id=data.get("threadId", ""),
@@ -134,7 +133,7 @@ class ChatMessage:
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_json(cls, raw: str) -> "ChatMessage":
+    def from_json(cls, raw: str) -> ChatMessage:
         return cls.from_dict(json.loads(raw))
 
 
@@ -155,8 +154,8 @@ class ChatThread:
     updated_at: str = ""
 
     @classmethod
-    def create(cls, title: str, scope: ChatScope) -> "ChatThread":
-        now = datetime.now(timezone.utc).isoformat()
+    def create(cls, title: str, scope: ChatScope) -> ChatThread:
+        now = datetime.now(UTC).isoformat()
         return cls(
             id=str(uuid.uuid4()),
             title=title,
@@ -176,15 +175,12 @@ class ChatThread:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ChatThread":
+    def from_dict(cls, data: dict) -> ChatThread:
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             title=data.get("title", ""),
             scope=ChatScope.from_dict(data.get("scope", {})),
-            messages=[
-                ChatMessage.from_dict(m)
-                for m in data.get("messages", [])
-            ],
+            messages=[ChatMessage.from_dict(m) for m in data.get("messages", [])],
             created_at=data.get("createdAt", ""),
             updated_at=data.get("updatedAt", ""),
         )

@@ -118,8 +118,10 @@ async def main() -> None:
 
     # Verify health
     health = await client.health_check("calculix")
-    print(f"       CalculiX adapter: {health.status} (v{health.version}, "
-          f"{health.tools_available} tools)")
+    print(
+        f"       CalculiX adapter: {health.status} (v{health.version}, "
+        f"{health.tools_available} tools)"
+    )
 
     bridge = McpClientBridge(client)
 
@@ -202,8 +204,7 @@ async def main() -> None:
                         "status": "passed",
                         "load_case": "hover_3g",
                         "max_stress_mpa": max(
-                            float(v)
-                            for v in sr["fea_result"]["max_von_mises"].values()
+                            float(v) for v in sr["fea_result"]["max_von_mises"].values()
                         ),
                         "critical_region": "fillet_region",
                         "safety_factor_min": min(

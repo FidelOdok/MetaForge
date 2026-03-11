@@ -11,9 +11,7 @@ class TopicConfig(BaseModel):
     name: str
     partitions: int = 6
     replication_factor: int = 1
-    retention_ms: int = Field(
-        default=604800000, description="Retention in ms (default 7 days)"
-    )
+    retention_ms: int = Field(default=604800000, description="Retention in ms (default 7 days)")
     cleanup_policy: str = "delete"
 
 

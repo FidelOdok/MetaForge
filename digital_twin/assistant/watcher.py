@@ -189,7 +189,9 @@ class FileWatcher:
                     continue
 
                 change_type = self._map_change_type(change_kind)
-                file_hash = await self._compute_hash(path) if change_type != ChangeType.DELETED else ""
+                file_hash = (
+                    await self._compute_hash(path) if change_type != ChangeType.DELETED else ""
+                )
 
                 event = FileChangeEvent(
                     path=path_str,
@@ -232,7 +234,7 @@ class FileWatcher:
         try:
             data = await asyncio.to_thread(path.read_bytes)
             return hashlib.sha256(data).hexdigest()
-        except (OSError, IOError):
+        except OSError:
             logger.warning("hash_computation_failed", path=str(path))
             return ""
 

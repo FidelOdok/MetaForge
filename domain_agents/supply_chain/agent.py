@@ -24,7 +24,6 @@ from domain_agents.base_agent import (
     is_llm_available,
 )
 from domain_agents.supply_chain.alt_parts import AlternatePartsFinder
-from domain_agents.supply_chain.models import BOMRiskReport
 from domain_agents.supply_chain.risk_scorer import BOMRiskScorer
 from domain_agents.supply_chain.skills.find_alternates.handler import (
     FindAlternatesHandler,
@@ -289,9 +288,7 @@ class SupplyChainAgent:
         return TaskResult(
             task_type=request.task_type,
             success=True,
-            skill_results=sc_result.tool_calls
-            if sc_result.tool_calls
-            else [sc_result.analysis],
+            skill_results=sc_result.tool_calls if sc_result.tool_calls else [sc_result.analysis],
             warnings=sc_result.recommendations,
         )
 
@@ -371,13 +368,9 @@ class SupplyChainAgent:
         report = output.report
         warnings = []
         if report.critical_count > 0:
-            warnings.append(
-                f"{report.critical_count} part(s) have critical supply chain risk"
-            )
+            warnings.append(f"{report.critical_count} part(s) have critical supply chain risk")
         if report.high_count > 0:
-            warnings.append(
-                f"{report.high_count} part(s) have high supply chain risk"
-            )
+            warnings.append(f"{report.high_count} part(s) have high supply chain risk")
 
         return TaskResult(
             task_type=request.task_type,

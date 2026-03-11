@@ -44,9 +44,7 @@ class AlternatePartsFinder:
     def __init__(self) -> None:
         self._scorer = BOMRiskScorer()
 
-    def _score_compatibility(
-        self, candidate: dict[str, Any], specs: dict[str, Any]
-    ) -> int:
+    def _score_compatibility(self, candidate: dict[str, Any], specs: dict[str, Any]) -> int:
         """Score how compatible a candidate is with the original specs.
 
         Returns 0-100 where 100 = perfect match.
@@ -60,8 +58,14 @@ class AlternatePartsFinder:
             return 0  # Incompatible package
 
         # Check key spec parameters
-        spec_keys = ["voltage_rating", "current_rating", "capacitance",
-                      "resistance", "tolerance", "temperature_range"]
+        spec_keys = [
+            "voltage_rating",
+            "current_rating",
+            "capacitance",
+            "resistance",
+            "tolerance",
+            "temperature_range",
+        ]
         checked = 0
         matched = 0
         for key in spec_keys:
@@ -159,9 +163,7 @@ class AlternatePartsFinder:
         else:
             return "higher"
 
-    def _estimate_risk_reduction(
-        self, candidate: dict[str, Any], original_score: int
-    ) -> int:
+    def _estimate_risk_reduction(self, candidate: dict[str, Any], original_score: int) -> int:
         """Estimate how much the risk score would drop if this alternate is used."""
         candidate_score = self._scorer.score_part(candidate)
         reduction = original_score - candidate_score.overall_score

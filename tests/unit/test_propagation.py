@@ -56,9 +56,7 @@ class TestExtractTraceContext:
         mock_context = MagicMock()
         with (
             patch("observability.propagation.HAS_OTEL", True),
-            patch(
-                "observability.propagation.extract", return_value=mock_context
-            ) as mock_extract,
+            patch("observability.propagation.extract", return_value=mock_context) as mock_extract,
         ):
             carrier = {"traceparent": "00-abc-def-01"}
             result = extract_trace_context(carrier)

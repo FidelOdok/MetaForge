@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,7 +20,6 @@ from orchestrator.event_bus.events import Event, EventType
 from orchestrator.event_bus.kafka_consumer import KafkaEventConsumer
 from orchestrator.event_bus.kafka_producer import KafkaEventPublisher, resolve_topic
 from orchestrator.event_bus.subscribers import EventBus, EventSubscriber
-
 
 # ---------------------------------------------------------------------------
 # Helpers

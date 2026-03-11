@@ -15,7 +15,6 @@ import pytest
 
 from observability.metrics import MetricsCollector
 
-
 # ---------------------------------------------------------------------------
 # Scheduler
 # ---------------------------------------------------------------------------
@@ -35,9 +34,7 @@ class TestSchedulerWiring:
     async def _run_step(self, engine, collector, agent_result=None, agent_exc=None):
         from orchestrator.scheduler import InMemoryScheduler, ScheduledStep
 
-        scheduler = InMemoryScheduler(
-            workflow_engine=engine, collector=collector
-        )
+        scheduler = InMemoryScheduler(workflow_engine=engine, collector=collector)
 
         # Register a mock agent
         mock_agent = MagicMock()
@@ -84,9 +81,7 @@ class TestSchedulerWiring:
 
         from orchestrator.scheduler import InMemoryScheduler, ScheduledStep
 
-        scheduler = InMemoryScheduler(
-            workflow_engine=engine, collector=collector
-        )
+        scheduler = InMemoryScheduler(workflow_engine=engine, collector=collector)
         mock_agent = MagicMock()
         mock_agent.run_task = slow_task
         scheduler.register_agent("TEST", mock_agent)

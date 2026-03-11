@@ -59,8 +59,8 @@ async def run_mechanical_agent(input: AgentActivityInput) -> AgentActivityOutput
         try:
             # Late imports to avoid circular dependencies
             from domain_agents.mechanical.agent import MechanicalAgent, TaskRequest
-            from twin_core.api import InMemoryTwinAPI
             from skill_registry.mcp_bridge import InMemoryMcpBridge
+            from twin_core.api import InMemoryTwinAPI
 
             twin = InMemoryTwinAPI.create()
             mcp = InMemoryMcpBridge()

@@ -144,12 +144,8 @@ class TestHandleToolList:
         result = await handle_tool_list(server_with_tools._tools, {})
         assert len(result["tools"]) == 2
 
-    async def test_list_filtered_by_capability(
-        self, server_with_tools: McpToolServer
-    ) -> None:
-        result = await handle_tool_list(
-            server_with_tools._tools, {"capability": "meshing"}
-        )
+    async def test_list_filtered_by_capability(self, server_with_tools: McpToolServer) -> None:
+        result = await handle_tool_list(server_with_tools._tools, {"capability": "meshing"})
         assert len(result["tools"]) == 1
         assert result["tools"][0]["tool_id"] == "calc.mesh"
 
@@ -164,9 +160,7 @@ class TestHandleToolList:
 
 
 class TestHandleToolCall:
-    async def test_call_registered_tool(
-        self, server_with_tools: McpToolServer
-    ) -> None:
+    async def test_call_registered_tool(self, server_with_tools: McpToolServer) -> None:
         result = await handle_tool_call(
             server_with_tools._tools,
             {"tool_id": "calc.run_fea", "arguments": {"load": 100}},
@@ -178,17 +172,13 @@ class TestHandleToolCall:
 
     async def test_call_unknown_tool_raises(self, server: McpToolServer) -> None:
         with pytest.raises(ToolNotFoundError, match="no_such_tool"):
-            await handle_tool_call(
-                server._tools, {"tool_id": "no_such_tool", "arguments": {}}
-            )
+            await handle_tool_call(server._tools, {"tool_id": "no_such_tool", "arguments": {}})
 
     async def test_call_handler_error_raises(self) -> None:
         srv = McpToolServer(adapter_id="test", version="0.0.1")
         srv.register_tool(manifest=_make_manifest(), handler=_failing_handler)
         with pytest.raises(ToolHandlerError, match="something went wrong"):
-            await handle_tool_call(
-                srv._tools, {"tool_id": "calc.run_fea", "arguments": {}}
-            )
+            await handle_tool_call(srv._tools, {"tool_id": "calc.run_fea", "arguments": {}})
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +187,7 @@ class TestHandleToolCall:
 
 
 class TestHandleHealthCheck:
-    async def test_health_check_response(
-        self, server_with_tools: McpToolServer
-    ) -> None:
+    async def test_health_check_response(self, server_with_tools: McpToolServer) -> None:
         result = await handle_health_check(
             adapter_id=server_with_tools.adapter_id,
             version=server_with_tools.version,
@@ -244,21 +232,15 @@ class TestJsonRpcHelpers:
 
 
 class TestMcpToolServer:
-    async def test_handle_valid_tool_list_request(
-        self, server_with_tools: McpToolServer
-    ) -> None:
-        request = json.dumps(
-            {"jsonrpc": "2.0", "id": "1", "method": "tool/list", "params": {}}
-        )
+    async def test_handle_valid_tool_list_request(self, server_with_tools: McpToolServer) -> None:
+        request = json.dumps({"jsonrpc": "2.0", "id": "1", "method": "tool/list", "params": {}})
         raw_response = await server_with_tools.handle_request(request)
         result = json.loads(raw_response)
         assert "result" in result
         assert "tools" in result["result"]
         assert len(result["result"]["tools"]) == 2
 
-    async def test_handle_valid_tool_call_request(
-        self, server_with_tools: McpToolServer
-    ) -> None:
+    async def test_handle_valid_tool_call_request(self, server_with_tools: McpToolServer) -> None:
         request = json.dumps(
             {
                 "jsonrpc": "2.0",
@@ -276,12 +258,8 @@ class TestMcpToolServer:
         assert result["result"]["status"] == "success"
         assert result["result"]["data"] == {"echo": {"mesh_size": 0.5}}
 
-    async def test_handle_health_check_request(
-        self, server_with_tools: McpToolServer
-    ) -> None:
-        request = json.dumps(
-            {"jsonrpc": "2.0", "id": "3", "method": "health/check", "params": {}}
-        )
+    async def test_handle_health_check_request(self, server_with_tools: McpToolServer) -> None:
+        request = json.dumps({"jsonrpc": "2.0", "id": "3", "method": "health/check", "params": {}})
         raw_response = await server_with_tools.handle_request(request)
         result = json.loads(raw_response)
         assert result["result"]["status"] == "healthy"
@@ -304,12 +282,8 @@ class TestMcpToolServer:
         assert result["error"]["code"] == -32600
         assert "Invalid JSON" in result["error"]["message"]
 
-    async def test_handle_invalid_jsonrpc_version(
-        self, server: McpToolServer
-    ) -> None:
-        request = json.dumps(
-            {"jsonrpc": "1.0", "id": "5", "method": "tool/list", "params": {}}
-        )
+    async def test_handle_invalid_jsonrpc_version(self, server: McpToolServer) -> None:
+        request = json.dumps({"jsonrpc": "1.0", "id": "5", "method": "tool/list", "params": {}})
         raw_response = await server.handle_request(request)
         result = json.loads(raw_response)
         assert "error" in result

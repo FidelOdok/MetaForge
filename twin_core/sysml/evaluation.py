@@ -6,9 +6,8 @@ estimates for building a production-ready SysML v2 adapter.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
 import structlog
+from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 
@@ -78,9 +77,7 @@ def evaluate_sysml_feasibility() -> FeasibilityReport:
                 "RequirementUsage, ConstraintUsage, ConnectionUsage). Key gaps "
                 "include behavioral modeling, allocation/traceability matrices, "
                 "and the full SysML v2 REST API implementation. A production "
-                "adapter is estimated at approximately {:.0f} engineering weeks.".format(
-                    total
-                )
+                f"adapter is estimated at approximately {total:.0f} engineering weeks."
             ),
             overall_feasibility="medium",
             mapping_coverage=coverage,
@@ -126,8 +123,7 @@ def _assess_mapping_coverage() -> list[MappingCoverage]:
             sysml_type="ConstraintUsage",
             coverage="full",
             notes=(
-                "Expression, severity, status, and cross-domain flag "
-                "all have direct equivalents."
+                "Expression, severity, status, and cross-domain flag all have direct equivalents."
             ),
         ),
         MappingCoverage(
@@ -221,10 +217,7 @@ def _identify_gaps() -> list[GapItem]:
                 "sync. MetaForge uses Kafka for event distribution."
             ),
             severity="low",
-            mitigation=(
-                "Build an SSE-to-Kafka bridge adapter for real-time "
-                "bidirectional sync."
-            ),
+            mitigation=("Build an SSE-to-Kafka bridge adapter for real-time bidirectional sync."),
         ),
         GapItem(
             category="tooling",

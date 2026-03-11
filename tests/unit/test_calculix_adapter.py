@@ -234,9 +234,7 @@ class TestValidateMesh:
         self, server_with_mocks: CalculixServer
     ) -> None:
         """validate_mesh uses default max_aspect_ratio of 10.0 when not provided."""
-        result = await server_with_mocks.validate_mesh(
-            {"mesh_file": "/models/bracket.inp"}
-        )
+        result = await server_with_mocks.validate_mesh({"mesh_file": "/models/bracket.inp"})
         assert result["valid"] is True
         # Verify _validate_mesh_file was called with default value
         call_args = server_with_mocks._validate_mesh_file.call_args  # type: ignore[attr-defined]
@@ -257,9 +255,7 @@ class TestUnmockedSolverRaisesNotImplemented:
 
     async def test_execute_thermal_solver_raises(self, server: CalculixServer) -> None:
         with pytest.raises(NotImplementedError, match="ccx binary"):
-            await server._execute_thermal_solver(
-                "/models/test.inp", {"temp": 25.0}, "steady_state"
-            )
+            await server._execute_thermal_solver("/models/test.inp", {"temp": 25.0}, "steady_state")
 
     async def test_validate_mesh_file_raises(self, server: CalculixServer) -> None:
         with pytest.raises(NotImplementedError, match="parsing .inp"):
@@ -362,9 +358,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["status"] == "success"
         assert response["result"]["data"]["valid"] is True
 
-    async def test_health_check_via_handle_request(
-        self, server: CalculixServer
-    ) -> None:
+    async def test_health_check_via_handle_request(self, server: CalculixServer) -> None:
         request = _make_jsonrpc("health/check")
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)

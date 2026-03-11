@@ -26,6 +26,4 @@ class FindAlternatesInput(BaseModel):
 class FindAlternatesOutput(BaseModel):
     """Output from the find_alternates skill."""
 
-    result: AlternatePartsResult = Field(
-        ..., description="Ranked alternate parts result"
-    )
+    result: AlternatePartsResult = Field(..., description="Ranked alternate parts result")

@@ -72,11 +72,15 @@ def _linear_workflow() -> WorkflowDefinition:
         steps=[
             WorkflowStep(step_id="a", agent_code="MECH", task_type="validate"),
             WorkflowStep(
-                step_id="b", agent_code="MECH", task_type="mesh",
+                step_id="b",
+                agent_code="MECH",
+                task_type="mesh",
                 depends_on=["a"],
             ),
             WorkflowStep(
-                step_id="c", agent_code="MECH", task_type="stress",
+                step_id="c",
+                agent_code="MECH",
+                task_type="stress",
                 depends_on=["b"],
             ),
         ],
@@ -90,15 +94,21 @@ def _diamond_workflow() -> WorkflowDefinition:
         steps=[
             WorkflowStep(step_id="a", agent_code="MECH", task_type="start"),
             WorkflowStep(
-                step_id="b", agent_code="MECH", task_type="left",
+                step_id="b",
+                agent_code="MECH",
+                task_type="left",
                 depends_on=["a"],
             ),
             WorkflowStep(
-                step_id="c", agent_code="EE", task_type="right",
+                step_id="c",
+                agent_code="EE",
+                task_type="right",
                 depends_on=["a"],
             ),
             WorkflowStep(
-                step_id="d", agent_code="MECH", task_type="merge",
+                step_id="d",
+                agent_code="MECH",
+                task_type="merge",
                 depends_on=["b", "c"],
             ),
         ],
@@ -122,15 +132,21 @@ def _cyclic_workflow() -> WorkflowDefinition:
         name="cyclic",
         steps=[
             WorkflowStep(
-                step_id="a", agent_code="MECH", task_type="x",
+                step_id="a",
+                agent_code="MECH",
+                task_type="x",
                 depends_on=["c"],
             ),
             WorkflowStep(
-                step_id="b", agent_code="MECH", task_type="y",
+                step_id="b",
+                agent_code="MECH",
+                task_type="y",
                 depends_on=["a"],
             ),
             WorkflowStep(
-                step_id="c", agent_code="MECH", task_type="z",
+                step_id="c",
+                agent_code="MECH",
+                task_type="z",
                 depends_on=["b"],
             ),
         ],
@@ -396,18 +412,14 @@ class TestWorkflowDAG:
         run = await engine.start_run(defn.id)
 
         await engine.update_step(run.id, "a", StepStatus.RUNNING)
-        sr = await engine.update_step(
-            run.id, "a", StepStatus.COMPLETED, result={"mesh": "ok"}
-        )
+        sr = await engine.update_step(run.id, "a", StepStatus.COMPLETED, result={"mesh": "ok"})
         assert sr is not None
         assert sr.status == StepStatus.COMPLETED
         assert sr.task_result == {"mesh": "ok"}
         assert sr.completed_at is not None
 
     @pytest.mark.asyncio
-    async def test_update_step_failed_sets_run_failed(
-        self, engine: InMemoryWorkflowEngine
-    ) -> None:
+    async def test_update_step_failed_sets_run_failed(self, engine: InMemoryWorkflowEngine) -> None:
         defn = _linear_workflow()
         await engine.register_workflow(defn)
         run = await engine.start_run(defn.id)
@@ -418,9 +430,7 @@ class TestWorkflowDAG:
         assert updated_run.status == WorkflowStatus.FAILED
 
     @pytest.mark.asyncio
-    async def test_all_completed_sets_run_completed(
-        self, engine: InMemoryWorkflowEngine
-    ) -> None:
+    async def test_all_completed_sets_run_completed(self, engine: InMemoryWorkflowEngine) -> None:
         defn = _parallel_workflow()
         await engine.register_workflow(defn)
         run = await engine.start_run(defn.id)
@@ -525,7 +535,9 @@ class TestDependencyEngine:
             name="bad",
             steps=[
                 WorkflowStep(
-                    step_id="a", agent_code="X", task_type="y",
+                    step_id="a",
+                    agent_code="X",
+                    task_type="y",
                     depends_on=["nonexistent"],
                 ),
             ],
@@ -612,7 +624,9 @@ class TestDependencyEngine:
 
     def test_resolve_step_inputs_no_refs(self) -> None:
         step = WorkflowStep(
-            step_id="s", agent_code="X", task_type="y",
+            step_id="s",
+            agent_code="X",
+            task_type="y",
             parameters={"key": "value", "num": 42},
         )
         graph = DependencyGraph(_linear_workflow())
@@ -621,7 +635,9 @@ class TestDependencyEngine:
 
     def test_resolve_step_inputs_with_refs(self) -> None:
         step = WorkflowStep(
-            step_id="s", agent_code="X", task_type="y",
+            step_id="s",
+            agent_code="X",
+            task_type="y",
             parameters={"mesh": "$ref:a.mesh_file", "plain": "hello"},
         )
         completed = {"a": {"mesh_file": "/path/mesh.inp", "nodes": 1000}}
@@ -631,7 +647,9 @@ class TestDependencyEngine:
 
     def test_resolve_step_inputs_missing_ref(self) -> None:
         step = WorkflowStep(
-            step_id="s", agent_code="X", task_type="y",
+            step_id="s",
+            agent_code="X",
+            task_type="y",
             parameters={"missing": "$ref:unknown.field"},
         )
         graph = DependencyGraph(_linear_workflow())
@@ -696,9 +714,13 @@ class TestScheduler:
         sched.register_agent("MECH", agent)
 
         await sched.start()
-        await sched.schedule_step(self._make_step(
-            run_id=run.id, step_id="x", agent_code="MECH",
-        ))
+        await sched.schedule_step(
+            self._make_step(
+                run_id=run.id,
+                step_id="x",
+                agent_code="MECH",
+            )
+        )
 
         # Give the loop time to process
         await asyncio.sleep(0.2)
@@ -710,9 +732,7 @@ class TestScheduler:
         assert updated.step_results["x"].status == StepStatus.COMPLETED
 
     @pytest.mark.asyncio
-    async def test_agent_not_found_fails_step(
-        self, engine: InMemoryWorkflowEngine
-    ) -> None:
+    async def test_agent_not_found_fails_step(self, engine: InMemoryWorkflowEngine) -> None:
         defn = _parallel_workflow()
         await engine.register_workflow(defn)
         run = await engine.start_run(defn.id)
@@ -720,9 +740,13 @@ class TestScheduler:
         sched = InMemoryScheduler(engine)
         # No agent registered for MECH
         await sched.start()
-        await sched.schedule_step(self._make_step(
-            run_id=run.id, step_id="x", agent_code="MECH",
-        ))
+        await sched.schedule_step(
+            self._make_step(
+                run_id=run.id,
+                step_id="x",
+                agent_code="MECH",
+            )
+        )
 
         await asyncio.sleep(0.2)
         await sched.stop()
@@ -732,9 +756,7 @@ class TestScheduler:
         assert updated.step_results["x"].status == StepStatus.FAILED
 
     @pytest.mark.asyncio
-    async def test_retry_on_failure(
-        self, engine: InMemoryWorkflowEngine
-    ) -> None:
+    async def test_retry_on_failure(self, engine: InMemoryWorkflowEngine) -> None:
         defn = _parallel_workflow()
         await engine.register_workflow(defn)
         run = await engine.start_run(defn.id)
@@ -754,12 +776,14 @@ class TestScheduler:
         sched.register_agent("MECH", _FlakeyAgent())  # type: ignore[arg-type]
 
         await sched.start()
-        await sched.schedule_step(self._make_step(
-            run_id=run.id,
-            step_id="x",
-            agent_code="MECH",
-            retry_policy=RetryPolicy(max_retries=1, backoff_seconds=0.05),
-        ))
+        await sched.schedule_step(
+            self._make_step(
+                run_id=run.id,
+                step_id="x",
+                agent_code="MECH",
+                retry_policy=RetryPolicy(max_retries=1, backoff_seconds=0.05),
+            )
+        )
 
         await asyncio.sleep(0.5)
         await sched.stop()
@@ -842,13 +866,12 @@ class TestIterationController:
     ) -> AsyncMock:
         twin = AsyncMock()
         twin.create_branch = AsyncMock(return_value="iterate/test")
-        twin.evaluate_constraints = AsyncMock(return_value=MagicMock(
-            passed=constraints_pass,
-            violations=[
-                MagicMock(message=e)
-                for e in (constraint_errors or [])
-            ],
-        ))
+        twin.evaluate_constraints = AsyncMock(
+            return_value=MagicMock(
+                passed=constraints_pass,
+                violations=[MagicMock(message=e) for e in (constraint_errors or [])],
+            )
+        )
         twin.commit = AsyncMock()
         twin.merge = AsyncMock()
         return twin
@@ -993,9 +1016,7 @@ class TestIterationController:
     async def test_auto_approve_without_workflow(self) -> None:
         twin = self._mock_twin(constraints_pass=True)
         agent = self._mock_agent()
-        ctrl = IterationController(
-            twin, IterationConfig(auto_approve=False)
-        )
+        ctrl = IterationController(twin, IterationConfig(auto_approve=False))
 
         result = await ctrl.run_iteration_loop(
             agent=agent,

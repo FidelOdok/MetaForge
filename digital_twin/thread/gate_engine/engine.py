@@ -211,9 +211,7 @@ class GateEngine:
         self._transitions: dict[UUID, GateTransition] = {}
         self._current_stages: dict[str, GateStage] = {}  # branch -> current stage
 
-    async def evaluate_readiness(
-        self, stage: GateStage, branch: str = "main"
-    ) -> ReadinessScore:
+    async def evaluate_readiness(self, stage: GateStage, branch: str = "main") -> ReadinessScore:
         """Evaluate all criteria for the given gate stage.
 
         Returns a ReadinessScore with individual criterion results,
@@ -233,9 +231,7 @@ class GateEngine:
             # Score each criterion
             criteria_results: list[CriterionResult] = []
             for criterion in definition.criteria:
-                score = await self._score_criterion(
-                    criterion, branch, constraint_result
-                )
+                score = await self._score_criterion(criterion, branch, constraint_result)
                 passed = score >= criterion.threshold
                 blockers: list[str] = []
                 if not passed and criterion.required:
@@ -256,9 +252,9 @@ class GateEngine:
             # Calculate weighted overall score
             total_weight = sum(c.weight for c in definition.criteria)
             if total_weight > 0:
-                overall_score = sum(
-                    cr.score * cr.criterion.weight for cr in criteria_results
-                ) / total_weight
+                overall_score = (
+                    sum(cr.score * cr.criterion.weight for cr in criteria_results) / total_weight
+                )
             else:
                 overall_score = 0.0
 
@@ -270,7 +266,8 @@ class GateEngine:
             # Check overall threshold
             if overall_score < definition.min_overall_score:
                 all_blockers.append(
-                    f"Overall score {overall_score:.1f} < minimum {definition.min_overall_score:.1f}"
+                    f"Overall score {overall_score:.1f}"
+                    f" < minimum {definition.min_overall_score:.1f}"
                 )
 
             ready = len(all_blockers) == 0
@@ -361,9 +358,7 @@ class GateEngine:
             if transition is None:
                 raise ValueError(f"Transition {transition_id} not found")
             if transition.status != GateTransitionStatus.PENDING:
-                raise ValueError(
-                    f"Transition {transition_id} is {transition.status}, not pending"
-                )
+                raise ValueError(f"Transition {transition_id} is {transition.status}, not pending")
 
             now = datetime.now(UTC)
             transition.status = GateTransitionStatus.APPROVED
@@ -404,9 +399,7 @@ class GateEngine:
             if transition is None:
                 raise ValueError(f"Transition {transition_id} not found")
             if transition.status != GateTransitionStatus.PENDING:
-                raise ValueError(
-                    f"Transition {transition_id} is {transition.status}, not pending"
-                )
+                raise ValueError(f"Transition {transition_id} is {transition.status}, not pending")
 
             transition.status = GateTransitionStatus.REJECTED
             transition.approved_by = approver
@@ -432,9 +425,7 @@ class GateEngine:
         """Get the current gate stage for a branch."""
         return self._current_stages.get(branch)
 
-    async def get_transition_history(
-        self, branch: str = "main"
-    ) -> list[GateTransition]:
+    async def get_transition_history(self, branch: str = "main") -> list[GateTransition]:
         """Get all transitions, optionally filtered by branch context.
 
         Returns transitions in insertion order. Since transitions store

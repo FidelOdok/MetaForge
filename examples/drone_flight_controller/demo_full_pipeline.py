@@ -141,25 +141,31 @@ async def run_pipeline() -> dict[str, Any]:
     mcp = InMemoryMcpBridge()
 
     # Register mock tool responses (would be real adapters in production)
-    mcp.register_tool_response("calculix.run_fea", {
-        **MOCK_FEA_RESULT,
-        "max_stress_mpa": 95.4,
-        "max_displacement_mm": 0.12,
-        "safety_factor": 2.89,
-        "solver_time_s": 18.3,
-    })
-    mcp.register_tool_response("kicad.run_erc", {
-        "violations": [
-            {
-                "rule_id": "ERC_WARN_001",
-                "severity": "warning",
-                "message": "Unconnected pin on U3 pad 14 (NC)",
-                "sheet": "main",
-                "component": "U3",
-                "pin": "14",
-            }
-        ],
-    })
+    mcp.register_tool_response(
+        "calculix.run_fea",
+        {
+            **MOCK_FEA_RESULT,
+            "max_stress_mpa": 95.4,
+            "max_displacement_mm": 0.12,
+            "safety_factor": 2.89,
+            "solver_time_s": 18.3,
+        },
+    )
+    mcp.register_tool_response(
+        "kicad.run_erc",
+        {
+            "violations": [
+                {
+                    "rule_id": "ERC_WARN_001",
+                    "severity": "warning",
+                    "message": "Unconnected pin on U3 pad 14 (NC)",
+                    "sheet": "main",
+                    "component": "U3",
+                    "pin": "14",
+                }
+            ],
+        },
+    )
 
     # -----------------------------------------------------------------------
     # Step 2: Create artifacts in the twin
@@ -444,10 +450,7 @@ def print_summary(results: dict[str, Any], readiness: Any) -> None:
         print("  BOM Risk Analysis:")
         print(f"    Overall risk score: {sr.get('overall_risk_score', 0):.0%}")
         print(f"    Total BOM cost:     ${sr.get('total_bom_cost_usd', 0):.2f}")
-        high_risk_parts = [
-            p for p in sr.get("part_risks", [])
-            if p.get("risk_score", 0) >= 0.6
-        ]
+        high_risk_parts = [p for p in sr.get("part_risks", []) if p.get("risk_score", 0) >= 0.6]
         if high_risk_parts:
             print(f"    Critical parts ({len(high_risk_parts)}):")
             for p in high_risk_parts:

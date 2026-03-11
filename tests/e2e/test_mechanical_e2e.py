@@ -370,11 +370,7 @@ class TestValidateStressSkillE2E:
                 artifact_id=uuid4(),  # Not in Twin
                 mesh_file_path="models/missing.inp",
                 load_case="lc1",
-                constraints=[
-                    StressConstraint(
-                        max_von_mises_mpa=276.0, material="Al6061-T6"
-                    )
-                ],
+                constraints=[StressConstraint(max_von_mises_mpa=276.0, material="Al6061-T6")],
             )
         )
 

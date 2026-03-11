@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from observability.metrics import MetricsCollector
 
 from twin_core.constraint_engine.models import ConstraintEvaluationResult
 from twin_core.constraint_engine.validator import ConstraintEngine, InMemoryConstraintEngine
@@ -39,22 +42,18 @@ class TwinAPI(ABC):
     # --- Artifacts ---
 
     @abstractmethod
-    async def create_artifact(self, artifact: Artifact, branch: str = "main") -> Artifact:
-        ...
+    async def create_artifact(self, artifact: Artifact, branch: str = "main") -> Artifact: ...
 
     @abstractmethod
-    async def get_artifact(self, artifact_id: UUID, branch: str = "main") -> Artifact | None:
-        ...
+    async def get_artifact(self, artifact_id: UUID, branch: str = "main") -> Artifact | None: ...
 
     @abstractmethod
     async def update_artifact(
         self, artifact_id: UUID, updates: dict[str, Any], branch: str = "main"
-    ) -> Artifact:
-        ...
+    ) -> Artifact: ...
 
     @abstractmethod
-    async def delete_artifact(self, artifact_id: UUID, branch: str = "main") -> bool:
-        ...
+    async def delete_artifact(self, artifact_id: UUID, branch: str = "main") -> bool: ...
 
     @abstractmethod
     async def list_artifacts(
@@ -62,36 +61,29 @@ class TwinAPI(ABC):
         branch: str = "main",
         domain: str | None = None,
         artifact_type: ArtifactType | None = None,
-    ) -> list[Artifact]:
-        ...
+    ) -> list[Artifact]: ...
 
     # --- Constraints ---
 
     @abstractmethod
-    async def create_constraint(self, constraint: Constraint) -> Constraint:
-        ...
+    async def create_constraint(self, constraint: Constraint) -> Constraint: ...
 
     @abstractmethod
-    async def get_constraint(self, constraint_id: UUID) -> Constraint | None:
-        ...
+    async def get_constraint(self, constraint_id: UUID) -> Constraint | None: ...
 
     @abstractmethod
-    async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult:
-        ...
+    async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult: ...
 
     # --- Components ---
 
     @abstractmethod
-    async def add_component(self, component: Component) -> Component:
-        ...
+    async def add_component(self, component: Component) -> Component: ...
 
     @abstractmethod
-    async def get_component(self, component_id: UUID) -> Component | None:
-        ...
+    async def get_component(self, component_id: UUID) -> Component | None: ...
 
     @abstractmethod
-    async def find_components(self, query: dict[str, Any]) -> list[Component]:
-        ...
+    async def find_components(self, query: dict[str, Any]) -> list[Component]: ...
 
     # --- Relationships ---
 
@@ -102,8 +94,7 @@ class TwinAPI(ABC):
         target_id: UUID,
         edge_type: EdgeType,
         metadata: dict[str, Any] | None = None,
-    ) -> EdgeBase:
-        ...
+    ) -> EdgeBase: ...
 
     @abstractmethod
     async def get_edges(
@@ -111,14 +102,10 @@ class TwinAPI(ABC):
         node_id: UUID,
         direction: str = "outgoing",
         edge_type: EdgeType | None = None,
-    ) -> list[EdgeBase]:
-        ...
+    ) -> list[EdgeBase]: ...
 
     @abstractmethod
-    async def remove_edge(
-        self, source_id: UUID, target_id: UUID, edge_type: EdgeType
-    ) -> bool:
-        ...
+    async def remove_edge(self, source_id: UUID, target_id: UUID, edge_type: EdgeType) -> bool: ...
 
     # --- Queries ---
 
@@ -128,38 +115,29 @@ class TwinAPI(ABC):
         root_id: UUID,
         depth: int = 2,
         edge_types: list[EdgeType] | None = None,
-    ) -> SubGraph:
-        ...
+    ) -> SubGraph: ...
 
     @abstractmethod
     async def query_cypher(
         self, query: str, params: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
-        ...
+    ) -> list[dict[str, Any]]: ...
 
     # --- Versioning ---
 
     @abstractmethod
-    async def create_branch(self, name: str, from_branch: str = "main") -> str:
-        ...
+    async def create_branch(self, name: str, from_branch: str = "main") -> str: ...
 
     @abstractmethod
-    async def commit(self, branch: str, message: str, author: str) -> Version:
-        ...
+    async def commit(self, branch: str, message: str, author: str) -> Version: ...
 
     @abstractmethod
-    async def merge(
-        self, source: str, target: str, message: str, author: str
-    ) -> Version:
-        ...
+    async def merge(self, source: str, target: str, message: str, author: str) -> Version: ...
 
     @abstractmethod
-    async def diff(self, branch_a: str, branch_b: str) -> VersionDiff:
-        ...
+    async def diff(self, branch_a: str, branch_b: str) -> VersionDiff: ...
 
     @abstractmethod
-    async def log(self, branch: str = "main", limit: int = 50) -> list[Version]:
-        ...
+    async def log(self, branch: str = "main", limit: int = 50) -> list[Version]: ...
 
 
 class InMemoryTwinAPI(TwinAPI):
@@ -188,11 +166,8 @@ class InMemoryTwinAPI(TwinAPI):
         return cls(graph=graph, version=version, constraints=constraints)
 
     @classmethod
-    def create_with_collector(
-        cls, collector: "MetricsCollector | None" = None
-    ) -> InMemoryTwinAPI:
+    def create_with_collector(cls, collector: MetricsCollector | None = None) -> InMemoryTwinAPI:
         """Factory that passes a MetricsCollector to graph and constraint engines."""
-        from observability.metrics import MetricsCollector  # noqa: F811
 
         graph = InMemoryGraphEngine(collector=collector)
         version = InMemoryVersionEngine(graph)
@@ -217,7 +192,9 @@ class InMemoryTwinAPI(TwinAPI):
             user = os.environ.get("METAFORGE_NEO4J_USER", "neo4j")
             password = os.environ.get("METAFORGE_NEO4J_PASSWORD", "password")
             graph: GraphEngine = Neo4jGraphEngine(
-                uri=uri, user=user, password=password,
+                uri=uri,
+                user=user,
+                password=password,
             )
             await graph.connect()  # type: ignore[attr-defined]
         else:
@@ -321,9 +298,7 @@ class InMemoryTwinAPI(TwinAPI):
     ) -> list[EdgeBase]:
         return await self._graph.get_edges(node_id, direction=direction, edge_type=edge_type)
 
-    async def remove_edge(
-        self, source_id: UUID, target_id: UUID, edge_type: EdgeType
-    ) -> bool:
+    async def remove_edge(self, source_id: UUID, target_id: UUID, edge_type: EdgeType) -> bool:
         return await self._graph.remove_edge(source_id, target_id, edge_type)
 
     # --- Queries ---
@@ -355,9 +330,7 @@ class InMemoryTwinAPI(TwinAPI):
     async def commit(self, branch: str, message: str, author: str) -> Version:
         return await self._version.commit(branch, message, [], author)
 
-    async def merge(
-        self, source: str, target: str, message: str, author: str
-    ) -> Version:
+    async def merge(self, source: str, target: str, message: str, author: str) -> Version:
         return await self._version.merge(source, target, message, author)
 
     async def diff(self, branch_a: str, branch_b: str) -> VersionDiff:

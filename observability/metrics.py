@@ -34,9 +34,7 @@ class MetricDefinition(BaseModel):
     @classmethod
     def _validate_name(cls, v: str) -> str:
         if not _METRIC_NAME_RE.match(v):
-            raise ValueError(
-                f"Metric name must be snake_case and start with a letter, got {v!r}"
-            )
+            raise ValueError(f"Metric name must be snake_case and start with a letter, got {v!r}")
         return v
 
     @field_validator("type")
@@ -415,9 +413,7 @@ class MetricsCollector:
 
     # ── Gateway ────────────────────────────────────────────────────────
 
-    def record_request(
-        self, method: str, endpoint: str, status_code: int, duration: float
-    ) -> None:
+    def record_request(self, method: str, endpoint: str, status_code: int, duration: float) -> None:
         """Record an HTTP request (counter + histogram)."""
         counter = self._instruments.get(MetricsRegistry.GATEWAY_REQUEST_TOTAL.name)
         if counter is not None:
@@ -450,9 +446,7 @@ class MetricsCollector:
 
     # ── Agent ──────────────────────────────────────────────────────────
 
-    def record_agent_execution(
-        self, agent_code: str, status: str, duration: float
-    ) -> None:
+    def record_agent_execution(self, agent_code: str, status: str, duration: float) -> None:
         """Record an agent execution (counter + histogram)."""
         counter = self._instruments.get(MetricsRegistry.AGENT_EXECUTION_TOTAL.name)
         if counter is not None:
@@ -482,9 +476,7 @@ class MetricsCollector:
                 },
             )
 
-    def record_llm_cost(
-        self, agent_code: str, provider: str, model: str, cost_usd: float
-    ) -> None:
+    def record_llm_cost(self, agent_code: str, provider: str, model: str, cost_usd: float) -> None:
         """Record LLM cost in USD."""
         counter = self._instruments.get(MetricsRegistry.AGENT_LLM_COST_TOTAL.name)
         if counter is not None:
@@ -529,9 +521,7 @@ class MetricsCollector:
 
     # ── Kafka ──────────────────────────────────────────────────────────
 
-    def set_consumer_lag(
-        self, group: str, topic: str, partition: str, lag: int
-    ) -> None:
+    def set_consumer_lag(self, group: str, topic: str, partition: str, lag: int) -> None:
         """Set the current Kafka consumer lag for a partition."""
         gauge = self._instruments.get(MetricsRegistry.KAFKA_CONSUMER_LAG.name)
         if gauge is not None:
@@ -575,9 +565,7 @@ class MetricsCollector:
             counter.add(1, attributes={"operation": operation, "status": status})
         hist = self._instruments.get(MetricsRegistry.NEO4J_QUERY_DURATION.name)
         if hist is not None:
-            hist.record(
-                duration, attributes={"operation": operation, "node_type": node_type}
-            )
+            hist.record(duration, attributes={"operation": operation, "node_type": node_type})
 
     def set_neo4j_connections(self, count: int) -> None:
         """Set the current number of active Neo4j connections."""
@@ -585,22 +573,16 @@ class MetricsCollector:
         if gauge is not None:
             gauge.add(count, attributes={})
 
-    def record_pgvector_search(
-        self, knowledge_type: str, status: str, duration: float
-    ) -> None:
+    def record_pgvector_search(self, knowledge_type: str, status: str, duration: float) -> None:
         """Record a pgvector search (counter + histogram)."""
         counter = self._instruments.get(MetricsRegistry.PGVECTOR_SEARCH_TOTAL.name)
         if counter is not None:
-            counter.add(
-                1, attributes={"knowledge_type": knowledge_type, "status": status}
-            )
+            counter.add(1, attributes={"knowledge_type": knowledge_type, "status": status})
         hist = self._instruments.get(MetricsRegistry.PGVECTOR_SEARCH_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"knowledge_type": knowledge_type})
 
-    def record_minio_operation(
-        self, operation: str, status: str, duration: float
-    ) -> None:
+    def record_minio_operation(self, operation: str, status: str, duration: float) -> None:
         """Record a MinIO operation (counter + histogram)."""
         counter = self._instruments.get(MetricsRegistry.MINIO_OPERATION_TOTAL.name)
         if counter is not None:
@@ -613,58 +595,42 @@ class MetricsCollector:
 
     def record_mqtt_message(self, device_id: str, topic: str) -> None:
         """Record an MQTT message received from a device."""
-        counter = self._instruments.get(
-            MetricsRegistry.MQTT_MESSAGES_RECEIVED_TOTAL.name
-        )
+        counter = self._instruments.get(MetricsRegistry.MQTT_MESSAGES_RECEIVED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"device_id": device_id, "topic": topic})
 
     def record_telemetry_routing(self, device_type: str, duration: float) -> None:
         """Record telemetry routing duration."""
-        hist = self._instruments.get(
-            MetricsRegistry.TELEMETRY_ROUTER_DURATION.name
-        )
+        hist = self._instruments.get(MetricsRegistry.TELEMETRY_ROUTER_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"device_type": device_type})
 
     def record_telemetry_ingestion(self, status: str) -> None:
         """Record a telemetry ingestion attempt (status: success/error)."""
-        counter = self._instruments.get(
-            MetricsRegistry.TELEMETRY_INGESTION_TOTAL.name
-        )
+        counter = self._instruments.get(MetricsRegistry.TELEMETRY_INGESTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"status": status})
 
     def record_telemetry_error(self, error_type: str) -> None:
         """Record a telemetry ingestion error (error_type: malformed/write_failure)."""
-        counter = self._instruments.get(
-            MetricsRegistry.TELEMETRY_INGESTION_ERRORS_TOTAL.name
-        )
+        counter = self._instruments.get(MetricsRegistry.TELEMETRY_INGESTION_ERRORS_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"error_type": error_type})
 
     def set_telemetry_lag(self, device_id: str, lag_seconds: float) -> None:
         """Set the telemetry processing lag for a device."""
-        gauge = self._instruments.get(
-            MetricsRegistry.TELEMETRY_LAG_SECONDS.name
-        )
+        gauge = self._instruments.get(MetricsRegistry.TELEMETRY_LAG_SECONDS.name)
         if gauge is not None:
             gauge.add(lag_seconds, attributes={"device_id": device_id})
 
     # ── Constraint & Policy ───────────────────────────────────────────
 
-    def record_constraint_evaluation(
-        self, domain: str, result: str, duration: float
-    ) -> None:
+    def record_constraint_evaluation(self, domain: str, result: str, duration: float) -> None:
         """Record a constraint evaluation (counter + histogram)."""
-        counter = self._instruments.get(
-            MetricsRegistry.CONSTRAINT_EVALUATION_TOTAL.name
-        )
+        counter = self._instruments.get(MetricsRegistry.CONSTRAINT_EVALUATION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"domain": domain, "result": result})
-        hist = self._instruments.get(
-            MetricsRegistry.CONSTRAINT_EVALUATION_DURATION.name
-        )
+        hist = self._instruments.get(MetricsRegistry.CONSTRAINT_EVALUATION_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"domain": domain})
 
@@ -676,8 +642,6 @@ class MetricsCollector:
 
     def record_oscillation_detected(self, node_type: str) -> None:
         """Record an oscillation detection in the constraint graph."""
-        counter = self._instruments.get(
-            MetricsRegistry.OSCILLATION_DETECTED_TOTAL.name
-        )
+        counter = self._instruments.get(MetricsRegistry.OSCILLATION_DETECTED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"node_type": node_type})

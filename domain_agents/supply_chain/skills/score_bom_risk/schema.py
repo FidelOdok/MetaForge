@@ -30,9 +30,7 @@ class ScoreBomRiskInput(BaseModel):
     """Input for the score_bom_risk skill."""
 
     project_id: str = Field(..., description="Project identifier")
-    bom_items: list[BOMItem] = Field(
-        ..., description="List of BOM items to score"
-    )
+    bom_items: list[BOMItem] = Field(..., description="List of BOM items to score")
 
 
 class ScoreBomRiskOutput(BaseModel):

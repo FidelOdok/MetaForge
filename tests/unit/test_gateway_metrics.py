@@ -201,9 +201,7 @@ class TestMetricsCollectorWithMeter:
         c.create_instruments(MetricsRegistry.all_gateway_metrics())
         return c
 
-    def test_create_instruments_populates_dict(
-        self, collector: MetricsCollector
-    ) -> None:
+    def test_create_instruments_populates_dict(self, collector: MetricsCollector) -> None:
         assert len(collector._instruments) == 4
 
     def test_counter_created(self, mock_meter: MagicMock, collector: MetricsCollector) -> None:
@@ -218,13 +216,9 @@ class TestMetricsCollectorWithMeter:
         # Two gauge metrics -> two up_down_counter calls
         assert mock_meter.create_up_down_counter.call_count == 2
 
-    def test_record_request_calls_counter_and_histogram(
-        self, collector: MetricsCollector
-    ) -> None:
+    def test_record_request_calls_counter_and_histogram(self, collector: MetricsCollector) -> None:
         collector.record_request("POST", "/v1/chat", 201, 0.123)
-        counter = collector._instruments[
-            MetricsRegistry.GATEWAY_REQUEST_TOTAL.name
-        ]
+        counter = collector._instruments[MetricsRegistry.GATEWAY_REQUEST_TOTAL.name]
         counter.add.assert_called_once_with(
             1,
             attributes={
@@ -233,30 +227,18 @@ class TestMetricsCollectorWithMeter:
                 "status_code": "201",
             },
         )
-        histogram = collector._instruments[
-            MetricsRegistry.GATEWAY_REQUEST_DURATION.name
-        ]
+        histogram = collector._instruments[MetricsRegistry.GATEWAY_REQUEST_DURATION.name]
         histogram.record.assert_called_once_with(
             0.123,
             attributes={"method": "POST", "endpoint": "/v1/chat"},
         )
 
-    def test_set_websocket_connections_calls_gauge(
-        self, collector: MetricsCollector
-    ) -> None:
+    def test_set_websocket_connections_calls_gauge(self, collector: MetricsCollector) -> None:
         collector.set_websocket_connections("open", 7)
-        gauge = collector._instruments[
-            MetricsRegistry.GATEWAY_WEBSOCKET_CONNECTIONS.name
-        ]
+        gauge = collector._instruments[MetricsRegistry.GATEWAY_WEBSOCKET_CONNECTIONS.name]
         gauge.add.assert_called_once_with(7, attributes={"state": "open"})
 
-    def test_set_active_sessions_calls_gauge(
-        self, collector: MetricsCollector
-    ) -> None:
+    def test_set_active_sessions_calls_gauge(self, collector: MetricsCollector) -> None:
         collector.set_active_sessions("authenticated", 42)
-        gauge = collector._instruments[
-            MetricsRegistry.GATEWAY_ACTIVE_SESSIONS.name
-        ]
-        gauge.add.assert_called_once_with(
-            42, attributes={"status": "authenticated"}
-        )
+        gauge = collector._instruments[MetricsRegistry.GATEWAY_ACTIVE_SESSIONS.name]
+        gauge.add.assert_called_once_with(42, attributes={"status": "authenticated"})

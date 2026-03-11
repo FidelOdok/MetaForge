@@ -15,14 +15,12 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from observability.tracing import get_tracer
-
 from domain_agents.compliance.agent import ComplianceAgent
 from domain_agents.compliance.models import (
     ComplianceRegime,
-    EvidenceStatus,
     EvidenceType,
 )
+from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.compliance")

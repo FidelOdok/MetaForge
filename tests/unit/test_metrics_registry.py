@@ -115,16 +115,12 @@ class TestMetricNamingConventions:
 
     def test_all_descriptions_non_empty(self) -> None:
         for metric in MetricsRegistry.all_metrics():
-            assert metric.description, (
-                f"Metric {metric.name} must have a non-empty description"
-            )
+            assert metric.description, f"Metric {metric.name} must have a non-empty description"
 
     def test_all_labels_are_strings(self) -> None:
         for metric in MetricsRegistry.all_metrics():
             for label in metric.labels:
-                assert isinstance(label, str), (
-                    f"Label in {metric.name} must be a string"
-                )
+                assert isinstance(label, str), f"Label in {metric.name} must be a string"
 
 
 # ── MetricsCollector with no meter (no-op) ─────────────────────────────
@@ -212,9 +208,7 @@ class TestMetricsCollectorWithMeter:
         collector.create_instruments([MetricsRegistry.KAFKA_CONSUMER_LAG])
         mock_meter.create_up_down_counter.assert_called_once()
 
-    def test_record_agent_execution_calls_instruments(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_agent_execution_calls_instruments(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.agent_metrics())
         collector.record_agent_execution("MECH", "success", 1.5)
@@ -224,9 +218,7 @@ class TestMetricsCollectorWithMeter:
         hist = collector._instruments[MetricsRegistry.AGENT_EXECUTION_DURATION.name]
         hist.record.assert_called_once()
 
-    def test_record_skill_execution_calls_instruments(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_skill_execution_calls_instruments(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.skill_metrics())
         collector.record_skill_execution("validate_stress", "mechanical", "success", 2.0)
@@ -258,18 +250,14 @@ class TestMetricsCollectorWithMeter:
             attributes={"consumer_group": "group-1", "topic": "events", "partition": "0"},
         )
 
-    def test_record_message_produced_calls_counter(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_message_produced_calls_counter(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.kafka_metrics())
         collector.record_message_produced("events")
         counter = collector._instruments[MetricsRegistry.KAFKA_MESSAGES_PRODUCED.name]
         counter.add.assert_called_once_with(1, attributes={"topic": "events"})
 
-    def test_record_message_consumed_calls_counter(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_message_consumed_calls_counter(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.kafka_metrics())
         collector.record_message_consumed("events", "group-1")

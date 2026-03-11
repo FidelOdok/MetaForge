@@ -38,7 +38,6 @@ from twin_core.sysml.models import (
 )
 from twin_core.sysml.serializer import SysMLSerializer
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -155,9 +154,7 @@ def edge(cad_artifact: Artifact, schematic_artifact: Artifact) -> EdgeBase:
 class TestNodeToSysML:
     """Test MetaForge node -> SysML v2 element conversion."""
 
-    def test_cad_artifact_to_part_usage(
-        self, mapper: SysMLMapper, cad_artifact: Artifact
-    ) -> None:
+    def test_cad_artifact_to_part_usage(self, mapper: SysMLMapper, cad_artifact: Artifact) -> None:
         result = mapper.node_to_sysml(cad_artifact)
         assert isinstance(result, PartUsage)
         assert result.element_type == SysMLElementType.PART_USAGE
@@ -209,9 +206,7 @@ class TestNodeToSysML:
         assert result.is_cross_domain is True
         assert result.element_id == constraint.id
 
-    def test_component_to_part_usage(
-        self, mapper: SysMLMapper, component: Component
-    ) -> None:
+    def test_component_to_part_usage(self, mapper: SysMLMapper, component: Component) -> None:
         result = mapper.node_to_sysml(component)
         assert isinstance(result, PartUsage)
         assert result.element_type == SysMLElementType.PART_USAGE
@@ -221,9 +216,7 @@ class TestNodeToSysML:
         assert result.properties["clock_mhz"] == 168
         assert result.element_id == component.id
 
-    def test_edge_to_connection_usage(
-        self, mapper: SysMLMapper, edge: EdgeBase
-    ) -> None:
+    def test_edge_to_connection_usage(self, mapper: SysMLMapper, edge: EdgeBase) -> None:
         result = mapper.edge_to_sysml(edge)
         assert isinstance(result, ConnectionUsage)
         assert result.element_type == SysMLElementType.CONNECTION_USAGE
@@ -311,9 +304,7 @@ class TestSysMLToNode:
         assert result.status == ConstraintStatus.PASS
         assert result.cross_domain is True
 
-    def test_constraint_usage_with_invalid_severity_defaults(
-        self, mapper: SysMLMapper
-    ) -> None:
+    def test_constraint_usage_with_invalid_severity_defaults(self, mapper: SysMLMapper) -> None:
         cu = ConstraintUsage(
             name="test",
             expression="x > 0",
@@ -339,9 +330,7 @@ class TestSysMLToNode:
         assert result.source_id == source_id
         assert result.target_id == target_id
 
-    def test_connection_usage_unknown_kind_defaults(
-        self, mapper: SysMLMapper
-    ) -> None:
+    def test_connection_usage_unknown_kind_defaults(self, mapper: SysMLMapper) -> None:
         conn = ConnectionUsage(
             source_id=uuid4(),
             target_id=uuid4(),
@@ -350,9 +339,7 @@ class TestSysMLToNode:
         result = mapper.sysml_to_edge(conn)
         assert result.edge_type == EdgeType.DEPENDS_ON
 
-    def test_connection_usage_missing_ids_raises(
-        self, mapper: SysMLMapper
-    ) -> None:
+    def test_connection_usage_missing_ids_raises(self, mapper: SysMLMapper) -> None:
         conn = ConnectionUsage(connection_kind="dependency")
         with pytest.raises(ValueError, match="source_id and target_id"):
             mapper.sysml_to_edge(conn)
@@ -432,9 +419,7 @@ class TestSerializationRoundTrip:
         assert restored.domain == original.domain
         assert restored.element_id == original.element_id
 
-    def test_requirement_usage_round_trip(
-        self, serializer: SysMLSerializer
-    ) -> None:
+    def test_requirement_usage_round_trip(self, serializer: SysMLSerializer) -> None:
         original = RequirementUsage(
             name="IMU Requirement",
             requirement_text="6-axis IMU support",
@@ -447,9 +432,7 @@ class TestSerializationRoundTrip:
         assert isinstance(restored, RequirementUsage)
         assert restored.requirement_text == original.requirement_text
 
-    def test_constraint_usage_round_trip(
-        self, serializer: SysMLSerializer
-    ) -> None:
+    def test_constraint_usage_round_trip(self, serializer: SysMLSerializer) -> None:
         original = ConstraintUsage(
             name="max_temp",
             expression="temp < 85",
@@ -464,9 +447,7 @@ class TestSerializationRoundTrip:
         assert restored.expression == original.expression
         assert restored.is_cross_domain is True
 
-    def test_connection_usage_round_trip(
-        self, serializer: SysMLSerializer
-    ) -> None:
+    def test_connection_usage_round_trip(self, serializer: SysMLSerializer) -> None:
         source_id = uuid4()
         target_id = uuid4()
         original = ConnectionUsage(
@@ -561,9 +542,7 @@ class TestGraphExport:
 class TestGraphImport:
     """Test importing SysML v2 elements to MetaForge graph nodes."""
 
-    def test_full_import_pipeline(
-        self, mapper: SysMLMapper, serializer: SysMLSerializer
-    ) -> None:
+    def test_full_import_pipeline(self, mapper: SysMLMapper, serializer: SysMLSerializer) -> None:
         """End-to-end: create SysML elements, serialize, deserialize, map to graph."""
         # Create SysML elements
         part = PartUsage(

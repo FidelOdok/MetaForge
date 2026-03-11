@@ -8,8 +8,6 @@ propagation, and step status tracking through the full orchestrator stack.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from uuid import uuid4
 
 import pytest
 
@@ -17,21 +15,19 @@ from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from orchestrator.dependency_engine import CyclicDependencyError, DependencyGraph
 from orchestrator.event_bus.events import Event, EventType
-from orchestrator.event_bus.subscribers import EventBus, EventSubscriber, create_default_bus
-from orchestrator.scheduler import InMemoryScheduler, ScheduledStep, SchedulerPriority
+from orchestrator.event_bus.subscribers import EventSubscriber, create_default_bus
+from orchestrator.scheduler import InMemoryScheduler
 from orchestrator.workflow_dag import (
     InMemoryWorkflowEngine,
     StepStatus,
     WorkflowDefinition,
-    WorkflowRun,
-    WorkflowStep,
     WorkflowStatus,
+    WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.artifact import Artifact
 from twin_core.models.enums import ArtifactType
-
 
 # ---------------------------------------------------------------------------
 # Realistic tool mock data
@@ -143,7 +139,11 @@ class TestSingleStepWorkflowE2E:
                         "mesh_file_path": "models/bracket.inp",
                         "load_case": "hover_3g",
                         "constraints": [
-                            {"max_von_mises_mpa": 276.0, "safety_factor": 1.5, "material": "Al6061-T6"}
+                            {
+                                "max_von_mises_mpa": 276.0,
+                                "safety_factor": 1.5,
+                                "material": "Al6061-T6",
+                            }
                         ],
                     },
                 ),
@@ -170,9 +170,11 @@ class TestSingleStepWorkflowE2E:
         for _ in range(50):
             await asyncio.sleep(0.1)
             run = await engine.get_run(run.id)
-            if run and run.step_results.get("stress") and run.step_results["stress"].status in {
-                StepStatus.COMPLETED, StepStatus.FAILED
-            }:
+            if (
+                run
+                and run.step_results.get("stress")
+                and run.step_results["stress"].status in {StepStatus.COMPLETED, StepStatus.FAILED}
+            ):
                 break
 
         await scheduler.stop()
@@ -220,7 +222,11 @@ class TestMultiStepWorkflowE2E:
                         "mesh_file_path": "models/bracket.inp",
                         "load_case": "hover_3g",
                         "constraints": [
-                            {"max_von_mises_mpa": 276.0, "safety_factor": 1.5, "material": "Al6061-T6"}
+                            {
+                                "max_von_mises_mpa": 276.0,
+                                "safety_factor": 1.5,
+                                "material": "Al6061-T6",
+                            }
                         ],
                     },
                 ),
@@ -462,9 +468,11 @@ class TestEventBusIntegrationE2E:
         for _ in range(50):
             await asyncio.sleep(0.1)
             run = await engine.get_run(run.id)
-            if run and run.step_results.get("erc") and run.step_results["erc"].status in {
-                StepStatus.COMPLETED, StepStatus.FAILED
-            }:
+            if (
+                run
+                and run.step_results.get("erc")
+                and run.step_results["erc"].status in {StepStatus.COMPLETED, StepStatus.FAILED}
+            ):
                 break
 
         await scheduler.stop()
@@ -513,7 +521,11 @@ class TestEventBusIntegrationE2E:
         for _ in range(30):
             await asyncio.sleep(0.1)
             run = await engine.get_run(run.id)
-            if run and run.step_results.get("step1") and run.step_results["step1"].status == StepStatus.FAILED:
+            if (
+                run
+                and run.step_results.get("step1")
+                and run.step_results["step1"].status == StepStatus.FAILED
+            ):
                 break
 
         await scheduler.stop()

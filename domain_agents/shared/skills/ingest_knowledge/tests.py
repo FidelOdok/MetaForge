@@ -165,12 +165,8 @@ class TestIngestKnowledgeSkill:
 
     async def test_schema_validation_rejects_empty_content(self) -> None:
         with pytest.raises(Exception):
-            IngestKnowledgeInput(
-                content="", knowledge_type="general", source="test"
-            )
+            IngestKnowledgeInput(content="", knowledge_type="general", source="test")
 
     async def test_schema_validation_rejects_empty_source(self) -> None:
         with pytest.raises(Exception):
-            IngestKnowledgeInput(
-                content="some content", knowledge_type="general", source=""
-            )
+            IngestKnowledgeInput(content="some content", knowledge_type="general", source="")

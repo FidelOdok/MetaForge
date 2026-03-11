@@ -233,8 +233,7 @@ class FreecadServer(McpToolServer):
                         "parameters": {
                             "type": "object",
                             "description": (
-                                "Shape-specific dimensions "
-                                "(width, height, thickness, etc.)"
+                                "Shape-specific dimensions (width, height, thickness, etc.)"
                             ),
                         },
                         "material": {
@@ -293,9 +292,7 @@ class FreecadServer(McpToolServer):
             output_path=output_path,
         )
 
-        result = await self._execute_parametric(
-            shape_type, parameters, material, output_path
-        )
+        result = await self._execute_parametric(shape_type, parameters, material, output_path)
         return result
 
     async def export_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -349,9 +346,7 @@ class FreecadServer(McpToolServer):
             output_format=output_format,
         )
 
-        result = await self._execute_meshing(
-            input_file, element_size, algorithm, output_format
-        )
+        result = await self._execute_meshing(input_file, element_size, algorithm, output_format)
         return result
 
     async def boolean_operation(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -381,9 +376,7 @@ class FreecadServer(McpToolServer):
             operation=operation,
         )
 
-        result = await self._execute_boolean(
-            input_file_a, input_file_b, operation, output_path
-        )
+        result = await self._execute_boolean(input_file_a, input_file_b, operation, output_path)
         return result
 
     async def get_properties(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -457,9 +450,7 @@ class FreecadServer(McpToolServer):
             "Use mock in tests or install FreeCAD for production use."
         )
 
-    async def _execute_analysis(
-        self, input_file: str, properties: list[str]
-    ) -> dict[str, Any]:
+    async def _execute_analysis(self, input_file: str, properties: list[str]) -> dict[str, Any]:
         """Execute FreeCAD property analysis. See _execute_export for notes."""
         raise NotImplementedError(
             "FreeCAD property analysis requires the freecadcmd binary. "

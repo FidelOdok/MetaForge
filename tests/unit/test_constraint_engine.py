@@ -201,9 +201,7 @@ class TestConstraintResolver:
     async def test_finds_direct_constraints(self, graph):
         a = await graph.add_node(_make_artifact())
         c = await graph.add_node(_make_constraint())
-        await graph.add_edge(
-            ConstrainedByEdge(source_id=a.id, target_id=c.id)
-        )
+        await graph.add_edge(ConstrainedByEdge(source_id=a.id, target_id=c.id))
 
         result = await resolve_constraints(graph, [a.id])
         assert len(result) == 1
@@ -211,9 +209,7 @@ class TestConstraintResolver:
 
     async def test_finds_cross_domain(self, graph):
         a = await graph.add_node(_make_artifact())
-        c = await graph.add_node(
-            _make_constraint(name="cross", cross_domain=True)
-        )
+        c = await graph.add_node(_make_constraint(name="cross", cross_domain=True))
         # No edge linking them — cross-domain is discovered via flag
 
         result = await resolve_constraints(graph, [a.id])
@@ -224,12 +220,8 @@ class TestConstraintResolver:
         a1 = await graph.add_node(_make_artifact("a1"))
         a2 = await graph.add_node(_make_artifact("a2"))
         c = await graph.add_node(_make_constraint())
-        await graph.add_edge(
-            ConstrainedByEdge(source_id=a1.id, target_id=c.id)
-        )
-        await graph.add_edge(
-            ConstrainedByEdge(source_id=a2.id, target_id=c.id)
-        )
+        await graph.add_edge(ConstrainedByEdge(source_id=a1.id, target_id=c.id))
+        await graph.add_edge(ConstrainedByEdge(source_id=a2.id, target_id=c.id))
 
         result = await resolve_constraints(graph, [a1.id, a2.id])
         assert len(result) == 1
@@ -242,12 +234,8 @@ class TestConstraintResolver:
         a1 = await graph.add_node(_make_artifact("a1"))
         a2 = await graph.add_node(_make_artifact("a2"))
         c = await graph.add_node(_make_constraint())
-        await graph.add_edge(
-            ConstrainedByEdge(source_id=a1.id, target_id=c.id)
-        )
-        await graph.add_edge(
-            ConstrainedByEdge(source_id=a2.id, target_id=c.id)
-        )
+        await graph.add_edge(ConstrainedByEdge(source_id=a1.id, target_id=c.id))
+        await graph.add_edge(ConstrainedByEdge(source_id=a2.id, target_id=c.id))
 
         result = await find_constrained_artifacts(graph, c.id)
         assert set(result) == {a1.id, a2.id}
@@ -279,12 +267,8 @@ class TestConstraintContext:
         assert mech[0].name == "mech1"
 
     async def test_filter_by_type(self, graph):
-        await graph.add_node(
-            _make_artifact("sch1", art_type=ArtifactType.SCHEMATIC)
-        )
-        await graph.add_node(
-            _make_artifact("cad1", art_type=ArtifactType.CAD_MODEL)
-        )
+        await graph.add_node(_make_artifact("sch1", art_type=ArtifactType.SCHEMATIC))
+        await graph.add_node(_make_artifact("cad1", art_type=ArtifactType.CAD_MODEL))
         ctx = await build_context(graph)
 
         schematics = ctx.artifacts(type=ArtifactType.SCHEMATIC)
@@ -302,9 +286,7 @@ class TestConstraintContext:
     async def test_dependents(self, graph):
         a1 = await graph.add_node(_make_artifact("source"))
         a2 = await graph.add_node(_make_artifact("target"))
-        await graph.add_edge(
-            DependsOnEdge(source_id=a1.id, target_id=a2.id)
-        )
+        await graph.add_edge(DependsOnEdge(source_id=a1.id, target_id=a2.id))
         ctx = await build_context(graph)
 
         deps = ctx.dependents(a2.id)
@@ -377,16 +359,12 @@ class TestExpressionEvaluation:
 
     def test_import_blocked(self):
         ctx = ConstraintContext({}, {}, [], {})
-        status, msg = InMemoryConstraintEngine._eval_expression(
-            "__import__('os')", ctx
-        )
+        status, msg = InMemoryConstraintEngine._eval_expression("__import__('os')", ctx)
         assert status == ConstraintStatus.SKIPPED
 
     def test_open_blocked(self):
         ctx = ConstraintContext({}, {}, [], {})
-        status, msg = InMemoryConstraintEngine._eval_expression(
-            "open('/etc/passwd')", ctx
-        )
+        status, msg = InMemoryConstraintEngine._eval_expression("open('/etc/passwd')", ctx)
         assert status == ConstraintStatus.SKIPPED
 
 
@@ -453,9 +431,7 @@ class TestEvaluate:
         assert updated.last_evaluated is not None
 
     async def test_updates_failed_status(self, engine, graph, artifact):
-        c = _make_constraint(
-            expression="False", severity=ConstraintSeverity.ERROR
-        )
+        c = _make_constraint(expression="False", severity=ConstraintSeverity.ERROR)
         await engine.add_constraint(c, [artifact.id])
 
         await engine.evaluate([artifact.id])
@@ -515,9 +491,7 @@ class TestEvaluateAll:
     async def test_includes_cross_domain(self, engine, graph):
         a = await graph.add_node(_make_artifact())
         c_local = _make_constraint(name="local", expression="True")
-        c_cross = _make_constraint(
-            name="cross", expression="True", cross_domain=True
-        )
+        c_cross = _make_constraint(name="cross", expression="True", cross_domain=True)
         await engine.add_constraint(c_local, [a.id])
         await engine.add_constraint(c_cross, [a.id])
 
@@ -593,9 +567,7 @@ class TestIntegration:
     async def test_dependency_constraint(self, engine, graph):
         source = await graph.add_node(_make_artifact("firmware"))
         target = await graph.add_node(_make_artifact("pinmap"))
-        await graph.add_edge(
-            DependsOnEdge(source_id=source.id, target_id=target.id)
-        )
+        await graph.add_edge(DependsOnEdge(source_id=source.id, target_id=target.id))
 
         c = _make_constraint(
             name="pinmap_has_dependents",

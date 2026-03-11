@@ -23,7 +23,6 @@ from digital_twin.thread.gate_engine.scoring import (
     calculate_requirement_coverage,
     calculate_test_evidence,
 )
-from orchestrator.event_bus.events import Event, EventType
 from orchestrator.event_bus.subscribers import EventBus
 from tests.conftest import SpySubscriber
 from twin_core.api import InMemoryTwinAPI
@@ -36,7 +35,6 @@ from twin_core.graph_engine import InMemoryGraphEngine
 from twin_core.models.artifact import Artifact
 from twin_core.models.component import Component
 from twin_core.models.enums import ArtifactType, ConstraintSeverity, EdgeType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -240,9 +238,7 @@ class TestRequirementCoverage:
 
         # Create test evidence artifacts and link 4 of 5
         for i in range(4):
-            evidence = _make_artifact(
-                f"evidence-{i}", art_type=ArtifactType.TEST_RESULT
-            )
+            evidence = _make_artifact(f"evidence-{i}", art_type=ArtifactType.TEST_RESULT)
             await twin.create_artifact(evidence)
             await twin.add_edge(
                 reqs[i].id,
@@ -272,9 +268,7 @@ class TestBomRisk:
 
 class TestConstraintCompliance:
     async def test_no_constraints_returns_100(self):
-        result = ConstraintEvaluationResult(
-            passed=True, evaluated_count=0
-        )
+        result = ConstraintEvaluationResult(passed=True, evaluated_count=0)
         score = await calculate_constraint_compliance(result)
         assert score == 100.0
 
@@ -315,9 +309,7 @@ class TestTestEvidence:
             plans.append(tp)
 
         for i in range(3):
-            tr = _make_artifact(
-                f"test-result-{i}", art_type=ArtifactType.TEST_RESULT
-            )
+            tr = _make_artifact(f"test-result-{i}", art_type=ArtifactType.TEST_RESULT)
             await twin.create_artifact(tr)
             await twin.add_edge(
                 plans[i].id,
@@ -374,9 +366,7 @@ class TestEvaluateReadiness:
                 ],
             ),
         }
-        engine = GateEngine(
-            twin, constraint_engine, event_bus, gate_definitions=custom_def
-        )
+        engine = GateEngine(twin, constraint_engine, event_bus, gate_definitions=custom_def)
 
         # Add an artifact without review approval -> score = 0%
         art = _make_artifact("unreviewed")
@@ -417,17 +407,13 @@ class TestGateTransitionBlocking:
                 ],
             ),
         }
-        engine = GateEngine(
-            twin, constraint_engine, event_bus, gate_definitions=custom_def
-        )
+        engine = GateEngine(twin, constraint_engine, event_bus, gate_definitions=custom_def)
 
         # Add unreviewed artifact
         art = _make_artifact("part-a")
         await twin.create_artifact(art)
 
-        transition = await engine.request_transition(
-            GateStage.EVT, "main", "engineer1"
-        )
+        transition = await engine.request_transition(GateStage.EVT, "main", "engineer1")
         assert transition.status == GateTransitionStatus.PENDING
         assert transition.readiness_score.ready is False
         assert len(transition.readiness_score.blockers) > 0
@@ -455,19 +441,13 @@ class TestGateTransitionBlocking:
                 ],
             ),
         }
-        engine = GateEngine(
-            twin, constraint_engine, event_bus, gate_definitions=custom_def
-        )
+        engine = GateEngine(twin, constraint_engine, event_bus, gate_definitions=custom_def)
 
         # Add reviewed artifact
-        art = _make_artifact(
-            "reviewed-part", metadata={"review_status": "approved"}
-        )
+        art = _make_artifact("reviewed-part", metadata={"review_status": "approved"})
         await twin.create_artifact(art)
 
-        transition = await engine.request_transition(
-            GateStage.EVT, "main", "engineer1"
-        )
+        transition = await engine.request_transition(GateStage.EVT, "main", "engineer1")
         assert transition.readiness_score.ready is True
         assert transition.readiness_score.blockers == []
 
@@ -479,23 +459,17 @@ class TestGateTransitionBlocking:
 
 class TestTransitionLifecycle:
     async def test_approve_transition(self, gate_engine: GateEngine):
-        transition = await gate_engine.request_transition(
-            GateStage.EVT, "main", "requestor1"
-        )
+        transition = await gate_engine.request_transition(GateStage.EVT, "main", "requestor1")
         assert transition.status == GateTransitionStatus.PENDING
 
-        approved = await gate_engine.approve_transition(
-            transition.id, "approver1", "Looks good"
-        )
+        approved = await gate_engine.approve_transition(transition.id, "approver1", "Looks good")
         assert approved.status == GateTransitionStatus.APPROVED
         assert approved.approved_by == "approver1"
         assert approved.approved_at is not None
         assert approved.comment == "Looks good"
 
     async def test_reject_transition(self, gate_engine: GateEngine):
-        transition = await gate_engine.request_transition(
-            GateStage.DVT, "main", "requestor1"
-        )
+        transition = await gate_engine.request_transition(GateStage.DVT, "main", "requestor1")
 
         rejected = await gate_engine.reject_transition(
             transition.id, "approver1", "Needs more testing"
@@ -513,18 +487,14 @@ class TestTransitionLifecycle:
             await gate_engine.reject_transition(uuid4(), "approver1")
 
     async def test_approve_already_approved_raises(self, gate_engine: GateEngine):
-        transition = await gate_engine.request_transition(
-            GateStage.EVT, "main", "requestor1"
-        )
+        transition = await gate_engine.request_transition(GateStage.EVT, "main", "requestor1")
         await gate_engine.approve_transition(transition.id, "approver1")
 
         with pytest.raises(ValueError, match="not pending"):
             await gate_engine.approve_transition(transition.id, "approver2")
 
     async def test_reject_already_rejected_raises(self, gate_engine: GateEngine):
-        transition = await gate_engine.request_transition(
-            GateStage.EVT, "main", "requestor1"
-        )
+        transition = await gate_engine.request_transition(GateStage.EVT, "main", "requestor1")
         await gate_engine.reject_transition(transition.id, "approver1")
 
         with pytest.raises(ValueError, match="not pending"):
@@ -542,9 +512,7 @@ class TestCurrentStage:
         assert stage is None
 
     async def test_stage_updated_on_approval(self, gate_engine: GateEngine):
-        transition = await gate_engine.request_transition(
-            GateStage.EVT, "main", "requestor1"
-        )
+        transition = await gate_engine.request_transition(GateStage.EVT, "main", "requestor1")
         await gate_engine.approve_transition(transition.id, "approver1")
 
         stage = await gate_engine.get_current_stage("main")
@@ -562,14 +530,10 @@ class TestTransitionHistory:
         assert history == []
 
     async def test_history_records_transitions(self, gate_engine: GateEngine):
-        t1 = await gate_engine.request_transition(
-            GateStage.EVT, "main", "user1"
-        )
+        t1 = await gate_engine.request_transition(GateStage.EVT, "main", "user1")
         await gate_engine.approve_transition(t1.id, "approver1")
 
-        t2 = await gate_engine.request_transition(
-            GateStage.DVT, "main", "user1"
-        )
+        _ = await gate_engine.request_transition(GateStage.DVT, "main", "user1")
 
         history = await gate_engine.get_transition_history("main")
         assert len(history) == 2
@@ -609,9 +573,7 @@ class TestEventEmission:
         spy: SpySubscriber,
     ):
         engine = GateEngine(twin, constraint_engine, event_bus)
-        transition = await engine.request_transition(
-            GateStage.EVT, "main", "user1"
-        )
+        transition = await engine.request_transition(GateStage.EVT, "main", "user1")
         await engine.approve_transition(transition.id, "approver1")
 
         assert len(spy.received) == 2
@@ -627,9 +589,7 @@ class TestEventEmission:
         spy: SpySubscriber,
     ):
         engine = GateEngine(twin, constraint_engine, event_bus)
-        transition = await engine.request_transition(
-            GateStage.DVT, "main", "user1"
-        )
+        transition = await engine.request_transition(GateStage.DVT, "main", "user1")
         await engine.reject_transition(transition.id, "approver1", "Not ready")
 
         assert len(spy.received) == 2
@@ -658,6 +618,4 @@ class TestDefaultDefinitions:
         for stage, defn in DEFAULT_GATE_DEFINITIONS.items():
             assert len(defn.criteria) > 0, f"{stage} has no criteria"
             total_weight = sum(c.weight for c in defn.criteria)
-            assert total_weight == pytest.approx(1.0), (
-                f"{stage} weights sum to {total_weight}"
-            )
+            assert total_weight == pytest.approx(1.0), f"{stage} weights sum to {total_weight}"

@@ -6,7 +6,6 @@ Temporal's built-in mechanisms, and emits lifecycle events to the EventBus.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -17,7 +16,6 @@ from pydantic import BaseModel, Field
 from observability.tracing import get_tracer
 from orchestrator.activities.base_activity import (
     AgentActivityInput,
-    AgentActivityOutput,
     get_default_retry_policy,
 )
 
@@ -55,9 +53,7 @@ class SingleAgentWorkflowInput(BaseModel):
 class SingleAgentWorkflowOutput(BaseModel):
     """Output from the SingleAgentWorkflow."""
 
-    activity_output: dict[str, Any] = Field(
-        description="Serialised AgentActivityOutput"
-    )
+    activity_output: dict[str, Any] = Field(description="Serialised AgentActivityOutput")
     agent_code: str
     workflow_run_id: str = Field(default="")
     started_at: str = Field(default="")
@@ -70,10 +66,10 @@ class SingleAgentWorkflowOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 # Import activity functions at module level for reference by name
-from orchestrator.activities.mechanical_activity import run_mechanical_agent
-from orchestrator.activities.electronics_activity import run_electronics_agent
-from orchestrator.activities.firmware_activity import run_firmware_agent
-from orchestrator.activities.simulation_activity import run_simulation_agent
+from orchestrator.activities.electronics_activity import run_electronics_agent  # noqa: E402
+from orchestrator.activities.firmware_activity import run_firmware_agent  # noqa: E402
+from orchestrator.activities.mechanical_activity import run_mechanical_agent  # noqa: E402
+from orchestrator.activities.simulation_activity import run_simulation_agent  # noqa: E402
 
 AGENT_ACTIVITIES: dict[str, Any] = {
     "mechanical": run_mechanical_agent,
@@ -178,9 +174,7 @@ class SingleAgentWorkflow:
             )
 
             result_dict = (
-                result.model_dump(mode="json")
-                if hasattr(result, "model_dump")
-                else result
+                result.model_dump(mode="json") if hasattr(result, "model_dump") else result
             )
 
             return SingleAgentWorkflowOutput(

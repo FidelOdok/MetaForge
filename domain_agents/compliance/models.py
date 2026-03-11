@@ -6,14 +6,14 @@ for checklist items, checklists, and evidence records.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
-class ComplianceRegime(str, Enum):
+class ComplianceRegime(StrEnum):
     """Supported regulatory compliance regimes."""
 
     UKCA = "UKCA"
@@ -22,7 +22,7 @@ class ComplianceRegime(str, Enum):
     PSTI = "PSTI"
 
 
-class EvidenceStatus(str, Enum):
+class EvidenceStatus(StrEnum):
     """Lifecycle status of a piece of compliance evidence."""
 
     MISSING = "MISSING"
@@ -31,7 +31,7 @@ class EvidenceStatus(str, Enum):
     APPROVED = "APPROVED"
 
 
-class EvidenceType(str, Enum):
+class EvidenceType(StrEnum):
     """Types of compliance evidence artifacts."""
 
     TEST_REPORT = "TEST_REPORT"
@@ -63,18 +63,14 @@ class ComplianceChecklist(BaseModel):
     """A generated compliance checklist for a project."""
 
     project_id: str = Field(..., description="Project identifier")
-    product_category: str = Field(
-        default="consumer_electronics", description="Product category"
-    )
-    target_markets: list[ComplianceRegime] = Field(
-        ..., description="Target market regimes"
-    )
+    product_category: str = Field(default="consumer_electronics", description="Product category")
+    target_markets: list[ComplianceRegime] = Field(..., description="Target market regimes")
     items: list[ChecklistItem] = Field(default_factory=list, description="Checklist items")
     total_items: int = Field(default=0, description="Total number of items")
     evidenced_items: int = Field(default=0, description="Items with evidence uploaded or better")
     coverage_percent: float = Field(default=0.0, description="Evidence coverage percentage")
     generated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="When the checklist was generated",
     )
 
@@ -90,11 +86,9 @@ class ComplianceEvidence(BaseModel):
     )
     title: str = Field(..., description="Short title for the evidence")
     description: str = Field(default="", description="Longer description")
-    artifact_id: UUID | None = Field(
-        default=None, description="UUID of the stored artifact"
-    )
+    artifact_id: UUID | None = Field(default=None, description="UUID of the stored artifact")
     uploaded_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Upload timestamp",
     )
     reviewed_by: str | None = Field(default=None, description="Reviewer identifier")

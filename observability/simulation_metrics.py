@@ -108,12 +108,10 @@ class SimulationCollector:
                     unit=defn.unit,
                 )
             elif defn.type == "gauge":
-                self._instruments[defn.name] = (
-                    self._meter.create_up_down_counter(
-                        name=defn.name,
-                        description=defn.description,
-                        unit=defn.unit,
-                    )
+                self._instruments[defn.name] = self._meter.create_up_down_counter(
+                    name=defn.name,
+                    description=defn.description,
+                    unit=defn.unit,
                 )
 
     # ── Recording helpers ─────────────────────────────────────────────
@@ -126,9 +124,7 @@ class SimulationCollector:
         duration: float,
     ) -> None:
         """Record a simulation run (duration histogram + total counter)."""
-        hist = self._instruments.get(
-            SimulationMetrics.SIMULATION_DURATION.name
-        )
+        hist = self._instruments.get(SimulationMetrics.SIMULATION_DURATION.name)
         if hist is not None:
             hist.record(
                 duration,
@@ -138,9 +134,7 @@ class SimulationCollector:
                 },
             )
 
-        counter = self._instruments.get(
-            SimulationMetrics.SIMULATION_TOTAL.name
-        )
+        counter = self._instruments.get(SimulationMetrics.SIMULATION_TOTAL.name)
         if counter is not None:
             counter.add(
                 1,
@@ -157,18 +151,14 @@ class SimulationCollector:
         memory_bytes: int,
     ) -> None:
         """Record CPU and memory consumption for a simulation."""
-        cpu_counter = self._instruments.get(
-            SimulationMetrics.SIMULATION_RESOURCE_CPU.name
-        )
+        cpu_counter = self._instruments.get(SimulationMetrics.SIMULATION_RESOURCE_CPU.name)
         if cpu_counter is not None:
             cpu_counter.add(
                 cpu_seconds,
                 attributes={"simulation_type": simulation_type},
             )
 
-        mem_gauge = self._instruments.get(
-            SimulationMetrics.SIMULATION_RESOURCE_MEMORY.name
-        )
+        mem_gauge = self._instruments.get(SimulationMetrics.SIMULATION_RESOURCE_MEMORY.name)
         if mem_gauge is not None:
             mem_gauge.add(
                 memory_bytes,
@@ -182,9 +172,7 @@ class SimulationCollector:
         score: float,
     ) -> None:
         """Record a simulation accuracy score."""
-        gauge = self._instruments.get(
-            SimulationMetrics.SIMULATION_ACCURACY.name
-        )
+        gauge = self._instruments.get(SimulationMetrics.SIMULATION_ACCURACY.name)
         if gauge is not None:
             gauge.add(
                 score,

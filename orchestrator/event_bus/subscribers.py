@@ -73,9 +73,7 @@ class EventBus:
             "subscriber_added",
             subscriber_id=subscriber.subscriber_id,
             event_types=(
-                [str(t) for t in subscriber.event_types]
-                if subscriber.event_types
-                else "all"
+                [str(t) for t in subscriber.event_types] if subscriber.event_types else "all"
             ),
         )
 

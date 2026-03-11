@@ -29,9 +29,9 @@ tracer = get_tracer("digital_twin.assistant.adapters.kicad")
 
 # Match (symbol (property "Reference" "R1" ...) (property "Value" "10k" ...) ...)
 _SYMBOL_BLOCK_RE = re.compile(
-    r'\(symbol\s[^()]*'           # opening (symbol ...
-    r'(?:\([^()]*(?:\([^()]*\))*[^()]*\)\s*)*'  # nested parens
-    r'\)',
+    r"\(symbol\s[^()]*"  # opening (symbol ...
+    r"(?:\([^()]*(?:\([^()]*\))*[^()]*\)\s*)*"  # nested parens
+    r"\)",
     re.DOTALL,
 )
 
@@ -40,10 +40,10 @@ _PROPERTY_RE = re.compile(
 )
 
 # PCB patterns
-_TRACK_WIDTH_RE = re.compile(r'\(segment\s.*?\(width\s+([\d.]+)\)')
-_VIA_RE = re.compile(r'\(via\s')
+_TRACK_WIDTH_RE = re.compile(r"\(segment\s.*?\(width\s+([\d.]+)\)")
+_VIA_RE = re.compile(r"\(via\s")
 _BOARD_AREA_RE = re.compile(
-    r'\(gr_rect\s[^)]*\(start\s+([\d.]+)\s+([\d.]+)\)\s*\(end\s+([\d.]+)\s+([\d.]+)\)'
+    r"\(gr_rect\s[^)]*\(start\s+([\d.]+)\s+([\d.]+)\)\s*\(end\s+([\d.]+)\s+([\d.]+)\)"
 )
 
 
@@ -73,7 +73,7 @@ class KicadAdapter(FileChangeAdapter):
             path = Path(event.path)
             try:
                 content = path.read_text(encoding="utf-8", errors="replace")
-            except (OSError, IOError) as exc:
+            except OSError as exc:
                 logger.error("kicad_read_failed", path=event.path, error=str(exc))
                 span.record_exception(exc)
                 return []

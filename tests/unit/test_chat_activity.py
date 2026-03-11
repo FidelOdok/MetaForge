@@ -14,7 +14,6 @@ from api_gateway.chat.activity import (
 )
 from orchestrator.event_bus.events import EventType
 
-
 # ---------------------------------------------------------------------------
 # ChatContextAssembler
 # ---------------------------------------------------------------------------

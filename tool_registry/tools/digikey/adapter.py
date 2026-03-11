@@ -192,12 +192,8 @@ class DigiKeyAdapter(DistributorAdapter):
                     distributor="DigiKey",
                     distributor_pn=product.get("DigiKeyPartNumber", ""),
                     stock_qty=product.get("QuantityAvailable", 0),
-                    lead_time_days=_parse_lead_time(
-                        product.get("ManufacturerLeadWeeks")
-                    ),
-                    lifecycle_status=_map_lifecycle(
-                        product.get("ProductStatus", "")
-                    ),
+                    lead_time_days=_parse_lead_time(product.get("ManufacturerLeadWeeks")),
+                    lifecycle_status=_map_lifecycle(product.get("ProductStatus", "")),
                     datasheet_url=product.get("DatasheetUrl"),
                 )
             )

@@ -15,12 +15,8 @@ class RunSpiceInput(BaseModel):
     netlist_path: str = Field(
         ..., min_length=1, description="Path to the SPICE netlist file (.cir/.spice)"
     )
-    analysis_type: str = Field(
-        default="dc", description="Analysis type: dc, ac, or transient"
-    )
-    params: dict[str, Any] = Field(
-        default_factory=dict, description="Analysis-specific parameters"
-    )
+    analysis_type: str = Field(default="dc", description="Analysis type: dc, ac, or transient")
+    params: dict[str, Any] = Field(default_factory=dict, description="Analysis-specific parameters")
 
 
 class RunSpiceOutput(BaseModel):

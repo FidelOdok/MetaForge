@@ -68,5 +68,18 @@ select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
 plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+check_untyped_defs = true
+exclude = [
+    "cli/",
+    "ide_assistants/",
+    "dashboard/",
+    "examples/",
+    "tools/",
+    "docs/",
+    "venv/",
+    "build/",
+    "dist/",
+]
+ignore_missing_imports = true

@@ -29,9 +29,7 @@ class ManufacturingProcess(BaseModel):
 
     process_type: str = Field(
         ...,
-        description=(
-            "Process type (e.g., 'cnc_milling', 'injection_molding', '3d_printing_fdm')"
-        ),
+        description=("Process type (e.g., 'cnc_milling', 'injection_molding', '3d_printing_fdm')"),
     )
     achievable_tolerance: float = Field(
         ..., gt=0, description="Best achievable tolerance in mm for this process"
@@ -39,9 +37,7 @@ class ManufacturingProcess(BaseModel):
     surface_finish_ra: float = Field(
         default=0.0, ge=0, description="Achievable surface finish Ra in um"
     )
-    min_feature_size: float = Field(
-        default=0.0, ge=0, description="Minimum feature size in mm"
-    )
+    min_feature_size: float = Field(default=0.0, ge=0, description="Minimum feature size in mm")
     max_aspect_ratio: float = Field(
         default=0.0, ge=0, description="Maximum aspect ratio (depth/width)"
     )
@@ -76,9 +72,7 @@ class ToleranceViolation(BaseModel):
         ),
     )
     severity: str = Field(..., description="Severity: 'error' or 'warning'")
-    specified_tolerance: float = Field(
-        ..., description="What was specified (tolerance band in mm)"
-    )
+    specified_tolerance: float = Field(..., description="What was specified (tolerance band in mm)")
     achievable_tolerance: float = Field(
         ..., description="What the process can achieve (tolerance in mm)"
     )
@@ -92,9 +86,7 @@ class ToleranceResult(BaseModel):
     dimension_id: str = Field(..., description="Dimension identifier")
     feature_name: str = Field(..., description="Feature name")
     nominal_value: float = Field(..., description="Nominal dimension in mm")
-    tolerance_range: float = Field(
-        ..., description="Total tolerance band (upper - lower) in mm"
-    )
+    tolerance_range: float = Field(..., description="Total tolerance band (upper - lower) in mm")
     status: str = Field(..., description="Status: 'pass', 'warning', or 'fail'")
     capability_index: float = Field(
         ...,
@@ -108,15 +100,11 @@ class CheckToleranceOutput(BaseModel):
 
     artifact_id: UUID = Field(..., description="ID of the analyzed artifact")
     process_type: str = Field(..., description="Manufacturing process used for analysis")
-    total_dimensions_checked: int = Field(
-        ..., ge=0, description="Number of dimensions checked"
-    )
+    total_dimensions_checked: int = Field(..., ge=0, description="Number of dimensions checked")
     passed: int = Field(..., ge=0, description="Number of dimensions that passed")
     warnings: int = Field(..., ge=0, description="Number of dimensions with warnings")
     failures: int = Field(..., ge=0, description="Number of dimensions that failed")
-    overall_status: str = Field(
-        ..., description="Overall status: 'pass', 'marginal', or 'fail'"
-    )
+    overall_status: str = Field(..., description="Overall status: 'pass', 'marginal', or 'fail'")
     results: list[ToleranceResult] = Field(
         default_factory=list, description="Per-dimension tolerance results"
     )

@@ -10,12 +10,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from orchestrator.dependency_engine import DependencyGraph
 from orchestrator.event_bus.events import EventType
 from orchestrator.event_bus.subscribers import EventBus
-from orchestrator.scheduler import InMemoryScheduler, RetryPolicy, ScheduledStep
+from orchestrator.scheduler import InMemoryScheduler
 from orchestrator.workflow_dag import (
     InMemoryWorkflowEngine,
     StepStatus,
@@ -28,7 +26,6 @@ from tests.conftest import (
     make_linear_workflow,
 )
 from tests.integration.conftest import MockAgent
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,7 +76,9 @@ class TestLinearChain:
         class OrderedAgent:
             async def run_task(self, request: Any) -> dict:
                 task_type = (
-                    request.task_type if hasattr(request, "task_type") else request.get("task_type", "?")
+                    request.task_type
+                    if hasattr(request, "task_type")
+                    else request.get("task_type", "?")
                 )
                 execution_order.append(task_type)
                 return {"status": "ok", "task_type": task_type, "value": f"result_{task_type}"}
@@ -357,18 +356,22 @@ class TestDiamondWorkflow:
 
         # Events for x should come before events for y
         agent_events = [
-            e for e in spy.received
+            e
+            for e in spy.received
             if e.type in {EventType.AGENT_TASK_STARTED, EventType.AGENT_TASK_COMPLETED}
         ]
-        step_ids = [e.data["step_id"] for e in agent_events]
         # x started and completed before y started
         x_completed_idx = next(
-            i for i, e in enumerate(agent_events)
+            i
+            for i, e in enumerate(agent_events)
             if e.data["step_id"] == "x" and e.type == EventType.AGENT_TASK_COMPLETED
         )
         y_started_idx = next(
-            (i for i, e in enumerate(agent_events)
-             if e.data["step_id"] == "y" and e.type == EventType.AGENT_TASK_STARTED),
+            (
+                i
+                for i, e in enumerate(agent_events)
+                if e.data["step_id"] == "y" and e.type == EventType.AGENT_TASK_STARTED
+            ),
             None,
         )
         if y_started_idx is not None:

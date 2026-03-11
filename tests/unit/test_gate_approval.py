@@ -30,7 +30,6 @@ from twin_core.graph_engine import InMemoryGraphEngine
 from twin_core.models.artifact import Artifact
 from twin_core.models.enums import ArtifactType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -261,9 +260,7 @@ class TestReadinessReportInContext:
         )
         assert isinstance(pending, _PendingApproval)
 
-        result = await approval_service.approve(
-            pending.request_id, "approver1", "Approved"
-        )
+        result = await approval_service.approve(pending.request_id, "approver1", "Approved")
 
         assert result.readiness_score is not None
         assert result.readiness_score.stage == GateStage.EVT
@@ -338,9 +335,7 @@ class TestOverrideWithJustification:
         assert isinstance(pending, _PendingApproval)
 
         with pytest.raises(ValueError, match="justification"):
-            await approval_service.override(
-                pending.request_id, "lead-engineer", ""
-            )
+            await approval_service.override(pending.request_id, "lead-engineer", "")
 
 
 # ---------------------------------------------------------------------------
@@ -364,9 +359,7 @@ class TestGateEventEmission:
             requestor_id="engineer1",
         )
 
-        gate_events = [
-            e for e in spy.received if e.type == EventType.GATE_REQUESTED
-        ]
+        gate_events = [e for e in spy.received if e.type == EventType.GATE_REQUESTED]
         assert len(gate_events) == 1
         assert gate_events[0].source == "gate_approval_service"
         assert gate_events[0].data["to_gate"] == "EVT"
@@ -386,13 +379,9 @@ class TestGateEventEmission:
         )
         assert isinstance(pending, _PendingApproval)
 
-        await approval_service.approve(
-            pending.request_id, "approver1", "Ship it"
-        )
+        await approval_service.approve(pending.request_id, "approver1", "Ship it")
 
-        gate_approved = [
-            e for e in spy.received if e.type == EventType.GATE_APPROVED
-        ]
+        gate_approved = [e for e in spy.received if e.type == EventType.GATE_APPROVED]
         assert len(gate_approved) == 1
         assert gate_approved[0].data["approver_id"] == "approver1"
         assert gate_approved[0].data["comment"] == "Ship it"
@@ -411,13 +400,9 @@ class TestGateEventEmission:
         )
         assert isinstance(pending, _PendingApproval)
 
-        await approval_service.reject(
-            pending.request_id, "reviewer1", "Needs more testing"
-        )
+        await approval_service.reject(pending.request_id, "reviewer1", "Needs more testing")
 
-        gate_rejected = [
-            e for e in spy.received if e.type == EventType.GATE_REJECTED
-        ]
+        gate_rejected = [e for e in spy.received if e.type == EventType.GATE_REJECTED]
         assert len(gate_rejected) == 1
         assert gate_rejected[0].data["approver_id"] == "reviewer1"
         assert gate_rejected[0].data["comment"] == "Needs more testing"

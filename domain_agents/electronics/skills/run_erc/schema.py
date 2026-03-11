@@ -11,14 +11,10 @@ class ErcViolation(BaseModel):
     """A single ERC violation reported by KiCad."""
 
     rule_id: str = Field(..., description="ERC rule identifier (e.g., 'ERC001')")
-    severity: str = Field(
-        ..., description="Severity: 'error' or 'warning'"
-    )
+    severity: str = Field(..., description="Severity: 'error' or 'warning'")
     message: str = Field(..., description="Human-readable violation description")
     sheet: str = Field(default="", description="Schematic sheet where the violation occurs")
-    component: str = Field(
-        default="", description="Component reference (e.g., 'U1', 'R3')"
-    )
+    component: str = Field(default="", description="Component reference (e.g., 'U1', 'R3')")
     pin: str = Field(default="", description="Pin identifier if applicable")
     location: str = Field(
         default="", description="Location in the schematic (e.g., coordinates or net name)"
@@ -46,9 +42,7 @@ class RunErcOutput(BaseModel):
     violations: list[ErcViolation] = Field(
         default_factory=list, description="List of ERC violations found"
     )
-    total_violations: int = Field(
-        ..., ge=0, description="Total number of violations found"
-    )
+    total_violations: int = Field(..., ge=0, description="Total number of violations found")
     total_errors: int = Field(..., ge=0, description="Number of error-severity violations")
     total_warnings: int = Field(..., ge=0, description="Number of warning-severity violations")
     passed: bool = Field(

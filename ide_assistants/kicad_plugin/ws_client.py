@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from .types import ChatMessage
 
@@ -76,11 +76,13 @@ def serialize_send_message(thread_id: str, content: str) -> str:
     str
         JSON string ready to be sent over the WebSocket.
     """
-    return json.dumps({
-        "type": "send_message",
-        "threadId": thread_id,
-        "content": content,
-    })
+    return json.dumps(
+        {
+            "type": "send_message",
+            "threadId": thread_id,
+            "content": content,
+        }
+    )
 
 
 def serialize_create_thread(title: str, scope_kind: str, entity_id: str = "") -> str:
@@ -95,7 +97,7 @@ def serialize_create_thread(title: str, scope_kind: str, entity_id: str = "") ->
     return json.dumps(payload)
 
 
-def deserialize_message(raw: str) -> Optional[ChatMessage]:
+def deserialize_message(raw: str) -> ChatMessage | None:
     """Attempt to parse a gateway WebSocket frame into a ChatMessage.
 
     Returns ``None`` if the frame is not a message payload.
@@ -163,8 +165,8 @@ class MetaForgeWSClient:
     def connect(self) -> None:
         """Open the WebSocket connection."""
         try:
+            from PyQt5.QtCore import QUrl  # type: ignore[import-untyped]
             from PyQt5.QtWebSockets import QWebSocket  # type: ignore[import-untyped]
-            from PyQt5.QtCore import QUrl, QTimer  # type: ignore[import-untyped]
         except ImportError:
             logger.error("PyQt5 is required for the KiCad WebSocket client")
             return
@@ -196,9 +198,7 @@ class MetaForgeWSClient:
         """Send a chat message to a thread."""
         self.send(serialize_send_message(thread_id, content))
 
-    def create_thread(
-        self, title: str, scope_kind: str, entity_id: str = ""
-    ) -> None:
+    def create_thread(self, title: str, scope_kind: str, entity_id: str = "") -> None:
         """Request creation of a new chat thread."""
         self.send(serialize_create_thread(title, scope_kind, entity_id))
 

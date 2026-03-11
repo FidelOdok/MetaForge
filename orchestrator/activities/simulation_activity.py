@@ -50,8 +50,8 @@ async def run_simulation_agent(input: AgentActivityInput) -> AgentActivityOutput
 
         try:
             from domain_agents.simulation.agent import SimulationAgent, TaskRequest
-            from twin_core.api import InMemoryTwinAPI
             from skill_registry.mcp_bridge import InMemoryMcpBridge
+            from twin_core.api import InMemoryTwinAPI
 
             twin = InMemoryTwinAPI.create()
             mcp = InMemoryMcpBridge()

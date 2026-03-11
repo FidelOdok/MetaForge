@@ -26,9 +26,7 @@ TOOL_UNAVAILABLE = -32003
 class McpError(Exception):
     """Base exception for MCP protocol errors."""
 
-    def __init__(
-        self, code: int, message: str, data: McpErrorData | None = None
-    ) -> None:
+    def __init__(self, code: int, message: str, data: McpErrorData | None = None) -> None:
         self.code = code
         self.message = message
         self.data = data
@@ -38,9 +36,7 @@ class McpError(Exception):
 class ToolExecutionError(McpError):
     """Tool ran but produced an error."""
 
-    def __init__(
-        self, tool_id: str, details: str, duration_ms: float = 0
-    ) -> None:
+    def __init__(self, tool_id: str, details: str, duration_ms: float = 0) -> None:
         super().__init__(
             code=TOOL_EXECUTION_ERROR,
             message="Tool execution failed",
@@ -96,9 +92,7 @@ def create_request(
     )
 
 
-def create_success_response(
-    request_id: str, result: dict[str, Any]
-) -> JsonRpcSuccessResponse:
+def create_success_response(request_id: str, result: dict[str, Any]) -> JsonRpcSuccessResponse:
     """Create a JSON-RPC success response."""
     return JsonRpcSuccessResponse(id=request_id, result=result)
 

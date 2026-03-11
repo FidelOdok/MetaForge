@@ -269,9 +269,7 @@ class TestOutput(BaseModel):
         _create_test_skill(tmp_path, name="skill_elec", domain="electronics")
         registry = SkillRegistry()
         await registry.register(str(tmp_path / "mechanical" / "skills" / "skill_mech"))
-        await registry.register(
-            str(tmp_path / "electronics" / "skills" / "skill_elec")
-        )
+        await registry.register(str(tmp_path / "electronics" / "skills" / "skill_elec"))
 
         mech = await registry.list_skills(domain="mechanical")
         assert len(mech) == 1
@@ -305,9 +303,7 @@ class TestOutput(BaseModel):
         _create_test_skill(tmp_path, name="skill_act", domain="electronics")
         registry = SkillRegistry()
         await registry.register(str(tmp_path / "mechanical" / "skills" / "skill_reg"))
-        await registry.register(
-            str(tmp_path / "electronics" / "skills" / "skill_act")
-        )
+        await registry.register(str(tmp_path / "electronics" / "skills" / "skill_act"))
         await registry.activate("skill_act")
 
         registered = await registry.list_skills(status="REGISTERED")
@@ -333,12 +329,8 @@ class TestOutput(BaseModel):
             tags=["erc"],
         )
         registry = SkillRegistry()
-        await registry.register(
-            str(tmp_path / "mechanical" / "skills" / "skill_tagged")
-        )
-        await registry.register(
-            str(tmp_path / "electronics" / "skills" / "skill_other")
-        )
+        await registry.register(str(tmp_path / "mechanical" / "skills" / "skill_tagged"))
+        await registry.register(str(tmp_path / "electronics" / "skills" / "skill_other"))
 
         fea = await registry.list_skills(tags=["fea"])
         assert len(fea) == 1
@@ -510,12 +502,8 @@ class TestRegistryHealth:
 
         registry = SkillRegistry()
         await registry.register(str(tmp_path / "mechanical" / "skills" / "skill_one"))
-        await registry.register(
-            str(tmp_path / "electronics" / "skills" / "skill_two")
-        )
-        await registry.register(
-            str(tmp_path / "mechanical" / "skills" / "skill_three")
-        )
+        await registry.register(str(tmp_path / "electronics" / "skills" / "skill_two"))
+        await registry.register(str(tmp_path / "mechanical" / "skills" / "skill_three"))
         await registry.activate("skill_two")
 
         report = await registry.health()

@@ -26,9 +26,7 @@ async def calculate_requirement_coverage(twin: TwinAPI, branch: str) -> float:
     with tracer.start_as_current_span("gate.scoring.requirement_coverage") as span:
         span.set_attribute("branch", branch)
 
-        requirements = await twin.list_artifacts(
-            branch=branch, artifact_type=ArtifactType.PRD
-        )
+        requirements = await twin.list_artifacts(branch=branch, artifact_type=ArtifactType.PRD)
         if not requirements:
             logger.info("requirement_coverage_no_requirements", branch=branch)
             return 100.0  # No requirements = fully covered (vacuously true)
@@ -36,10 +34,7 @@ async def calculate_requirement_coverage(twin: TwinAPI, branch: str) -> float:
         covered = 0
         for req in requirements:
             edges = await twin.get_edges(req.id, direction="outgoing")
-            has_evidence = any(
-                edge.metadata.get("type") == "test_evidence"
-                for edge in edges
-            )
+            has_evidence = any(edge.metadata.get("type") == "test_evidence" for edge in edges)
             if has_evidence:
                 covered += 1
 
@@ -143,9 +138,7 @@ async def calculate_test_evidence(twin: TwinAPI, branch: str) -> float:
     with tracer.start_as_current_span("gate.scoring.test_evidence") as span:
         span.set_attribute("branch", branch)
 
-        test_plans = await twin.list_artifacts(
-            branch=branch, artifact_type=ArtifactType.TEST_PLAN
-        )
+        test_plans = await twin.list_artifacts(branch=branch, artifact_type=ArtifactType.TEST_PLAN)
         if not test_plans:
             logger.info("test_evidence_no_test_plans", branch=branch)
             return 100.0  # No test plans = vacuously true
@@ -153,10 +146,7 @@ async def calculate_test_evidence(twin: TwinAPI, branch: str) -> float:
         with_results = 0
         for tp in test_plans:
             edges = await twin.get_edges(tp.id, direction="outgoing")
-            has_result = any(
-                edge.metadata.get("type") == "test_result"
-                for edge in edges
-            )
+            has_result = any(edge.metadata.get("type") == "test_result" for edge in edges)
             if has_result:
                 with_results += 1
 

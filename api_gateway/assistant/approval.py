@@ -125,9 +125,7 @@ class ApprovalWorkflow:
         If *session_id* is given, only proposals for that session are
         returned.
         """
-        proposals = [
-            p for p in self._proposals.values() if p.status == ChangeStatus.PENDING
-        ]
+        proposals = [p for p in self._proposals.values() if p.status == ChangeStatus.PENDING]
         if session_id is not None:
             proposals = [p for p in proposals if p.session_id == session_id]
         return proposals

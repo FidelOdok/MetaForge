@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 
+from orchestrator.activities.approval_activity import wait_for_approval
 from orchestrator.activities.base_activity import (
     AgentActivityInput,
     AgentActivityOutput,
@@ -19,21 +20,19 @@ from orchestrator.activities.base_activity import (
     ApprovalResult,
     get_default_retry_policy,
 )
-from orchestrator.activities.mechanical_activity import run_mechanical_agent
 from orchestrator.activities.electronics_activity import run_electronics_agent
 from orchestrator.activities.firmware_activity import run_firmware_agent
+from orchestrator.activities.mechanical_activity import run_mechanical_agent
 from orchestrator.activities.simulation_activity import run_simulation_agent
-from orchestrator.activities.approval_activity import wait_for_approval
-from orchestrator.workflows.single_agent_workflow import (
-    SingleAgentWorkflow,
-    SingleAgentWorkflowInput,
-    AGENT_ACTIVITIES,
-)
 from orchestrator.workflows.hardware_design_workflow import (
     HardwareDesignWorkflow,
     HardwareDesignWorkflowInput,
 )
-
+from orchestrator.workflows.single_agent_workflow import (
+    AGENT_ACTIVITIES,
+    SingleAgentWorkflow,
+    SingleAgentWorkflowInput,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -239,13 +238,17 @@ class TestApprovalActivity:
 
     async def test_auto_approves_without_temporal(self) -> None:
         """Without Temporal runtime, the activity auto-approves."""
+        from unittest.mock import patch
+
         req = ApprovalRequest(
             approval_id="test-1",
             description="Test approval",
             run_id=RUN_ID,
             step_id="approval_step",
         )
-        result = await wait_for_approval(req)
+        # Force the non-Temporal code path regardless of SDK availability
+        with patch("orchestrator.activities.approval_activity.HAS_TEMPORAL", False):
+            result = await wait_for_approval(req)
         assert isinstance(result, ApprovalResult)
         assert result.approved is True
         assert result.approver_id == "auto"
@@ -569,7 +572,7 @@ class TestTimeoutBehavior:
     async def test_timeout_error_propagates(self) -> None:
         """When an agent exceeds its timeout, the error propagates for Temporal retry."""
         agent = AsyncMock()
-        agent.run_task.side_effect = asyncio.TimeoutError("activity timed out")
+        agent.run_task.side_effect = TimeoutError("activity timed out")
         p1, p2, p3 = _patch_agent_activity("mechanical", "MechanicalAgent", agent)
         with p1, p2 as mock_twin, p3:
             mock_twin.create.return_value = MagicMock()

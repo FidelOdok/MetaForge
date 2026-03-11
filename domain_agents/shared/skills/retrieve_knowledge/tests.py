@@ -46,14 +46,10 @@ class TestRetrieveKnowledgeSkill:
             knowledge_type=KnowledgeType.MATERIAL_PROPERTY,
             source="materials-db",
         )
-        mock_store.search = AsyncMock(
-            return_value=[SearchResult(entry=entry, score=0.92)]
-        )
+        mock_store.search = AsyncMock(return_value=[SearchResult(entry=entry, score=0.92)])
 
         handler = RetrieveKnowledgeHandler(mock_context, mock_store)
-        input_data = RetrieveKnowledgeInput(
-            query="aluminum yield strength", limit=5
-        )
+        input_data = RetrieveKnowledgeInput(query="aluminum yield strength", limit=5)
         output = await handler.execute(input_data)
 
         assert output.total_results == 1

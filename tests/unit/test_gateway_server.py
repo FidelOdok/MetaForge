@@ -175,9 +175,7 @@ class TestAssistantEndpoints:
         assert "Unknown action" in response.json()["detail"]
 
     async def test_run_status_not_found(self, wired_client: AsyncClient):
-        response = await wired_client.get(
-            "/v1/assistant/request/nonexistent-run-id"
-        )
+        response = await wired_client.get("/v1/assistant/request/nonexistent-run-id")
         assert response.status_code == 404
 
     async def test_run_status_after_submit(self, wired_client: AsyncClient):
@@ -192,9 +190,7 @@ class TestAssistantEndpoints:
         assert submit_resp.status_code == 200
         run_id = submit_resp.json()["result"]["run_id"]
 
-        status_resp = await wired_client.get(
-            f"/v1/assistant/request/{run_id}"
-        )
+        status_resp = await wired_client.get(f"/v1/assistant/request/{run_id}")
         assert status_resp.status_code == 200
         data = status_resp.json()
         assert data["run_id"] == run_id
@@ -206,9 +202,7 @@ class TestAssistantEndpoints:
         data = response.json()
         assert "proposals" in data
 
-    async def test_submit_request_fallback_no_orchestrator(
-        self, client: AsyncClient
-    ):
+    async def test_submit_request_fallback_no_orchestrator(self, client: AsyncClient):
         """Without orchestrator, route falls back to 'accepted' placeholder."""
         response = await client.post(
             "/v1/assistant/request",

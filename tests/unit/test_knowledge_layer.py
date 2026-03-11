@@ -12,7 +12,7 @@ Covers:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -35,7 +35,6 @@ from domain_agents.shared.skills.ingest_knowledge.schema import IngestKnowledgeI
 from domain_agents.shared.skills.retrieve_knowledge.handler import RetrieveKnowledgeHandler
 from domain_agents.shared.skills.retrieve_knowledge.schema import RetrieveKnowledgeInput
 from orchestrator.event_bus.events import Event, EventType
-
 
 # ============================================================================
 # InMemoryKnowledgeStore tests
@@ -399,6 +398,7 @@ class TestIngestKnowledgeHandler:
 
         assert output.embedded is True
         from uuid import UUID as _UUID
+
         stored = await store.get(_UUID(output.entry_id))
         assert stored is not None
         assert stored.content == "Use M3 screws"
@@ -415,6 +415,7 @@ class TestIngestKnowledgeHandler:
         output = await handler.execute(inp)
         assert output.embedded is False
         from uuid import UUID as _UUID
+
         assert await store.get(_UUID(output.entry_id)) is not None
 
 

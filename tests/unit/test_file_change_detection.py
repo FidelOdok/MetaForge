@@ -6,12 +6,10 @@ All tests are fully mocked — no real filesystem operations needed.
 from __future__ import annotations
 
 import hashlib
-import io
-import uuid
 import zipfile
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -31,7 +29,6 @@ from digital_twin.assistant.watcher import (
     FileChangeEvent,
     FileWatcher,
 )
-
 
 # ---------------------------------------------------------------------------
 # FileWatcher tests
@@ -164,7 +161,7 @@ class TestFileWatcher:
 
         # Try 3 more times rapidly — all should be debounced
         for i in range(3):
-            with patch.object(watcher, "_compute_hash", return_value=f"hash{i+3}"):
+            with patch.object(watcher, "_compute_hash", return_value=f"hash{i + 3}"):
                 await watcher._process_changes({(2, "/tmp/test/main.py")})
 
         # Total: still only 1 event emitted from 5 rapid changes
@@ -433,17 +430,13 @@ int main(int argc, char* argv[]) {
         assert "init_hardware" in func_names
         assert "main" in func_names
 
-        include_mutations = [
-            m for m in mutations if m.node_id.endswith("::includes")
-        ]
+        include_mutations = [m for m in mutations if m.node_id.endswith("::includes")]
         assert len(include_mutations) == 1
         includes = include_mutations[0].properties["includes"]
         assert "stdio.h" in includes
         assert "config.h" in includes
 
-        define_mutations = [
-            m for m in mutations if m.node_id.endswith("::defines")
-        ]
+        define_mutations = [m for m in mutations if m.node_id.endswith("::defines")]
         assert len(define_mutations) == 1
         defines = define_mutations[0].properties["defines"]
         assert defines["MAX_RETRIES"] == "5"

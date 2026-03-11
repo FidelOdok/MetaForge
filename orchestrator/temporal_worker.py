@@ -18,15 +18,15 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.temporal_worker")
 
 # Activities
-from orchestrator.activities.mechanical_activity import run_mechanical_agent
-from orchestrator.activities.electronics_activity import run_electronics_agent
-from orchestrator.activities.firmware_activity import run_firmware_agent
-from orchestrator.activities.simulation_activity import run_simulation_agent
-from orchestrator.activities.approval_activity import wait_for_approval
+from orchestrator.activities.approval_activity import wait_for_approval  # noqa: E402
+from orchestrator.activities.electronics_activity import run_electronics_agent  # noqa: E402
+from orchestrator.activities.firmware_activity import run_firmware_agent  # noqa: E402
+from orchestrator.activities.mechanical_activity import run_mechanical_agent  # noqa: E402
+from orchestrator.activities.simulation_activity import run_simulation_agent  # noqa: E402
+from orchestrator.workflows.hardware_design_workflow import HardwareDesignWorkflow  # noqa: E402
 
 # Workflows
-from orchestrator.workflows.single_agent_workflow import SingleAgentWorkflow
-from orchestrator.workflows.hardware_design_workflow import HardwareDesignWorkflow
+from orchestrator.workflows.single_agent_workflow import SingleAgentWorkflow  # noqa: E402
 
 # All registered activities
 ALL_ACTIVITIES = [

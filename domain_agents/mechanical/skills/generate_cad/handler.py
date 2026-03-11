@@ -72,9 +72,7 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             # 2. Build output path if not provided
             output_path = input_data.output_path
             if not output_path:
-                output_path = (
-                    f"output/{input_data.shape_type}_{input_data.artifact_id}.step"
-                )
+                output_path = f"output/{input_data.shape_type}_{input_data.artifact_id}.step"
 
             # 3. Invoke freecad.create_parametric via MCP bridge
             try:
@@ -98,9 +96,7 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             cad_file: str = result.get("cad_file", "")
             volume_mm3: float = float(result.get("volume_mm3", 0.0))
             surface_area_mm2: float = float(result.get("surface_area_mm2", 0.0))
-            parameters_used: dict[str, Any] = result.get(
-                "parameters_used", input_data.dimensions
-            )
+            parameters_used: dict[str, Any] = result.get("parameters_used", input_data.dimensions)
 
             raw_bbox: dict[str, Any] = result.get("bounding_box", {})
             bounding_box = BoundingBox(

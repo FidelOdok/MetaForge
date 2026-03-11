@@ -33,11 +33,7 @@ class ForgeClient:
         base_url: str | None = None,
         timeout: float = 30.0,
     ) -> None:
-        self.base_url = (
-            base_url
-            or os.environ.get("METAFORGE_GATEWAY_URL")
-            or _DEFAULT_GATEWAY_URL
-        )
+        self.base_url = base_url or os.environ.get("METAFORGE_GATEWAY_URL") or _DEFAULT_GATEWAY_URL
         self.timeout = timeout
 
     # ------------------------------------------------------------------
@@ -128,7 +124,10 @@ class ForgeClient:
             return resp.json()
 
     def approve_proposal(
-        self, change_id: str, reason: str, reviewer: str = "cli-user",
+        self,
+        change_id: str,
+        reason: str,
+        reviewer: str = "cli-user",
     ) -> dict[str, Any]:
         """Approve a proposal via ``POST /api/v1/assistant/proposals/{change_id}/decide``."""
         payload = {
@@ -143,7 +142,10 @@ class ForgeClient:
             return resp.json()
 
     def reject_proposal(
-        self, change_id: str, reason: str, reviewer: str = "cli-user",
+        self,
+        change_id: str,
+        reason: str,
+        reviewer: str = "cli-user",
     ) -> dict[str, Any]:
         """Reject a proposal via ``POST /api/v1/assistant/proposals/{change_id}/decide``."""
         payload = {

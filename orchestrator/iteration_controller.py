@@ -165,11 +165,7 @@ class IterationController:
 
                         from domain_agents.mechanical.agent import TaskRequest
 
-                        aid = (
-                            _UUID(artifact_id)
-                            if isinstance(artifact_id, str)
-                            else artifact_id
-                        )
+                        aid = _UUID(artifact_id) if isinstance(artifact_id, str) else artifact_id
                         request = TaskRequest(
                             task_type=task_type,
                             artifact_id=aid,
@@ -197,8 +193,7 @@ class IterationController:
                         eval_result = await self._twin.evaluate_constraints(branch)
                         constraints_passed = eval_result.passed
                         constraint_errors = [
-                            v.message
-                            for v in getattr(eval_result, "violations", [])
+                            v.message for v in getattr(eval_result, "violations", [])
                         ]
                     except Exception as exc:
                         constraints_passed = False
@@ -211,15 +206,11 @@ class IterationController:
                     result.records.append(record)
                     result.total_iterations = iteration
 
-                    cycle_span.set_attribute(
-                        "iteration.constraints_passed", constraints_passed
-                    )
+                    cycle_span.set_attribute("iteration.constraints_passed", constraints_passed)
 
                     if constraints_passed:
                         # --- GATE CHECK ---
-                        gate_status = await self._gate_check(
-                            loop_id, agent_code, branch
-                        )
+                        gate_status = await self._gate_check(loop_id, agent_code, branch)
                         if gate_status == IterationStatus.APPROVED:
                             # --- COMMIT ---
                             try:
@@ -283,9 +274,7 @@ class IterationController:
 
             # Exhausted max iterations
             result.status = IterationStatus.FAILED
-            result.error = (
-                f"Max iterations ({self._config.max_iterations}) exhausted"
-            )
+            result.error = f"Max iterations ({self._config.max_iterations}) exhausted"
             result.completed_at = datetime.now(UTC).isoformat()
             span.set_attribute("iteration.final_status", "max_exhausted")
             logger.warning(
@@ -295,9 +284,7 @@ class IterationController:
             )
             return result
 
-    async def _gate_check(
-        self, loop_id: str, agent_code: str, branch: str
-    ) -> IterationStatus:
+    async def _gate_check(self, loop_id: str, agent_code: str, branch: str) -> IterationStatus:
         """Determine whether the converged result should be auto-approved."""
         if self._config.auto_approve:
             return IterationStatus.APPROVED

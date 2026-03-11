@@ -189,7 +189,9 @@ class KafkaEventConsumer:
                     "kafka_event_deserialize_failed",
                     topic=topic,
                     error=str(exc),
-                    raw_value=raw_value[:200] if isinstance(raw_value, str) else str(raw_value)[:200],
+                    raw_value=raw_value[:200]
+                    if isinstance(raw_value, str)
+                    else str(raw_value)[:200],
                 )
                 await self._send_to_dlq(raw_value, topic, str(exc))
                 return

@@ -14,12 +14,8 @@ Test coverage:
 
 from __future__ import annotations
 
-import json
 import os
 import re
-
-import pytest
-
 
 # =========================================================================
 # 1. Context detector — scope mapping
@@ -127,9 +123,7 @@ class TestGatewayClient:
         assert _to_ws_url("http://localhost:8000") == "ws://localhost:8000"
 
     def test_to_ws_url_https(self) -> None:
-        assert _to_ws_url("https://gateway.example.com") == (
-            "wss://gateway.example.com"
-        )
+        assert _to_ws_url("https://gateway.example.com") == ("wss://gateway.example.com")
 
     def test_websocket_url_for_session(self) -> None:
         base = "http://localhost:8000"

@@ -21,9 +21,8 @@ class TestSharedTypesImport:
 
     def test_import_all_types(self) -> None:
         """Happy path: every name in __all__ is importable."""
-        from shared.types import __all__ as all_names
-
         import shared.types as st
+        from shared.types import __all__ as all_names
 
         for name in all_names:
             attr = getattr(st, name, None)
@@ -42,65 +41,56 @@ class TestIdentityReExports:
 
     def test_artifact_identity(self) -> None:
         from shared.types import Artifact
-
         from twin_core.models import Artifact as SourceArtifact
 
         assert Artifact is SourceArtifact
 
     def test_constraint_identity(self) -> None:
         from shared.types import Constraint
-
         from twin_core.models import Constraint as SourceConstraint
 
         assert Constraint is SourceConstraint
 
     def test_node_base_identity(self) -> None:
         from shared.types import NodeBase
-
         from twin_core.models import NodeBase as SourceNodeBase
 
         assert NodeBase is SourceNodeBase
 
     def test_event_identity(self) -> None:
-        from shared.types import Event
-
         from orchestrator.event_bus.events import Event as SourceEvent
+        from shared.types import Event
 
         assert Event is SourceEvent
 
     def test_event_type_identity(self) -> None:
-        from shared.types import EventType
-
         from orchestrator.event_bus.events import EventType as SourceEventType
+        from shared.types import EventType
 
         assert EventType is SourceEventType
 
     def test_gate_stage_identity(self) -> None:
-        from shared.types import GateStage
-
         from digital_twin.thread.gate_engine.models import GateStage as SourceGateStage
+        from shared.types import GateStage
 
         assert GateStage is SourceGateStage
 
     def test_gate_definition_identity(self) -> None:
-        from shared.types import GateDefinition
-
         from digital_twin.thread.gate_engine.models import (
             GateDefinition as SourceGateDefinition,
         )
+        from shared.types import GateDefinition
 
         assert GateDefinition is SourceGateDefinition
 
     def test_tool_manifest_identity(self) -> None:
-        from shared.types import ToolManifest
-
         from mcp_core.schemas import ToolManifest as SourceToolManifest
+        from shared.types import ToolManifest
 
         assert ToolManifest is SourceToolManifest
 
     def test_skill_definition_identity(self) -> None:
         from shared.types import SkillDefinition
-
         from skill_registry.schema_validator import (
             SkillDefinition as SourceSkillDefinition,
         )
@@ -108,11 +98,10 @@ class TestIdentityReExports:
         assert SkillDefinition is SourceSkillDefinition
 
     def test_readiness_score_identity(self) -> None:
-        from shared.types import ReadinessScore
-
         from digital_twin.thread.gate_engine.models import (
             ReadinessScore as SourceReadinessScore,
         )
+        from shared.types import ReadinessScore
 
         assert ReadinessScore is SourceReadinessScore
 

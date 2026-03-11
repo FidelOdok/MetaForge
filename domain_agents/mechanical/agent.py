@@ -192,12 +192,14 @@ def _get_or_create_pydantic_agent() -> Any:
                 passed = float(stress_val) <= allowable
                 if not passed:
                     all_passed = False
-                results.append({
-                    "region": region,
-                    "stress_mpa": float(stress_val),
-                    "allowable_mpa": allowable,
-                    "passed": passed,
-                })
+                results.append(
+                    {
+                        "region": region,
+                        "stress_mpa": float(stress_val),
+                        "allowable_mpa": allowable,
+                        "passed": passed,
+                    }
+                )
 
         return {
             "skill": "validate_stress",
@@ -333,8 +335,11 @@ class MechanicalAgent:
     """
 
     SUPPORTED_TASKS = {
-        "validate_stress", "check_tolerances", "generate_mesh",
-        "generate_cad", "full_validation",
+        "validate_stress",
+        "check_tolerances",
+        "generate_mesh",
+        "generate_cad",
+        "full_validation",
     }
 
     def __init__(
@@ -395,9 +400,7 @@ class MechanicalAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         deps = AgentDependencies(
@@ -430,17 +433,13 @@ class MechanicalAgent:
             if mechanical_result.tool_calls
             else [mechanical_result.analysis],
             warnings=(
-                mechanical_result.recommendations
-                if not mechanical_result.overall_passed
-                else []
+                mechanical_result.recommendations if not mechanical_result.overall_passed else []
             ),
         )
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [
-            f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."
-        ]
+        parts = [f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -467,9 +466,7 @@ class MechanicalAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         # Route to handler
@@ -568,9 +565,7 @@ class MechanicalAgent:
         raw_tolerances: list[dict[str, Any]] = request.parameters.get("tolerances", [])
         tolerances = [ToleranceSpec.model_validate(t) for t in raw_tolerances]
 
-        raw_process: dict[str, Any] = request.parameters.get(
-            "manufacturing_process", {}
-        )
+        raw_process: dict[str, Any] = request.parameters.get("manufacturing_process", {})
         if not raw_process:
             return TaskResult(
                 task_type=request.task_type,
@@ -624,11 +619,7 @@ class MechanicalAgent:
                     "summary": output.summary,
                 }
             ],
-            warnings=(
-                [output.summary]
-                if output.overall_status == "marginal"
-                else []
-            ),
+            warnings=([output.summary] if output.overall_status == "marginal" else []),
         )
 
     async def _run_generate_mesh(self, request: TaskRequest) -> TaskResult:
@@ -651,9 +642,7 @@ class MechanicalAgent:
             algorithm=request.parameters.get("algorithm", "netgen"),
             output_format=request.parameters.get("output_format", "inp"),
             min_angle_threshold=request.parameters.get("min_angle_threshold", 15.0),
-            max_aspect_ratio_threshold=request.parameters.get(
-                "max_aspect_ratio_threshold", 10.0
-            ),
+            max_aspect_ratio_threshold=request.parameters.get("max_aspect_ratio_threshold", 10.0),
             refinement_regions=request.parameters.get("refinement_regions", []),
         )
 
@@ -762,9 +751,7 @@ class MechanicalAgent:
         overall_success = stress_result.success
 
         # Run tolerance check if tolerance parameters are provided
-        if request.parameters.get("tolerances") and request.parameters.get(
-            "manufacturing_process"
-        ):
+        if request.parameters.get("tolerances") and request.parameters.get("manufacturing_process"):
             tol_result = await self._run_check_tolerances(request)
             all_results.extend(tol_result.skill_results)
             all_errors.extend(tol_result.errors)

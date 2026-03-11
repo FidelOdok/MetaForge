@@ -90,9 +90,7 @@ class DockerRuntime(ContainerRuntime):
 
         Raises NotImplementedError until docker SDK is available.
         """
-        raise NotImplementedError(
-            "Docker runtime requires docker SDK — install docker[asyncio]"
-        )
+        raise NotImplementedError("Docker runtime requires docker SDK — install docker[asyncio]")
 
     async def cleanup(self, container_id: str) -> None:
         """Clean up a Docker container."""
@@ -178,9 +176,7 @@ class ContainerExecutionEngine:
             RuntimeError: If the runtime is not available.
         """
         if not await self.runtime.is_available():
-            raise RuntimeError(
-                f"Container runtime is not available for tool '{tool_name}'"
-            )
+            raise RuntimeError(f"Container runtime is not available for tool '{tool_name}'")
 
         self.logger.info(
             "Container execution started",

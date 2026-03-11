@@ -100,9 +100,7 @@ class SkillBase(ABC, Generic[InputT, OutputT]):
             except Exception as exc:
                 elapsed_s = time.monotonic() - start
                 if collector:
-                    collector.record_skill_execution(
-                        skill_name, domain, "input_error", elapsed_s
-                    )
+                    collector.record_skill_execution(skill_name, domain, "input_error", elapsed_s)
                 return SkillResult(success=False, errors=[f"Input validation failed: {exc}"])
 
         # Check preconditions
@@ -122,9 +120,7 @@ class SkillBase(ABC, Generic[InputT, OutputT]):
             elapsed = (time.monotonic() - start) * 1000
             self.logger.error("Skill execution failed", error=str(exc))
             if collector:
-                collector.record_skill_execution(
-                    skill_name, domain, "error", elapsed / 1000
-                )
+                collector.record_skill_execution(skill_name, domain, "error", elapsed / 1000)
             return SkillResult(
                 success=False, errors=[f"Execution failed: {exc}"], duration_ms=elapsed
             )
@@ -133,9 +129,7 @@ class SkillBase(ABC, Generic[InputT, OutputT]):
         if not isinstance(output, self.output_type):
             elapsed = (time.monotonic() - start) * 1000
             if collector:
-                collector.record_skill_execution(
-                    skill_name, domain, "output_error", elapsed / 1000
-                )
+                collector.record_skill_execution(skill_name, domain, "output_error", elapsed / 1000)
             return SkillResult(
                 success=False,
                 errors=[
@@ -147,7 +141,5 @@ class SkillBase(ABC, Generic[InputT, OutputT]):
 
         elapsed = (time.monotonic() - start) * 1000
         if collector:
-            collector.record_skill_execution(
-                skill_name, domain, "success", elapsed / 1000
-            )
+            collector.record_skill_execution(skill_name, domain, "success", elapsed / 1000)
         return SkillResult(success=True, data=output, duration_ms=elapsed)

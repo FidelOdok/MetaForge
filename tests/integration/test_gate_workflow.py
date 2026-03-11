@@ -3,9 +3,6 @@
 End-to-end workflow testing the constraint engine and gate engine together.
 """
 
-from pathlib import Path
-from uuid import uuid4
-
 import pytest
 
 from twin_core.constraint_engine import InMemoryConstraintEngine
@@ -15,7 +12,6 @@ from twin_core.gate_engine.models import GateCriterion, GateDefinition, GatePhas
 from twin_core.graph_engine import InMemoryGraphEngine
 from twin_core.models.artifact import Artifact
 from twin_core.models.enums import ArtifactType, ConstraintSeverity
-
 
 # --- Helpers ---
 
@@ -79,14 +75,20 @@ class TestEndToEndGateWorkflow:
 
         c1 = Constraint(
             name="weight_ok",
-            expression="sum(a.metadata.get('weight_grams', 0) for a in ctx.artifacts(domain='mechanical')) <= 500",
+            expression=(
+                "sum(a.metadata.get('weight_grams', 0)"
+                " for a in ctx.artifacts(domain='mechanical')) <= 500"
+            ),
             severity=ConstraintSeverity.ERROR,
             domain="mechanical",
             source="test",
         )
         c2 = Constraint(
             name="erc_clean",
-            expression="all(a.metadata.get('erc_errors', 0) == 0 for a in ctx.artifacts(domain='electronics'))",
+            expression=(
+                "all(a.metadata.get('erc_errors', 0) == 0"
+                " for a in ctx.artifacts(domain='electronics'))"
+            ),
             severity=ConstraintSeverity.ERROR,
             domain="electronics",
             source="test",
@@ -143,7 +145,10 @@ class TestEndToEndGateWorkflow:
 
         c = Constraint(
             name="weight_limit",
-            expression="sum(a.metadata.get('weight_grams', 0) for a in ctx.artifacts(domain='mechanical')) <= 500",
+            expression=(
+                "sum(a.metadata.get('weight_grams', 0)"
+                " for a in ctx.artifacts(domain='mechanical')) <= 500"
+            ),
             severity=ConstraintSeverity.ERROR,
             domain="mechanical",
             source="test",
@@ -220,7 +225,9 @@ class TestEndToEndGateWorkflow:
         assert dvt_transition.allowed is True
         assert dvt_transition.from_phase == GatePhase.EVT
 
-    async def test_yaml_rules_to_gate_evaluation(self, graph, constraint_engine, gate_engine, tmp_path):
+    async def test_yaml_rules_to_gate_evaluation(
+        self, graph, constraint_engine, gate_engine, tmp_path
+    ):
         """Load YAML rules, evaluate constraints, use result in gate."""
         # Write a rule file
         rule_file = tmp_path / "test_rules.yaml"

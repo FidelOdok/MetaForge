@@ -70,7 +70,7 @@ class FirmwareAdapter(FileChangeAdapter):
             path = Path(event.path)
             try:
                 content = path.read_text(encoding="utf-8", errors="replace")
-            except (OSError, IOError) as exc:
+            except OSError as exc:
                 logger.error("firmware_read_failed", path=event.path, error=str(exc))
                 span.record_exception(exc)
                 return []

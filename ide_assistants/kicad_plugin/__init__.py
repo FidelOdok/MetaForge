@@ -12,7 +12,7 @@ from __future__ import annotations
 
 try:
     # When loaded inside KiCad, pcbnew is available.
-    import pcbnew  # type: ignore[import-untyped]
+    import pcbnew  # type: ignore[import-untyped]  # noqa: F401
 
     from .plugin import MetaForgeChatPlugin
 

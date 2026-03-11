@@ -36,8 +36,8 @@ class WorkflowStatus(StrEnum):
 
 class StepStatus(StrEnum):
     PENDING = "pending"
-    WAITING = "waiting"      # has unresolved dependencies
-    READY = "ready"          # all deps met, awaiting scheduler
+    WAITING = "waiting"  # has unresolved dependencies
+    READY = "ready"  # all deps met, awaiting scheduler
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -68,9 +68,7 @@ class WorkflowDefinition(BaseModel):
     name: str
     description: str = ""
     steps: list[WorkflowStep] = Field(default_factory=list)
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class StepResult(BaseModel):
@@ -110,12 +108,10 @@ class WorkflowEngine(ABC):
     """Abstract workflow engine — swap for Temporal in production."""
 
     @abstractmethod
-    async def register_workflow(self, definition: WorkflowDefinition) -> WorkflowDefinition:
-        ...
+    async def register_workflow(self, definition: WorkflowDefinition) -> WorkflowDefinition: ...
 
     @abstractmethod
-    async def get_workflow(self, workflow_id: str) -> WorkflowDefinition | None:
-        ...
+    async def get_workflow(self, workflow_id: str) -> WorkflowDefinition | None: ...
 
     @abstractmethod
     async def start_run(
@@ -123,12 +119,10 @@ class WorkflowEngine(ABC):
         workflow_id: str,
         branch: str = "main",
         metadata: dict[str, Any] | None = None,
-    ) -> WorkflowRun:
-        ...
+    ) -> WorkflowRun: ...
 
     @abstractmethod
-    async def get_run(self, run_id: str) -> WorkflowRun | None:
-        ...
+    async def get_run(self, run_id: str) -> WorkflowRun | None: ...
 
     @abstractmethod
     async def update_step(
@@ -138,20 +132,17 @@ class WorkflowEngine(ABC):
         status: StepStatus,
         result: dict[str, Any] | None = None,
         error: str | None = None,
-    ) -> StepResult | None:
-        ...
+    ) -> StepResult | None: ...
 
     @abstractmethod
-    async def cancel_run(self, run_id: str) -> WorkflowRun | None:
-        ...
+    async def cancel_run(self, run_id: str) -> WorkflowRun | None: ...
 
     @abstractmethod
     async def list_runs(
         self,
         workflow_id: str | None = None,
         status: WorkflowStatus | None = None,
-    ) -> list[WorkflowRun]:
-        ...
+    ) -> list[WorkflowRun]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +197,7 @@ class InMemoryWorkflowEngine(WorkflowEngine):
 
             # Initialise step results
             for step in defn.steps:
-                initial_status = (
-                    StepStatus.WAITING if step.depends_on else StepStatus.READY
-                )
+                initial_status = StepStatus.WAITING if step.depends_on else StepStatus.READY
                 run.step_results[step.step_id] = StepResult(
                     step_id=step.step_id,
                     status=initial_status,

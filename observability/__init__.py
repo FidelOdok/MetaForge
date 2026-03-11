@@ -1,4 +1,7 @@
-"""MetaForge Observability -- OTel bootstrap, config, structlog bridge, metrics, tracing, and middleware."""
+"""MetaForge Observability.
+
+OTel bootstrap, config, structlog bridge, metrics, tracing, and middleware.
+"""
 
 from observability.bootstrap import (
     ObservabilityState,

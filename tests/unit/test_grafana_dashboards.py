@@ -26,6 +26,7 @@ VALID_PANEL_TYPES = {"stat", "timeseries", "gauge", "alertlist", "graph", "table
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def dashboard_data() -> dict:
     """Load and parse the system-overview dashboard JSON."""
@@ -43,6 +44,7 @@ def panels(dashboard_data: dict) -> list[dict]:
 # ===========================================================================
 # File validity
 # ===========================================================================
+
 
 class TestDashboardFileValidity:
     """Basic file and JSON validity checks."""
@@ -65,6 +67,7 @@ class TestDashboardFileValidity:
 # Dashboard metadata
 # ===========================================================================
 
+
 class TestDashboardMetadata:
     """Verify dashboard-level settings."""
 
@@ -85,14 +88,10 @@ class TestDashboardMetadata:
 
     def test_dashboard_has_auto_refresh(self, dashboard_data: dict) -> None:
         refresh = dashboard_data.get("refresh")
-        assert refresh is not None and refresh != "", (
-            "Dashboard must have an auto-refresh interval"
-        )
+        assert refresh is not None and refresh != "", "Dashboard must have an auto-refresh interval"
 
     def test_dashboard_refresh_is_30s(self, dashboard_data: dict) -> None:
-        assert dashboard_data.get("refresh") == "30s", (
-            "Dashboard auto-refresh must be 30s"
-        )
+        assert dashboard_data.get("refresh") == "30s", "Dashboard auto-refresh must be 30s"
 
     def test_dashboard_has_time_range(self, dashboard_data: dict) -> None:
         time_config = dashboard_data.get("time", {})
@@ -104,27 +103,22 @@ class TestDashboardMetadata:
         assert time_config.get("from") == "now-1h", (
             "Dashboard default time range 'from' must be 'now-1h'"
         )
-        assert time_config.get("to") == "now", (
-            "Dashboard default time range 'to' must be 'now'"
-        )
+        assert time_config.get("to") == "now", "Dashboard default time range 'to' must be 'now'"
 
 
 # ===========================================================================
 # Panels
 # ===========================================================================
 
+
 class TestDashboardPanels:
     """Validate panel structure and content."""
 
     def test_dashboard_has_at_least_6_panels(self, panels: list[dict]) -> None:
-        assert len(panels) >= 6, (
-            f"Dashboard must have at least 6 panels, found {len(panels)}"
-        )
+        assert len(panels) >= 6, f"Dashboard must have at least 6 panels, found {len(panels)}"
 
     def test_dashboard_has_8_panels(self, panels: list[dict]) -> None:
-        assert len(panels) == 8, (
-            f"Dashboard should have exactly 8 panels, found {len(panels)}"
-        )
+        assert len(panels) == 8, f"Dashboard should have exactly 8 panels, found {len(panels)}"
 
     def test_each_panel_has_valid_type(self, panels: list[dict]) -> None:
         for panel in panels:
@@ -141,13 +135,9 @@ class TestDashboardPanels:
     def test_each_panel_has_grid_position(self, panels: list[dict]) -> None:
         for panel in panels:
             grid_pos = panel.get("gridPos")
-            assert grid_pos is not None, (
-                f"Panel '{panel.get('title')}' must have gridPos"
-            )
+            assert grid_pos is not None, f"Panel '{panel.get('title')}' must have gridPos"
             for key in ("h", "w", "x", "y"):
-                assert key in grid_pos, (
-                    f"Panel '{panel.get('title')}' gridPos must have '{key}'"
-                )
+                assert key in grid_pos, f"Panel '{panel.get('title')}' gridPos must have '{key}'"
 
     def test_panels_with_targets_have_promql(self, panels: list[dict]) -> None:
         """All panels with targets must have a non-empty PromQL expression."""
@@ -156,9 +146,7 @@ class TestDashboardPanels:
             if targets:
                 for target in targets:
                     expr = target.get("expr", "")
-                    assert expr, (
-                        f"Panel '{panel.get('title')}' target must have a PromQL expr"
-                    )
+                    assert expr, f"Panel '{panel.get('title')}' target must have a PromQL expr"
 
     def test_panel_types_include_stat(self, panels: list[dict]) -> None:
         types = {p.get("type") for p in panels}
@@ -190,9 +178,7 @@ class TestDashboardPanels:
 
     def test_error_rate_panel_exists(self, panels: list[dict]) -> None:
         titles = [p.get("title", "") for p in panels]
-        assert any("Error Rate" in t for t in titles), (
-            "Dashboard must have an 'Error Rate' panel"
-        )
+        assert any("Error Rate" in t for t in titles), "Dashboard must have an 'Error Rate' panel"
 
     def test_panels_use_4_column_grid(self, panels: list[dict]) -> None:
         """Panels should use a 4-column grid (widths of 6 in a 24-unit grid)."""
@@ -205,6 +191,4 @@ class TestDashboardPanels:
 
     def test_panel_ids_are_unique(self, panels: list[dict]) -> None:
         ids = [p.get("id") for p in panels]
-        assert len(ids) == len(set(ids)), (
-            f"Panel IDs must be unique, found duplicates in {ids}"
-        )
+        assert len(ids) == len(set(ids)), f"Panel IDs must be unique, found duplicates in {ids}"

@@ -10,8 +10,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from orchestrator.dependency_engine import DependencyGraph
 from orchestrator.event_bus.events import EventType
 from orchestrator.event_bus.subscribers import EventBus
@@ -26,11 +24,10 @@ from orchestrator.workflow_dag import (
     WorkflowDefinition,
     WorkflowStep,
 )
-from skill_registry.mcp_bridge import InMemoryMcpBridge, McpTimeoutError, McpToolError
-from tests.conftest import MECH_ARTIFACT_ID, SpySubscriber
+from skill_registry.mcp_bridge import InMemoryMcpBridge, McpTimeoutError
+from tests.conftest import SpySubscriber
 from tests.integration.conftest import FlakeyAgent, MockAgent
 from twin_core.api import InMemoryTwinAPI
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -103,9 +100,7 @@ class TestMcpErrorPropagation:
         bare_mcp = InMemoryMcpBridge()
         agent = MechanicalAgent(twin=twin, mcp=bare_mcp)
 
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", agent)
 
         step = ScheduledStep(
@@ -127,8 +122,10 @@ class TestMcpErrorPropagation:
         assert sr.status == StepStatus.COMPLETED
         # But the result itself indicates failure
         assert sr.task_result.get("success") is False
-        assert any("failed" in e.lower() or "not registered" in e.lower()
-                    for e in sr.task_result.get("errors", []))
+        assert any(
+            "failed" in e.lower() or "not registered" in e.lower()
+            for e in sr.task_result.get("errors", [])
+        )
 
     async def test_mcp_timeout_propagates(
         self,
@@ -140,9 +137,7 @@ class TestMcpErrorPropagation:
             async def run_task(self, request: Any) -> dict:
                 raise McpTimeoutError("calculix.run_fea", 30.0)
 
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", TimeoutAgent())
 
         step = ScheduledStep(
@@ -175,9 +170,7 @@ class TestAgentExceptionPropagation:
         spy: SpySubscriber,
     ):
         mock = MockAgent(error=RuntimeError("Agent crashed"))
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", mock)
 
         step = ScheduledStep(
@@ -202,9 +195,7 @@ class TestAgentExceptionPropagation:
         spy: SpySubscriber,
     ):
         mock = MockAgent(error=ValueError("bad input"))
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", mock)
 
         step = ScheduledStep(
@@ -225,9 +216,7 @@ class TestAgentExceptionPropagation:
         event_bus: EventBus,
     ):
         mock = MockAgent(error=RuntimeError("Specific error: code 42"))
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", mock)
 
         step = ScheduledStep(
@@ -321,9 +310,7 @@ class TestRetryBehavior:
         event_bus: EventBus,
     ):
         agent = FlakeyAgent(fail_count=1, result={"status": "recovered"})
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", agent)
 
         step = ScheduledStep(
@@ -349,9 +336,7 @@ class TestRetryBehavior:
         spy: SpySubscriber,
     ):
         agent = FlakeyAgent(fail_count=5)  # Always fails within retry budget
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", agent)
 
         step = ScheduledStep(

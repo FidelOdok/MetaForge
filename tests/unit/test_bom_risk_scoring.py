@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 from domain_agents.supply_chain.alt_parts import AlternatePartsFinder
 from domain_agents.supply_chain.models import (
-    AlternatePart,
-    AlternatePartsResult,
     BOMRiskReport,
     LifecycleStatus,
     PartRiskScore,
@@ -20,7 +18,6 @@ from domain_agents.supply_chain.models import (
     RiskLevel,
 )
 from domain_agents.supply_chain.risk_scorer import BOMRiskScorer, _classify_risk_level
-
 
 # ===========================================================================
 # Fixtures
@@ -216,21 +213,15 @@ class TestStockLevelScoring:
 
 class TestComplianceScoring:
     def test_fully_compliant_scores_0(self, scorer: BOMRiskScorer) -> None:
-        factor = scorer._score_compliance(
-            {"rohs_compliant": True, "reach_compliant": True}
-        )
+        factor = scorer._score_compliance({"rohs_compliant": True, "reach_compliant": True})
         assert factor.score == 0
 
     def test_missing_both_scores_100(self, scorer: BOMRiskScorer) -> None:
-        factor = scorer._score_compliance(
-            {"rohs_compliant": False, "reach_compliant": False}
-        )
+        factor = scorer._score_compliance({"rohs_compliant": False, "reach_compliant": False})
         assert factor.score == 100
 
     def test_partial_compliance_scores_50(self, scorer: BOMRiskScorer) -> None:
-        factor = scorer._score_compliance(
-            {"rohs_compliant": True, "reach_compliant": False}
-        )
+        factor = scorer._score_compliance({"rohs_compliant": True, "reach_compliant": False})
         assert factor.score == 50
 
 
@@ -385,18 +376,14 @@ class TestAlternatePartsFinder:
         candidates = [
             {"mpn": "TEST-001", "package": "SOIC-8", "manufacturer": "A", "stock": 100},
         ]
-        result = finder.find_alternates(
-            "TEST-001", {"package": "SOIC-8"}, candidates
-        )
+        result = finder.find_alternates("TEST-001", {"package": "SOIC-8"}, candidates)
         assert len(result.alternates) == 0
 
     def test_incompatible_package_excluded(self, finder: AlternatePartsFinder) -> None:
         candidates = [
             {"mpn": "ALT-001", "package": "QFN-16", "manufacturer": "B", "stock": 100},
         ]
-        result = finder.find_alternates(
-            "TEST-001", {"package": "SOIC-8"}, candidates
-        )
+        result = finder.find_alternates("TEST-001", {"package": "SOIC-8"}, candidates)
         assert len(result.alternates) == 0
 
     def test_compatible_alternate_found(self, finder: AlternatePartsFinder) -> None:
@@ -445,9 +432,7 @@ class TestAlternatePartsFinder:
         )
         assert len(result.alternates) <= 3
 
-    def test_alternates_ranked_by_composite_score(
-        self, finder: AlternatePartsFinder
-    ) -> None:
+    def test_alternates_ranked_by_composite_score(self, finder: AlternatePartsFinder) -> None:
         # One with good availability, one with bad
         candidates = [
             {
@@ -500,9 +485,7 @@ class TestAlternatePartsFinder:
                 "reach_compliant": True,
             },
         ]
-        result = finder.find_alternates(
-            "TEST-001", {"package": "SOIC-8"}, candidates
-        )
+        result = finder.find_alternates("TEST-001", {"package": "SOIC-8"}, candidates)
         if result.alternates:
             assert isinstance(result.alternates[0].compatibility_score, int)
 

@@ -144,9 +144,7 @@ class TestRunErc:
         assert result.skill_results[0]["passed"] is True
         assert result.skill_results[0]["total_violations"] == 0
 
-    async def test_erc_fails_with_errors(
-        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
-    ):
+    async def test_erc_fails_with_errors(self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge):
         """ERC with errors should report failure through the agent."""
         mcp_bridge.register_tool_response(
             "kicad.run_erc",
@@ -226,9 +224,7 @@ class TestRunDrc:
         assert result.skill_results[0]["passed"] is True
         assert result.skill_results[0]["total_violations"] == 0
 
-    async def test_drc_fails_with_errors(
-        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
-    ):
+    async def test_drc_fails_with_errors(self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge):
         """DRC with errors should report failure through the agent."""
         mcp_bridge.register_tool_response(
             "kicad.run_drc",

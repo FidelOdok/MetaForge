@@ -17,27 +17,25 @@ import os
 
 import pytest
 
+from ide_assistants.kicad_plugin.chat_widget import (
+    color_for_role,
+    format_message_html,
+)
+from ide_assistants.kicad_plugin.context_resolver import (
+    resolve_scope_from_references,
+)
 from ide_assistants.kicad_plugin.types import (
     ChatActor,
     ChatMessage,
     ChatScope,
     ChatThread,
 )
-from ide_assistants.kicad_plugin.context_resolver import (
-    resolve_scope_from_references,
-)
-from ide_assistants.kicad_plugin.chat_widget import (
-    color_for_role,
-    format_message_html,
-    ROLE_COLORS,
-)
 from ide_assistants.kicad_plugin.ws_client import (
     build_ws_url,
-    serialize_send_message,
-    serialize_create_thread,
     deserialize_message,
+    serialize_create_thread,
+    serialize_send_message,
 )
-
 
 # =========================================================================
 # 1. context_resolver — component -> scope mapping
@@ -165,29 +163,33 @@ class TestWSClient:
         assert "entityId" not in data["scope"]
 
     def test_deserialize_message_payload(self) -> None:
-        raw = json.dumps({
-            "type": "message",
-            "message": {
-                "id": "m1",
-                "threadId": "t1",
-                "actor": {"kind": "agent", "displayName": "Agent"},
-                "content": "Reply",
-                "createdAt": "2024-01-01T00:00:00Z",
-            },
-        })
+        raw = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "id": "m1",
+                    "threadId": "t1",
+                    "actor": {"kind": "agent", "displayName": "Agent"},
+                    "content": "Reply",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                },
+            }
+        )
         msg = deserialize_message(raw)
         assert msg is not None
         assert msg.content == "Reply"
         assert msg.actor.kind == "agent"
 
     def test_deserialize_message_top_level(self) -> None:
-        raw = json.dumps({
-            "id": "m2",
-            "threadId": "t1",
-            "actor": {"kind": "user", "displayName": "Bob"},
-            "content": "Direct",
-            "createdAt": "2024-01-01T00:00:00Z",
-        })
+        raw = json.dumps(
+            {
+                "id": "m2",
+                "threadId": "t1",
+                "actor": {"kind": "user", "displayName": "Bob"},
+                "content": "Direct",
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        )
         msg = deserialize_message(raw)
         assert msg is not None
         assert msg.content == "Direct"

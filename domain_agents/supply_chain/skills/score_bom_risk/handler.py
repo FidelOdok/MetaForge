@@ -9,7 +9,7 @@ import structlog
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
-from .schema import BOMItem, ScoreBomRiskInput, ScoreBomRiskOutput
+from .schema import ScoreBomRiskInput, ScoreBomRiskOutput
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("domain_agents.supply_chain.skills.score_bom_risk")

@@ -52,9 +52,7 @@ class CrossDomainValidator:
             self.check_connector_clearances,
         ]
 
-    def register_check(
-        self, check_fn: Callable[..., Any]
-    ) -> None:
+    def register_check(self, check_fn: Callable[..., Any]) -> None:
         """Register a custom cross-domain check function.
 
         The function must accept (artifact_id: UUID, branch: str) and return
@@ -62,9 +60,7 @@ class CrossDomainValidator:
         """
         self._checks.append(check_fn)
 
-    async def validate_all(
-        self, artifact_id: UUID, branch: str = "main"
-    ) -> list[CrossDomainCheck]:
+    async def validate_all(self, artifact_id: UUID, branch: str = "main") -> list[CrossDomainCheck]:
         """Run all cross-domain checks for an artifact.
 
         Each check runs independently. If a check raises an exception, it is
@@ -101,12 +97,8 @@ class CrossDomainValidator:
         Looks for PCB artifacts (electronics domain) and enclosure artifacts
         (mechanical domain) and compares their dimensions.
         """
-        pcb_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="electronics"
-        )
-        mech_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="mechanical"
-        )
+        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
+        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
 
         # Find PCB and enclosure by metadata
         pcb = None
@@ -168,13 +160,9 @@ class CrossDomainValidator:
         else:
             oversize = []
             if not fits_width:
-                oversize.append(
-                    f"width ({pcb_width}mm > {available_width}mm)"
-                )
+                oversize.append(f"width ({pcb_width}mm > {available_width}mm)")
             if not fits_height:
-                oversize.append(
-                    f"height ({pcb_height}mm > {available_height}mm)"
-                )
+                oversize.append(f"height ({pcb_height}mm > {available_height}mm)")
             message = f"PCB exceeds enclosure in: {', '.join(oversize)}"
 
         return CrossDomainCheck(
@@ -195,12 +183,8 @@ class CrossDomainValidator:
         Compares mounting hole positions from PCB metadata with mounting
         standoff positions from enclosure metadata.
         """
-        pcb_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="electronics"
-        )
-        mech_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="mechanical"
-        )
+        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
+        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
 
         pcb = None
         enclosure = None
@@ -225,9 +209,7 @@ class CrossDomainValidator:
             )
 
         pcb_holes: list[dict[str, float]] = pcb.metadata.get("mounting_holes", [])
-        enc_standoffs: list[dict[str, float]] = enclosure.metadata.get(
-            "mounting_standoffs", []
-        )
+        enc_standoffs: list[dict[str, float]] = enclosure.metadata.get("mounting_standoffs", [])
 
         if not pcb_holes or not enc_standoffs:
             return CrossDomainCheck(
@@ -258,9 +240,7 @@ class CrossDomainValidator:
             if best_dist <= tolerance:
                 matched += 1
             else:
-                misaligned.append(
-                    {"hole": hole, "min_distance": round(best_dist, 3)}
-                )
+                misaligned.append({"hole": hole, "min_distance": round(best_dist, 3)})
 
         passed = len(misaligned) == 0
 
@@ -301,12 +281,8 @@ class CrossDomainValidator:
         thermally restricted mechanical zones (e.g., near battery, near
         plastic walls with low melting points).
         """
-        pcb_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="electronics"
-        )
-        mech_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="mechanical"
-        )
+        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
+        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
 
         pcb = None
         enclosure = None
@@ -398,12 +374,8 @@ class CrossDomainValidator:
         Verifies that connectors on the PCB have corresponding cutouts in the
         enclosure and that there is sufficient clearance around each connector.
         """
-        pcb_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="electronics"
-        )
-        mech_artifacts = await self.twin.list_artifacts(
-            branch=branch, domain="mechanical"
-        )
+        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
+        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
 
         pcb = None
         enclosure = None
@@ -495,13 +467,10 @@ class CrossDomainValidator:
 
         if passed:
             message = (
-                f"All {len(connectors)} connectors have adequate clearance "
-                f"(min {min_clearance}mm)"
+                f"All {len(connectors)} connectors have adequate clearance (min {min_clearance}mm)"
             )
         else:
-            message = (
-                f"{len(issues)} connector clearance issue(s) detected"
-            )
+            message = f"{len(issues)} connector clearance issue(s) detected"
 
         return CrossDomainCheck(
             name="check_connector_clearances",

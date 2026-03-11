@@ -6,15 +6,12 @@ TwinAPI, McpBridge, EventBus, WorkflowEngine, Scheduler, and test artifacts.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
-from orchestrator.dependency_engine import DependencyGraph
 from orchestrator.event_bus.events import Event, EventType
 from orchestrator.event_bus.subscribers import EventBus, EventSubscriber
-from orchestrator.scheduler import InMemoryScheduler
 from orchestrator.workflow_dag import (
     InMemoryWorkflowEngine,
     WorkflowDefinition,
@@ -25,7 +22,6 @@ from twin_core.api import InMemoryTwinAPI
 from twin_core.models.artifact import Artifact
 from twin_core.models.enums import ArtifactType
 
-
 # ---------------------------------------------------------------------------
 # Spy subscriber for capturing events
 # ---------------------------------------------------------------------------
@@ -34,9 +30,7 @@ from twin_core.models.enums import ArtifactType
 class SpySubscriber(EventSubscriber):
     """Records all received events for test assertions."""
 
-    def __init__(
-        self, sub_id: str = "spy", types: set[EventType] | None = None
-    ) -> None:
+    def __init__(self, sub_id: str = "spy", types: set[EventType] | None = None) -> None:
         self._id = sub_id
         self._types = types
         self.received: list[Event] = []

@@ -5,6 +5,7 @@ recovery, retry semantics, and observability via Temporal's activity
 infrastructure.
 """
 
+from orchestrator.activities.approval_activity import wait_for_approval
 from orchestrator.activities.base_activity import (
     AgentActivityInput,
     AgentActivityOutput,
@@ -12,7 +13,6 @@ from orchestrator.activities.base_activity import (
     ApprovalResult,
     get_default_retry_policy,
 )
-from orchestrator.activities.approval_activity import wait_for_approval
 from orchestrator.activities.electronics_activity import run_electronics_agent
 from orchestrator.activities.firmware_activity import run_firmware_agent
 from orchestrator.activities.mechanical_activity import run_mechanical_agent

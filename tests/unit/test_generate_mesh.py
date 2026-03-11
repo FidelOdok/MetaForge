@@ -159,9 +159,7 @@ class TestGenerateMeshHandler:
         """Successful mesh generation with good quality."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         output = await handler.execute(sample_input)
@@ -179,9 +177,7 @@ class TestGenerateMeshHandler:
         """Mesh with quality within thresholds should be acceptable."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         output = await handler.execute(sample_input)
@@ -198,9 +194,7 @@ class TestGenerateMeshHandler:
         """Mesh with quality outside thresholds should be unacceptable."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", BAD_QUALITY_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", BAD_QUALITY_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         output = await handler.execute(sample_input)
@@ -212,9 +206,7 @@ class TestGenerateMeshHandler:
         # max_aspect_ratio 15.0 > threshold 10.0
         assert any("aspect ratio" in issue.lower() for issue in output.quality_issues)
 
-    async def test_generate_mesh_with_custom_element_size(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_generate_mesh_with_custom_element_size(self, mock_context: SkillContext) -> None:
         """Custom element size is passed through to the output."""
         inp = GenerateMeshInput(
             artifact_id=uuid4(),
@@ -223,18 +215,14 @@ class TestGenerateMeshHandler:
         )
         mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         output = await handler.execute(inp)
 
         assert output.element_size_used == 0.25
 
-    async def test_generate_mesh_with_gmsh_algorithm(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_generate_mesh_with_gmsh_algorithm(self, mock_context: SkillContext) -> None:
         """Gmsh algorithm should be accepted and passed through."""
         inp = GenerateMeshInput(
             artifact_id=uuid4(),
@@ -243,18 +231,14 @@ class TestGenerateMeshHandler:
         )
         mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         output = await handler.execute(inp)
 
         assert output.algorithm_used == "gmsh"
 
-    async def test_generate_mesh_missing_cad_file(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_generate_mesh_missing_cad_file(self, mock_context: SkillContext) -> None:
         """Missing CAD file extension should raise ValueError."""
         inp = GenerateMeshInput(
             artifact_id=uuid4(),
@@ -262,17 +246,13 @@ class TestGenerateMeshHandler:
         )
         mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         with pytest.raises(ValueError, match="Unsupported CAD file extension"):
             await handler.execute(inp)
 
-    async def test_generate_mesh_unsupported_format(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_generate_mesh_unsupported_format(self, mock_context: SkillContext) -> None:
         """Unsupported output format should raise ValueError."""
         inp = GenerateMeshInput(
             artifact_id=uuid4(),
@@ -281,9 +261,7 @@ class TestGenerateMeshHandler:
         )
         mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         with pytest.raises(ValueError, match="Unsupported output format"):
@@ -361,9 +339,7 @@ class TestGenerateMeshPipeline:
         """Full run() pipeline should return SkillResult with success=True."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", GOOD_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         result = await handler.run(sample_input)
@@ -395,9 +371,7 @@ class TestGenerateMeshPipeline:
         """run() should succeed but report quality issues."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
-        mock_context.mcp.register_tool_response(
-            "freecad.generate_mesh", BAD_QUALITY_MESH_RESPONSE
-        )
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", BAD_QUALITY_MESH_RESPONSE)
 
         handler = GenerateMeshHandler(mock_context)
         result = await handler.run(sample_input)

@@ -150,14 +150,10 @@ class CostAttributionTracker:
 
     # ── Budget checking ────────────────────────────────────────────────
 
-    def check_budget_threshold(
-        self, project_id: str, budget_usd: float
-    ) -> tuple[bool, float]:
+    def check_budget_threshold(self, project_id: str, budget_usd: float) -> tuple[bool, float]:
         """Check whether *project_id* has exceeded *budget_usd*.
 
         Returns ``(exceeded, current_total)``.
         """
-        current = sum(
-            r.cost_usd for r in self._records if r.project_id == project_id
-        )
+        current = sum(r.cost_usd for r in self._records if r.project_id == project_id)
         return (current >= budget_usd, current)

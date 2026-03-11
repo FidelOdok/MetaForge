@@ -346,9 +346,7 @@ class BOMRiskScorer:
 
             # Overall BOM score = average of part scores (0 if empty)
             if total_parts > 0:
-                overall_score = round(
-                    sum(p.overall_score for p in part_scores) / total_parts
-                )
+                overall_score = round(sum(p.overall_score for p in part_scores) / total_parts)
             else:
                 overall_score = 0
 

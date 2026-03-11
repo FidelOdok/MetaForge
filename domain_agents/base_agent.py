@@ -7,9 +7,8 @@ graceful degradation to hardcoded dispatch when no LLM is available.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
 
 import structlog
 from pydantic import BaseModel, Field

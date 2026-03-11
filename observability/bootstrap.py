@@ -126,9 +126,7 @@ def init_observability(config: ObservabilityConfig) -> ObservabilityState:
         return ObservabilityState()
 
     if not _otel_fully_available():
-        logger.warning(
-            "OpenTelemetry packages not installed -- running without telemetry"
-        )
+        logger.warning("OpenTelemetry packages not installed -- running without telemetry")
         return ObservabilityState()
 
     # Build a Resource describing this service

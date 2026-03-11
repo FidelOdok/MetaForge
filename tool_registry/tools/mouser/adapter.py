@@ -157,9 +157,7 @@ class MouserAdapter(DistributorAdapter):
 
     def _map_search_results(self, data: dict[str, Any]) -> list[PartSearchResult]:
         results: list[PartSearchResult] = []
-        parts = (
-            data.get("SearchResults", {}).get("Parts", [])
-        )
+        parts = data.get("SearchResults", {}).get("Parts", [])
         for part in parts:
             results.append(
                 PartSearchResult(

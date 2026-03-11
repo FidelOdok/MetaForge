@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import structlog
@@ -15,7 +15,7 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("distributors.base")
 
 
-class LifecycleStatus(str, Enum):
+class LifecycleStatus(StrEnum):
     """Part lifecycle status across distributors."""
 
     ACTIVE = "ACTIVE"
@@ -61,12 +61,8 @@ class AvailabilityInfo(BaseModel):
     stock_qty: int = Field(default=0, ge=0, description="Quantity in stock")
     lead_time_days: int | None = Field(default=None, description="Lead time in days")
     minimum_order_qty: int = Field(default=1, ge=1, description="Minimum order quantity")
-    factory_stock: int | None = Field(
-        default=None, description="Stock at factory (if reported)"
-    )
-    on_order_qty: int | None = Field(
-        default=None, description="Quantity on order (if reported)"
-    )
+    factory_stock: int | None = Field(default=None, description="Stock at factory (if reported)")
+    on_order_qty: int | None = Field(default=None, description="Quantity on order (if reported)")
 
 
 class DistributorAdapter(ABC):

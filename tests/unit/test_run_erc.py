@@ -250,9 +250,7 @@ class TestRunErcHandler:
         assert output.total_warnings == 1
         assert output.total_violations == 3
 
-    async def test_severity_filter_errors_only(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_severity_filter_errors_only(self, mock_context: SkillContext) -> None:
         """Severity filter 'error' should exclude warnings."""
         inp = RunErcInput(
             artifact_id=str(uuid4()),
@@ -280,9 +278,7 @@ class TestRunErcHandler:
         assert output.total_warnings == 0
         assert output.violations[0].severity == "error"
 
-    async def test_severity_filter_warnings_only(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_severity_filter_warnings_only(self, mock_context: SkillContext) -> None:
         """Severity filter 'warning' should exclude errors."""
         inp = RunErcInput(
             artifact_id=str(uuid4()),
@@ -374,9 +370,7 @@ class TestRunErcHandler:
         """Output should include the schematic file path."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("kicad.run_erc", "erc_validation")
-        mock_context.mcp.register_tool_response(
-            "kicad.run_erc", _make_erc_response()
-        )
+        mock_context.mcp.register_tool_response("kicad.run_erc", _make_erc_response())
 
         handler = RunErcHandler(mock_context)
         output = await handler.execute(sample_input)
@@ -389,9 +383,7 @@ class TestRunErcHandler:
         """Output should include the artifact ID."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("kicad.run_erc", "erc_validation")
-        mock_context.mcp.register_tool_response(
-            "kicad.run_erc", _make_erc_response()
-        )
+        mock_context.mcp.register_tool_response("kicad.run_erc", _make_erc_response())
 
         handler = RunErcHandler(mock_context)
         output = await handler.execute(sample_input)
@@ -404,9 +396,7 @@ class TestRunErcHandler:
         """Summary for zero violations should say 'No violations found'."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("kicad.run_erc", "erc_validation")
-        mock_context.mcp.register_tool_response(
-            "kicad.run_erc", _make_erc_response()
-        )
+        mock_context.mcp.register_tool_response("kicad.run_erc", _make_erc_response())
 
         handler = RunErcHandler(mock_context)
         output = await handler.execute(sample_input)
@@ -505,9 +495,7 @@ class TestSkillRunPipeline:
         """Full run() pipeline should return SkillResult with success=True."""
         mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
         mock_context.mcp.register_tool("kicad.run_erc", "erc_validation")
-        mock_context.mcp.register_tool_response(
-            "kicad.run_erc", _make_erc_response()
-        )
+        mock_context.mcp.register_tool_response("kicad.run_erc", _make_erc_response())
 
         handler = RunErcHandler(mock_context)
         result = await handler.run(sample_input)

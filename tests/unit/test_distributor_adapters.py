@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
+from tool_registry.tools.digikey.adapter import DigiKeyAdapter
 from tool_registry.tools.distributors.base import (
     AvailabilityInfo,
     LifecycleStatus,
@@ -15,10 +16,8 @@ from tool_registry.tools.distributors.base import (
     PricingBreak,
 )
 from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
-from tool_registry.tools.digikey.adapter import DigiKeyAdapter
 from tool_registry.tools.mouser.adapter import MouserAdapter
 from tool_registry.tools.nexar.adapter import NexarAdapter
-
 
 # ======================================================================
 # Fixtures — mock httpx responses
@@ -718,7 +717,10 @@ class TestNexarAdapter:
         token_resp = _mock_response(NEXAR_TOKEN_RESPONSE)
         search_resp = _mock_response(NEXAR_SEARCH_RESPONSE)
         mock_client.post.side_effect = [
-            token_resp, search_resp, token_resp, search_resp,
+            token_resp,
+            search_resp,
+            token_resp,
+            search_resp,
         ]
 
         await adapter.search_parts("ATmega")

@@ -119,8 +119,7 @@ class Neo4jGraphEngine(GraphEngine):
     async def _ensure_indexes(self) -> None:
         """Create indexes and constraints for the graph schema."""
         statements = [
-            "CREATE CONSTRAINT node_id_unique IF NOT EXISTS "
-            "FOR (n:Node) REQUIRE n.id IS UNIQUE",
+            "CREATE CONSTRAINT node_id_unique IF NOT EXISTS FOR (n:Node) REQUIRE n.id IS UNIQUE",
             "CREATE INDEX node_type_index IF NOT EXISTS FOR (n:Node) ON (n.node_type)",
             "CREATE INDEX edge_type_index IF NOT EXISTS FOR ()-[r:EDGE]-() ON (r.edge_type)",
         ]
@@ -417,9 +416,7 @@ class Neo4jGraphEngine(GraphEngine):
                     for i, (key, value) in enumerate(filters.items()):
                         param_name = f"filter_{i}"
                         where_clauses.append(f"n.{key} = ${param_name}")
-                        params[param_name] = (
-                            str(value) if isinstance(value, UUID) else value
-                        )
+                        params[param_name] = str(value) if isinstance(value, UUID) else value
 
                 where = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
                 query = f"MATCH (n:Node){where} RETURN n"  # noqa: S608
@@ -458,18 +455,14 @@ class Neo4jGraphEngine(GraphEngine):
                         sid=str(edge.source_id),
                     )
                     if await result.single() is None:
-                        raise ValueError(
-                            f"Source node {edge.source_id} does not exist"
-                        )
+                        raise ValueError(f"Source node {edge.source_id} does not exist")
 
                     result = await session.run(
                         "MATCH (t:Node {id: $tid}) RETURN t",
                         tid=str(edge.target_id),
                     )
                     if await result.single() is None:
-                        raise ValueError(
-                            f"Target node {edge.target_id} does not exist"
-                        )
+                        raise ValueError(f"Target node {edge.target_id} does not exist")
 
                     await session.run(
                         "MATCH (s:Node {id: $sid}), (t:Node {id: $tid}) "
@@ -542,9 +535,7 @@ class Neo4jGraphEngine(GraphEngine):
                 logger.error("neo4j_get_edges_failed", error=str(exc))
                 raise Neo4jQueryError(f"Failed to get edges: {exc}") from exc
 
-    async def remove_edge(
-        self, source_id: UUID, target_id: UUID, edge_type: EdgeType
-    ) -> bool:
+    async def remove_edge(self, source_id: UUID, target_id: UUID, edge_type: EdgeType) -> bool:
         """Remove a specific edge. Returns False if not found."""
         self._assert_connected()
         t0 = time.monotonic()
@@ -595,16 +586,10 @@ class Neo4jGraphEngine(GraphEngine):
             span.set_attribute("db.operation", "get_neighbors")
             span.set_attribute("node.id", str(node_id))
             try:
-                edges = await self.get_edges(
-                    node_id, direction=direction, edge_type=edge_type
-                )
+                edges = await self.get_edges(node_id, direction=direction, edge_type=edge_type)
                 neighbor_ids: list[UUID] = []
                 for edge in edges:
-                    nid = (
-                        edge.target_id
-                        if edge.source_id == node_id
-                        else edge.source_id
-                    )
+                    nid = edge.target_id if edge.source_id == node_id else edge.source_id
                     if nid not in neighbor_ids:
                         neighbor_ids.append(nid)
 
@@ -649,9 +634,7 @@ class Neo4jGraphEngine(GraphEngine):
                     if current_depth >= depth:
                         continue
 
-                    edges = await self.get_edges(
-                        current_id, direction="outgoing"
-                    )
+                    edges = await self.get_edges(current_id, direction="outgoing")
                     for edge in edges:
                         if edge_types and edge.edge_type not in edge_types:
                             continue
@@ -660,9 +643,7 @@ class Neo4jGraphEngine(GraphEngine):
                             target = await self.get_node(edge.target_id)
                             if target is not None:
                                 visited_nodes[edge.target_id] = target
-                                queue.append(
-                                    (edge.target_id, current_depth + 1)
-                                )
+                                queue.append((edge.target_id, current_depth + 1))
 
                 span.set_attribute(
                     "neo4j.result_count",
@@ -681,9 +662,7 @@ class Neo4jGraphEngine(GraphEngine):
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error("neo4j_get_subgraph_failed", error=str(exc))
-                raise Neo4jQueryError(
-                    f"Failed to get subgraph: {exc}"
-                ) from exc
+                raise Neo4jQueryError(f"Failed to get subgraph: {exc}") from exc
 
     async def traverse(
         self,
@@ -703,9 +682,7 @@ class Neo4jGraphEngine(GraphEngine):
                     raise KeyError(f"Root node {root_id} not found")
 
                 paths: list[list[UUID]] = []
-                stack: list[tuple[UUID, list[UUID]]] = [
-                    (root_id, [root_id])
-                ]
+                stack: list[tuple[UUID, list[UUID]]] = [(root_id, [root_id])]
 
                 while stack:
                     current_id, current_path = stack.pop()
@@ -713,9 +690,7 @@ class Neo4jGraphEngine(GraphEngine):
                         paths.append(current_path)
                         continue
 
-                    edges = await self.get_edges(
-                        current_id, direction="outgoing"
-                    )
+                    edges = await self.get_edges(current_id, direction="outgoing")
                     has_children = False
                     for edge in edges:
                         if edge.edge_type not in edge_types:
@@ -779,6 +754,4 @@ class Neo4jGraphEngine(GraphEngine):
                     query=query[:200],
                     error=str(exc),
                 )
-                raise Neo4jQueryError(
-                    f"Cypher query failed: {exc}"
-                ) from exc
+                raise Neo4jQueryError(f"Cypher query failed: {exc}") from exc

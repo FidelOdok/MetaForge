@@ -167,17 +167,11 @@ class TestExportGeometry:
         assert result["file_size_bytes"] == 245760
         assert result["format"] == "stl"
 
-    async def test_export_missing_input_file_raises(
-        self, server_with_mocks: FreecadServer
-    ) -> None:
+    async def test_export_missing_input_file_raises(self, server_with_mocks: FreecadServer) -> None:
         with pytest.raises(ValueError, match="input_file is required"):
-            await server_with_mocks.export_geometry(
-                {"input_file": "", "output_format": "stl"}
-            )
+            await server_with_mocks.export_geometry({"input_file": "", "output_format": "stl"})
 
-    async def test_export_unsupported_format_raises(
-        self, server_with_mocks: FreecadServer
-    ) -> None:
+    async def test_export_unsupported_format_raises(self, server_with_mocks: FreecadServer) -> None:
         with pytest.raises(ValueError, match="Unsupported export format"):
             await server_with_mocks.export_geometry(
                 {"input_file": "/models/bracket.step", "output_format": "fbx"}
@@ -207,13 +201,9 @@ class TestGenerateMesh:
         assert result["quality_metrics"]["max_aspect_ratio"] == 4.2
         assert result["quality_metrics"]["avg_quality"] == 0.87
 
-    async def test_generate_mesh_default_params(
-        self, server_with_mocks: FreecadServer
-    ) -> None:
+    async def test_generate_mesh_default_params(self, server_with_mocks: FreecadServer) -> None:
         """generate_mesh uses default element_size, algorithm, and output_format."""
-        result = await server_with_mocks.generate_mesh(
-            {"input_file": "/models/bracket.step"}
-        )
+        result = await server_with_mocks.generate_mesh({"input_file": "/models/bracket.step"})
         assert result["num_nodes"] == 12500
         # Verify _execute_meshing was called with default values
         call_args = server_with_mocks._execute_meshing.call_args  # type: ignore[attr-defined]
@@ -275,9 +265,7 @@ class TestBooleanOperation:
         assert result["operation"] == "subtract"
         assert result["result_volume"] == 800.0
 
-    async def test_boolean_missing_files_raises(
-        self, server_with_mocks: FreecadServer
-    ) -> None:
+    async def test_boolean_missing_files_raises(self, server_with_mocks: FreecadServer) -> None:
         with pytest.raises(ValueError, match="input_file_a is required"):
             await server_with_mocks.boolean_operation(
                 {
@@ -295,9 +283,7 @@ class TestBooleanOperation:
                 }
             )
 
-    async def test_boolean_invalid_operation_raises(
-        self, server_with_mocks: FreecadServer
-    ) -> None:
+    async def test_boolean_invalid_operation_raises(self, server_with_mocks: FreecadServer) -> None:
         with pytest.raises(ValueError, match="Unsupported boolean operation"):
             await server_with_mocks.boolean_operation(
                 {
@@ -327,13 +313,9 @@ class TestGetProperties:
         assert result["properties"]["center_of_mass"]["x"] == 10.0
         assert result["properties"]["bounding_box"]["max_x"] == 20.0
 
-    async def test_get_properties_default_fields(
-        self, server_with_mocks: FreecadServer
-    ) -> None:
+    async def test_get_properties_default_fields(self, server_with_mocks: FreecadServer) -> None:
         """get_properties uses default property list when not specified."""
-        result = await server_with_mocks.get_properties(
-            {"input_file": "/models/bracket.step"}
-        )
+        result = await server_with_mocks.get_properties({"input_file": "/models/bracket.step"})
         assert result["file"] == "/models/bracket.step"
         # Verify _execute_analysis was called with default properties
         call_args = server_with_mocks._execute_analysis.call_args  # type: ignore[attr-defined]

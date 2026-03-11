@@ -304,9 +304,7 @@ class TestContainerExecutionEngine:
 
         runtime.run = run_with_retries  # type: ignore[assignment]
         config = ContainerConfig(image="metaforge/retry")
-        result = await engine.execute_with_retry(
-            "retry-tool", config, ["run"], max_retries=2
-        )
+        result = await engine.execute_with_retry("retry-tool", config, ["run"], max_retries=2)
         assert result.success is True
         assert call_count == 3
 
@@ -317,9 +315,7 @@ class TestContainerExecutionEngine:
             ExecutionResult(success=False, exit_code=1, stderr="permanent failure"),
         )
         config = ContainerConfig(image="metaforge/always-fail")
-        result = await engine.execute_with_retry(
-            "failing-tool", config, ["run"], max_retries=2
-        )
+        result = await engine.execute_with_retry("failing-tool", config, ["run"], max_retries=2)
         assert result.success is False
         assert result.exit_code == 1
 
@@ -330,9 +326,7 @@ class TestContainerExecutionEngine:
             ExecutionResult(success=False, exit_code=1),
         )
         config = ContainerConfig(image="metaforge/zero-retry")
-        result = await engine.execute_with_retry(
-            "tool", config, ["run"], max_retries=0
-        )
+        result = await engine.execute_with_retry("tool", config, ["run"], max_retries=0)
         assert result.success is False
 
     async def test_execute_logging(self, engine, config):

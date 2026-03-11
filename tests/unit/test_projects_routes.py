@@ -6,8 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api_gateway.server import create_app
-from orchestrator.workflow_dag import InMemoryWorkflowEngine
 from orchestrator.scheduler import InMemoryScheduler
+from orchestrator.workflow_dag import InMemoryWorkflowEngine
 
 
 @pytest.fixture

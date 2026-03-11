@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 
+from twin_core.aas.exporter import AASExporter
 from twin_core.aas.mapper import AASMapper
 from twin_core.aas.models import (
     AASEnvironment,
@@ -32,7 +33,6 @@ from twin_core.aas.models import (
     SubmodelElementCollection,
 )
 from twin_core.aas.packager import AASXPackager
-from twin_core.aas.exporter import AASExporter
 from twin_core.graph_engine import InMemoryGraphEngine
 from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase
@@ -44,9 +44,7 @@ from twin_core.models.enums import (
     ConstraintSeverity,
     ConstraintStatus,
     EdgeType,
-    NodeType,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -263,15 +261,11 @@ class TestAASMapper:
         env = mapper.map_subgraph(subgraph)
 
         # Find nameplate submodel
-        nameplate = next(
-            sm for sm in env.submodels if sm.id_short == "Nameplate"
-        )
+        nameplate = next(sm for sm in env.submodels if sm.id_short == "Nameplate")
         assert nameplate is not None
 
         # Check elements
-        elements_by_id = {
-            el.id_short: el for el in nameplate.submodel_elements
-        }
+        elements_by_id = {el.id_short: el for el in nameplate.submodel_elements}
         assert "ManufacturerName" in elements_by_id
         assert "ArtifactCount" in elements_by_id
         assert elements_by_id["ArtifactCount"].value == "1"
@@ -296,9 +290,7 @@ class TestAASMapper:
 
         env = mapper.map_subgraph(subgraph)
 
-        bom = next(
-            sm for sm in env.submodels if sm.id_short == "BillOfMaterials"
-        )
+        bom = next(sm for sm in env.submodels if sm.id_short == "BillOfMaterials")
         assert len(bom.submodel_elements) == 1
 
         line_item = bom.submodel_elements[0]
@@ -327,9 +319,7 @@ class TestAASMapper:
 
         env = mapper.map_subgraph(subgraph)
 
-        tech = next(
-            sm for sm in env.submodels if sm.id_short == "TechnicalData"
-        )
+        tech = next(sm for sm in env.submodels if sm.id_short == "TechnicalData")
         assert len(tech.submodel_elements) == 1
 
         constraint_el = tech.submodel_elements[0]
@@ -359,9 +349,7 @@ class TestAASMapper:
 
         env = mapper.map_subgraph(subgraph)
 
-        docs = next(
-            sm for sm in env.submodels if sm.id_short == "Documentation"
-        )
+        docs = next(sm for sm in env.submodels if sm.id_short == "Documentation")
         assert len(docs.submodel_elements) == 1
 
         doc_el = docs.submodel_elements[0]
@@ -406,9 +394,7 @@ class TestAASMapper:
         docs = next(sm for sm in env.submodels if sm.id_short == "Documentation")
         assert len(docs.submodel_elements) == 1
 
-    def test_shell_references_all_submodels(
-        self, asset_id: str, asset_name: str
-    ) -> None:
+    def test_shell_references_all_submodels(self, asset_id: str, asset_name: str) -> None:
         from twin_core.models.relationship import SubGraph
 
         mapper = AASMapper(asset_id=asset_id, asset_name=asset_name)
@@ -591,9 +577,7 @@ class TestAASExporterRoundTrip:
             assert shell["assetInformation"]["globalAssetId"] == "urn:metaforge:asset:test-1"
 
     @pytest.mark.asyncio
-    async def test_export_with_components_and_constraints(
-        self, graph: InMemoryGraphEngine
-    ) -> None:
+    async def test_export_with_components_and_constraints(self, graph: InMemoryGraphEngine) -> None:
         # Create root artifact
         root = Artifact(
             name="Main Schematic",
@@ -659,26 +643,18 @@ class TestAASExporterRoundTrip:
             # BOM should have the component
             bom = submodels["BillOfMaterials"]
             assert len(bom["submodelElements"]) == 1
-            bom_props = {
-                el["idShort"]: el
-                for el in bom["submodelElements"][0]["value"]
-            }
+            bom_props = {el["idShort"]: el for el in bom["submodelElements"][0]["value"]}
             assert bom_props["PartNumber"]["value"] == "LM7805"
             assert bom_props["Quantity"]["value"] == "2"
 
             # TechnicalData should have the constraint
             tech = submodels["TechnicalData"]
             assert len(tech["submodelElements"]) == 1
-            constraint_props = {
-                el["idShort"]: el
-                for el in tech["submodelElements"][0]["value"]
-            }
+            constraint_props = {el["idShort"]: el for el in tech["submodelElements"][0]["value"]}
             assert constraint_props["Name"]["value"] == "Input Voltage Range"
 
     @pytest.mark.asyncio
-    async def test_export_environment_without_packaging(
-        self, graph: InMemoryGraphEngine
-    ) -> None:
+    async def test_export_environment_without_packaging(self, graph: InMemoryGraphEngine) -> None:
         artifact = Artifact(
             name="Firmware",
             type=ArtifactType.FIRMWARE_SOURCE,
@@ -703,9 +679,7 @@ class TestAASExporterRoundTrip:
         assert len(env.submodels) == 4
 
     @pytest.mark.asyncio
-    async def test_export_preserves_semantic_ids(
-        self, graph: InMemoryGraphEngine
-    ) -> None:
+    async def test_export_preserves_semantic_ids(self, graph: InMemoryGraphEngine) -> None:
         artifact = Artifact(
             name="Test",
             type=ArtifactType.BOM,
@@ -732,9 +706,7 @@ class TestAASExporterRoundTrip:
             assert sm.semantic_id.keys[0].type == KeyType.GLOBAL_REFERENCE
 
     @pytest.mark.asyncio
-    async def test_export_multiple_components(
-        self, graph: InMemoryGraphEngine
-    ) -> None:
+    async def test_export_multiple_components(self, graph: InMemoryGraphEngine) -> None:
         root = Artifact(
             name="BOM Artifact",
             type=ArtifactType.BOM,
@@ -747,11 +719,13 @@ class TestAASExporterRoundTrip:
         await graph.add_node(root)
 
         components = []
-        for i, (pn, mfr) in enumerate([
-            ("RC0402JR-07100KL", "Yageo"),
-            ("CC0402KRX7R7BB104", "Yageo"),
-            ("CRCW040210K0FKED", "Vishay"),
-        ]):
+        for i, (pn, mfr) in enumerate(
+            [
+                ("RC0402JR-07100KL", "Yageo"),
+                ("CC0402KRX7R7BB104", "Yageo"),
+                ("CRCW040210K0FKED", "Vishay"),
+            ]
+        ):
             comp = Component(
                 part_number=pn,
                 manufacturer=mfr,
@@ -780,16 +754,11 @@ class TestAASExporterRoundTrip:
             env_raw = zf.read("aasx/aas/aas_env.json").decode("utf-8")
             env_data = json.loads(env_raw)
 
-            bom = next(
-                sm for sm in env_data["submodels"]
-                if sm["idShort"] == "BillOfMaterials"
-            )
+            bom = next(sm for sm in env_data["submodels"] if sm["idShort"] == "BillOfMaterials")
             assert len(bom["submodelElements"]) == 3
 
     @pytest.mark.asyncio
-    async def test_aasx_zip_is_valid_and_complete(
-        self, graph: InMemoryGraphEngine
-    ) -> None:
+    async def test_aasx_zip_is_valid_and_complete(self, graph: InMemoryGraphEngine) -> None:
         """Verify the full OPC structure of the exported AASX."""
         root = Artifact(
             name="Complete Test",

@@ -12,9 +12,7 @@ class RunFeaInput(BaseModel):
     """Input for the run_fea skill."""
 
     artifact_id: UUID = Field(..., description="Twin artifact ID for the mechanical design")
-    mesh_file: str = Field(
-        ..., min_length=1, description="Path to the FEA mesh file (.inp/.unv)"
-    )
+    mesh_file: str = Field(..., min_length=1, description="Path to the FEA mesh file (.inp/.unv)")
     load_cases: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Load case definitions: [{'name': '...', 'force_n': N, 'direction': '...'}]",
@@ -31,15 +29,9 @@ class RunFeaOutput(BaseModel):
     """Output from the run_fea skill."""
 
     artifact_id: UUID = Field(..., description="Twin artifact ID")
-    max_stress_mpa: float = Field(
-        ..., ge=0, description="Maximum von Mises stress in MPa"
-    )
-    max_displacement_mm: float = Field(
-        ..., ge=0, description="Maximum displacement in mm"
-    )
+    max_stress_mpa: float = Field(..., ge=0, description="Maximum von Mises stress in MPa")
+    max_displacement_mm: float = Field(..., ge=0, description="Maximum displacement in mm")
     safety_factor: float = Field(
         ..., ge=0, description="Minimum safety factor across all load cases"
     )
-    solver_time_s: float = Field(
-        default=0.0, ge=0, description="Solver wall-clock time in seconds"
-    )
+    solver_time_s: float = Field(default=0.0, ge=0, description="Solver wall-clock time in seconds")

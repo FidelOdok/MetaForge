@@ -14,12 +14,11 @@ import base64
 import json
 import logging
 import tempfile
-from email.parser import BytesParser
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from convert import convert, QUALITY_TIERS
+from convert import QUALITY_TIERS, convert
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("occt-server")
@@ -47,7 +46,7 @@ def _parse_multipart(headers: dict, body: bytes) -> tuple[bytes, str]:
         if header_end == -1:
             continue
         part_headers = part[:header_end].decode("utf-8", errors="replace")
-        part_body = part[header_end + 4:]
+        part_body = part[header_end + 4 :]
         # Strip trailing \r\n-- if present
         if part_body.endswith(b"\r\n"):
             part_body = part_body[:-2]
@@ -70,7 +69,6 @@ def _parse_multipart(headers: dict, body: bytes) -> tuple[bytes, str]:
 
 
 class ConvertHandler(BaseHTTPRequestHandler):
-
     def do_GET(self) -> None:
         if urlparse(self.path).path == "/health":
             self._json_response(200, {"status": "ok"})
@@ -98,9 +96,7 @@ class ConvertHandler(BaseHTTPRequestHandler):
 
         # Parse multipart
         try:
-            file_bytes, filename = _parse_multipart(
-                dict(self.headers), body
-            )
+            file_bytes, filename = _parse_multipart(dict(self.headers), body)
         except ValueError as exc:
             self._json_response(400, {"error": str(exc)})
             return

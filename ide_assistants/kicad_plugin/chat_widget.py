@@ -7,10 +7,9 @@ integration.  The widget is designed to match KiCad's default dark palette.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
-from .types import ChatActor, ChatMessage, ChatScope, ChatThread
 from .context_resolver import resolve_current_scope
+from .types import ChatActor, ChatMessage, ChatScope, ChatThread
 from .ws_client import MetaForgeWSClient, WSConfig
 
 logger = logging.getLogger(__name__)
@@ -20,9 +19,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 ROLE_COLORS: dict[str, str] = {
-    "user": "#264f78",     # Blue tint
-    "agent": "#1b5e20",    # Green tint
-    "system": "#424242",   # Gray
+    "user": "#264f78",  # Blue tint
+    "agent": "#1b5e20",  # Green tint
+    "system": "#424242",  # Gray
 }
 
 DEFAULT_COLOR = "#424242"
@@ -79,10 +78,7 @@ def format_message_html(message: ChatMessage) -> str:
 def _escape(text: str) -> str:
     """Escape HTML special characters."""
     return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
 
 
@@ -117,8 +113,8 @@ class ChatWidget:
         self._message_list = None
         self._composer = None
         self._send_button = None
-        self._ws_client: Optional[MetaForgeWSClient] = None
-        self._current_thread: Optional[ChatThread] = None
+        self._ws_client: MetaForgeWSClient | None = None
+        self._current_thread: ChatThread | None = None
         self._scope: ChatScope = resolve_current_scope()
         self._messages: list[ChatMessage] = []
 
@@ -130,18 +126,16 @@ class ChatWidget:
         Requires PyQt5 at runtime (available inside KiCad).
         """
         try:
+            from PyQt5.QtGui import QColor, QPalette  # type: ignore[import-untyped]
             from PyQt5.QtWidgets import (  # type: ignore[import-untyped]
                 QDialog,
-                QVBoxLayout,
                 QHBoxLayout,
-                QListWidget,
-                QListWidgetItem,
-                QTextEdit,
-                QPushButton,
                 QLabel,
+                QListWidget,
+                QPushButton,
+                QTextEdit,
+                QVBoxLayout,
             )
-            from PyQt5.QtCore import Qt  # type: ignore[import-untyped]
-            from PyQt5.QtGui import QColor, QPalette  # type: ignore[import-untyped]
         except ImportError:
             logger.error("PyQt5 is required to display the chat widget")
             return
@@ -167,9 +161,7 @@ class ChatWidget:
 
         # Scope label.
         scope_label = QLabel(self._scope.label or "Project")
-        scope_label.setStyleSheet(
-            "color: #9d9d9d; font-size: 11px; padding: 2px 0;"
-        )
+        scope_label.setStyleSheet("color: #9d9d9d; font-size: 11px; padding: 2px 0;")
         layout.addWidget(scope_label)
 
         # ---- Message list -------------------------------------------------
@@ -266,8 +258,8 @@ class ChatWidget:
         if self._message_list is None:
             return
         try:
-            from PyQt5.QtWidgets import QListWidgetItem, QLabel  # type: ignore[import-untyped]
             from PyQt5.QtCore import Qt  # type: ignore[import-untyped]
+            from PyQt5.QtWidgets import QLabel, QListWidgetItem  # type: ignore[import-untyped]
 
             html = format_message_html(message)
             label = QLabel(html)

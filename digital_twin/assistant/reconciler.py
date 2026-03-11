@@ -260,7 +260,7 @@ class DriftReconciler:
         try:
             data = path.read_bytes()
             return hashlib.sha256(data).hexdigest()
-        except (OSError, IOError):
+        except OSError:
             return ""
 
     async def _publish_drift_event(self, event_kind: str, drift: DriftResult) -> None:

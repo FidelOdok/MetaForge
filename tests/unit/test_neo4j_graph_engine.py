@@ -16,7 +16,6 @@ from twin_core.neo4j_graph_engine import (
     Neo4jQueryError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -119,9 +118,7 @@ class TestConnectionLifecycle:
     async def test_connect_failure(self, mock_driver):
         mock_neo4j = MagicMock()
         mock_neo4j.AsyncGraphDatabase.driver.return_value = mock_driver
-        mock_driver.verify_connectivity = AsyncMock(
-            side_effect=Exception("Connection refused")
-        )
+        mock_driver.verify_connectivity = AsyncMock(side_effect=Exception("Connection refused"))
 
         with patch("twin_core.neo4j_graph_engine.neo4j", mock_neo4j):
             eng = Neo4jGraphEngine(uri="bolt://bad:7687")
@@ -180,9 +177,7 @@ class TestNodeOperations:
         # Second run: create node
         mock_result_create = AsyncMock()
 
-        mock_session.run = AsyncMock(
-            side_effect=[mock_result_check, mock_result_create]
-        )
+        mock_session.run = AsyncMock(side_effect=[mock_result_check, mock_result_create])
 
         result = await engine.add_node(artifact)
         assert result.id == artifact.id
@@ -367,9 +362,7 @@ class TestEdgeOperations:
         mock_target_result = AsyncMock()
         mock_target_result.single = AsyncMock(return_value=None)
 
-        mock_session.run = AsyncMock(
-            side_effect=[mock_source_result, mock_target_result]
-        )
+        mock_session.run = AsyncMock(side_effect=[mock_source_result, mock_target_result])
 
         with pytest.raises(ValueError, match="Target node"):
             await engine.add_edge(edge)
@@ -394,21 +387,13 @@ class TestEdgeOperations:
 
     async def test_get_edges_both_directions(self, engine, mock_session):
         a_id = uuid4()
-        edge_out = EdgeBase(
-            source_id=a_id, target_id=uuid4(), edge_type=EdgeType.DEPENDS_ON
-        )
-        edge_in = EdgeBase(
-            source_id=uuid4(), target_id=a_id, edge_type=EdgeType.VALIDATES
-        )
+        edge_out = EdgeBase(source_id=a_id, target_id=uuid4(), edge_type=EdgeType.DEPENDS_ON)
+        edge_in = EdgeBase(source_id=uuid4(), target_id=a_id, edge_type=EdgeType.VALIDATES)
 
         mock_out = AsyncMock()
-        mock_out.data = AsyncMock(
-            return_value=[{"r": Neo4jGraphEngine._edge_to_props(edge_out)}]
-        )
+        mock_out.data = AsyncMock(return_value=[{"r": Neo4jGraphEngine._edge_to_props(edge_out)}])
         mock_in = AsyncMock()
-        mock_in.data = AsyncMock(
-            return_value=[{"r": Neo4jGraphEngine._edge_to_props(edge_in)}]
-        )
+        mock_in.data = AsyncMock(return_value=[{"r": Neo4jGraphEngine._edge_to_props(edge_in)}])
         mock_session.run = AsyncMock(side_effect=[mock_out, mock_in])
 
         result = await engine.get_edges(a_id, direction="both")
@@ -444,9 +429,7 @@ class TestTraversalQueries:
     async def test_get_neighbors(self, engine, mock_session):
         a = _make_artifact("a")
         b = _make_artifact("b")
-        edge = EdgeBase(
-            source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON
-        )
+        edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
         # get_edges returns one edge
         edge_props = Neo4jGraphEngine._edge_to_props(edge)
@@ -467,9 +450,7 @@ class TestTraversalQueries:
     async def test_get_subgraph(self, engine, mock_session):
         a = _make_artifact("a")
         b = _make_artifact("b")
-        edge = EdgeBase(
-            source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON
-        )
+        edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
         # get_node for root
         a_record = _make_mock_record(a)
@@ -492,10 +473,10 @@ class TestTraversalQueries:
 
         mock_session.run = AsyncMock(
             side_effect=[
-                mock_root,       # get_node(root_id)
-                mock_edges_root, # get_edges(root, outgoing)
-                mock_b_node,     # get_node(b.id)
-                mock_edges_b,    # get_edges(b, outgoing)
+                mock_root,  # get_node(root_id)
+                mock_edges_root,  # get_edges(root, outgoing)
+                mock_b_node,  # get_node(b.id)
+                mock_edges_b,  # get_edges(b, outgoing)
             ]
         )
 
@@ -515,9 +496,7 @@ class TestTraversalQueries:
     async def test_traverse(self, engine, mock_session):
         a = _make_artifact("a")
         b = _make_artifact("b")
-        edge = EdgeBase(
-            source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON
-        )
+        edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
         # get_node for root
         a_record = _make_mock_record(a)
@@ -533,13 +512,9 @@ class TestTraversalQueries:
         mock_edges_b = AsyncMock()
         mock_edges_b.data = AsyncMock(return_value=[])
 
-        mock_session.run = AsyncMock(
-            side_effect=[mock_root, mock_edges_a, mock_edges_b]
-        )
+        mock_session.run = AsyncMock(side_effect=[mock_root, mock_edges_a, mock_edges_b])
 
-        paths = await engine.traverse(
-            a.id, edge_types=[EdgeType.DEPENDS_ON], max_depth=5
-        )
+        paths = await engine.traverse(a.id, edge_types=[EdgeType.DEPENDS_ON], max_depth=5)
         assert len(paths) == 1
         assert paths[0] == [a.id, b.id]
 
@@ -560,14 +535,10 @@ class TestTraversalQueries:
 class TestCypherQuery:
     async def test_query_cypher(self, engine, mock_session):
         mock_result = AsyncMock()
-        mock_result.data = AsyncMock(
-            return_value=[{"name": "test"}, {"name": "other"}]
-        )
+        mock_result.data = AsyncMock(return_value=[{"name": "test"}, {"name": "other"}])
         mock_session.run = AsyncMock(return_value=mock_result)
 
-        result = await engine.query_cypher(
-            "MATCH (n) RETURN n.name AS name", params={}
-        )
+        result = await engine.query_cypher("MATCH (n) RETURN n.name AS name", params={})
         assert len(result) == 2
         assert result[0]["name"] == "test"
 

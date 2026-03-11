@@ -53,9 +53,7 @@ def _cfd_response(convergence_residual: float = 1e-5) -> dict:
 @pytest.fixture
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
-    twin.get_artifact.return_value = MagicMock(
-        id=uuid4(), name="drone-fc", domain="simulation"
-    )
+    twin.get_artifact.return_value = MagicMock(id=uuid4(), name="drone-fc", domain="simulation")
     return twin
 
 
@@ -214,9 +212,7 @@ class TestRunFea:
         assert result.skill_results[0]["skill"] == "run_fea"
         assert result.skill_results[0]["safety_factor"] >= 1.0
 
-    async def test_fea_fails_low_safety(
-        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
-    ):
+    async def test_fea_fails_low_safety(self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge):
         """FEA with low safety factor should report failure."""
         mcp_bridge.register_tool_response(
             "calculix.run_fea",

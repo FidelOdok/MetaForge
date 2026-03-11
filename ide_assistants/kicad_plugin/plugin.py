@@ -25,9 +25,7 @@ class MetaForgeChatPlugin:
     def __init__(self) -> None:
         self._name = "MetaForge Chat"
         self._category = "MetaForge"
-        self._description = (
-            "Open the MetaForge AI assistant chat for PCB design guidance."
-        )
+        self._description = "Open the MetaForge AI assistant chat for PCB design guidance."
         self._show_toolbar_button = True
         self._icon_file_name = ""
         self._plugin_instance = None
@@ -38,9 +36,7 @@ class MetaForgeChatPlugin:
         """Set plugin metadata (called by KiCad during registration)."""
         self._name = "MetaForge Chat"
         self._category = "MetaForge"
-        self._description = (
-            "Open the MetaForge AI assistant chat for PCB design guidance."
-        )
+        self._description = "Open the MetaForge AI assistant chat for PCB design guidance."
 
     def Run(self) -> None:  # noqa: N802 — KiCad uses PascalCase
         """Entry point invoked when the user activates the plugin."""
@@ -80,6 +76,4 @@ class MetaForgeChatPlugin:
             self._plugin_instance.register()
             logger.info("MetaForge KiCad plugin registered")
         except ImportError:
-            logger.debug(
-                "pcbnew not available — skipping plugin registration"
-            )
+            logger.debug("pcbnew not available — skipping plugin registration")

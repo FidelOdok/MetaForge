@@ -26,9 +26,7 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
     input_type = CheckToleranceInput
     output_type = CheckToleranceOutput
 
-    async def validate_preconditions(
-        self, input_data: CheckToleranceInput
-    ) -> list[str]:
+    async def validate_preconditions(self, input_data: CheckToleranceInput) -> list[str]:
         """Check that the artifact exists in the Twin."""
         errors: list[str] = []
 
@@ -36,15 +34,11 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
             input_data.artifact_id, branch=self.context.branch
         )
         if artifact is None:
-            errors.append(
-                f"Artifact {input_data.artifact_id} not found in Twin"
-            )
+            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
 
         return errors
 
-    async def execute(
-        self, input_data: CheckToleranceInput
-    ) -> CheckToleranceOutput:
+    async def execute(self, input_data: CheckToleranceInput) -> CheckToleranceOutput:
         """Analyze tolerances against manufacturing process capabilities."""
         self.logger.info(
             "Running tolerance check",
@@ -161,8 +155,7 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
             if 1.0 <= cp < 1.33 and status == "warning":
                 # Only add if not already flagged as too_tight
                 has_too_tight = any(
-                    v.dimension_id == spec.dimension_id
-                    and v.violation_type == "too_tight"
+                    v.dimension_id == spec.dimension_id and v.violation_type == "too_tight"
                     for v in violations
                 )
                 if not has_too_tight:
@@ -175,8 +168,7 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
                             specified_tolerance=round(tol_range, 6),
                             achievable_tolerance=process.achievable_tolerance,
                             message=(
-                                f"Capability index Cp={cp:.2f} is marginal "
-                                f"(recommended >= 1.33)"
+                                f"Capability index Cp={cp:.2f} is marginal (recommended >= 1.33)"
                             ),
                             recommendation=(
                                 "Consider widening tolerance or upgrading process "
@@ -203,8 +195,12 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
             overall_status = "pass"
 
         summary = self._build_summary(
-            len(results), num_passed, num_warnings, num_failures,
-            overall_status, process.process_type,
+            len(results),
+            num_passed,
+            num_warnings,
+            num_failures,
+            overall_status,
+            process.process_type,
         )
 
         return CheckToleranceOutput(
@@ -271,10 +267,7 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
         Stack-up tolerance = sqrt(sum(ti^2)) where ti = individual tolerance range.
         Compares against a simple worst-case limit.
         """
-        tol_ranges = [
-            spec.upper_tolerance - spec.lower_tolerance
-            for spec in input_data.tolerances
-        ]
+        tol_ranges = [spec.upper_tolerance - spec.lower_tolerance for spec in input_data.tolerances]
         rss_stack = math.sqrt(sum(t**2 for t in tol_ranges))
         worst_case = sum(tol_ranges)
 

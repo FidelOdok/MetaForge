@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any
+from datetime import UTC, datetime
+from enum import StrEnum
 
 import structlog
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("domain_agents.supply_chain.models")
 
 
-class LifecycleStatus(str, Enum):
+class LifecycleStatus(StrEnum):
     """Component lifecycle status."""
 
     ACTIVE = "active"
@@ -25,7 +24,7 @@ class LifecycleStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     """Risk level classification."""
 
     LOW = "low"
@@ -68,7 +67,7 @@ class BOMRiskReport(BaseModel):
         default_factory=list, description="Per-part risk scores"
     )
     generated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Report generation timestamp",
     )
 
@@ -78,9 +77,7 @@ class AlternatePart(BaseModel):
 
     mpn: str = Field(..., description="Manufacturer Part Number")
     manufacturer: str = Field(default="", description="Part manufacturer")
-    compatibility_score: int = Field(
-        ..., ge=0, le=100, description="Compatibility score (0-100)"
-    )
+    compatibility_score: int = Field(..., ge=0, le=100, description="Compatibility score (0-100)")
     availability: str = Field(default="unknown", description="Availability status")
     price_comparison: str = Field(
         default="unknown", description="Price comparison vs original (lower/similar/higher)"
@@ -101,6 +98,4 @@ class AlternatePartsResult(BaseModel):
     alternates: list[AlternatePart] = Field(
         default_factory=list, description="Ranked list of alternate parts"
     )
-    recommendation: str = Field(
-        default="", description="Overall recommendation for this part"
-    )
+    recommendation: str = Field(default="", description="Overall recommendation for this part")

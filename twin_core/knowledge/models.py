@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import enum
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
-class KnowledgeType(str, enum.Enum):
+class KnowledgeType(StrEnum):
     """Categories of knowledge that can be stored and retrieved."""
 
     DESIGN_RULE = "design_rule"
@@ -39,7 +39,7 @@ class KnowledgeEntry(BaseModel):
         default_factory=list, description="Vector embedding of the content"
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Creation timestamp",
     )
 

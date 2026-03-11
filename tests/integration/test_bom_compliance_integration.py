@@ -15,7 +15,6 @@ import pytest
 from domain_agents.compliance.checklist_generator import ChecklistGenerator
 from domain_agents.compliance.evidence_tracker import EvidenceTracker
 from domain_agents.compliance.models import (
-    ComplianceChecklist,
     ComplianceRegime,
     EvidenceStatus,
     EvidenceType,
@@ -23,18 +22,17 @@ from domain_agents.compliance.models import (
 from domain_agents.supply_chain.alt_parts import AlternatePartsFinder
 from domain_agents.supply_chain.models import (
     BOMRiskReport,
-    LifecycleStatus,
-    PartRiskScore,
     RiskLevel,
 )
 from domain_agents.supply_chain.risk_scorer import BOMRiskScorer
-
 
 # ---------------------------------------------------------------------------
 # Realistic drone FC BOM fixture (18 parts as dicts)
 # ---------------------------------------------------------------------------
 
-_REGIMES_DIR = Path(__file__).resolve().parent.parent.parent / "domain_agents" / "compliance" / "regimes"
+_REGIMES_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "domain_agents" / "compliance" / "regimes"
+)
 
 
 def _make_drone_fc_bom() -> list[dict]:
@@ -332,9 +330,7 @@ def evidence_tracker() -> EvidenceTracker:
 class TestBOMRiskScoring:
     """Tests for BOM risk scoring on realistic drone FC data."""
 
-    def test_score_full_bom_returns_report(
-        self, scorer: BOMRiskScorer, drone_bom: list[dict]
-    ):
+    def test_score_full_bom_returns_report(self, scorer: BOMRiskScorer, drone_bom: list[dict]):
         report = scorer.score_bom(drone_bom, project_id="drone-fc")
         assert isinstance(report, BOMRiskReport)
         assert report.total_parts == 18
@@ -342,43 +338,33 @@ class TestBOMRiskScoring:
 
     def test_stm32f405_scores_low_risk(self, risk_report: BOMRiskReport):
         """STM32F405RGT6 is multi-source, active lifecycle -> low risk."""
-        stm32 = next(
-            s for s in risk_report.part_scores if s.mpn == "STM32F405RGT6"
-        )
+        stm32 = next(s for s in risk_report.part_scores if s.mpn == "STM32F405RGT6")
         assert stm32.risk_level == RiskLevel.LOW
         assert stm32.overall_score <= 25
 
     def test_single_source_mems_scores_medium_or_higher(self, risk_report: BOMRiskReport):
         """XSENS-MTI-3 is single-source with low stock and long lead -> elevated risk."""
-        xsens = next(
-            s for s in risk_report.part_scores if s.mpn == "XSENS-MTI-3"
-        )
+        xsens = next(s for s in risk_report.part_scores if s.mpn == "XSENS-MTI-3")
         assert xsens.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL)
         assert xsens.overall_score >= 26
         assert xsens.flagged or xsens.risk_level != RiskLevel.LOW
 
     def test_eol_part_scores_high_or_critical(self, risk_report: BOMRiskReport):
         """MAX232CPE is EOL with single source -> high or critical risk."""
-        max232 = next(
-            s for s in risk_report.part_scores if s.mpn == "MAX232CPE"
-        )
+        max232 = next(s for s in risk_report.part_scores if s.mpn == "MAX232CPE")
         assert max232.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
         assert max232.overall_score >= 51
         assert max232.flagged is True
 
     def test_nrnd_part_scores_medium_or_higher(self, risk_report: BOMRiskReport):
         """AT24C256C is NRND -> at least medium risk."""
-        eeprom = next(
-            s for s in risk_report.part_scores if s.mpn == "AT24C256C"
-        )
+        eeprom = next(s for s in risk_report.part_scores if s.mpn == "AT24C256C")
         assert eeprom.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH)
         assert eeprom.overall_score >= 10
 
     def test_commodity_passive_scores_low(self, risk_report: BOMRiskReport):
         """Commodity passives (resistors, caps) should score low risk."""
-        resistor = next(
-            s for s in risk_report.part_scores if s.mpn == "RC0603FR-0710KL"
-        )
+        resistor = next(s for s in risk_report.part_scores if s.mpn == "RC0603FR-0710KL")
         assert resistor.risk_level == RiskLevel.LOW
         assert resistor.overall_score <= 25
 
@@ -481,9 +467,7 @@ class TestComplianceChecklist:
         checklist = checklist_generator.generate_checklist(
             project_id="drone-fc", markets=[ComplianceRegime.CE]
         )
-        assert all(
-            i.evidence_status == EvidenceStatus.MISSING for i in checklist.items
-        )
+        assert all(i.evidence_status == EvidenceStatus.MISSING for i in checklist.items)
 
     def test_initial_coverage_is_zero(self, checklist_generator: ChecklistGenerator):
         checklist = checklist_generator.generate_checklist(
@@ -609,9 +593,7 @@ class TestBOMCompliancePipeline:
         coverage = evidence_tracker.get_coverage(checklist)
         assert 0.0 < coverage["coverage_percent"] < 100.0
 
-    def test_bom_risk_contributes_to_gate_readiness(
-        self, risk_report: BOMRiskReport
-    ):
+    def test_bom_risk_contributes_to_gate_readiness(self, risk_report: BOMRiskReport):
         """High-risk BOM should reduce gate readiness score."""
         # Gate readiness formula: base 100, penalize for risk
         bom_penalty = risk_report.overall_score * 0.4  # Scale to 40 points max

@@ -157,21 +157,31 @@ class TestBuildParser:
 
     def test_run_with_params(self) -> None:
         parser = build_parser()
-        args = parser.parse_args([
-            "run", "validate_stress",
-            "--artifact", str(uuid4()),
-            "--params", '{"load": 500}',
-        ])
+        args = parser.parse_args(
+            [
+                "run",
+                "validate_stress",
+                "--artifact",
+                str(uuid4()),
+                "--params",
+                '{"load": 500}',
+            ]
+        )
         assert args.params == '{"load": 500}'
 
     def test_run_with_session_id(self) -> None:
         parser = build_parser()
         sid = str(uuid4())
-        args = parser.parse_args([
-            "run", "check_bom",
-            "--artifact", str(uuid4()),
-            "--session-id", sid,
-        ])
+        args = parser.parse_args(
+            [
+                "run",
+                "check_bom",
+                "--artifact",
+                str(uuid4()),
+                "--session-id",
+                sid,
+            ]
+        )
         assert args.session_id == sid
 
     def test_status_command(self) -> None:
@@ -190,11 +200,16 @@ class TestBuildParser:
 
     def test_twin_list_command(self) -> None:
         parser = build_parser()
-        args = parser.parse_args([
-            "twin", "list",
-            "--domain", "mechanical",
-            "--type", "cad_model",
-        ])
+        args = parser.parse_args(
+            [
+                "twin",
+                "list",
+                "--domain",
+                "mechanical",
+                "--type",
+                "cad_model",
+            ]
+        )
         assert args.command == "twin"
         assert args.twin_command == "list"
         assert args.domain == "mechanical"
@@ -217,11 +232,16 @@ class TestBuildParser:
     def test_reject_command(self) -> None:
         parser = build_parser()
         cid = str(uuid4())
-        args = parser.parse_args([
-            "reject", cid,
-            "--reason", "needs work",
-            "--reviewer", "bob",
-        ])
+        args = parser.parse_args(
+            [
+                "reject",
+                cid,
+                "--reason",
+                "needs work",
+                "--reviewer",
+                "bob",
+            ]
+        )
         assert args.command == "reject"
         assert args.reason == "needs work"
         assert args.reviewer == "bob"

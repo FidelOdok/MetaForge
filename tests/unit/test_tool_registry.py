@@ -10,7 +10,6 @@ import pytest
 from mcp_core.protocol import ToolExecutionError, ToolTimeoutError, ToolUnavailableError
 from mcp_core.schemas import ToolCallRequest
 from tool_registry.execution_engine import ExecutionEngine
-from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.registry import ToolRegistry
 from tool_registry.tool_metadata import AdapterInfo, AdapterStatus, ToolCapability
 from tool_registry.tools.calculix.adapter import CalculixServer

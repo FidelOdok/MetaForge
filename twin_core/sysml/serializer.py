@@ -103,9 +103,7 @@ class SysMLSerializer:
         """Deserialize a list of JSON dicts to SysML v2 elements."""
         return [self.from_json(d) for d in data_list]
 
-    def to_api_response(
-        self, elements: list[SysMLElement], project_id: str = ""
-    ) -> dict[str, Any]:
+    def to_api_response(self, elements: list[SysMLElement], project_id: str = "") -> dict[str, Any]:
         """Format elements as a SysML v2 REST API response body.
 
         Follows the structure returned by ``GET /projects/{projectId}/commits/{commitId}/elements``.

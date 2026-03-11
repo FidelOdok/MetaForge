@@ -373,9 +373,7 @@ class SimulationAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         deps = AgentDependencies(
@@ -407,17 +405,13 @@ class SimulationAgent:
             if simulation_result.tool_calls
             else [simulation_result.analysis],
             warnings=(
-                simulation_result.recommendations
-                if not simulation_result.overall_passed
-                else []
+                simulation_result.recommendations if not simulation_result.overall_passed else []
             ),
         )
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [
-            f"Perform a '{request.task_type}' simulation on artifact {request.artifact_id}."
-        ]
+        parts = [f"Perform a '{request.task_type}' simulation on artifact {request.artifact_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -444,9 +438,7 @@ class SimulationAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         # Route to handler
@@ -563,9 +555,7 @@ class SimulationAgent:
                 }
             ],
             warnings=(
-                [f"Safety factor {output.safety_factor:.2f} is below 1.0"]
-                if not passed
-                else []
+                [f"Safety factor {output.safety_factor:.2f} is below 1.0"] if not passed else []
             ),
         )
 

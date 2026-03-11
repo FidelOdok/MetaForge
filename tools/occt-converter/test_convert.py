@@ -8,11 +8,9 @@ schema validation.
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -68,11 +66,14 @@ class TestBoundingBox:
         import numpy as np
         from convert import _bounding_box
 
-        verts = np.array([
-            [0, 0, 0],
-            [1, 2, 3],
-            [-1, -2, -3],
-        ], dtype=np.float32)
+        verts = np.array(
+            [
+                [0, 0, 0],
+                [1, 2, 3],
+                [-1, -2, -3],
+            ],
+            dtype=np.float32,
+        )
 
         bb = _bounding_box(verts)
         assert bb["min"] == pytest.approx([-1, -2, -3])
@@ -110,7 +111,8 @@ class TestCLIArgs:
     def test_cli_help(self):
         result = subprocess.run(
             [sys.executable, str(CONVERTER), "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         assert "--quality" in result.stdout

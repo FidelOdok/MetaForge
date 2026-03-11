@@ -29,8 +29,8 @@ QUALITY_TIERS = {
 
 def _read_step(path: str):
     """Read a STEP file and return the root shape."""
-    from OCC.Core.STEPControl import STEPControl_Reader
     from OCC.Core.IFSelect import IFSelect_RetDone
+    from OCC.Core.STEPControl import STEPControl_Reader
 
     reader = STEPControl_Reader()
     status = reader.ReadFile(path)
@@ -42,8 +42,8 @@ def _read_step(path: str):
 
 def _read_iges(path: str):
     """Read an IGES file and return the root shape."""
-    from OCC.Core.IGESControl import IGESControl_Reader
     from OCC.Core.IFSelect import IFSelect_RetDone
+    from OCC.Core.IGESControl import IGESControl_Reader
 
     reader = IGESControl_Reader()
     status = reader.ReadFile(path)
@@ -79,11 +79,11 @@ def _get_sub_shapes(shape):
 
 def _tessellate(shape, deflection: float):
     """Tessellate a shape and return vertices + faces as numpy arrays."""
+    from OCC.Core.BRep import BRep_Tool
     from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
     from OCC.Core.TopAbs import TopAbs_FACE
     from OCC.Core.TopExp import TopExp_Explorer
     from OCC.Core.TopLoc import TopLoc_Location
-    from OCC.Core.BRep import BRep_Tool
 
     BRepMesh_IncrementalMesh(shape, deflection, False, 0.5, True)
 
@@ -110,11 +110,13 @@ def _tessellate(shape, deflection: float):
             for i in range(1, nb_tris + 1):
                 tri = triangulation.Triangle(i)
                 n1, n2, n3 = tri.Get()
-                all_faces.append([
-                    n1 - 1 + vertex_offset,
-                    n2 - 1 + vertex_offset,
-                    n3 - 1 + vertex_offset,
-                ])
+                all_faces.append(
+                    [
+                        n1 - 1 + vertex_offset,
+                        n2 - 1 + vertex_offset,
+                        n3 - 1 + vertex_offset,
+                    ]
+                )
 
             vertex_offset += nb_nodes
 
@@ -168,12 +170,14 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
         scene.add_geometry(mesh, node_name=mesh_name, geom_name=mesh_name)
 
         total_triangles += len(faces)
-        parts.append({
-            "name": part_name,
-            "meshName": mesh_name,
-            "children": [],
-            "boundingBox": _bounding_box(vertices),
-        })
+        parts.append(
+            {
+                "name": part_name,
+                "meshName": mesh_name,
+                "children": [],
+                "boundingBox": _bounding_box(vertices),
+            }
+        )
 
     # Export GLB
     glb_path = out / "model.glb"
@@ -194,7 +198,9 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
 
     logger.info(
         "Conversion complete: %d parts, %d triangles, %d bytes",
-        len(parts), total_triangles, file_size,
+        len(parts),
+        total_triangles,
+        file_size,
     )
     return metadata
 

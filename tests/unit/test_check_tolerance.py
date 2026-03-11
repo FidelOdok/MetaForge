@@ -135,9 +135,7 @@ class TestToleranceModels:
         assert proc.min_feature_size == 0.0
         assert proc.max_aspect_ratio == 0.0
 
-    def test_check_tolerance_input_model(
-        self, cnc_process: ManufacturingProcess
-    ) -> None:
+    def test_check_tolerance_input_model(self, cnc_process: ManufacturingProcess) -> None:
         inp = CheckToleranceInput(
             artifact_id=uuid4(),
             tolerances=[],
@@ -217,9 +215,7 @@ class TestCheckToleranceHandler:
         passing_input: CheckToleranceInput,
     ) -> None:
         """All tolerances well within CNC capability should pass."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": passing_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
 
@@ -235,18 +231,14 @@ class TestCheckToleranceHandler:
         tight_input: CheckToleranceInput,
     ) -> None:
         """Tolerance tighter than achievable should fail."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": tight_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": tight_input.artifact_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(tight_input)
 
         assert output.failures >= 1
         assert output.overall_status == "fail"
         # Should have a "too_tight" violation
-        too_tight = [
-            v for v in output.violations if v.violation_type == "too_tight"
-        ]
+        too_tight = [v for v in output.violations if v.violation_type == "too_tight"]
         assert len(too_tight) >= 1
         assert too_tight[0].severity == "error"
 
@@ -305,9 +297,7 @@ class TestCheckToleranceHandler:
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
 
-        below_min = [
-            v for v in output.violations if v.violation_type == "below_min_feature"
-        ]
+        below_min = [v for v in output.violations if v.violation_type == "below_min_feature"]
         assert len(below_min) == 1
         assert below_min[0].severity == "error"
 
@@ -381,9 +371,7 @@ class TestCheckToleranceHandler:
         passing_input: CheckToleranceInput,
     ) -> None:
         """All passing dimensions should yield 'pass' overall."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": passing_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
 
@@ -421,9 +409,7 @@ class TestCheckToleranceHandler:
         tight_input: CheckToleranceInput,
     ) -> None:
         """Failures should yield 'fail' overall."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": tight_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": tight_input.artifact_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(tight_input)
 
@@ -435,9 +421,7 @@ class TestCheckToleranceHandler:
         tight_input: CheckToleranceInput,
     ) -> None:
         """Violations list should be populated when there are failures."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": tight_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": tight_input.artifact_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(tight_input)
 
@@ -451,9 +435,7 @@ class TestCheckToleranceHandler:
         passing_input: CheckToleranceInput,
     ) -> None:
         """Summary string should be generated."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": passing_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
 
@@ -512,9 +494,7 @@ class TestCheckTolerancePreconditions:
         passing_input: CheckToleranceInput,
     ) -> None:
         """Existing artifact should pass preconditions."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": passing_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
 
         handler = CheckToleranceHandler(mock_context)
         errors = await handler.validate_preconditions(passing_input)
@@ -534,9 +514,7 @@ class TestCheckToleranceRunPipeline:
         passing_input: CheckToleranceInput,
     ) -> None:
         """Full run() pipeline should return SkillResult with success=True."""
-        mock_context.twin.get_artifact.return_value = {
-            "id": passing_input.artifact_id
-        }
+        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
 
         handler = CheckToleranceHandler(mock_context)
         result = await handler.run(passing_input)
@@ -609,9 +587,7 @@ class TestCheckToleranceStackUp:
 
         # 2 tolerances: RSS = sqrt(0.04 + 0.04) = 0.2828, WC = 0.4
         # 0.2828 / 0.4 = 70.7% < 75% => no stack-up warning
-        stack_violations = [
-            v for v in output.violations if v.violation_type == "stack_up_exceeded"
-        ]
+        stack_violations = [v for v in output.violations if v.violation_type == "stack_up_exceeded"]
         assert len(stack_violations) == 0
 
     async def test_stack_up_triggers_warning(
@@ -650,9 +626,7 @@ class TestCheckToleranceStackUp:
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
 
-        stack_violations = [
-            v for v in output.violations if v.violation_type == "stack_up_exceeded"
-        ]
+        stack_violations = [v for v in output.violations if v.violation_type == "stack_up_exceeded"]
         assert len(stack_violations) == 1
         assert stack_violations[0].dimension_id == "STACK_UP"
 
@@ -688,9 +662,7 @@ class TestCheckToleranceStackUp:
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
 
-        stack_violations = [
-            v for v in output.violations if v.violation_type == "stack_up_exceeded"
-        ]
+        stack_violations = [v for v in output.violations if v.violation_type == "stack_up_exceeded"]
         assert len(stack_violations) == 0
 
 

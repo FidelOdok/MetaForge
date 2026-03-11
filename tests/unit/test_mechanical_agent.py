@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from domain_agents.base_agent import AgentDependencies, AgentResult, get_llm_model, is_llm_available
+from domain_agents.base_agent import AgentDependencies, get_llm_model, is_llm_available
 from domain_agents.mechanical.agent import (
     MechanicalAgent,
     MechanicalResult,
@@ -22,9 +22,7 @@ from skill_registry.mcp_bridge import InMemoryMcpBridge
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
     # Default: artifact exists
-    twin.get_artifact.return_value = MagicMock(
-        id=uuid4(), name="bracket", domain="mechanical"
-    )
+    twin.get_artifact.return_value = MagicMock(id=uuid4(), name="bracket", domain="mechanical")
     return twin
 
 
@@ -143,9 +141,7 @@ class TestValidateStress:
         assert result.success is False
         assert any("not found" in e for e in result.errors)
 
-    async def test_fea_solver_error(
-        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
-    ):
+    async def test_fea_solver_error(self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge):
         """FEA solver failure should produce an error."""
         # Create a bridge with no response registered for the tool
         bad_bridge = InMemoryMcpBridge()

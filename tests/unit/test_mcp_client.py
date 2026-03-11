@@ -95,9 +95,7 @@ class TestMcpSchemas:
         assert result.output_files == []
 
     def test_json_rpc_success_response(self) -> None:
-        resp = JsonRpcSuccessResponse(
-            id="r1", result={"status": "ok"}
-        )
+        resp = JsonRpcSuccessResponse(id="r1", result={"status": "ok"})
         assert resp.jsonrpc == "2.0"
         assert resp.result == {"status": "ok"}
 
@@ -284,9 +282,7 @@ class TestMcpClient:
     async def test_call_tool_unknown_tool_raises(self) -> None:
         client = McpClient()
         with pytest.raises(ToolUnavailableError):
-            await client.call_tool(
-                ToolCallRequest(tool_id="unknown.tool")
-            )
+            await client.call_tool(ToolCallRequest(tool_id="unknown.tool"))
 
     async def test_call_tool_disconnected_raises(self) -> None:
         """Calling a tool on a disconnected transport should raise."""
@@ -301,9 +297,7 @@ class TestMcpClient:
         client.register_manifest(_make_manifest())
 
         with pytest.raises(ToolUnavailableError):
-            await client.call_tool(
-                ToolCallRequest(tool_id="calculix.run_fea")
-            )
+            await client.call_tool(ToolCallRequest(tool_id="calculix.run_fea"))
 
     async def test_call_tool_error_response_raises(self) -> None:
         client = McpClient()
@@ -313,9 +307,7 @@ class TestMcpClient:
         transport.queue_response(_error_response_json())
 
         with pytest.raises(ToolExecutionError) as exc_info:
-            await client.call_tool(
-                ToolCallRequest(tool_id="calculix.run_fea")
-            )
+            await client.call_tool(ToolCallRequest(tool_id="calculix.run_fea"))
         assert exc_info.value.code == TOOL_EXECUTION_ERROR
 
     async def test_list_tools(self) -> None:
@@ -353,9 +345,7 @@ class TestMcpClient:
             "tools_available": 3,
             "uptime_seconds": 600.0,
         }
-        transport.queue_response(
-            _success_response_json(result=health_data)
-        )
+        transport.queue_response(_success_response_json(result=health_data))
 
         status = await client.health_check("calculix")
         assert isinstance(status, HealthStatus)

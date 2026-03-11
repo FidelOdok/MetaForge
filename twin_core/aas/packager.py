@@ -81,9 +81,7 @@ class AASXPackager:
 
             return result
 
-    def package_to_file(
-        self, environment: AASEnvironment, output_path: str | Path
-    ) -> Path:
+    def package_to_file(self, environment: AASEnvironment, output_path: str | Path) -> Path:
         """Serialize an AASEnvironment to an AASX file on disk.
 
         Args:
@@ -117,26 +115,18 @@ class AASXPackager:
         zf.writestr("[Content_Types].xml", CONTENT_TYPES_XML)
         zf.writestr("_rels/.rels", ROOT_RELS_XML)
 
-    def _write_environment(
-        self, zf: zipfile.ZipFile, environment: AASEnvironment
-    ) -> None:
+    def _write_environment(self, zf: zipfile.ZipFile, environment: AASEnvironment) -> None:
         """Write the main AAS environment JSON file."""
-        env_json = environment.model_dump(
-            mode="json", by_alias=True, exclude_none=True
-        )
+        env_json = environment.model_dump(mode="json", by_alias=True, exclude_none=True)
         zf.writestr(
             "aasx/aas/aas_env.json",
             json.dumps(env_json, indent=2, ensure_ascii=False),
         )
 
-    def _write_individual_submodels(
-        self, zf: zipfile.ZipFile, submodels: list[Submodel]
-    ) -> None:
+    def _write_individual_submodels(self, zf: zipfile.ZipFile, submodels: list[Submodel]) -> None:
         """Write each submodel as an individual JSON file for easy access."""
         for submodel in submodels:
-            sm_json = submodel.model_dump(
-                mode="json", by_alias=True, exclude_none=True
-            )
+            sm_json = submodel.model_dump(mode="json", by_alias=True, exclude_none=True)
             safe_name = submodel.id_short.replace(" ", "_").lower()
             zf.writestr(
                 f"aasx/aas/{safe_name}.json",

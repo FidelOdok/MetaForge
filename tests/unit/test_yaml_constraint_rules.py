@@ -7,7 +7,6 @@ from textwrap import dedent
 
 import pytest
 
-from twin_core.constraint_engine.validator import InMemoryConstraintEngine
 from twin_core.constraint_engine.yaml_loader import (
     YamlRule,
     YamlRuleLoadError,
@@ -69,7 +68,10 @@ def _eval_simple(expression: str, variables: dict) -> tuple[ConstraintStatus, st
 
 class TestYamlParsing:
     def test_load_valid_file(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "test.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "test.yaml",
+            """\
             domain: mechanical
             version: "1.0"
             rules:
@@ -77,7 +79,8 @@ class TestYamlParsing:
                 description: "A test rule"
                 severity: critical
                 condition: "x > 0"
-        """)
+        """,
+        )
         rs = load_rules_from_file(path)
         assert rs.domain == "mechanical"
         assert rs.version == "1.0"
@@ -86,7 +89,10 @@ class TestYamlParsing:
         assert rs.rules[0].severity == "critical"
 
     def test_load_file_inherits_domain(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "test.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "test.yaml",
+            """\
             domain: electrical
             version: "2.0"
             rules:
@@ -94,12 +100,16 @@ class TestYamlParsing:
                 description: "Rule without explicit domain"
                 severity: warning
                 condition: "v < 5"
-        """)
+        """,
+        )
         rs = load_rules_from_file(path)
         assert rs.rules[0].domain == "electrical"
 
     def test_load_file_with_tags_and_hint(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "test.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "test.yaml",
+            """\
             domain: firmware
             version: "1.0"
             rules:
@@ -110,7 +120,8 @@ class TestYamlParsing:
                 message_template: "Flash full"
                 remediation_hint: "Free up flash"
                 tags: [memory, flash]
-        """)
+        """,
+        )
         rs = load_rules_from_file(path)
         rule = rs.rules[0]
         assert rule.remediation_hint == "Free up flash"
@@ -118,7 +129,10 @@ class TestYamlParsing:
         assert rule.message_template == "Flash full"
 
     def test_load_multiple_rules(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "test.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "test.yaml",
+            """\
             domain: mechanical
             version: "1.0"
             rules:
@@ -134,7 +148,8 @@ class TestYamlParsing:
                 description: "Rule 3"
                 severity: info
                 condition: "c > 0"
-        """)
+        """,
+        )
         rs = load_rules_from_file(path)
         assert len(rs.rules) == 3
         assert [r.severity for r in rs.rules] == ["critical", "warning", "info"]
@@ -152,64 +167,88 @@ class TestYamlParsingErrors:
             load_rules_from_file(path)
 
     def test_invalid_yaml_raises(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "bad.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             domain: test
             rules:
               - name: [invalid
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="Invalid YAML"):
             load_rules_from_file(path)
 
     def test_missing_domain_raises(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "bad.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             domain: ""
             version: "1.0"
             rules: []
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="validation failed"):
             load_rules_from_file(path)
 
     def test_invalid_severity_raises(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "bad.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             domain: test
             rules:
               - name: bad_rule
                 description: "Bad severity"
                 severity: fatal
                 condition: "True"
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="validation failed"):
             load_rules_from_file(path)
 
     def test_invalid_expression_raises(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "bad.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             domain: test
             rules:
               - name: bad_expr
                 description: "Invalid expression"
                 severity: critical
                 condition: "def foo():"
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="validation failed"):
             load_rules_from_file(path)
 
     def test_empty_name_raises(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "bad.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             domain: test
             rules:
               - name: ""
                 description: "No name"
                 severity: critical
                 condition: "True"
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="validation failed"):
             load_rules_from_file(path)
 
     def test_not_a_mapping_raises(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "bad.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             - item1
             - item2
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="Expected a YAML mapping"):
             load_rules_from_file(path)
 
@@ -221,7 +260,10 @@ class TestYamlParsingErrors:
 
 class TestDirectoryLoading:
     def test_load_directory(self, tmp_path: Path) -> None:
-        _write_yaml(tmp_path, "a.yaml", """\
+        _write_yaml(
+            tmp_path,
+            "a.yaml",
+            """\
             domain: mechanical
             version: "1.0"
             rules:
@@ -229,8 +271,12 @@ class TestDirectoryLoading:
                 description: "Rule 1"
                 severity: critical
                 condition: "True"
-        """)
-        _write_yaml(tmp_path, "b.yaml", """\
+        """,
+        )
+        _write_yaml(
+            tmp_path,
+            "b.yaml",
+            """\
             domain: electrical
             version: "1.0"
             rules:
@@ -238,7 +284,8 @@ class TestDirectoryLoading:
                 description: "Rule 2"
                 severity: warning
                 condition: "True"
-        """)
+        """,
+        )
         rulesets = load_rules_from_directory(tmp_path)
         assert len(rulesets) == 2
         domains = {rs.domain for rs in rulesets}
@@ -253,7 +300,10 @@ class TestDirectoryLoading:
         assert rulesets == []
 
     def test_skips_invalid_files(self, tmp_path: Path) -> None:
-        _write_yaml(tmp_path, "good.yaml", """\
+        _write_yaml(
+            tmp_path,
+            "good.yaml",
+            """\
             domain: mechanical
             version: "1.0"
             rules:
@@ -261,20 +311,29 @@ class TestDirectoryLoading:
                 description: "Good"
                 severity: critical
                 condition: "True"
-        """)
-        _write_yaml(tmp_path, "bad.yaml", """\
+        """,
+        )
+        _write_yaml(
+            tmp_path,
+            "bad.yaml",
+            """\
             - not a mapping
-        """)
+        """,
+        )
         rulesets = load_rules_from_directory(tmp_path)
         assert len(rulesets) == 1
         assert rulesets[0].domain == "mechanical"
 
     def test_ignores_non_yaml_files(self, tmp_path: Path) -> None:
-        _write_yaml(tmp_path, "good.yaml", """\
+        _write_yaml(
+            tmp_path,
+            "good.yaml",
+            """\
             domain: test
             version: "1.0"
             rules: []
-        """)
+        """,
+        )
         (tmp_path / "readme.txt").write_text("not a yaml file")
         (tmp_path / "data.json").write_text("{}")
         rulesets = load_rules_from_directory(tmp_path)
@@ -322,9 +381,7 @@ class TestConversion:
             domain="test",
             version="1.0",
             rules=[
-                YamlRule(
-                    name="w", description="Warn", severity="warning", condition="True"
-                ),
+                YamlRule(name="w", description="Warn", severity="warning", condition="True"),
             ],
         )
         constraints = convert_to_constraints(rs)
@@ -335,9 +392,7 @@ class TestConversion:
             domain="test",
             version="1.0",
             rules=[
-                YamlRule(
-                    name="i", description="Info", severity="info", condition="True"
-                ),
+                YamlRule(name="i", description="Info", severity="info", condition="True"),
             ],
         )
         constraints = convert_to_constraints(rs)
@@ -376,7 +431,10 @@ class TestConversion:
         assert constraints[0].message == "Fallback description"
 
     def test_load_and_convert_directory(self, tmp_path: Path) -> None:
-        _write_yaml(tmp_path, "a.yaml", """\
+        _write_yaml(
+            tmp_path,
+            "a.yaml",
+            """\
             domain: mechanical
             version: "1.0"
             rules:
@@ -388,8 +446,12 @@ class TestConversion:
                 description: "Rule 2"
                 severity: warning
                 condition: "True"
-        """)
-        _write_yaml(tmp_path, "b.yaml", """\
+        """,
+        )
+        _write_yaml(
+            tmp_path,
+            "b.yaml",
+            """\
             domain: electrical
             version: "1.0"
             rules:
@@ -397,7 +459,8 @@ class TestConversion:
                 description: "Rule 3"
                 severity: info
                 condition: "True"
-        """)
+        """,
+        )
         constraints = load_and_convert_directory(tmp_path)
         assert len(constraints) == 3
         names = {c.name for c in constraints}
@@ -558,20 +621,28 @@ class TestCrossDomainRuleEvaluation:
 
 class TestErrorHandling:
     def test_corrupt_yaml_clear_error(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "corrupt.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "corrupt.yaml",
+            """\
             domain: test
             rules:
               - {name: "r1", description: "d", severity: "critical", condition: "
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError):
             load_rules_from_file(path)
 
     def test_missing_required_fields_clear_error(self, tmp_path: Path) -> None:
-        path = _write_yaml(tmp_path, "missing.yaml", """\
+        path = _write_yaml(
+            tmp_path,
+            "missing.yaml",
+            """\
             domain: test
             rules:
               - name: "r1"
-        """)
+        """,
+        )
         with pytest.raises(YamlRuleLoadError, match="validation failed"):
             load_rules_from_file(path)
 
@@ -584,10 +655,16 @@ class TestErrorHandling:
 class TestMultiRuleAggregation:
     def test_multi_rule_report(self) -> None:
         rules = [
-            ("stress_mpa < yield_strength_mpa * 0.85", {"stress_mpa": 45, "yield_strength_mpa": 276}),  # PASS
+            (
+                "stress_mpa < yield_strength_mpa * 0.85",
+                {"stress_mpa": 45, "yield_strength_mpa": 276},
+            ),  # PASS
             ("wall_thickness_mm >= 1.0", {"wall_thickness_mm": 0.5}),  # FAIL
             ("safety_factor >= 2.0", {"safety_factor": 3.0}),  # PASS
-            ("total_power_draw_w <= supply_power_w", {"total_power_draw_w": 6, "supply_power_w": 5}),  # FAIL
+            (
+                "total_power_draw_w <= supply_power_w",
+                {"total_power_draw_w": 6, "supply_power_w": 5},
+            ),  # FAIL
         ]
         results = [_eval_simple(expr, vars_) for expr, vars_ in rules]
         pass_count = sum(1 for s, _ in results if s == ConstraintStatus.PASS)

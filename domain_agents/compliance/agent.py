@@ -11,14 +11,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from observability.tracing import get_tracer
-from skill_registry.skill_base import SkillContext
 
 from .checklist_generator import ChecklistGenerator
 from .evidence_tracker import EvidenceTracker
-from .models import ComplianceChecklist, ComplianceRegime, EvidenceStatus, EvidenceType
+from .models import ComplianceChecklist, ComplianceRegime, EvidenceType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("compliance.agent")
@@ -128,18 +127,14 @@ class ComplianceAgent:
                     errors=[str(exc)],
                 )
 
-    async def _handle_generate_checklist(
-        self, request: ComplianceTaskRequest
-    ) -> ComplianceResult:
+    async def _handle_generate_checklist(self, request: ComplianceTaskRequest) -> ComplianceResult:
         """Generate a compliance checklist for the project."""
         raw_markets = request.parameters.get("markets", [])
         markets = [ComplianceRegime(m) for m in raw_markets]
 
         checklist = self._generator.generate_checklist(
             project_id=request.project_id,
-            product_category=request.parameters.get(
-                "product_category", "consumer_electronics"
-            ),
+            product_category=request.parameters.get("product_category", "consumer_electronics"),
             markets=markets,
         )
 
@@ -155,9 +150,7 @@ class ComplianceAgent:
             data={"checklist": checklist.model_dump(mode="json")},
         )
 
-    async def _handle_link_evidence(
-        self, request: ComplianceTaskRequest
-    ) -> ComplianceResult:
+    async def _handle_link_evidence(self, request: ComplianceTaskRequest) -> ComplianceResult:
         """Link evidence to a checklist item."""
         item_id = request.parameters.get("checklist_item_id", "")
         ev_type_str = request.parameters.get("evidence_type", "TEST_REPORT")
@@ -185,9 +178,7 @@ class ComplianceAgent:
             data={"evidence": evidence.model_dump(mode="json")},
         )
 
-    async def _handle_get_coverage(
-        self, request: ComplianceTaskRequest
-    ) -> ComplianceResult:
+    async def _handle_get_coverage(self, request: ComplianceTaskRequest) -> ComplianceResult:
         """Get coverage statistics for a project's checklist."""
         checklist = self._checklists.get(request.project_id)
         if checklist is None:

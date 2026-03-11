@@ -306,9 +306,7 @@ class TestApprovalWorkflow:
     async def test_approve_proposal(self) -> None:
         wf = ApprovalWorkflow()
         proposal = await wf.propose_change("mech", "test", {}, [])
-        result = await wf.decide(
-            proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "alice"
-        )
+        result = await wf.decide(proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "alice")
         assert result is not None
         assert result.status == ChangeStatus.APPROVED
         assert result.reviewer == "alice"
@@ -319,18 +317,14 @@ class TestApprovalWorkflow:
     async def test_reject_proposal(self) -> None:
         wf = ApprovalWorkflow()
         proposal = await wf.propose_change("mech", "test", {}, [])
-        result = await wf.decide(
-            proposal.change_id, ApprovalDecisionType.REJECT, "bad", "bob"
-        )
+        result = await wf.decide(proposal.change_id, ApprovalDecisionType.REJECT, "bad", "bob")
         assert result is not None
         assert result.status == ChangeStatus.REJECTED
 
     @pytest.mark.asyncio
     async def test_decide_unknown_returns_none(self) -> None:
         wf = ApprovalWorkflow()
-        result = await wf.decide(
-            uuid4(), ApprovalDecisionType.APPROVE, "ok", "alice"
-        )
+        result = await wf.decide(uuid4(), ApprovalDecisionType.APPROVE, "ok", "alice")
         assert result is None
 
     @pytest.mark.asyncio
@@ -339,9 +333,7 @@ class TestApprovalWorkflow:
         proposal = await wf.propose_change("mech", "test", {}, [])
         await wf.decide(proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "a")
         # Try to reject an already-approved proposal
-        result = await wf.decide(
-            proposal.change_id, ApprovalDecisionType.REJECT, "too late", "b"
-        )
+        result = await wf.decide(proposal.change_id, ApprovalDecisionType.REJECT, "too late", "b")
         assert result is not None
         assert result.status == ChangeStatus.APPROVED  # unchanged
 
@@ -369,9 +361,7 @@ class TestApprovalWorkflow:
     async def test_approved_not_in_pending(self) -> None:
         wf = ApprovalWorkflow()
         proposal = await wf.propose_change("mech", "test", {}, [])
-        await wf.decide(
-            proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "alice"
-        )
+        await wf.decide(proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "alice")
         pending = wf.get_pending_proposals()
         assert len(pending) == 0
 
@@ -392,9 +382,7 @@ class TestApprovalWorkflow:
         proposal = await wf.propose_change("mech", "test", {}, [], session_id=sid)
         # Drain the CHANGE_PROPOSED event
         queue.get_nowait()
-        await wf.decide(
-            proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "alice"
-        )
+        await wf.decide(proposal.change_id, ApprovalDecisionType.APPROVE, "ok", "alice")
         event = queue.get_nowait()
         assert event.event_type == EventType.CHANGE_APPROVED
 
@@ -405,9 +393,7 @@ class TestApprovalWorkflow:
         queue = wf.subscribe(sid)
         proposal = await wf.propose_change("mech", "test", {}, [], session_id=sid)
         queue.get_nowait()
-        await wf.decide(
-            proposal.change_id, ApprovalDecisionType.REJECT, "no", "bob"
-        )
+        await wf.decide(proposal.change_id, ApprovalDecisionType.REJECT, "no", "bob")
         event = queue.get_nowait()
         assert event.event_type == EventType.CHANGE_REJECTED
 

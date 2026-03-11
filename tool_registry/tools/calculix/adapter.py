@@ -180,9 +180,7 @@ class CalculixServer(McpToolServer):
 
         logger.info("Running thermal analysis", mesh_file=mesh_file, mode=analysis_mode)
 
-        result = await self._execute_thermal_solver(
-            mesh_file, boundary_conditions, analysis_mode
-        )
+        result = await self._execute_thermal_solver(mesh_file, boundary_conditions, analysis_mode)
         return result
 
     async def validate_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -198,9 +196,7 @@ class CalculixServer(McpToolServer):
         result = await self._validate_mesh_file(mesh_file, max_aspect_ratio)
         return result
 
-    async def _execute_solver(
-        self, mesh_file: str, analysis_type: str
-    ) -> dict[str, Any]:
+    async def _execute_solver(self, mesh_file: str, analysis_type: str) -> dict[str, Any]:
         """Execute CalculiX solver. In production, runs the ccx binary.
 
         This method is designed to be easily mockable in tests.
@@ -237,9 +233,7 @@ class CalculixServer(McpToolServer):
             "Use mock_solver() in tests or install CalculiX for production use."
         )
 
-    async def _validate_mesh_file(
-        self, mesh_file: str, max_aspect_ratio: float
-    ) -> dict[str, Any]:
+    async def _validate_mesh_file(self, mesh_file: str, max_aspect_ratio: float) -> dict[str, Any]:
         """Validate mesh quality by parsing the .inp file.
 
         In production, this would parse the mesh file and compute quality metrics.

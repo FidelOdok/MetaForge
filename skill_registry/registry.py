@@ -124,33 +124,25 @@ class SkillRegistry:
         try:
             raw = json.loads(def_path.read_text())
         except json.JSONDecodeError as exc:
-            raise SkillLoadError(
-                "unknown", f"Invalid JSON: {exc}", skill_path
-            ) from exc
+            raise SkillLoadError("unknown", f"Invalid JSON: {exc}", skill_path) from exc
 
         # 2. Validate definition
         try:
             definition = SchemaValidator.validate_definition(raw)
         except Exception as exc:
             name = raw.get("name", "unknown")
-            raise SkillLoadError(
-                name, f"Definition validation failed: {exc}", skill_path
-            ) from exc
+            raise SkillLoadError(name, f"Definition validation failed: {exc}", skill_path) from exc
 
         # Check for duplicate
         if definition.name in self._skills:
             existing = self._skills[definition.name]
             if existing.status != "DRAFT":
-                raise SkillLoadError(
-                    definition.name, "Skill already registered", skill_path
-                )
+                raise SkillLoadError(definition.name, "Skill already registered", skill_path)
 
         # 3. Import schema.py and resolve schema classes
         schema_module_path = path / "schema.py"
         if not schema_module_path.exists():
-            raise SkillLoadError(
-                definition.name, "schema.py not found", skill_path
-            )
+            raise SkillLoadError(definition.name, "schema.py not found", skill_path)
 
         try:
             schema_module = self._import_module_from_path(
@@ -164,9 +156,7 @@ class SkillRegistry:
             ) from exc
 
         # Resolve input_schema reference (e.g., "schema.ValidateStressInput" -> class)
-        input_class = self._resolve_class(
-            schema_module, definition.input_schema, "input_schema"
-        )
+        input_class = self._resolve_class(schema_module, definition.input_schema, "input_schema")
         if input_class is None:
             raise SkillLoadError(
                 definition.name,
@@ -174,9 +164,7 @@ class SkillRegistry:
                 skill_path,
             )
 
-        output_class = self._resolve_class(
-            schema_module, definition.output_schema, "output_schema"
-        )
+        output_class = self._resolve_class(schema_module, definition.output_schema, "output_schema")
         if output_class is None:
             raise SkillLoadError(
                 definition.name,
@@ -187,9 +175,7 @@ class SkillRegistry:
         # 4. Import handler.py and find SkillBase subclass
         handler_module_path = path / "handler.py"
         if not handler_module_path.exists():
-            raise SkillLoadError(
-                definition.name, "handler.py not found", skill_path
-            )
+            raise SkillLoadError(definition.name, "handler.py not found", skill_path)
 
         try:
             handler_module = self._import_module_from_path(
@@ -272,9 +258,7 @@ class SkillRegistry:
         if reg is None:
             raise KeyError(f"Skill '{skill_name}' not found")
         if reg.status != "REGISTERED":
-            raise ValueError(
-                f"Cannot activate skill in '{reg.status}' state (must be REGISTERED)"
-            )
+            raise ValueError(f"Cannot activate skill in '{reg.status}' state (must be REGISTERED)")
         reg.status = "ACTIVE"
         logger.info("Skill activated", skill=skill_name)
 
@@ -284,9 +268,7 @@ class SkillRegistry:
         if reg is None:
             raise KeyError(f"Skill '{skill_name}' not found")
         if reg.status not in ("REGISTERED", "ACTIVE"):
-            raise ValueError(
-                f"Cannot deprecate skill in '{reg.status}' state"
-            )
+            raise ValueError(f"Cannot deprecate skill in '{reg.status}' state")
         reg.status = "DEPRECATED"
         reg.deprecation_reason = reason
         logger.info("Skill deprecated", skill=skill_name, reason=reason)
@@ -316,9 +298,7 @@ class SkillRegistry:
         return module
 
     @staticmethod
-    def _resolve_class(
-        module: Any, dotted_path: str, label: str
-    ) -> type[BaseModel] | None:
+    def _resolve_class(module: Any, dotted_path: str, label: str) -> type[BaseModel] | None:
         """Resolve 'schema.ClassName' to the actual class from the module.
 
         The dotted_path format is 'schema.ClassName' -- we take the part after the last dot.
@@ -337,10 +317,6 @@ class SkillRegistry:
         """Find the first SkillBase subclass in a handler module."""
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, SkillBase)
-                and attr is not SkillBase
-            ):
+            if isinstance(attr, type) and issubclass(attr, SkillBase) and attr is not SkillBase:
                 return attr
         return None

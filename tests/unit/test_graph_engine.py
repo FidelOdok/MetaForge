@@ -307,9 +307,7 @@ class TestGetNeighbors:
         await engine.add_edge(
             EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
         )
-        await engine.add_edge(
-            EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.CONTAINS)
-        )
+        await engine.add_edge(EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.CONTAINS))
 
         neighbors = await engine.get_neighbors(a.id)
         assert len(neighbors) == 2
@@ -342,9 +340,7 @@ class TestGetNeighbors:
         await engine.add_edge(
             EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
         )
-        await engine.add_edge(
-            EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.CONTAINS)
-        )
+        await engine.add_edge(EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.CONTAINS))
 
         neighbors = await engine.get_neighbors(a.id, edge_type=EdgeType.DEPENDS_ON)
         assert len(neighbors) == 1
@@ -400,9 +396,7 @@ class TestGetSubgraph:
         await engine.add_edge(
             EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
         )
-        await engine.add_edge(
-            EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.CONTAINS)
-        )
+        await engine.add_edge(EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.CONTAINS))
 
         sg = await engine.get_subgraph(a.id, depth=1, edge_types=[EdgeType.DEPENDS_ON])
         node_ids = {n.id for n in sg.nodes}
@@ -482,9 +476,7 @@ class TestTraverse:
         await engine.add_node(a)
         await engine.add_node(b)
 
-        await engine.add_edge(
-            EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.CONTAINS)
-        )
+        await engine.add_edge(EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.CONTAINS))
 
         # Traverse looking for DEPENDS_ON, but only CONTAINS exists
         paths = await engine.traverse(a.id, [EdgeType.DEPENDS_ON], max_depth=5)

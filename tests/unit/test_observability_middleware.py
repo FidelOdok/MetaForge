@@ -192,9 +192,7 @@ class TestObservabilityMiddleware:
     # -- exception handling ------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_records_metrics_on_app_exception(
-        self, collector: MagicMock
-    ) -> None:
+    async def test_records_metrics_on_app_exception(self, collector: MagicMock) -> None:
         mw = ObservabilityMiddleware(_error_app(), collector=collector)
         with pytest.raises(RuntimeError, match="boom"):
             await mw(_make_http_scope(), _noop_receive, _noop_send)
@@ -208,9 +206,7 @@ class TestObservabilityMiddleware:
     async def test_records_actual_status_on_exception_after_headers(
         self, collector: MagicMock
     ) -> None:
-        mw = ObservabilityMiddleware(
-            _error_after_headers_app(503), collector=collector
-        )
+        mw = ObservabilityMiddleware(_error_after_headers_app(503), collector=collector)
         with pytest.raises(RuntimeError, match="boom after headers"):
             await mw(_make_http_scope(), _noop_receive, _noop_send)
 
@@ -218,9 +214,7 @@ class TestObservabilityMiddleware:
         assert collector.record_request.call_args[0][2] == 503
 
     @pytest.mark.asyncio
-    async def test_duration_measured_even_on_exception(
-        self, collector: MagicMock
-    ) -> None:
+    async def test_duration_measured_even_on_exception(self, collector: MagicMock) -> None:
         mw = ObservabilityMiddleware(_error_app(), collector=collector)
         with pytest.raises(RuntimeError):
             await mw(_make_http_scope(), _noop_receive, _noop_send)
@@ -231,9 +225,7 @@ class TestObservabilityMiddleware:
     # -- scope defaults ----------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_defaults_for_missing_scope_fields(
-        self, collector: MagicMock
-    ) -> None:
+    async def test_defaults_for_missing_scope_fields(self, collector: MagicMock) -> None:
         """If scope lacks method/path keys, fall back to defaults."""
         scope = {"type": "http"}  # no method or path
         mw = ObservabilityMiddleware(_simple_app(), collector=collector)
@@ -245,9 +237,7 @@ class TestObservabilityMiddleware:
         assert path == "/"
 
     @pytest.mark.asyncio
-    async def test_multiple_requests_recorded_independently(
-        self, collector: MagicMock
-    ) -> None:
+    async def test_multiple_requests_recorded_independently(self, collector: MagicMock) -> None:
         mw = ObservabilityMiddleware(_simple_app(200), collector=collector)
         await mw(_make_http_scope("GET", "/a"), _noop_receive, _noop_send)
         await mw(_make_http_scope("POST", "/b"), _noop_receive, _noop_send)

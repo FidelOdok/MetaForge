@@ -37,10 +37,7 @@ class AuditLogger:
         """Append *event* to the buffer.  Auto-flush when the batch size
         is reached (if config is set)."""
         self._buffer.append(event)
-        if (
-            self._config is not None
-            and len(self._buffer) >= self._config.batch_size
-        ):
+        if self._config is not None and len(self._buffer) >= self._config.batch_size:
             self.flush()
 
     # ── Convenience helpers ───────────────────────────────────────────

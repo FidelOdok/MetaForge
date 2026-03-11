@@ -117,9 +117,7 @@ class TestTenantRBAC:
 
     def test_get_visible_tenants_admin(self) -> None:
         all_ids = ["acme", "globex", "initech"]
-        visible = TenantRBAC.get_visible_tenants(
-            "__admin__", is_admin=True, all_tenant_ids=all_ids
-        )
+        visible = TenantRBAC.get_visible_tenants("__admin__", is_admin=True, all_tenant_ids=all_ids)
         assert set(visible) == {"acme", "globex", "initech"}
 
     def test_get_visible_tenants_admin_no_list(self) -> None:
@@ -341,27 +339,21 @@ class TestCostAttributionTracker:
             timestamp=ts or datetime(2024, 3, 15, 12, 0, 0),
         )
 
-    def test_record_and_query_by_project(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_record_and_query_by_project(self, tracker: CostAttributionTracker) -> None:
         tracker.record_cost(self._make_record(project="p1"))
         tracker.record_cost(self._make_record(project="p2"))
         results = tracker.get_costs_by_project("p1")
         assert len(results) == 1
         assert results[0].project_id == "p1"
 
-    def test_record_and_query_by_team(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_record_and_query_by_team(self, tracker: CostAttributionTracker) -> None:
         tracker.record_cost(self._make_record(team="t1"))
         tracker.record_cost(self._make_record(team="t2"))
         results = tracker.get_costs_by_team("t1")
         assert len(results) == 1
         assert results[0].team_id == "t1"
 
-    def test_query_by_project_with_time_range(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_query_by_project_with_time_range(self, tracker: CostAttributionTracker) -> None:
         early = datetime(2024, 1, 1)
         mid = datetime(2024, 6, 1)
         late = datetime(2024, 12, 1)
@@ -376,16 +368,12 @@ class TestCostAttributionTracker:
         assert len(results) == 1
         assert results[0].timestamp == mid
 
-    def test_query_by_team_with_time_range(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_query_by_team_with_time_range(self, tracker: CostAttributionTracker) -> None:
         jan = datetime(2024, 1, 15)
         jul = datetime(2024, 7, 15)
         tracker.record_cost(self._make_record(team="t1", ts=jan))
         tracker.record_cost(self._make_record(team="t1", ts=jul))
-        results = tracker.get_costs_by_team(
-            "t1", start=datetime(2024, 6, 1)
-        )
+        results = tracker.get_costs_by_team("t1", start=datetime(2024, 6, 1))
         assert len(results) == 1
 
     def test_daily_totals(self, tracker: CostAttributionTracker) -> None:
@@ -415,50 +403,38 @@ class TestCostAttributionTracker:
         assert totals["2024-01"] == pytest.approx(10.0)
         assert totals["2024-02"] == pytest.approx(20.0)
 
-    def test_monthly_totals_with_time_range(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_monthly_totals_with_time_range(self, tracker: CostAttributionTracker) -> None:
         jan = datetime(2024, 1, 15)
         feb = datetime(2024, 2, 15)
         mar = datetime(2024, 3, 15)
         tracker.record_cost(self._make_record(cost=10.0, ts=jan))
         tracker.record_cost(self._make_record(cost=20.0, ts=feb))
         tracker.record_cost(self._make_record(cost=30.0, ts=mar))
-        totals = tracker.get_monthly_totals(
-            start=datetime(2024, 2, 1), end=datetime(2024, 2, 28)
-        )
+        totals = tracker.get_monthly_totals(start=datetime(2024, 2, 1), end=datetime(2024, 2, 28))
         assert "2024-01" not in totals
         assert "2024-03" not in totals
         assert totals["2024-02"] == pytest.approx(20.0)
 
-    def test_budget_threshold_not_exceeded(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_budget_threshold_not_exceeded(self, tracker: CostAttributionTracker) -> None:
         tracker.record_cost(self._make_record(project="p1", cost=50.0))
         exceeded, total = tracker.check_budget_threshold("p1", 100.0)
         assert exceeded is False
         assert total == pytest.approx(50.0)
 
-    def test_budget_threshold_exceeded(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_budget_threshold_exceeded(self, tracker: CostAttributionTracker) -> None:
         tracker.record_cost(self._make_record(project="p1", cost=100.0))
         tracker.record_cost(self._make_record(project="p1", cost=50.0))
         exceeded, total = tracker.check_budget_threshold("p1", 100.0)
         assert exceeded is True
         assert total == pytest.approx(150.0)
 
-    def test_budget_threshold_exactly_at_limit(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_budget_threshold_exactly_at_limit(self, tracker: CostAttributionTracker) -> None:
         tracker.record_cost(self._make_record(project="p1", cost=100.0))
         exceeded, total = tracker.check_budget_threshold("p1", 100.0)
         assert exceeded is True
         assert total == pytest.approx(100.0)
 
-    def test_budget_threshold_empty_project(
-        self, tracker: CostAttributionTracker
-    ) -> None:
+    def test_budget_threshold_empty_project(self, tracker: CostAttributionTracker) -> None:
         exceeded, total = tracker.check_budget_threshold("nonexistent", 100.0)
         assert exceeded is False
         assert total == pytest.approx(0.0)
@@ -635,9 +611,7 @@ class TestExportConfig:
 
     def test_invalid_flush_interval(self) -> None:
         with pytest.raises(ValidationError):
-            ExportConfig(
-                destination=ExportDestination.s3, flush_interval_seconds=0
-            )
+            ExportConfig(destination=ExportDestination.s3, flush_interval_seconds=0)
 
 
 # ---------------------------------------------------------------------------
@@ -691,9 +665,7 @@ class TestAuditLogger:
         assert len(audit_logger.get_events()) == 1
 
     def test_auto_flush_on_batch_size(self) -> None:
-        config = ExportConfig(
-            destination=ExportDestination.local_file, batch_size=2
-        )
+        config = ExportConfig(destination=ExportDestination.local_file, batch_size=2)
         al = AuditLogger(config=config)
         al.log_event(self._make_event())
         assert len(al._buffer) == 1
@@ -703,15 +675,9 @@ class TestAuditLogger:
         assert len(al._flushed) == 2
 
     def test_query_by_event_type(self, audit_logger: AuditLogger) -> None:
-        audit_logger.log_event(
-            self._make_event(event_type=AuditEventType.graph_mutation)
-        )
-        audit_logger.log_event(
-            self._make_event(event_type=AuditEventType.authentication)
-        )
-        results = audit_logger.get_events(
-            event_type=AuditEventType.authentication
-        )
+        audit_logger.log_event(self._make_event(event_type=AuditEventType.graph_mutation))
+        audit_logger.log_event(self._make_event(event_type=AuditEventType.authentication))
+        results = audit_logger.get_events(event_type=AuditEventType.authentication)
         assert len(results) == 1
         assert results[0].event_type == AuditEventType.authentication
 
@@ -727,9 +693,7 @@ class TestAuditLogger:
         late = datetime(2024, 12, 1)
         audit_logger.log_event(self._make_event(ts=early))
         audit_logger.log_event(self._make_event(ts=late))
-        results = audit_logger.get_events(
-            start=datetime(2024, 6, 1), end=datetime(2024, 12, 31)
-        )
+        results = audit_logger.get_events(start=datetime(2024, 6, 1), end=datetime(2024, 12, 31))
         assert len(results) == 1
         assert results[0].timestamp == late
 
@@ -887,7 +851,5 @@ class TestAuditIntegrity:
         events = [self._make_event(action=f"act-{i}") for i in range(3)]
         chain = AuditIntegrity.build_hash_chain(events)
         # Verify second hash uses first hash as previous
-        expected_second = AuditIntegrity.compute_hash(
-            events[1], previous_hash=chain[0]
-        )
+        expected_second = AuditIntegrity.compute_hash(events[1], previous_hash=chain[0])
         assert chain[1] == expected_second

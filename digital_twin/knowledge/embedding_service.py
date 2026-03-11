@@ -116,9 +116,7 @@ class OpenAIEmbeddingService(EmbeddingService):
             span.set_attribute("embedding.text_length", len(text))
             try:
                 client = self._get_client()
-                response = await client.embeddings.create(
-                    model=self._model, input=text
-                )
+                response = await client.embeddings.create(model=self._model, input=text)
                 return response.data[0].embedding  # type: ignore[no-any-return]
             except Exception as exc:
                 span.record_exception(exc)
@@ -131,9 +129,7 @@ class OpenAIEmbeddingService(EmbeddingService):
             span.set_attribute("embedding.batch_size", len(texts))
             try:
                 client = self._get_client()
-                response = await client.embeddings.create(
-                    model=self._model, input=texts
-                )
+                response = await client.embeddings.create(model=self._model, input=texts)
                 return [d.embedding for d in response.data]  # type: ignore[no-any-return]
             except Exception as exc:
                 span.record_exception(exc)

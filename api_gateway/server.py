@@ -69,6 +69,7 @@ def _create_collector() -> MetricsCollector:
     logger.info("metrics_collector_noop", reason="OTel SDK not available or disabled")
     return MetricsCollector()
 
+
 # ---------------------------------------------------------------------------
 # Workflow definitions registry
 # ---------------------------------------------------------------------------
@@ -89,9 +90,7 @@ ACTION_WORKFLOWS: dict[str, WorkflowDefinition] = {
     "check_tolerances": WorkflowDefinition(
         name="check_tolerances",
         steps=[
-            WorkflowStep(
-                step_id="tolerances", agent_code="MECH", task_type="check_tolerances"
-            ),
+            WorkflowStep(step_id="tolerances", agent_code="MECH", task_type="check_tolerances"),
         ],
     ),
     "generate_cad": WorkflowDefinition(
@@ -264,7 +263,16 @@ def create_app(
     logger.info(
         "gateway_configured",
         cors_origins=origins,
-        routers=["health", "assistant", "chat", "convert", "sessions", "projects", "knowledge", "compliance"],
+        routers=[
+            "health",
+            "assistant",
+            "chat",
+            "convert",
+            "sessions",
+            "projects",
+            "knowledge",
+            "compliance",
+        ],
     )
 
     return app

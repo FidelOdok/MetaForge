@@ -29,9 +29,7 @@ class RunDrcHandler(SkillBase[RunDrcInput, RunDrcOutput]):
             input_data.artifact_id, branch=self.context.branch
         )
         if artifact is None:
-            errors.append(
-                f"Artifact {input_data.artifact_id} not found in Twin"
-            )
+            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
 
         # Check KiCad DRC tool is available
         if not await self.context.mcp.is_available("kicad.run_drc"):

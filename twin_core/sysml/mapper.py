@@ -92,9 +92,7 @@ class SysMLMapper:
 
             if node.node_type == NodeType.ARTIFACT and isinstance(node, Artifact):
                 return self._artifact_to_sysml(node)
-            elif node.node_type == NodeType.CONSTRAINT and isinstance(
-                node, Constraint
-            ):
+            elif node.node_type == NodeType.CONSTRAINT and isinstance(node, Constraint):
                 return self._constraint_to_sysml(node)
             elif node.node_type == NodeType.COMPONENT and isinstance(node, Component):
                 return self._component_to_sysml(node)
@@ -104,9 +102,7 @@ class SysMLMapper:
                     node_type=str(node.node_type),
                     node_id=str(node.id),
                 )
-                return SysMLElement(
-                    **{"@id": node.id, "@type": SysMLElementType.ELEMENT}
-                )
+                return SysMLElement(**{"@id": node.id, "@type": SysMLElementType.ELEMENT})
 
     def edge_to_sysml(self, edge: EdgeBase) -> ConnectionUsage:
         """Convert a MetaForge edge to a SysML v2 ConnectionUsage."""
@@ -162,7 +158,9 @@ class SysMLMapper:
                 **{"@type": SysMLElementType.PACKAGE},
                 name=package_name,
                 members=member_ids,
-                description=f"Exported from MetaForge Digital Twin ({len(nodes)} nodes, {len(edges)} edges)",
+                description=(
+                    f"Exported from MetaForge Digital Twin ({len(nodes)} nodes, {len(edges)} edges)"
+                ),
             )
 
             logger.info(
@@ -172,9 +170,7 @@ class SysMLMapper:
             )
 
             # Store elements in metadata for retrieval
-            package.metadata["elements"] = [
-                str(e.element_id) for e in elements
-            ]
+            package.metadata["elements"] = [str(e.element_id) for e in elements]
 
             return package
 
@@ -337,9 +333,7 @@ class SysMLMapper:
         is_component = part.properties.get("is_component", False)
 
         if is_component:
-            logger.debug(
-                "mapping_part_to_component", part_name=part.name
-            )
+            logger.debug("mapping_part_to_component", part_name=part.name)
             specs = {
                 k: v
                 for k, v in part.properties.items()
@@ -369,9 +363,7 @@ class SysMLMapper:
                 specs=specs,
             )
         else:
-            artifact_type_str = part.properties.get(
-                "artifact_type", str(ArtifactType.CAD_MODEL)
-            )
+            artifact_type_str = part.properties.get("artifact_type", str(ArtifactType.CAD_MODEL))
             # Parse the ArtifactType, default to CAD_MODEL
             try:
                 artifact_type = ArtifactType(artifact_type_str)
@@ -401,9 +393,7 @@ class SysMLMapper:
 
     def _requirement_usage_to_node(self, req: RequirementUsage) -> Artifact:
         """Map a RequirementUsage to an Artifact of type PRD."""
-        logger.debug(
-            "mapping_requirement_to_artifact", req_name=req.name
-        )
+        logger.debug("mapping_requirement_to_artifact", req_name=req.name)
         return Artifact(
             id=req.element_id,
             name=req.name or "Imported Requirement",

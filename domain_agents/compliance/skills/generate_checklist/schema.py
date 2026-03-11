@@ -13,9 +13,7 @@ class GenerateChecklistInput(BaseModel):
     """Input for the checklist generation skill."""
 
     project_id: str = Field(..., min_length=1, description="Project identifier")
-    product_category: str = Field(
-        default="consumer_electronics", description="Product category"
-    )
+    product_category: str = Field(default="consumer_electronics", description="Product category")
     target_markets: list[ComplianceRegime] = Field(
         ..., min_length=1, description="Target market regimes"
     )

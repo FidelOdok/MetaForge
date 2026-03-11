@@ -126,15 +126,11 @@ class SkillLoader:
                     loaded.append(skill)
                 except SkillLoadError as exc:
                     errors.append(exc)
-                    logger.warning(
-                        "Skill load failed", skill=exc.skill_name, reason=exc.reason
-                    )
+                    logger.warning("Skill load failed", skill=exc.skill_name, reason=exc.reason)
                 except Exception as exc:
                     err = SkillLoadError("unknown", str(exc), skill_dir)
                     errors.append(err)
-                    logger.warning(
-                        "Unexpected error loading skill", path=skill_dir, error=str(exc)
-                    )
+                    logger.warning("Unexpected error loading skill", path=skill_dir, error=str(exc))
 
         return loaded, errors
 
@@ -194,9 +190,7 @@ class SkillLoader:
             return SchemaValidator.validate_definition(raw)
         except Exception as exc:
             name: str = raw.get("name", "unknown")
-            raise SkillLoadError(
-                name, f"Definition validation failed: {exc}", str(path)
-            ) from exc
+            raise SkillLoadError(name, f"Definition validation failed: {exc}", str(path)) from exc
 
     def _load_schemas(
         self, path: Path, definition: SkillDefinition
@@ -207,9 +201,7 @@ class SkillLoader:
             raise SkillLoadError(definition.name, "schema.py not found", str(path))
 
         try:
-            module = self._import_module(
-                str(schema_path), f"_skill_{definition.name}_schema"
-            )
+            module = self._import_module(str(schema_path), f"_skill_{definition.name}_schema")
         except Exception as exc:
             raise SkillLoadError(
                 definition.name, f"Failed to import schema.py: {exc}", str(path)
@@ -246,9 +238,7 @@ class SkillLoader:
             raise SkillLoadError(definition.name, "handler.py not found", str(path))
 
         try:
-            module = self._import_module(
-                str(handler_path), f"_skill_{definition.name}_handler"
-            )
+            module = self._import_module(str(handler_path), f"_skill_{definition.name}_handler")
         except Exception as exc:
             raise SkillLoadError(
                 definition.name, f"Failed to import handler.py: {exc}", str(path)
@@ -295,9 +285,7 @@ class SkillLoader:
         return module
 
     @staticmethod
-    def _resolve_schema_class(
-        module: Any, dotted_path: str
-    ) -> type[BaseModel] | None:
+    def _resolve_schema_class(module: Any, dotted_path: str) -> type[BaseModel] | None:
         """Resolve 'schema.ClassName' to the actual class from the imported module.
 
         Takes the part after the last dot as the class name.
@@ -313,10 +301,6 @@ class SkillLoader:
         """Find the first concrete SkillBase subclass in a handler module."""
         for attr_name in dir(module):
             attr: object = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, SkillBase)
-                and attr is not SkillBase
-            ):
+            if isinstance(attr, type) and issubclass(attr, SkillBase) and attr is not SkillBase:
                 return attr
         return None

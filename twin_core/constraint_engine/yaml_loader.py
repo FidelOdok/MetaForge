@@ -115,7 +115,7 @@ def load_rules_from_file(path: str | Path) -> YamlRuleSet:
             logger.error("yaml_rule_file_not_found", path=str(path))
             raise YamlRuleLoadError(msg)
 
-        if not path.suffix.lower() in (".yaml", ".yml"):
+        if path.suffix.lower() not in (".yaml", ".yml"):
             msg = f"Expected .yaml or .yml file, got: {path.suffix}"
             logger.error("yaml_rule_invalid_extension", path=str(path))
             raise YamlRuleLoadError(msg)
@@ -186,8 +186,7 @@ def load_rules_from_directory(dir_path: str | Path) -> list[YamlRuleSet]:
             return []
 
         yaml_files = sorted(
-            p for p in dir_path.iterdir()
-            if p.is_file() and p.suffix.lower() in (".yaml", ".yml")
+            p for p in dir_path.iterdir() if p.is_file() and p.suffix.lower() in (".yaml", ".yml")
         )
 
         if not yaml_files:

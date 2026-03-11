@@ -59,9 +59,7 @@ class TenantMetricInjector:
     Grafana / Alertmanager filter expressions."""
 
     @staticmethod
-    def inject_tenant_labels(
-        attributes: dict, tenant: TenantContext
-    ) -> dict:
+    def inject_tenant_labels(attributes: dict, tenant: TenantContext) -> dict:
         """Return a *new* dict with ``tenant_id`` added to *attributes*."""
         result = dict(attributes)
         result["tenant_id"] = tenant.tenant_id
@@ -94,9 +92,7 @@ class TenantRBAC:
     """Role-based access control for per-tenant metric visibility."""
 
     @staticmethod
-    def can_view_metrics(
-        viewer_tenant_id: str, metric_tenant_id: str
-    ) -> bool:
+    def can_view_metrics(viewer_tenant_id: str, metric_tenant_id: str) -> bool:
         """Return ``True`` if *viewer_tenant_id* may view metrics belonging
         to *metric_tenant_id*.
 

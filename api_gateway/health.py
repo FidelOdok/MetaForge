@@ -101,16 +101,8 @@ class HealthChecker:
         # Aggregate: any unhealthy -> degraded; ALL unhealthy -> unhealthy
         overall = DependencyStatus.HEALTHY
         if components:
-            unhealthy_count = sum(
-                1
-                for c in components
-                if c.status == DependencyStatus.UNHEALTHY
-            )
-            degraded_count = sum(
-                1
-                for c in components
-                if c.status == DependencyStatus.DEGRADED
-            )
+            unhealthy_count = sum(1 for c in components if c.status == DependencyStatus.UNHEALTHY)
+            degraded_count = sum(1 for c in components if c.status == DependencyStatus.DEGRADED)
             if unhealthy_count == len(components):
                 overall = DependencyStatus.UNHEALTHY
             elif unhealthy_count > 0 or degraded_count > 0:

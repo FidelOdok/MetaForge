@@ -81,16 +81,12 @@ def mock_context() -> SkillContext:
 
 
 class TestSkillBase:
-    async def test_concrete_skill_executes_successfully(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_concrete_skill_executes_successfully(self, mock_context: SkillContext) -> None:
         skill = EchoSkill(mock_context)
         output = await skill.execute(DummyInput(value=42))
         assert output.result == "echo-42"
 
-    async def test_skill_run_returns_result_with_metadata(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_skill_run_returns_result_with_metadata(self, mock_context: SkillContext) -> None:
         skill = EchoSkill(mock_context)
         result = await skill.run(DummyInput(value=7))
         assert isinstance(result, SkillResult)
@@ -101,9 +97,7 @@ class TestSkillBase:
         assert result.duration_ms >= 0
         assert result.errors == []
 
-    async def test_skill_run_catches_execution_errors(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_skill_run_catches_execution_errors(self, mock_context: SkillContext) -> None:
         skill = FailingSkill(mock_context)
         result = await skill.run(DummyInput(value=1))
         assert result.success is False
@@ -112,9 +106,7 @@ class TestSkillBase:
         assert "boom" in result.errors[0]
         assert result.duration_ms >= 0
 
-    async def test_skill_run_checks_preconditions(
-        self, mock_context: SkillContext
-    ) -> None:
+    async def test_skill_run_checks_preconditions(self, mock_context: SkillContext) -> None:
         skill = PreconditionSkill(mock_context)
         result = await skill.run(DummyInput(value=-1))
         assert result.success is False

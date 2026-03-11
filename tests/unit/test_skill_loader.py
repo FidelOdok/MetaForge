@@ -198,13 +198,7 @@ class TestSkillLoader:
         assert exc_info.value.skill_name == "no_handler_skill"
 
     def test_load_no_skillbase_subclass_raises(self, tmp_path: Path) -> None:
-        handler_no_skill = (
-            "from pydantic import BaseModel\n"
-            "\n"
-            "\n"
-            "class NotASkill:\n"
-            "    pass\n"
-        )
+        handler_no_skill = "from pydantic import BaseModel\n\n\nclass NotASkill:\n    pass\n"
         skill_dir = _create_skill_dir(
             tmp_path, name="no_subclass_skill", handler_content=handler_no_skill
         )
@@ -262,9 +256,7 @@ class TestSkillLoaderLoadAll:
 
     def test_load_all_nonexistent_path(self) -> None:
         loader = SkillLoader()
-        loaded, errors = loader.load_all(
-            search_paths=["/nonexistent/path/that/does/not/exist"]
-        )
+        loaded, errors = loader.load_all(search_paths=["/nonexistent/path/that/does/not/exist"])
 
         assert len(loaded) == 0
         assert len(errors) == 0

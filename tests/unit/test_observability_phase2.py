@@ -325,9 +325,7 @@ class TestMetricsCollectorDatastore:
     def test_record_pgvector_search_calls_histogram(self, collector: MetricsCollector) -> None:
         collector.record_pgvector_search("component_spec", "success", 0.045)
         hist = collector._instruments[MetricsRegistry.PGVECTOR_SEARCH_DURATION.name]
-        hist.record.assert_called_once_with(
-            0.045, attributes={"knowledge_type": "component_spec"}
-        )
+        hist.record.assert_called_once_with(0.045, attributes={"knowledge_type": "component_spec"})
 
     def test_record_minio_operation_calls_counter(self, collector: MetricsCollector) -> None:
         collector.record_minio_operation("put_object", "success", 0.1)
@@ -339,9 +337,7 @@ class TestMetricsCollectorDatastore:
     def test_record_minio_operation_calls_histogram(self, collector: MetricsCollector) -> None:
         collector.record_minio_operation("put_object", "success", 0.1)
         hist = collector._instruments[MetricsRegistry.MINIO_OPERATION_DURATION.name]
-        hist.record.assert_called_once_with(
-            0.1, attributes={"operation": "put_object"}
-        )
+        hist.record.assert_called_once_with(0.1, attributes={"operation": "put_object"})
 
     def test_noop_record_neo4j_query(self) -> None:
         collector = MetricsCollector()
@@ -373,9 +369,7 @@ class TestMetricsCollectorConstraint:
         c.create_instruments(MetricsRegistry.constraint_metrics())
         return c
 
-    def test_record_constraint_evaluation_calls_counter(
-        self, collector: MetricsCollector
-    ) -> None:
+    def test_record_constraint_evaluation_calls_counter(self, collector: MetricsCollector) -> None:
         collector.record_constraint_evaluation("mechanical", "pass", 0.003)
         counter = collector._instruments[MetricsRegistry.CONSTRAINT_EVALUATION_TOTAL.name]
         counter.add.assert_called_once_with(
@@ -387,9 +381,7 @@ class TestMetricsCollectorConstraint:
     ) -> None:
         collector.record_constraint_evaluation("mechanical", "pass", 0.003)
         hist = collector._instruments[MetricsRegistry.CONSTRAINT_EVALUATION_DURATION.name]
-        hist.record.assert_called_once_with(
-            0.003, attributes={"domain": "mechanical"}
-        )
+        hist.record.assert_called_once_with(0.003, attributes={"domain": "mechanical"})
 
     def test_record_opa_decision(self, collector: MetricsCollector) -> None:
         collector.record_opa_decision("agent_budget", "allow")
@@ -401,9 +393,7 @@ class TestMetricsCollectorConstraint:
     def test_record_oscillation_detected(self, collector: MetricsCollector) -> None:
         collector.record_oscillation_detected("Constraint")
         counter = collector._instruments[MetricsRegistry.OSCILLATION_DETECTED_TOTAL.name]
-        counter.add.assert_called_once_with(
-            1, attributes={"node_type": "Constraint"}
-        )
+        counter.add.assert_called_once_with(1, attributes={"node_type": "Constraint"})
 
     def test_noop_record_constraint_evaluation(self) -> None:
         collector = MetricsCollector()

@@ -72,7 +72,9 @@ class ConversionService:
             return json.loads(meta.read_text())
         return None
 
-    def convert(self, file_bytes: bytes, filename: str, quality: str = "standard") -> dict[str, Any]:
+    def convert(
+        self, file_bytes: bytes, filename: str, quality: str = "standard"
+    ) -> dict[str, Any]:
         """Convert a CAD file to GLB.
 
         Returns a dict with keys: hash, glb_url, metadata, cached.
@@ -134,9 +136,7 @@ class ConversionService:
 
         if resp.status_code != 200:
             body = resp.text
-            raise RuntimeError(
-                f"OCCT converter returned {resp.status_code}: {body}"
-            )
+            raise RuntimeError(f"OCCT converter returned {resp.status_code}: {body}")
 
         result = resp.json()
 

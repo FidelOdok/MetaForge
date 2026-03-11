@@ -41,8 +41,8 @@ class DependencyGraph:
     def __init__(self, definition: WorkflowDefinition) -> None:
         self._definition = definition
         self._steps: dict[str, WorkflowStep] = {}
-        self._adjacency: dict[str, list[str]] = {}   # step -> dependents
-        self._reverse: dict[str, list[str]] = {}      # step -> dependencies
+        self._adjacency: dict[str, list[str]] = {}  # step -> dependents
+        self._reverse: dict[str, list[str]] = {}  # step -> dependencies
         self._build()
 
     def _build(self) -> None:
@@ -54,21 +54,15 @@ class DependencyGraph:
         for step in self._definition.steps:
             for dep in step.depends_on:
                 if dep not in self._steps:
-                    raise ValueError(
-                        f"Step '{step.step_id}' depends on unknown step '{dep}'"
-                    )
+                    raise ValueError(f"Step '{step.step_id}' depends on unknown step '{dep}'")
                 self._adjacency[dep].append(step.step_id)
                 self._reverse[step.step_id].append(dep)
 
     def validate(self) -> None:
         """Raise ``CyclicDependencyError`` if the graph contains a cycle."""
         with tracer.start_as_current_span("dependency.validate") as span:
-            in_degree: dict[str, int] = {
-                sid: len(deps) for sid, deps in self._reverse.items()
-            }
-            queue: deque[str] = deque(
-                sid for sid, deg in in_degree.items() if deg == 0
-            )
+            in_degree: dict[str, int] = {sid: len(deps) for sid, deps in self._reverse.items()}
+            queue: deque[str] = deque(sid for sid, deg in in_degree.items() if deg == 0)
             visited: list[str] = []
 
             while queue:
@@ -91,12 +85,8 @@ class DependencyGraph:
         """Return step IDs in a valid execution order."""
         self.validate()
 
-        in_degree: dict[str, int] = {
-            sid: len(deps) for sid, deps in self._reverse.items()
-        }
-        queue: deque[str] = deque(
-            sid for sid, deg in in_degree.items() if deg == 0
-        )
+        in_degree: dict[str, int] = {sid: len(deps) for sid, deps in self._reverse.items()}
+        queue: deque[str] = deque(sid for sid, deg in in_degree.items() if deg == 0)
         result: list[str] = []
 
         while queue:

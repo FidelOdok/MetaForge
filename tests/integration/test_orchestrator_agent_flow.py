@@ -9,20 +9,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from uuid import UUID
-
-import pytest
 
 from domain_agents.mechanical.agent import MechanicalAgent
-from domain_agents.mechanical.agent import TaskRequest as MechTaskRequest
-from orchestrator.dependency_engine import DependencyGraph
 from orchestrator.event_bus.events import EventType
 from orchestrator.event_bus.subscribers import EventBus
 from orchestrator.scheduler import (
     InMemoryScheduler,
-    RetryPolicy,
     ScheduledStep,
-    SchedulerPriority,
 )
 from orchestrator.workflow_dag import (
     InMemoryWorkflowEngine,
@@ -31,11 +24,9 @@ from orchestrator.workflow_dag import (
     WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
-from tests.conftest import MECH_ARTIFACT_ID, SpySubscriber, make_artifact
-from tests.integration.conftest import FEA_SUCCESS_RESPONSE, MockAgent
+from tests.conftest import MECH_ARTIFACT_ID, SpySubscriber
+from tests.integration.conftest import MockAgent
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import ArtifactType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -105,9 +96,7 @@ class TestSingleStepMechAgent:
         mech_artifact,
     ):
         agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", agent)
 
         run_id = await _run_single_step(
@@ -132,9 +121,7 @@ class TestSingleStepMechAgent:
         mech_artifact,
     ):
         agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", agent)
 
         run_id = await _run_single_step(
@@ -174,9 +161,7 @@ class TestSingleStepEEAgent:
         from domain_agents.electronics.agent import ElectronicsAgent
 
         agent = ElectronicsAgent(twin=twin, mcp=mcp_with_tools)
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("EE", agent)
 
         run_id = await _run_single_step(
@@ -207,12 +192,10 @@ class TestEventLifecycle:
         spy: SpySubscriber,
     ):
         mock = MockAgent(result={"status": "ok"})
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", mock)
 
-        run_id = await _run_single_step(scheduler, workflow_engine)
+        _ = await _run_single_step(scheduler, workflow_engine)
 
         started = spy.events_of_type(EventType.AGENT_TASK_STARTED)
         completed = spy.events_of_type(EventType.AGENT_TASK_COMPLETED)
@@ -228,12 +211,10 @@ class TestEventLifecycle:
         spy: SpySubscriber,
     ):
         mock = MockAgent(error=RuntimeError("boom"))
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", mock)
 
-        run_id = await _run_single_step(scheduler, workflow_engine)
+        _ = await _run_single_step(scheduler, workflow_engine)
 
         failed = spy.events_of_type(EventType.AGENT_TASK_FAILED)
         assert len(failed) >= 1
@@ -249,12 +230,10 @@ class TestSchedulerTaskRequest:
         event_bus: EventBus,
     ):
         mock = MockAgent()
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
         scheduler.register_agent("MECH", mock)
 
-        run_id = await _run_single_step(scheduler, workflow_engine)
+        _ = await _run_single_step(scheduler, workflow_engine)
 
         assert len(mock.calls) == 1
         req = mock.calls[0]
@@ -268,9 +247,7 @@ class TestSchedulerTaskRequest:
         spy: SpySubscriber,
     ):
         # Don't register any agent — scheduler should fail gracefully
-        scheduler = InMemoryScheduler(
-            workflow_engine=workflow_engine, event_bus=event_bus
-        )
+        scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
 
         run_id = await _run_single_step(scheduler, workflow_engine)
 
@@ -326,9 +303,7 @@ class TestParallelDispatch:
             )
         )
         await scheduler.schedule_step(
-            ScheduledStep(
-                run_id=run.id, step_id="s2", agent_code="EE", task_type="run_erc"
-            )
+            ScheduledStep(run_id=run.id, step_id="s2", agent_code="EE", task_type="run_erc")
         )
 
         # Wait for both to complete

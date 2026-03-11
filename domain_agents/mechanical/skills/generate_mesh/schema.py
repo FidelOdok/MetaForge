@@ -22,9 +22,7 @@ class GenerateMeshInput(BaseModel):
 
     artifact_id: UUID = Field(..., description="Twin artifact ID for the CAD model")
     cad_file: str = Field(..., min_length=1, description="Path to input CAD file (STEP/STL/BREP)")
-    element_size: float = Field(
-        default=1.0, gt=0, description="Target element size in mm"
-    )
+    element_size: float = Field(default=1.0, gt=0, description="Target element size in mm")
     algorithm: str = Field(default="netgen", description="Meshing algorithm: netgen, gmsh, mefisto")
     output_format: str = Field(default="inp", description="Output format: inp, unv, stl")
     min_angle_threshold: float = Field(
@@ -52,9 +50,7 @@ class GenerateMeshOutput(BaseModel):
     quality_metrics: MeshQualityMetrics = Field(
         default_factory=MeshQualityMetrics, description="Mesh quality metrics"
     )
-    quality_acceptable: bool = Field(
-        ..., description="Whether mesh meets quality thresholds"
-    )
+    quality_acceptable: bool = Field(..., description="Whether mesh meets quality thresholds")
     quality_issues: list[str] = Field(
         default_factory=list, description="Human-readable quality issues"
     )

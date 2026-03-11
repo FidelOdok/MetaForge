@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import io
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,9 +26,8 @@ async def client(app):
 @pytest.fixture
 def mock_service():
     """Mock the ConversionService used by routes."""
-    with patch("api_gateway.convert.routes._service") as mock:
+    with patch("api_gateway.convert.routes._service") as _:
         svc = MagicMock()
-        mock_ref = svc
 
         # Patch get_service to return our mock
         with patch("api_gateway.convert.routes.get_service", return_value=svc):
@@ -65,7 +62,11 @@ class TestUploadAndConvert:
         mock_service.convert.return_value = {
             "hash": "abc123",
             "glb_url": "/v1/convert/abc123/glb?quality=standard",
-            "metadata": {"parts": [], "materials": [], "stats": {"triangleCount": 0, "fileSize": 0}},
+            "metadata": {
+                "parts": [],
+                "materials": [],
+                "stats": {"triangleCount": 0, "fileSize": 0},
+            },
             "cached": False,
         }
 
@@ -85,7 +86,11 @@ class TestUploadAndConvert:
         mock_service.convert.return_value = {
             "hash": "abc123",
             "glb_url": "/v1/convert/abc123/glb?quality=standard",
-            "metadata": {"parts": [], "materials": [], "stats": {"triangleCount": 0, "fileSize": 0}},
+            "metadata": {
+                "parts": [],
+                "materials": [],
+                "stats": {"triangleCount": 0, "fileSize": 0},
+            },
             "cached": True,
         }
 

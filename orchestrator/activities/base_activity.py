@@ -6,12 +6,11 @@ activities plus a default retry policy factory.
 
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 import structlog
+from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 
@@ -36,9 +35,7 @@ class AgentActivityInput(BaseModel):
     """Canonical input for every agent Temporal activity."""
 
     agent_code: str = Field(description="Domain agent identifier (e.g. 'mechanical')")
-    task_request: dict[str, Any] = Field(
-        description="Serialised TaskRequest for the target agent"
-    )
+    task_request: dict[str, Any] = Field(description="Serialised TaskRequest for the target agent")
     session_id: str = Field(description="Session UUID string")
     run_id: str = Field(description="Temporal workflow run ID")
     step_id: str = Field(description="Workflow step identifier")
@@ -47,9 +44,7 @@ class AgentActivityInput(BaseModel):
 class AgentActivityOutput(BaseModel):
     """Canonical output returned by every agent Temporal activity."""
 
-    task_result: dict[str, Any] = Field(
-        description="Serialised TaskResult from the agent"
-    )
+    task_result: dict[str, Any] = Field(description="Serialised TaskResult from the agent")
     agent_code: str = Field(description="Domain agent identifier")
     duration_ms: float = Field(description="Wall-clock execution time in milliseconds")
     tool_calls: list[dict[str, Any]] = Field(
@@ -68,12 +63,8 @@ class ApprovalRequest(BaseModel):
 
     approval_id: str = Field(description="Unique approval request identifier")
     description: str = Field(description="What needs approval")
-    required_role: str = Field(
-        default="reviewer", description="Role required to approve"
-    )
-    artifact_ids: list[str] = Field(
-        default_factory=list, description="Artifact IDs under review"
-    )
+    required_role: str = Field(default="reviewer", description="Role required to approve")
+    artifact_ids: list[str] = Field(default_factory=list, description="Artifact IDs under review")
     run_id: str = Field(description="Parent workflow run ID")
     step_id: str = Field(description="Parent workflow step ID")
     requested_at: str = Field(

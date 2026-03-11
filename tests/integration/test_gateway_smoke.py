@@ -9,9 +9,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-import pytest
 from httpx import AsyncClient
-
 
 # ---------------------------------------------------------------------------
 # Health endpoint
@@ -19,7 +17,6 @@ from httpx import AsyncClient
 
 
 class TestHealthEndpoint:
-
     async def test_health_returns_200(self, http_client: AsyncClient):
         resp = await http_client.get("/health")
         assert resp.status_code == 200
@@ -40,7 +37,6 @@ class TestHealthEndpoint:
 
 
 class TestAssistantEndpoints:
-
     async def test_submit_request_accepted(self, http_client: AsyncClient):
         resp = await http_client.post(
             "/v1/assistant/request",
@@ -78,7 +74,6 @@ class TestAssistantEndpoints:
 
 
 class TestChatEndpoints:
-
     async def test_list_channels(self, http_client: AsyncClient):
         resp = await http_client.get("/v1/chat/channels")
         assert resp.status_code == 200
@@ -148,7 +143,6 @@ class TestChatEndpoints:
 
 
 class TestCors:
-
     async def test_cors_preflight_headers(self, http_client: AsyncClient):
         resp = await http_client.options(
             "/health",

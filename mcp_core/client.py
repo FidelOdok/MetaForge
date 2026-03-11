@@ -154,16 +154,10 @@ class McpClient:
             output_files=result_data.get("output_files", []),
         )
 
-    async def list_tools(
-        self, adapter_id: str | None = None
-    ) -> list[ToolManifest]:
+    async def list_tools(self, adapter_id: str | None = None) -> list[ToolManifest]:
         """Discover available tools from one or all connected adapters."""
         if adapter_id is not None:
-            return [
-                m
-                for m in self._manifests.values()
-                if m.adapter_id == adapter_id
-            ]
+            return [m for m in self._manifests.values() if m.adapter_id == adapter_id]
         return list(self._manifests.values())
 
     def register_manifest(self, manifest: ToolManifest) -> None:

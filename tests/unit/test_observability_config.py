@@ -223,9 +223,7 @@ class TestInitObservabilityNoOtel:
     """init_observability should return a no-op state when OTel is absent."""
 
     def test_returns_inactive_state_when_otel_unavailable(self) -> None:
-        with patch(
-            "observability.bootstrap._otel_fully_available", return_value=False
-        ):
+        with patch("observability.bootstrap._otel_fully_available", return_value=False):
             state = init_observability(ObservabilityConfig())
         assert state.is_active is False
         assert state.tracer_provider is None
@@ -258,19 +256,11 @@ class TestInitObservabilityMocked:
         mock_reader = MagicMock()
 
         patches = {
-            "observability.bootstrap._otel_fully_available": MagicMock(
-                return_value=True
-            ),
+            "observability.bootstrap._otel_fully_available": MagicMock(return_value=True),
             "observability.bootstrap.Resource": mock_resource_cls,
-            "observability.bootstrap.TracerProvider": MagicMock(
-                return_value=mock_tracer_provider
-            ),
-            "observability.bootstrap.MeterProvider": MagicMock(
-                return_value=mock_meter_provider
-            ),
-            "observability.bootstrap.OTLPSpanExporter": MagicMock(
-                return_value=mock_span_exporter
-            ),
+            "observability.bootstrap.TracerProvider": MagicMock(return_value=mock_tracer_provider),
+            "observability.bootstrap.MeterProvider": MagicMock(return_value=mock_meter_provider),
+            "observability.bootstrap.OTLPSpanExporter": MagicMock(return_value=mock_span_exporter),
             "observability.bootstrap.OTLPMetricExporter": MagicMock(
                 return_value=mock_metric_exporter
             ),
@@ -302,16 +292,12 @@ class TestInitObservabilityMocked:
         assert state.is_active is True
 
     def test_init_with_traces_disabled(self) -> None:
-        state = self._mock_otel_init(
-            ObservabilityConfig(enable_traces=False, enable_metrics=True)
-        )
+        state = self._mock_otel_init(ObservabilityConfig(enable_traces=False, enable_metrics=True))
         assert state.is_active is True
         assert state.tracer_provider is None
 
     def test_init_with_metrics_disabled(self) -> None:
-        state = self._mock_otel_init(
-            ObservabilityConfig(enable_traces=True, enable_metrics=False)
-        )
+        state = self._mock_otel_init(ObservabilityConfig(enable_traces=True, enable_metrics=False))
         assert state.is_active is True
         assert state.meter_provider is None
 

@@ -144,9 +144,7 @@ class InMemoryKnowledgeStore(KnowledgeStore):
     ) -> list[KnowledgeEntry]:
         with tracer.start_as_current_span("knowledge_store.search") as span:
             span.set_attribute("pgvector.top_k", limit)
-            span.set_attribute(
-                "pgvector.query_embedding_dim", len(embedding)
-            )
+            span.set_attribute("pgvector.query_embedding_dim", len(embedding))
             t0 = time.monotonic()
 
             candidates = list(self._entries.values())
@@ -223,9 +221,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
         try:
             import asyncpg  # type: ignore[import-untyped]
 
-            self._pool = await asyncpg.create_pool(
-                self._dsn, min_size=1, max_size=self._pool_size
-            )
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=self._pool_size)
             async with self._pool.acquire() as conn:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 await conn.execute("""
@@ -334,9 +330,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 for row in rows:
                     emb_text = row["embedding"]
                     emb_values = (
-                        [float(v) for v in emb_text.strip("[]").split(",")]
-                        if emb_text
-                        else []
+                        [float(v) for v in emb_text.strip("[]").split(",")] if emb_text else []
                     )
                     meta = row["metadata"]
                     if isinstance(meta, str):
@@ -385,11 +379,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 if row is None:
                     return None
                 emb_text = row["embedding"]
-                emb_values = (
-                    [float(v) for v in emb_text.strip("[]").split(",")]
-                    if emb_text
-                    else []
-                )
+                emb_values = [float(v) for v in emb_text.strip("[]").split(",")] if emb_text else []
                 meta = row["metadata"]
                 if isinstance(meta, str):
                     meta = json.loads(meta)
@@ -461,9 +451,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 for row in rows:
                     emb_text = row["embedding"]
                     emb_values = (
-                        [float(v) for v in emb_text.strip("[]").split(",")]
-                        if emb_text
-                        else []
+                        [float(v) for v in emb_text.strip("[]").split(",")] if emb_text else []
                     )
                     meta = row["metadata"]
                     if isinstance(meta, str):

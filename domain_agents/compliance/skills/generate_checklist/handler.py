@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from domain_agents.compliance.checklist_generator import ChecklistGenerator
 from skill_registry.skill_base import SkillBase
 
-from domain_agents.compliance.checklist_generator import ChecklistGenerator
-
 from .schema import GenerateChecklistInput, GenerateChecklistOutput
-
 
 _DEFAULT_REGIMES_DIR = Path(__file__).resolve().parent.parent.parent / "regimes"
 

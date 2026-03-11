@@ -162,60 +162,38 @@ class TestTelemetryCollectorWithMeter:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.telemetry_metrics())
         collector.record_mqtt_message("dev-001", "sensors/temp")
-        counter = collector._instruments[
-            MetricsRegistry.MQTT_MESSAGES_RECEIVED_TOTAL.name
-        ]
+        counter = collector._instruments[MetricsRegistry.MQTT_MESSAGES_RECEIVED_TOTAL.name]
         counter.add.assert_called_once_with(
             1, attributes={"device_id": "dev-001", "topic": "sensors/temp"}
         )
 
-    def test_record_telemetry_routing_calls_histogram(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_telemetry_routing_calls_histogram(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.telemetry_metrics())
         collector.record_telemetry_routing("temperature_sensor", 0.042)
-        hist = collector._instruments[
-            MetricsRegistry.TELEMETRY_ROUTER_DURATION.name
-        ]
-        hist.record.assert_called_once_with(
-            0.042, attributes={"device_type": "temperature_sensor"}
-        )
+        hist = collector._instruments[MetricsRegistry.TELEMETRY_ROUTER_DURATION.name]
+        hist.record.assert_called_once_with(0.042, attributes={"device_type": "temperature_sensor"})
 
-    def test_record_telemetry_ingestion_calls_counter(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_telemetry_ingestion_calls_counter(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.telemetry_metrics())
         collector.record_telemetry_ingestion("success")
-        counter = collector._instruments[
-            MetricsRegistry.TELEMETRY_INGESTION_TOTAL.name
-        ]
+        counter = collector._instruments[MetricsRegistry.TELEMETRY_INGESTION_TOTAL.name]
         counter.add.assert_called_once_with(1, attributes={"status": "success"})
 
-    def test_record_telemetry_error_calls_counter(
-        self, mock_meter: MagicMock
-    ) -> None:
+    def test_record_telemetry_error_calls_counter(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.telemetry_metrics())
         collector.record_telemetry_error("write_failure")
-        counter = collector._instruments[
-            MetricsRegistry.TELEMETRY_INGESTION_ERRORS_TOTAL.name
-        ]
-        counter.add.assert_called_once_with(
-            1, attributes={"error_type": "write_failure"}
-        )
+        counter = collector._instruments[MetricsRegistry.TELEMETRY_INGESTION_ERRORS_TOTAL.name]
+        counter.add.assert_called_once_with(1, attributes={"error_type": "write_failure"})
 
     def test_set_telemetry_lag_calls_gauge(self, mock_meter: MagicMock) -> None:
         collector = MetricsCollector(meter=mock_meter)
         collector.create_instruments(MetricsRegistry.telemetry_metrics())
         collector.set_telemetry_lag("dev-001", 3.2)
-        gauge = collector._instruments[
-            MetricsRegistry.TELEMETRY_LAG_SECONDS.name
-        ]
-        gauge.add.assert_called_once_with(
-            3.2, attributes={"device_id": "dev-001"}
-        )
+        gauge = collector._instruments[MetricsRegistry.TELEMETRY_LAG_SECONDS.name]
+        gauge.add.assert_called_once_with(3.2, attributes={"device_id": "dev-001"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -282,9 +260,7 @@ class TestFleetHealthDashboard:
         assert panel["type"] == "histogram"
         assert "TSDB" in panel["title"] or "Write Latency" in panel["title"]
 
-    def test_dashboard_has_device_group_template_variable(
-        self, dashboard: dict
-    ) -> None:
+    def test_dashboard_has_device_group_template_variable(self, dashboard: dict) -> None:
         variables = dashboard.get("templating", {}).get("list", [])
         names = [v["name"] for v in variables]
         assert "device_group" in names
@@ -411,13 +387,9 @@ class TestIncidentRunbooks:
 
     @pytest.mark.parametrize("filename", _RUNBOOK_FILES)
     @pytest.mark.parametrize("section", _REQUIRED_SECTIONS)
-    def test_runbook_has_required_section(
-        self, filename: str, section: str
-    ) -> None:
+    def test_runbook_has_required_section(self, filename: str, section: str) -> None:
         content = (_RUNBOOK_DIR / filename).read_text()
-        assert section in content, (
-            f"Runbook {filename} is missing required section: {section}"
-        )
+        assert section in content, f"Runbook {filename} is missing required section: {section}"
 
     def test_gateway_down_runbook_references_alert(self) -> None:
         content = (_RUNBOOK_DIR / "gateway-down.md").read_text()

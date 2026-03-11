@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from api_gateway.convert.schemas import ConversionResult
@@ -48,7 +48,10 @@ async def upload_and_convert(
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+                detail=(
+                    f"Unsupported file type '{ext}'."
+                    f" Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+                ),
             )
 
         # Read file content

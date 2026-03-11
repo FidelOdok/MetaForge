@@ -121,9 +121,7 @@ class NexarAdapter(DistributorAdapter):
         with tracer.start_as_current_span("nexar.search_parts") as span:
             span.set_attribute("query", query)
             try:
-                data = await self._graphql(
-                    SEARCH_PARTS_QUERY, {"query": query, "limit": limit}
-                )
+                data = await self._graphql(SEARCH_PARTS_QUERY, {"query": query, "limit": limit})
                 return self._map_search_results(data)
             except Exception as exc:
                 span.record_exception(exc)
@@ -219,9 +217,7 @@ class NexarAdapter(DistributorAdapter):
             lead_time_days=best_offer.get("factoryLeadDays") if best_offer else None,
             lifecycle_status=self._extract_lifecycle(part),
             datasheet_url=(
-                part.get("bestDatasheet", {}).get("url")
-                if part.get("bestDatasheet")
-                else None
+                part.get("bestDatasheet", {}).get("url") if part.get("bestDatasheet") else None
             ),
             specs=specs,
             package=specs.get("Package / Case", ""),

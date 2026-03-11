@@ -7,7 +7,6 @@ basic metadata.
 
 from __future__ import annotations
 
-import os
 import re
 import xml.etree.ElementTree as ET
 import zipfile
@@ -182,7 +181,7 @@ class FreecadAdapter(FileChangeAdapter):
             content = path.read_text(encoding="utf-8", errors="replace")
             entity_count = len(_STEP_ENTITY_RE.findall(content))
             properties["entity_count"] = entity_count
-        except (OSError, IOError):
+        except OSError:
             properties["entity_count"] = 0
 
         return [

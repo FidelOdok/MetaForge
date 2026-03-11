@@ -76,9 +76,7 @@ def format_compact(rows: list[dict[str, Any]], key_field: str = "id") -> str:
     lines: list[str] = []
     for row in rows:
         key_val = row.get(key_field, "?")
-        rest = " ".join(
-            f"{k}={v}" for k, v in row.items() if k != key_field
-        )
+        rest = " ".join(f"{k}={v}" for k, v in row.items() if k != key_field)
         lines.append(f"{key_val}: {rest}")
     return "\n".join(lines)
 

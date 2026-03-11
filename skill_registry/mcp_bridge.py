@@ -84,9 +84,7 @@ class InMemoryMcpBridge(McpBridge):
     def register_tool(self, tool_id: str, capability: str, name: str = "") -> None:
         """Register a tool as available."""
         self._available.add(tool_id)
-        self._tools.append(
-            {"tool_id": tool_id, "capability": capability, "name": name or tool_id}
-        )
+        self._tools.append({"tool_id": tool_id, "capability": capability, "name": name or tool_id})
 
     async def invoke(
         self,

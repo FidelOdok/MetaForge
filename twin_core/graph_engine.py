@@ -6,7 +6,11 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from observability.metrics import MetricsCollector
 
 from twin_core.models.base import EdgeBase, NodeBase
 from twin_core.models.enums import EdgeType, NodeType
@@ -68,9 +72,7 @@ class GraphEngine(ABC):
         ...
 
     @abstractmethod
-    async def remove_edge(
-        self, source_id: UUID, target_id: UUID, edge_type: EdgeType
-    ) -> bool:
+    async def remove_edge(self, source_id: UUID, target_id: UUID, edge_type: EdgeType) -> bool:
         """Remove a specific edge. Returns False if not found."""
         ...
 
@@ -110,9 +112,7 @@ class GraphEngine(ABC):
 class InMemoryGraphEngine(GraphEngine):
     """Dict-based in-memory graph engine for development and testing."""
 
-    def __init__(self, collector: "MetricsCollector | None" = None) -> None:
-        from observability.metrics import MetricsCollector  # noqa: F811
-
+    def __init__(self, collector: MetricsCollector | None = None) -> None:
         self._nodes: dict[UUID, NodeBase] = {}
         self._outgoing: dict[UUID, list[EdgeBase]] = defaultdict(list)
         self._incoming: dict[UUID, list[EdgeBase]] = defaultdict(list)
@@ -120,9 +120,7 @@ class InMemoryGraphEngine(GraphEngine):
 
     # --- Node operations ---
 
-    def _record_query(
-        self, operation: str, node_type: str, status: str, duration: float
-    ) -> None:
+    def _record_query(self, operation: str, node_type: str, status: str, duration: float) -> None:
         if self._collector:
             self._collector.record_neo4j_query(operation, node_type, status, duration)
 
@@ -192,9 +190,7 @@ class InMemoryGraphEngine(GraphEngine):
             results = [n for n in results if n.node_type == node_type]
         if filters:
             for key, value in filters.items():
-                results = [
-                    n for n in results if hasattr(n, key) and getattr(n, key) == value
-                ]
+                results = [n for n in results if hasattr(n, key) and getattr(n, key) == value]
         ntype = str(node_type) if node_type else "all"
         self._record_query("list_nodes", ntype, "success", time.monotonic() - t0)
         return results
@@ -210,14 +206,10 @@ class InMemoryGraphEngine(GraphEngine):
                 raise ValueError(f"Target node {edge.target_id} does not exist")
             self._outgoing[edge.source_id].append(edge)
             self._incoming[edge.target_id].append(edge)
-            self._record_query(
-                "add_edge", str(edge.edge_type), "success", time.monotonic() - t0
-            )
+            self._record_query("add_edge", str(edge.edge_type), "success", time.monotonic() - t0)
             return edge
         except Exception:
-            self._record_query(
-                "add_edge", str(edge.edge_type), "error", time.monotonic() - t0
-            )
+            self._record_query("add_edge", str(edge.edge_type), "error", time.monotonic() - t0)
             raise
 
     async def get_edges(
@@ -235,14 +227,10 @@ class InMemoryGraphEngine(GraphEngine):
             edges = [e for e in edges if e.edge_type == edge_type]
         return edges
 
-    async def remove_edge(
-        self, source_id: UUID, target_id: UUID, edge_type: EdgeType
-    ) -> bool:
+    async def remove_edge(self, source_id: UUID, target_id: UUID, edge_type: EdgeType) -> bool:
         original_out = self._outgoing.get(source_id, [])
         new_out = [
-            e
-            for e in original_out
-            if not (e.target_id == target_id and e.edge_type == edge_type)
+            e for e in original_out if not (e.target_id == target_id and e.edge_type == edge_type)
         ]
         if len(new_out) == len(original_out):
             return False

@@ -9,8 +9,6 @@ Supports four IDTA-standard submodel types:
 
 from __future__ import annotations
 
-from uuid import UUID
-
 import structlog
 
 from observability.tracing import get_tracer
@@ -30,7 +28,6 @@ from twin_core.aas.models import (
     SubmodelElementCollection,
 )
 from twin_core.models.artifact import Artifact
-from twin_core.models.base import NodeBase
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import ArtifactType, NodeType
@@ -43,9 +40,7 @@ tracer = get_tracer("twin_core.aas.mapper")
 SEMANTIC_ID_NAMEPLATE = "https://admin-shell.io/zvei/nameplate/2/0/Nameplate"
 SEMANTIC_ID_BOM = "https://admin-shell.io/idta/HierarchicalStructures/1/0/Submodel"
 SEMANTIC_ID_TECHNICAL_DATA = "https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2"
-SEMANTIC_ID_DOCUMENTATION = (
-    "https://admin-shell.io/vdi/2770/1/0/Documentation"
-)
+SEMANTIC_ID_DOCUMENTATION = "https://admin-shell.io/vdi/2770/1/0/Documentation"
 
 
 def _make_semantic_ref(semantic_id: str) -> Reference:
@@ -120,9 +115,7 @@ class AASMapper:
             tech_data = self._build_technical_data_submodel(constraints)
             submodels.append(tech_data)
 
-            doc_artifacts = [
-                a for a in artifacts if a.type == ArtifactType.DOCUMENTATION
-            ]
+            doc_artifacts = [a for a in artifacts if a.type == ArtifactType.DOCUMENTATION]
             documentation = self._build_documentation_submodel(doc_artifacts)
             submodels.append(documentation)
 
@@ -265,9 +258,7 @@ class AASMapper:
                 submodelElements=elements,
             )
 
-    def _build_technical_data_submodel(
-        self, constraints: list[Constraint]
-    ) -> Submodel:
+    def _build_technical_data_submodel(self, constraints: list[Constraint]) -> Submodel:
         """Build TechnicalData submodel from Constraint nodes."""
         with tracer.start_as_current_span("aas.build_technical_data") as span:
             span.set_attribute("aas.constraint_count", len(constraints))
@@ -331,9 +322,7 @@ class AASMapper:
                 submodelElements=elements,
             )
 
-    def _build_documentation_submodel(
-        self, doc_artifacts: list[Artifact]
-    ) -> Submodel:
+    def _build_documentation_submodel(self, doc_artifacts: list[Artifact]) -> Submodel:
         """Build Documentation submodel from documentation-type Artifacts."""
         with tracer.start_as_current_span("aas.build_documentation") as span:
             span.set_attribute("aas.doc_count", len(doc_artifacts))

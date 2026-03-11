@@ -7,22 +7,18 @@ with the Twin's graph state.
 
 from __future__ import annotations
 
-from uuid import UUID, uuid4
-
-import pytest
+from uuid import uuid4
 
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.electronics.agent import TaskRequest as EETaskRequest
 from domain_agents.mechanical.agent import MechanicalAgent
 from domain_agents.mechanical.agent import TaskRequest as MechTaskRequest
 from skill_registry.mcp_bridge import InMemoryMcpBridge
-from tests.conftest import EE_ARTIFACT_ID, MECH_ARTIFACT_ID, make_artifact
-from tests.integration.conftest import FEA_SUCCESS_RESPONSE
+from tests.conftest import make_artifact
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.artifact import Artifact
 from twin_core.models.constraint import Constraint
-from twin_core.models.enums import ArtifactType, ConstraintSeverity, ConstraintStatus
-
+from twin_core.models.enums import ArtifactType, ConstraintSeverity
 
 # ---------------------------------------------------------------------------
 # Agent reads Twin
@@ -179,9 +175,7 @@ class TestConstraintEvaluation:
         assert result.passed is True
         assert result.evaluated_count == 0
 
-    async def test_passing_constraint(
-        self, twin: InMemoryTwinAPI, mech_artifact: Artifact
-    ):
+    async def test_passing_constraint(self, twin: InMemoryTwinAPI, mech_artifact: Artifact):
         constraint = Constraint(
             name="always-true",
             expression="True",
@@ -198,9 +192,7 @@ class TestConstraintEvaluation:
         assert result.passed is True
         assert result.evaluated_count >= 1
 
-    async def test_failing_constraint(
-        self, twin: InMemoryTwinAPI, mech_artifact: Artifact
-    ):
+    async def test_failing_constraint(self, twin: InMemoryTwinAPI, mech_artifact: Artifact):
         constraint = Constraint(
             name="always-fail",
             expression="False",

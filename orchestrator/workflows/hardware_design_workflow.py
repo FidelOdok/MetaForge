@@ -22,9 +22,7 @@ from pydantic import BaseModel, Field
 from observability.tracing import get_tracer
 from orchestrator.activities.base_activity import (
     AgentActivityInput,
-    AgentActivityOutput,
     ApprovalRequest,
-    ApprovalResult,
     get_default_retry_policy,
 )
 
@@ -39,12 +37,11 @@ except ImportError:
     HAS_TEMPORAL = False
 
 # Import activity functions
-from orchestrator.activities.mechanical_activity import run_mechanical_agent
-from orchestrator.activities.electronics_activity import run_electronics_agent
-from orchestrator.activities.firmware_activity import run_firmware_agent
-from orchestrator.activities.simulation_activity import run_simulation_agent
-from orchestrator.activities.approval_activity import wait_for_approval
-
+from orchestrator.activities.approval_activity import wait_for_approval  # noqa: E402
+from orchestrator.activities.electronics_activity import run_electronics_agent  # noqa: E402
+from orchestrator.activities.firmware_activity import run_firmware_agent  # noqa: E402
+from orchestrator.activities.mechanical_activity import run_mechanical_agent  # noqa: E402
+from orchestrator.activities.simulation_activity import run_simulation_agent  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Workflow I/O models
@@ -159,9 +156,7 @@ class HardwareDesignWorkflow:
             steps.append(mech_outcome)
 
             if mech_outcome.status == "failed":
-                return self._build_output(
-                    run_id, "failed", steps, {}, started_at
-                )
+                return self._build_output(run_id, "failed", steps, {}, started_at)
 
         # ---- Step 2: Electronics + Firmware (parallel) ----
         parallel_tasks: list[asyncio.Task[StepOutcome]] = []
@@ -195,11 +190,13 @@ class HardwareDesignWorkflow:
             has_failure = False
             for result in parallel_results:
                 if isinstance(result, Exception):
-                    steps.append(StepOutcome(
-                        agent_code="unknown",
-                        status="failed",
-                        error=str(result),
-                    ))
+                    steps.append(
+                        StepOutcome(
+                            agent_code="unknown",
+                            status="failed",
+                            error=str(result),
+                        )
+                    )
                     has_failure = True
                 else:
                     steps.append(result)
@@ -207,9 +204,7 @@ class HardwareDesignWorkflow:
                         has_failure = True
 
             if has_failure:
-                return self._build_output(
-                    run_id, "failed", steps, {}, started_at
-                )
+                return self._build_output(run_id, "failed", steps, {}, started_at)
 
         # ---- Step 3: Simulation (validation) ----
         if input.simulation_task:
@@ -225,9 +220,7 @@ class HardwareDesignWorkflow:
             steps.append(sim_outcome)
 
             if sim_outcome.status == "failed":
-                return self._build_output(
-                    run_id, "failed", steps, {}, started_at
-                )
+                return self._build_output(run_id, "failed", steps, {}, started_at)
 
         # ---- Step 4: Approval gate ----
         approval_dict: dict[str, Any] = {}
@@ -265,9 +258,7 @@ class HardwareDesignWorkflow:
                         "hardware_design_workflow_rejected",
                         workflow_run_id=run_id,
                     )
-                    return self._build_output(
-                        run_id, "failed", steps, approval_dict, started_at
-                    )
+                    return self._build_output(run_id, "failed", steps, approval_dict, started_at)
 
             except Exception as exc:
                 logger.error(
@@ -275,9 +266,7 @@ class HardwareDesignWorkflow:
                     workflow_run_id=run_id,
                     error=str(exc),
                 )
-                return self._build_output(
-                    run_id, "failed", steps, {"error": str(exc)}, started_at
-                )
+                return self._build_output(run_id, "failed", steps, {"error": str(exc)}, started_at)
 
         logger.info(
             "hardware_design_workflow_completed",
@@ -285,9 +274,7 @@ class HardwareDesignWorkflow:
             total_steps=len(steps),
         )
 
-        return self._build_output(
-            run_id, "completed", steps, approval_dict, started_at
-        )
+        return self._build_output(run_id, "completed", steps, approval_dict, started_at)
 
     async def _run_activity(
         self,
@@ -320,9 +307,7 @@ class HardwareDesignWorkflow:
                 result = await activity_fn(activity_input)
 
             result_dict = (
-                result.model_dump(mode="json")
-                if hasattr(result, "model_dump")
-                else result
+                result.model_dump(mode="json") if hasattr(result, "model_dump") else result
             )
 
             return StepOutcome(

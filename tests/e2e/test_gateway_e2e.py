@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -25,9 +24,6 @@ from orchestrator.event_bus.subscribers import create_default_bus
 from orchestrator.scheduler import InMemoryScheduler
 from orchestrator.workflow_dag import (
     InMemoryWorkflowEngine,
-    StepStatus,
-    WorkflowDefinition,
-    WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
@@ -68,8 +64,12 @@ CAD_GENERATE_RESULT = {
     "volume_mm3": 12500.0,
     "surface_area_mm2": 8400.0,
     "bounding_box": {
-        "min_x": 0.0, "min_y": 0.0, "min_z": 0.0,
-        "max_x": 50.0, "max_y": 30.0, "max_z": 5.0,
+        "min_x": 0.0,
+        "min_y": 0.0,
+        "min_z": 0.0,
+        "max_x": 50.0,
+        "max_y": 30.0,
+        "max_z": 5.0,
     },
     "parameters_used": {"width": 50.0, "height": 30.0, "thickness": 5.0},
 }
@@ -288,10 +288,7 @@ class TestRunStatusPollingE2E:
                 continue
             status_body = status_resp.json()
             steps = status_body.get("steps", {})
-            if any(
-                s_data.get("status") in {"completed", "failed"}
-                for s_data in steps.values()
-            ):
+            if any(s_data.get("status") in {"completed", "failed"} for s_data in steps.values()):
                 break
 
         assert status_resp.status_code == 200
@@ -408,10 +405,10 @@ class TestFullRoundTripE2E:
             steps = body.get("steps", {})
             stress = steps.get("stress", {})
             erc = steps.get("erc", {})
-            if (
-                stress.get("status") in {"completed", "failed"}
-                and erc.get("status") in {"completed", "failed"}
-            ):
+            if stress.get("status") in {"completed", "failed"} and erc.get("status") in {
+                "completed",
+                "failed",
+            }:
                 final_body = body
                 break
 

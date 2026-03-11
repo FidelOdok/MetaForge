@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from uuid import UUID
 
 import pytest
 
 from digital_twin.thread.gate_engine.models import GateStage, ReadinessScore
-from domain_agents.compliance.agent import ComplianceAgent
-from domain_agents.compliance.agent import ComplianceTaskRequest
+from domain_agents.compliance.agent import ComplianceAgent, ComplianceTaskRequest
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.electronics.agent import TaskRequest as EETaskRequest
 from domain_agents.firmware.agent import FirmwareAgent
@@ -82,6 +80,7 @@ DRONE_BOM_PARTS = [
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def event_loop():
@@ -189,6 +188,7 @@ async def artifacts(twin: InMemoryTwinAPI) -> dict[str, Artifact]:
 # ---------------------------------------------------------------------------
 # Tests: Individual agent execution
 # ---------------------------------------------------------------------------
+
 
 class TestMechanicalAgent:
     """Tests for MechanicalAgent in the pipeline."""
@@ -414,6 +414,7 @@ class TestComplianceAgent:
 # Tests: Gate engine evaluation
 # ---------------------------------------------------------------------------
 
+
 class TestGateEngine:
     """Tests for gate engine models and definitions."""
 
@@ -434,7 +435,11 @@ class TestGateEngine:
     def test_readiness_score_model(self) -> None:
         from datetime import UTC, datetime
 
-        from digital_twin.thread.gate_engine.models import CriterionResult, GateCriterion, GateCriterionType
+        from digital_twin.thread.gate_engine.models import (
+            CriterionResult,
+            GateCriterion,
+            GateCriterionType,
+        )
 
         criterion = GateCriterion(
             type=GateCriterionType.REQUIREMENT_COVERAGE,
@@ -467,6 +472,7 @@ class TestGateEngine:
 # ---------------------------------------------------------------------------
 # Tests: Pipeline resilience
 # ---------------------------------------------------------------------------
+
 
 class TestPipelineResilience:
     """Tests for pipeline behaviour when agents fail."""
@@ -537,6 +543,7 @@ class TestPipelineResilience:
 # ---------------------------------------------------------------------------
 # Tests: Twin state updates
 # ---------------------------------------------------------------------------
+
 
 class TestTwinState:
     """Tests for Digital Twin state after agent execution."""

@@ -81,9 +81,7 @@ class McpToolServer:
         params: dict[str, Any] = data.get("params", {})
 
         if data.get("jsonrpc") != "2.0":
-            response = make_error(
-                request_id, _INVALID_REQUEST, "Not a valid JSON-RPC 2.0 message"
-            )
+            response = make_error(request_id, _INVALID_REQUEST, "Not a valid JSON-RPC 2.0 message")
             return json.dumps(response)
 
         # Route to handler
@@ -97,14 +95,10 @@ class McpToolServer:
                     self.adapter_id, self.version, self._tools, self._start_time
                 )
             else:
-                response = make_error(
-                    request_id, _METHOD_NOT_FOUND, f"Unknown method: {method}"
-                )
+                response = make_error(request_id, _METHOD_NOT_FOUND, f"Unknown method: {method}")
                 return json.dumps(response)
         except ToolNotFoundError as exc:
-            response = make_error(
-                request_id, _METHOD_NOT_FOUND, str(exc), {"tool_id": exc.tool_id}
-            )
+            response = make_error(request_id, _METHOD_NOT_FOUND, str(exc), {"tool_id": exc.tool_id})
             return json.dumps(response)
         except ToolHandlerError as exc:
             response = make_error(

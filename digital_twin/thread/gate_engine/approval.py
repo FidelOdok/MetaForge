@@ -179,9 +179,7 @@ class GateApprovalService:
                 pending.request.branch,
                 approver_id,
             )
-            await self._gate_engine.approve_transition(
-                transition.id, approver_id, comment
-            )
+            await self._gate_engine.approve_transition(transition.id, approver_id, comment)
 
             result = GateApprovalResult(
                 request_id=request_id,

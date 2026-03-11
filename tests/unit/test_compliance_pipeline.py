@@ -12,6 +12,12 @@ from uuid import uuid4
 import pytest
 import yaml
 
+from domain_agents.compliance.agent import (
+    ComplianceAgent,
+    ComplianceTaskRequest,
+)
+from domain_agents.compliance.checklist_generator import ChecklistGenerator
+from domain_agents.compliance.evidence_tracker import EvidenceTracker
 from domain_agents.compliance.models import (
     ChecklistItem,
     ComplianceChecklist,
@@ -20,19 +26,14 @@ from domain_agents.compliance.models import (
     EvidenceStatus,
     EvidenceType,
 )
-from domain_agents.compliance.checklist_generator import ChecklistGenerator
-from domain_agents.compliance.evidence_tracker import EvidenceTracker
-from domain_agents.compliance.agent import (
-    ComplianceAgent,
-    ComplianceResult,
-    ComplianceTaskRequest,
-)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-REGIMES_DIR = Path(__file__).resolve().parent.parent.parent / "domain_agents" / "compliance" / "regimes"
+REGIMES_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "domain_agents" / "compliance" / "regimes"
+)
 
 
 def _make_checklist(items: list[ChecklistItem]) -> ComplianceChecklist:
@@ -330,9 +331,7 @@ class TestEvidenceTracker:
             evidence_type=EvidenceType.TEST_REPORT,
             title="LVD Report",
         )
-        updated = self.tracker.update_status(
-            ev.id, EvidenceStatus.REVIEWED, reviewed_by="alice"
-        )
+        updated = self.tracker.update_status(ev.id, EvidenceStatus.REVIEWED, reviewed_by="alice")
         assert updated is not None
         assert updated.status == EvidenceStatus.REVIEWED
         assert updated.reviewed_by == "alice"
@@ -343,9 +342,7 @@ class TestEvidenceTracker:
             evidence_type=EvidenceType.TEST_REPORT,
             title="LVD Report",
         )
-        updated = self.tracker.update_status(
-            ev.id, EvidenceStatus.APPROVED, approved_by="bob"
-        )
+        updated = self.tracker.update_status(ev.id, EvidenceStatus.APPROVED, approved_by="bob")
         assert updated is not None
         assert updated.status == EvidenceStatus.APPROVED
         assert updated.approved_by == "bob"
@@ -355,16 +352,18 @@ class TestEvidenceTracker:
         assert result is None
 
     def test_get_coverage_empty(self):
-        cl = _make_checklist([
-            ChecklistItem(
-                id="X-001",
-                regime=ComplianceRegime.UKCA,
-                category="test",
-                requirement="req",
-                standard="STD-1",
-                evidence_type=EvidenceType.TEST_REPORT,
-            ),
-        ])
+        cl = _make_checklist(
+            [
+                ChecklistItem(
+                    id="X-001",
+                    regime=ComplianceRegime.UKCA,
+                    category="test",
+                    requirement="req",
+                    standard="STD-1",
+                    evidence_type=EvidenceType.TEST_REPORT,
+                ),
+            ]
+        )
         coverage = self.tracker.get_coverage(cl)
         assert coverage["total_items"] == 1
         assert coverage["evidenced_items"] == 0
@@ -376,24 +375,26 @@ class TestEvidenceTracker:
             evidence_type=EvidenceType.TEST_REPORT,
             title="Report",
         )
-        cl = _make_checklist([
-            ChecklistItem(
-                id="X-001",
-                regime=ComplianceRegime.UKCA,
-                category="test",
-                requirement="req",
-                standard="STD-1",
-                evidence_type=EvidenceType.TEST_REPORT,
-            ),
-            ChecklistItem(
-                id="X-002",
-                regime=ComplianceRegime.UKCA,
-                category="test",
-                requirement="req2",
-                standard="STD-2",
-                evidence_type=EvidenceType.DECLARATION,
-            ),
-        ])
+        cl = _make_checklist(
+            [
+                ChecklistItem(
+                    id="X-001",
+                    regime=ComplianceRegime.UKCA,
+                    category="test",
+                    requirement="req",
+                    standard="STD-1",
+                    evidence_type=EvidenceType.TEST_REPORT,
+                ),
+                ChecklistItem(
+                    id="X-002",
+                    regime=ComplianceRegime.UKCA,
+                    category="test",
+                    requirement="req2",
+                    standard="STD-2",
+                    evidence_type=EvidenceType.DECLARATION,
+                ),
+            ]
+        )
         coverage = self.tracker.get_coverage(cl)
         assert coverage["total_items"] == 2
         assert coverage["evidenced_items"] == 1
@@ -407,12 +408,20 @@ class TestEvidenceTracker:
         )
         items = [
             ChecklistItem(
-                id="X-001", regime=ComplianceRegime.UKCA, category="a",
-                requirement="r1", standard="S1", evidence_type=EvidenceType.TEST_REPORT,
+                id="X-001",
+                regime=ComplianceRegime.UKCA,
+                category="a",
+                requirement="r1",
+                standard="S1",
+                evidence_type=EvidenceType.TEST_REPORT,
             ),
             ChecklistItem(
-                id="X-002", regime=ComplianceRegime.UKCA, category="b",
-                requirement="r2", standard="S2", evidence_type=EvidenceType.DECLARATION,
+                id="X-002",
+                regime=ComplianceRegime.UKCA,
+                category="b",
+                requirement="r2",
+                standard="S2",
+                evidence_type=EvidenceType.DECLARATION,
             ),
         ]
         cl = _make_checklist(items)
@@ -426,12 +435,18 @@ class TestEvidenceTracker:
             evidence_type=EvidenceType.TEST_REPORT,
             title="Report",
         )
-        cl = _make_checklist([
-            ChecklistItem(
-                id="X-001", regime=ComplianceRegime.UKCA, category="a",
-                requirement="r1", standard="S1", evidence_type=EvidenceType.TEST_REPORT,
-            ),
-        ])
+        cl = _make_checklist(
+            [
+                ChecklistItem(
+                    id="X-001",
+                    regime=ComplianceRegime.UKCA,
+                    category="a",
+                    requirement="r1",
+                    standard="S1",
+                    evidence_type=EvidenceType.TEST_REPORT,
+                ),
+            ]
+        )
         missing = self.tracker.get_missing_items(cl)
         assert len(missing) == 0
 
@@ -594,16 +609,18 @@ class TestComplianceAPI:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from api_gateway.compliance.routes import router, _agent
-
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from api_gateway.compliance.routes import router
+
         app = FastAPI()
         app.include_router(router)
 
         # Reset agent state for each test
-        from domain_agents.compliance.agent import ComplianceAgent
         import api_gateway.compliance.routes as routes_mod
+        from domain_agents.compliance.agent import ComplianceAgent
+
         routes_mod._agent = ComplianceAgent(regimes_dir=REGIMES_DIR)
 
         return TestClient(app)
@@ -723,6 +740,7 @@ class TestGenerateChecklistSkill:
 
     def test_definition_json_content(self):
         import json
+
         defn_path = (
             Path(__file__).resolve().parent.parent.parent
             / "domain_agents"
@@ -741,6 +759,7 @@ class TestGenerateChecklistSkill:
             GenerateChecklistInput,
             GenerateChecklistOutput,
         )
+
         assert GenerateChecklistInput is not None
         assert GenerateChecklistOutput is not None
 
@@ -748,4 +767,5 @@ class TestGenerateChecklistSkill:
         from domain_agents.compliance.skills.generate_checklist.handler import (
             GenerateChecklistHandler,
         )
+
         assert GenerateChecklistHandler is not None

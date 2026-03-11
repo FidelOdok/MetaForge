@@ -78,9 +78,7 @@ class SLORegistry:
             good_events_query=(
                 'sum(rate(metaforge_gateway_request_total{status_code!~"5.."}[30d]))'
             ),
-            total_events_query=(
-                "sum(rate(metaforge_gateway_request_total[30d]))"
-            ),
+            total_events_query=("sum(rate(metaforge_gateway_request_total[30d]))"),
             unit="ratio",
         ),
         target=99.9,
@@ -97,11 +95,9 @@ class SLORegistry:
             description="Ratio of requests completing within 100ms at p99",
             metric_name="metaforge_gateway_request_duration_seconds",
             good_events_query=(
-                "sum(rate(metaforge_gateway_request_duration_seconds_bucket{le=\"0.1\"}[30d]))"
+                'sum(rate(metaforge_gateway_request_duration_seconds_bucket{le="0.1"}[30d]))'
             ),
-            total_events_query=(
-                "sum(rate(metaforge_gateway_request_duration_seconds_count[30d]))"
-            ),
+            total_events_query=("sum(rate(metaforge_gateway_request_duration_seconds_count[30d]))"),
             unit="s",
         ),
         target=99.0,
@@ -117,12 +113,8 @@ class SLORegistry:
             name="agent_success_rate_sli",
             description="Ratio of successful agent executions to total",
             metric_name="metaforge_agent_execution_total",
-            good_events_query=(
-                'sum(rate(metaforge_agent_execution_total{status="success"}[30d]))'
-            ),
-            total_events_query=(
-                "sum(rate(metaforge_agent_execution_total[30d]))"
-            ),
+            good_events_query=('sum(rate(metaforge_agent_execution_total{status="success"}[30d]))'),
+            total_events_query=("sum(rate(metaforge_agent_execution_total[30d]))"),
         ),
         target=95.0,
         window_days=30,
@@ -138,11 +130,9 @@ class SLORegistry:
             description="Ratio of agent executions completing within 30s at p95",
             metric_name="metaforge_agent_execution_duration_seconds",
             good_events_query=(
-                "sum(rate(metaforge_agent_execution_duration_seconds_bucket{le=\"30\"}[30d]))"
+                'sum(rate(metaforge_agent_execution_duration_seconds_bucket{le="30"}[30d]))'
             ),
-            total_events_query=(
-                "sum(rate(metaforge_agent_execution_duration_seconds_count[30d]))"
-            ),
+            total_events_query=("sum(rate(metaforge_agent_execution_duration_seconds_count[30d]))"),
             unit="s",
         ),
         target=95.0,
@@ -203,9 +193,7 @@ class SLORegistry:
             good_events_query=(
                 'sum(rate(metaforge_pgvector_search_duration_seconds_bucket{le="0.1"}[30d]))'
             ),
-            total_events_query=(
-                "sum(rate(metaforge_pgvector_search_duration_seconds_count[30d]))"
-            ),
+            total_events_query=("sum(rate(metaforge_pgvector_search_duration_seconds_count[30d]))"),
             unit="s",
         ),
         target=99.0,
@@ -221,12 +209,8 @@ class SLORegistry:
             name="kafka_consumer_lag_sli",
             description="Ratio of time consumer lag is below 1000 messages",
             metric_name="metaforge_kafka_consumer_lag",
-            good_events_query=(
-                "count(metaforge_kafka_consumer_lag < 1000)"
-            ),
-            total_events_query=(
-                "count(metaforge_kafka_consumer_lag)"
-            ),
+            good_events_query=("count(metaforge_kafka_consumer_lag < 1000)"),
+            total_events_query=("count(metaforge_kafka_consumer_lag)"),
         ),
         target=99.0,
         window_days=30,
@@ -245,9 +229,7 @@ class SLORegistry:
                 "sum(rate(metaforge_kafka_messages_consumed_total[30d]))"
                 " - sum(rate(metaforge_kafka_dead_letters_total[30d]))"
             ),
-            total_events_query=(
-                "sum(rate(metaforge_kafka_messages_consumed_total[30d]))"
-            ),
+            total_events_query=("sum(rate(metaforge_kafka_messages_consumed_total[30d]))"),
         ),
         target=99.9,
         window_days=30,

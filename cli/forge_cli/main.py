@@ -52,9 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     # -- run ---------------------------------------------------------------
     run_parser = subparsers.add_parser("run", help="Invoke a skill via the gateway")
     run_parser.add_argument("skill_name", help="Name of the skill to invoke")
-    run_parser.add_argument(
-        "--artifact", required=True, help="UUID of the target artifact"
-    )
+    run_parser.add_argument("--artifact", required=True, help="UUID of the target artifact")
     run_parser.add_argument(
         "--params",
         default="{}",

@@ -59,9 +59,7 @@ class AuditIntegrity:
         return chain
 
     @classmethod
-    def verify_chain(
-        cls, events: list[AuditEvent], chain: list[str]
-    ) -> bool:
+    def verify_chain(cls, events: list[AuditEvent], chain: list[str]) -> bool:
         """Verify that *chain* is a valid hash chain for *events*.
 
         Returns ``True`` if every hash matches; ``False`` otherwise.

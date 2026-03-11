@@ -6,7 +6,7 @@ checklists for a given set of target markets.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -120,12 +120,7 @@ class ChecklistGenerator:
                     seen_standards.add(item.standard)
                     items.append(item.model_copy())
 
-            evidenced = sum(
-                1
-                for i in items
-                if i.evidence_status
-                not in (EvidenceStatus.MISSING,)
-            )
+            evidenced = sum(1 for i in items if i.evidence_status not in (EvidenceStatus.MISSING,))
             total = len(items)
             coverage = (evidenced / total * 100.0) if total > 0 else 0.0
 
@@ -137,7 +132,7 @@ class ChecklistGenerator:
                 total_items=total,
                 evidenced_items=evidenced,
                 coverage_percent=round(coverage, 2),
-                generated_at=datetime.now(timezone.utc),
+                generated_at=datetime.now(UTC),
             )
 
             span.set_attribute("total_items", total)

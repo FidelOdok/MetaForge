@@ -136,9 +136,7 @@ class HandleChatMessageInput(BaseModel):
     actor_id: str = Field(description="ID of the message sender")
     actor_kind: str = Field(description="Kind of sender: user, agent, or system")
     content: str = Field(description="Message content from the sender")
-    scope_kind: str = Field(
-        description="Scope kind determining context assembly strategy"
-    )
+    scope_kind: str = Field(description="Scope kind determining context assembly strategy")
     scope_entity_id: str = Field(
         description="Entity ID within the scope (e.g. session ID, node ID)"
     )
@@ -152,9 +150,7 @@ class HandleChatMessageOutput(BaseModel):
     context_used: dict[str, Any] = Field(
         description="Context dict that was assembled for response generation"
     )
-    duration_ms: float = Field(
-        description="Wall-clock duration of the activity in milliseconds"
-    )
+    duration_ms: float = Field(description="Wall-clock duration of the activity in milliseconds")
 
 
 # ---------------------------------------------------------------------------

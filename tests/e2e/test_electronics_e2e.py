@@ -129,7 +129,15 @@ def _create_kicad_server(
             "output_dir": "/tmp/drone_fc_gerber",
             "files_generated": ["F.Cu.gbr", "B.Cu.gbr", "F.Mask.gbr"],
             "total_files": 7,
-            "layers_exported": ["F.Cu", "B.Cu", "F.Mask", "B.Mask", "F.SilkS", "B.SilkS", "Edge.Cuts"],
+            "layers_exported": [
+                "F.Cu",
+                "B.Cu",
+                "F.Mask",
+                "B.Mask",
+                "F.SilkS",
+                "B.SilkS",
+                "Edge.Cuts",
+            ],
         }
     )
     server._execute_netlist_export = AsyncMock(
@@ -144,8 +152,14 @@ def _create_kicad_server(
         return_value={
             "schematic_file": "eda/kicad/drone_fc.kicad_sch",
             "components": [
-                {"ref": "U1", "pins": [{"name": "VCC", "net": "VCC_3V3"}, {"name": "GND", "net": "GND"}]},
-                {"ref": "U2", "pins": [{"name": "PA0", "net": "IMU_INT"}, {"name": "PA1", "net": "SPI_SCK"}]},
+                {
+                    "ref": "U1",
+                    "pins": [{"name": "VCC", "net": "VCC_3V3"}, {"name": "GND", "net": "GND"}],
+                },
+                {
+                    "ref": "U2",
+                    "pins": [{"name": "PA0", "net": "IMU_INT"}, {"name": "PA1", "net": "SPI_SCK"}],
+                },
             ],
             "total_components": 2,
             "total_pins": 4,
@@ -255,9 +269,7 @@ class TestElectronicsAgentE2E:
     async def test_erc_fails_with_violations(self):
         """ERC fails when errors are found in the schematic."""
         twin = InMemoryTwinAPI.create()
-        client, bridge, server = await _setup_kicad_mcp_stack(
-            erc_result=ERC_WITH_VIOLATIONS
-        )
+        client, bridge, server = await _setup_kicad_mcp_stack(erc_result=ERC_WITH_VIOLATIONS)
 
         artifact = _make_schematic_artifact()
         created = await twin.create_artifact(artifact)
@@ -299,9 +311,7 @@ class TestElectronicsAgentE2E:
     async def test_drc_fails_with_violations(self):
         """DRC fails when clearance and track width errors exist."""
         twin = InMemoryTwinAPI.create()
-        client, bridge, server = await _setup_kicad_mcp_stack(
-            drc_result=DRC_WITH_VIOLATIONS
-        )
+        client, bridge, server = await _setup_kicad_mcp_stack(drc_result=DRC_WITH_VIOLATIONS)
 
         artifact = _make_schematic_artifact()
         created = await twin.create_artifact(artifact)

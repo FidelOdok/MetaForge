@@ -337,9 +337,7 @@ class TestMountingHoleAlignment:
 
     async def test_holes_within_tolerance(self, twin, validator):
         """Holes slightly off but within tolerance should pass."""
-        pcb = _make_pcb(
-            mounting_holes=[{"x": 5.3, "y": 5.2}]
-        )
+        pcb = _make_pcb(mounting_holes=[{"x": 5.3, "y": 5.2}])
         enc = _make_enclosure(
             mounting_standoffs=[{"x": 5.0, "y": 5.0}],
             mounting_tolerance=0.5,
@@ -352,9 +350,7 @@ class TestMountingHoleAlignment:
 
     async def test_holes_outside_tolerance(self, twin, validator):
         """Holes just outside tolerance should fail."""
-        pcb = _make_pcb(
-            mounting_holes=[{"x": 6.0, "y": 5.0}]
-        )
+        pcb = _make_pcb(mounting_holes=[{"x": 6.0, "y": 5.0}])
         enc = _make_enclosure(
             mounting_standoffs=[{"x": 5.0, "y": 5.0}],
             mounting_tolerance=0.5,
@@ -467,14 +463,10 @@ class TestConnectorClearances:
     async def test_adequate_clearance(self, twin, validator):
         """Connectors with sufficient cutout clearance should pass."""
         pcb = _make_pcb(
-            connectors=[
-                {"name": "usb_c", "x": 25.0, "y": 0.0, "width": 9.0, "height": 3.2}
-            ]
+            connectors=[{"name": "usb_c", "x": 25.0, "y": 0.0, "width": 9.0, "height": 3.2}]
         )
         enc = _make_enclosure(
-            cutouts=[
-                {"connector_name": "usb_c", "width": 12.0, "height": 5.0}
-            ],
+            cutouts=[{"connector_name": "usb_c", "width": 12.0, "height": 5.0}],
             min_connector_clearance=0.5,
         )
         await twin.create_artifact(pcb)
@@ -486,14 +478,10 @@ class TestConnectorClearances:
     async def test_insufficient_clearance(self, twin, validator):
         """Connector cutout too tight should fail."""
         pcb = _make_pcb(
-            connectors=[
-                {"name": "usb_c", "x": 25.0, "y": 0.0, "width": 9.0, "height": 3.2}
-            ]
+            connectors=[{"name": "usb_c", "x": 25.0, "y": 0.0, "width": 9.0, "height": 3.2}]
         )
         enc = _make_enclosure(
-            cutouts=[
-                {"connector_name": "usb_c", "width": 9.5, "height": 3.5}
-            ],
+            cutouts=[{"connector_name": "usb_c", "width": 9.5, "height": 3.5}],
             min_connector_clearance=0.5,
         )
         await twin.create_artifact(pcb)
@@ -506,14 +494,10 @@ class TestConnectorClearances:
     async def test_missing_cutout(self, twin, validator):
         """Connector without matching cutout should fail."""
         pcb = _make_pcb(
-            connectors=[
-                {"name": "hdmi", "x": 10.0, "y": 0.0, "width": 15.0, "height": 5.5}
-            ]
+            connectors=[{"name": "hdmi", "x": 10.0, "y": 0.0, "width": 15.0, "height": 5.5}]
         )
         enc = _make_enclosure(
-            cutouts=[
-                {"connector_name": "usb_c", "width": 12.0, "height": 5.0}
-            ],
+            cutouts=[{"connector_name": "usb_c", "width": 12.0, "height": 5.0}],
         )
         await twin.create_artifact(pcb)
         await twin.create_artifact(enc)

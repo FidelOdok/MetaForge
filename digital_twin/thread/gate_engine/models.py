@@ -39,9 +39,7 @@ class GateCriterion(BaseModel):
     name: str
     description: str
     weight: float = Field(ge=0.0, le=1.0, description="Weight for scoring (0-1)")
-    threshold: float = Field(
-        ge=0.0, le=100.0, description="Minimum score to pass (0-100)"
-    )
+    threshold: float = Field(ge=0.0, le=100.0, description="Minimum score to pass (0-100)")
     required: bool = Field(
         default=True, description="If True, failing this criterion blocks the gate"
     )

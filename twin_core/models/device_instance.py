@@ -1,6 +1,6 @@
 """DeviceInstance node — a specific manufactured unit of a product."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from pydantic import Field

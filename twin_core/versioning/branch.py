@@ -335,9 +335,7 @@ class InMemoryVersionEngine(VersionEngine):
         node = await self._graph.get_node(head_id)
         return node  # type: ignore[return-value]
 
-    async def _find_common_ancestor(
-        self, id_a: UUID, id_b: UUID
-    ) -> UUID | None:
+    async def _find_common_ancestor(self, id_a: UUID, id_b: UUID) -> UUID | None:
         """Find the common ancestor of two versions using BFS up PARENT_OF edges."""
         ancestors_a: set[UUID] = set()
         ancestors_b: set[UUID] = set()

@@ -338,9 +338,7 @@ class ElectronicsAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         deps = AgentDependencies(
@@ -372,17 +370,13 @@ class ElectronicsAgent:
             if electronics_result.tool_calls
             else [electronics_result.analysis],
             warnings=(
-                electronics_result.recommendations
-                if not electronics_result.overall_passed
-                else []
+                electronics_result.recommendations if not electronics_result.overall_passed else []
             ),
         )
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [
-            f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."
-        ]
+        parts = [f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -409,9 +403,7 @@ class ElectronicsAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         # Route to handler
@@ -477,9 +469,7 @@ class ElectronicsAgent:
                     "schematic_file": output.schematic_file,
                 }
             ],
-            warnings=(
-                [output.summary] if output.total_warnings > 0 else []
-            ),
+            warnings=([output.summary] if output.total_warnings > 0 else []),
         )
 
     async def _run_drc(self, request: TaskRequest) -> TaskResult:
@@ -529,9 +519,7 @@ class ElectronicsAgent:
                     "pcb_file": output.pcb_file,
                 }
             ],
-            warnings=(
-                [output.summary] if output.total_warnings > 0 else []
-            ),
+            warnings=([output.summary] if output.total_warnings > 0 else []),
         )
 
     async def _run_check_power_budget(self, request: TaskRequest) -> TaskResult:

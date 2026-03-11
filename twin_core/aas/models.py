@@ -8,11 +8,9 @@ and Reference/Key structures.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Union
-from uuid import UUID, uuid4
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Discriminator, Field, Tag
-
 
 # ---------------------------------------------------------------------------
 # AAS Enumerations
@@ -85,9 +83,7 @@ class Reference(BaseModel):
 class SubmodelElement(BaseModel):
     """Base class for all AAS submodel elements."""
 
-    model_type: Literal["SubmodelElement"] = Field(
-        alias="modelType", default="SubmodelElement"
-    )
+    model_type: Literal["SubmodelElement"] = Field(alias="modelType", default="SubmodelElement")
     id_short: str = Field(alias="idShort")
     description: list[dict[str, str]] | None = None
     semantic_id: Reference | None = Field(default=None, alias="semanticId")
@@ -112,11 +108,9 @@ def _get_model_type_discriminator(v: Any) -> str:
 
 # Forward-declare the union type for nested elements
 AnySubmodelElement = Annotated[
-    Union[
-        Annotated[Property, Tag("Property")],
-        Annotated["SubmodelElementCollection", Tag("SubmodelElementCollection")],
-        Annotated[SubmodelElement, Tag("SubmodelElement")],
-    ],
+    Annotated[Property, Tag("Property")]
+    | Annotated["SubmodelElementCollection", Tag("SubmodelElementCollection")]
+    | Annotated[SubmodelElement, Tag("SubmodelElement")],
     Discriminator(_get_model_type_discriminator),
 ]
 

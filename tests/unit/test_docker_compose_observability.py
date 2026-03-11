@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 # Helpers: lightweight YAML parsing (no PyYAML dependency required)
 # ---------------------------------------------------------------------------
 
+
 def _load_yaml_text(path: Path) -> str:
     """Read a YAML file and return its raw text."""
     assert path.exists(), f"File not found: {path}"
@@ -46,6 +47,7 @@ DASHBOARD_DIR = PROJECT_ROOT / "observability" / "dashboards"
 # ===========================================================================
 # docker-compose.observability.yml
 # ===========================================================================
+
 
 class TestDockerComposeFile:
     """Validate docker-compose.observability.yml structure."""
@@ -108,6 +110,7 @@ class TestDockerComposeFile:
 # OTel Collector configuration
 # ===========================================================================
 
+
 class TestOtelCollectorConfig:
     """Validate observability/otel-collector-config.yaml."""
 
@@ -147,6 +150,7 @@ class TestOtelCollectorConfig:
 # Prometheus configuration
 # ===========================================================================
 
+
 class TestPrometheusConfig:
     """Validate observability/prometheus.yml."""
 
@@ -155,9 +159,7 @@ class TestPrometheusConfig:
 
     def test_prometheus_has_scrape_configs(self) -> None:
         text = _load_yaml_text(PROMETHEUS_CONFIG)
-        assert _yaml_has_key(text, "scrape_configs"), (
-            "prometheus.yml must have scrape_configs"
-        )
+        assert _yaml_has_key(text, "scrape_configs"), "prometheus.yml must have scrape_configs"
 
     def test_prometheus_has_global(self) -> None:
         text = _load_yaml_text(PROMETHEUS_CONFIG)
@@ -165,9 +167,7 @@ class TestPrometheusConfig:
 
     def test_prometheus_scrapes_otel_collector(self) -> None:
         text = _load_yaml_text(PROMETHEUS_CONFIG)
-        assert "otel-collector" in text, (
-            "prometheus.yml must scrape otel-collector"
-        )
+        assert "otel-collector" in text, "prometheus.yml must scrape otel-collector"
 
     def test_prometheus_scrapes_gateway_via_otel_collector(self) -> None:
         """Gateway metrics flow via OTLP → OTel Collector → Prometheus exporter on :8889."""
@@ -181,6 +181,7 @@ class TestPrometheusConfig:
 # Grafana provisioning configs
 # ===========================================================================
 
+
 class TestGrafanaDatasourcesConfig:
     """Validate observability/grafana-datasources.yml."""
 
@@ -189,15 +190,11 @@ class TestGrafanaDatasourcesConfig:
 
     def test_grafana_datasources_has_api_version(self) -> None:
         text = _load_yaml_text(GRAFANA_DS_CONFIG)
-        assert _yaml_has_key(text, "apiVersion"), (
-            "grafana-datasources.yml must have apiVersion"
-        )
+        assert _yaml_has_key(text, "apiVersion"), "grafana-datasources.yml must have apiVersion"
 
     def test_grafana_datasources_points_to_prometheus(self) -> None:
         text = _load_yaml_text(GRAFANA_DS_CONFIG)
-        assert "prometheus" in text.lower(), (
-            "grafana-datasources.yml must reference prometheus"
-        )
+        assert "prometheus" in text.lower(), "grafana-datasources.yml must reference prometheus"
 
     def test_grafana_datasources_has_prometheus_url(self) -> None:
         text = _load_yaml_text(GRAFANA_DS_CONFIG)
@@ -214,20 +211,17 @@ class TestGrafanaDashboardsConfig:
 
     def test_grafana_dashboards_has_providers(self) -> None:
         text = _load_yaml_text(GRAFANA_DASH_CONFIG)
-        assert _yaml_has_key(text, "providers"), (
-            "grafana-dashboards.yml must have providers"
-        )
+        assert _yaml_has_key(text, "providers"), "grafana-dashboards.yml must have providers"
 
     def test_grafana_dashboards_has_metaforge_folder(self) -> None:
         text = _load_yaml_text(GRAFANA_DASH_CONFIG)
-        assert "MetaForge" in text, (
-            "grafana-dashboards.yml must reference MetaForge folder"
-        )
+        assert "MetaForge" in text, "grafana-dashboards.yml must reference MetaForge folder"
 
 
 # ===========================================================================
 # Volume mount file existence
 # ===========================================================================
+
 
 class TestVolumeMountReferences:
     """Verify that files referenced in volume mounts actually exist."""

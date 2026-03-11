@@ -32,12 +32,8 @@ class RunCfdOutput(BaseModel):
     """Output from the run_cfd skill."""
 
     artifact_id: UUID = Field(..., description="Twin artifact ID")
-    max_velocity_ms: float = Field(
-        ..., ge=0, description="Maximum fluid velocity in m/s"
-    )
-    pressure_drop_pa: float = Field(
-        ..., ge=0, description="Pressure drop across the domain in Pa"
-    )
+    max_velocity_ms: float = Field(..., ge=0, description="Maximum fluid velocity in m/s")
+    pressure_drop_pa: float = Field(..., ge=0, description="Pressure drop across the domain in Pa")
     max_temperature_c: float = Field(
         default=0.0, description="Maximum temperature in degrees Celsius"
     )

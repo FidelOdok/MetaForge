@@ -367,9 +367,7 @@ class FirmwareAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         deps = AgentDependencies(
@@ -401,17 +399,13 @@ class FirmwareAgent:
             if firmware_result.tool_calls
             else [firmware_result.analysis],
             warnings=(
-                firmware_result.recommendations
-                if not firmware_result.overall_passed
-                else []
+                firmware_result.recommendations if not firmware_result.overall_passed else []
             ),
         )
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [
-            f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."
-        ]
+        parts = [f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -438,9 +432,7 @@ class FirmwareAgent:
                 task_type=request.task_type,
                 artifact_id=request.artifact_id,
                 success=False,
-                errors=[
-                    f"Artifact {request.artifact_id} not found on branch '{request.branch}'"
-                ],
+                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
             )
 
         # Route to handler

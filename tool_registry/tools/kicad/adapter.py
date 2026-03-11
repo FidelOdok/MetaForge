@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import io
 import json
 import os
 import tempfile
@@ -43,9 +42,7 @@ class KicadCliError(RuntimeError):
         self.returncode = returncode
         self.stderr = stderr
         self.partial_result = partial_result
-        super().__init__(
-            f"kicad-cli exited with code {returncode}: {stderr[:500]}"
-        )
+        super().__init__(f"kicad-cli exited with code {returncode}: {stderr[:500]}")
 
 
 class KicadCliTimeoutError(RuntimeError):
@@ -70,7 +67,8 @@ async def _check_kicad_cli(cli_path: str) -> str:
         span.set_attribute("kicad.cli_path", cli_path)
         try:
             proc = await asyncio.create_subprocess_exec(
-                cli_path, "--version",
+                cli_path,
+                "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -114,10 +112,8 @@ async def _run_kicad_cli(
             raise KicadCliNotFoundError(cli_path)
 
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
-        except asyncio.TimeoutError:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
             proc.kill()
             await proc.communicate()
             raise KicadCliTimeoutError(timeout)
@@ -312,8 +308,7 @@ class KicadServer(McpToolServer):
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Layers to export (default: all copper"
-                                " + mask + silk + edge)"
+                                "Layers to export (default: all copper + mask + silk + edge)"
                             ),
                         },
                     },
@@ -482,9 +477,7 @@ class KicadServer(McpToolServer):
             group_by=group_by,
         )
 
-        result = await self._execute_bom_export(
-            schematic_file, output_format, group_by
-        )
+        result = await self._execute_bom_export(schematic_file, output_format, group_by)
         return result
 
     async def export_gerber(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -561,9 +554,7 @@ class KicadServer(McpToolServer):
     # Internal execution methods
     # ------------------------------------------------------------------
 
-    async def _execute_erc(
-        self, schematic_file: str, severity_filter: str
-    ) -> dict[str, Any]:
+    async def _execute_erc(self, schematic_file: str, severity_filter: str) -> dict[str, Any]:
         """Execute KiCad ERC via kicad-cli.
 
         Runs: kicad-cli sch erc --format json --severity-all --output <tmp> <schematic>
@@ -580,10 +571,13 @@ class KicadServer(McpToolServer):
 
             try:
                 cli_args = [
-                    "sch", "erc",
-                    "--format", "json",
+                    "sch",
+                    "erc",
+                    "--format",
+                    "json",
                     "--severity-all",
-                    "--output", report_path,
+                    "--output",
+                    report_path,
                     schematic_file,
                 ]
                 timeout = float(self.config.max_operation_time)
@@ -657,10 +651,13 @@ class KicadServer(McpToolServer):
 
             try:
                 cli_args = [
-                    "pcb", "drc",
-                    "--format", "json",
+                    "pcb",
+                    "drc",
+                    "--format",
+                    "json",
                     "--severity-all",
-                    "--output", report_path,
+                    "--output",
+                    report_path,
                     pcb_file,
                 ]
                 timeout = float(self.config.max_operation_time)
@@ -737,8 +734,11 @@ class KicadServer(McpToolServer):
             output_file = f"{self.config.work_dir}/{stem}_bom.{output_format}"
 
             cli_args = [
-                "sch", "export", "bom",
-                "--output", output_file,
+                "sch",
+                "export",
+                "bom",
+                "--output",
+                output_file,
                 schematic_file,
             ]
             timeout = float(self.config.max_operation_time)
@@ -793,8 +793,11 @@ class KicadServer(McpToolServer):
             await _check_kicad_cli(self.config.kicad_cli)
 
             cli_args = [
-                "pcb", "export", "gerbers",
-                "--output", output_dir,
+                "pcb",
+                "export",
+                "gerbers",
+                "--output",
+                output_dir,
                 pcb_file,
             ]
             # Add layer arguments
@@ -854,9 +857,13 @@ class KicadServer(McpToolServer):
             output_file = f"{self.config.work_dir}/{stem}.{ext}"
 
             cli_args = [
-                "sch", "export", "netlist",
-                "--format", output_format,
-                "--output", output_file,
+                "sch",
+                "export",
+                "netlist",
+                "--format",
+                output_format,
+                "--output",
+                output_file,
                 schematic_file,
             ]
             timeout = float(self.config.max_operation_time)
@@ -911,16 +918,18 @@ class KicadServer(McpToolServer):
             await _check_kicad_cli(self.config.kicad_cli)
 
             # Export netlist in KiCad format for parsing
-            netlist_fd, netlist_path = tempfile.mkstemp(
-                suffix=".net", prefix="kicad_pinmap_"
-            )
+            netlist_fd, netlist_path = tempfile.mkstemp(suffix=".net", prefix="kicad_pinmap_")
             os.close(netlist_fd)
 
             try:
                 cli_args = [
-                    "sch", "export", "netlist",
-                    "--format", "kicad",
-                    "--output", netlist_path,
+                    "sch",
+                    "export",
+                    "netlist",
+                    "--format",
+                    "kicad",
+                    "--output",
+                    netlist_path,
                     schematic_file,
                 ]
                 timeout = float(self.config.max_operation_time)
@@ -933,9 +942,7 @@ class KicadServer(McpToolServer):
                     raise KicadCliError(returncode, stderr)
 
                 # Parse the netlist for pin mapping
-                components = _parse_pin_mapping_from_netlist(
-                    netlist_path, component_filter
-                )
+                components = _parse_pin_mapping_from_netlist(netlist_path, component_filter)
 
                 total_pins = sum(len(c["pins"]) for c in components)
 
@@ -971,9 +978,7 @@ class KicadServer(McpToolServer):
 # ------------------------------------------------------------------
 
 
-def _parse_erc_violations(
-    report: dict[str, Any], severity_filter: str
-) -> list[dict[str, Any]]:
+def _parse_erc_violations(report: dict[str, Any], severity_filter: str) -> list[dict[str, Any]]:
     """Parse ERC violations from kicad-cli JSON report.
 
     KiCad 8 JSON ERC report format:
@@ -1017,21 +1022,21 @@ def _parse_erc_violations(
             if len(items) > 1:
                 pin = items[1].get("description", "")
 
-        result.append({
-            "rule_id": v.get("type", ""),
-            "severity": severity,
-            "message": v.get("description", ""),
-            "sheet": sheet,
-            "component": component,
-            "pin": pin,
-        })
+        result.append(
+            {
+                "rule_id": v.get("type", ""),
+                "severity": severity,
+                "message": v.get("description", ""),
+                "sheet": sheet,
+                "component": component,
+                "pin": pin,
+            }
+        )
 
     return result
 
 
-def _parse_drc_violations(
-    report: dict[str, Any], severity_filter: str
-) -> list[dict[str, Any]]:
+def _parse_drc_violations(report: dict[str, Any], severity_filter: str) -> list[dict[str, Any]]:
     """Parse DRC violations from kicad-cli JSON report.
 
     KiCad 8 JSON DRC report format:
@@ -1075,12 +1080,14 @@ def _parse_drc_violations(
                 "layer": first_item.get("layer", ""),
             }
 
-        result.append({
-            "rule_id": v.get("type", ""),
-            "severity": severity,
-            "message": v.get("description", ""),
-            "location": location,
-        })
+        result.append(
+            {
+                "rule_id": v.get("type", ""),
+                "severity": severity,
+                "message": v.get("description", ""),
+                "location": location,
+            }
+        )
 
     return result
 
@@ -1124,8 +1131,16 @@ def _parse_bom_csv(file_path: str) -> tuple[int, int]:
 def _list_gerber_files(output_dir: str) -> list[str]:
     """List Gerber files in the output directory."""
     gerber_extensions = {
-        ".gtl", ".gbl", ".gts", ".gbs", ".gto", ".gbo",
-        ".gm1", ".gm2", ".drl", ".gbr",
+        ".gtl",
+        ".gbl",
+        ".gts",
+        ".gbs",
+        ".gto",
+        ".gbo",
+        ".gm1",
+        ".gm2",
+        ".drl",
+        ".gbr",
     }
     try:
         files = []
@@ -1187,12 +1202,14 @@ def _parse_pin_mapping_from_netlist(
         if component_filter and not ref.startswith(component_filter):
             continue
 
-        components.append({
-            "reference": ref,
-            "value": value,
-            "footprint": footprint,
-            "pins": [],
-        })
+        components.append(
+            {
+                "reference": ref,
+                "value": value,
+                "footprint": footprint,
+                "pins": [],
+            }
+        )
 
     # Parse net sections to fill in pin mapping
     net_sections = content.split("(net ")
@@ -1211,12 +1228,14 @@ def _parse_pin_mapping_from_netlist(
             if node_ref and node_pin:
                 for comp in components:
                     if comp["reference"] == node_ref:
-                        comp["pins"].append({
-                            "number": node_pin,
-                            "name": pin_name or node_pin,
-                            "type": pin_type or "passive",
-                            "net": net_name,
-                        })
+                        comp["pins"].append(
+                            {
+                                "number": node_pin,
+                                "name": pin_name or node_pin,
+                                "type": pin_type or "passive",
+                                "net": net_name,
+                            }
+                        )
 
     return components
 

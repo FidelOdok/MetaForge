@@ -10,8 +10,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from orchestrator.dependency_engine import DependencyGraph
@@ -25,11 +23,8 @@ from orchestrator.workflow_dag import (
     WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
-from tests.conftest import SpySubscriber, make_artifact
-from tests.integration.conftest import MockAgent
+from tests.conftest import SpySubscriber
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import ArtifactType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,7 +40,8 @@ async def _wait_done(
         if run is None:
             continue
         done_count = sum(
-            1 for s in steps
+            1
+            for s in steps
             if run.step_results.get(s)
             and run.step_results[s].status in {StepStatus.COMPLETED, StepStatus.FAILED}
         )
@@ -81,14 +77,20 @@ class TestSequentialCrossAgent:
                     step_id="stress",
                     agent_code="MECH",
                     task_type="validate_stress",
-                    parameters={"artifact_id": str(mech_artifact.id), "mesh_file_path": "cad/bracket.inp"},
+                    parameters={
+                        "artifact_id": str(mech_artifact.id),
+                        "mesh_file_path": "cad/bracket.inp",
+                    },
                 ),
                 WorkflowStep(
                     step_id="erc",
                     agent_code="EE",
                     task_type="run_erc",
                     depends_on=["stress"],
-                    parameters={"artifact_id": str(ee_artifact.id), "schematic_file": "eda/kicad/main.kicad_sch"},
+                    parameters={
+                        "artifact_id": str(ee_artifact.id),
+                        "schematic_file": "eda/kicad/main.kicad_sch",
+                    },
                 ),
             ],
         )
@@ -137,13 +139,19 @@ class TestParallelCrossAgent:
                     step_id="stress",
                     agent_code="MECH",
                     task_type="validate_stress",
-                    parameters={"artifact_id": str(mech_artifact.id), "mesh_file_path": "cad/bracket.inp"},
+                    parameters={
+                        "artifact_id": str(mech_artifact.id),
+                        "mesh_file_path": "cad/bracket.inp",
+                    },
                 ),
                 WorkflowStep(
                     step_id="erc",
                     agent_code="EE",
                     task_type="run_erc",
-                    parameters={"artifact_id": str(ee_artifact.id), "schematic_file": "eda/kicad/main.kicad_sch"},
+                    parameters={
+                        "artifact_id": str(ee_artifact.id),
+                        "schematic_file": "eda/kicad/main.kicad_sch",
+                    },
                 ),
             ],
         )
@@ -240,8 +248,8 @@ class TestSharedTwinState:
         ee_agent = ElectronicsAgent(twin=twin, mcp=mcp_with_tools)
 
         # Both should be able to read the same mechanical artifact
-        from domain_agents.mechanical.agent import TaskRequest as MechTR
         from domain_agents.electronics.agent import TaskRequest as EETR
+        from domain_agents.mechanical.agent import TaskRequest as MechTR
 
         mech_result = await mech_agent.run_task(
             MechTR(

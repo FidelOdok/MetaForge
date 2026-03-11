@@ -83,7 +83,6 @@ class ScheduledStep(BaseModel):
 
 
 class Scheduler(ABC):
-
     @abstractmethod
     async def schedule_step(self, step: ScheduledStep) -> None: ...
 
@@ -177,9 +176,7 @@ class InMemoryScheduler(Scheduler):
     async def _run_loop(self) -> None:
         while self._running:
             try:
-                priority, ts, step = await asyncio.wait_for(
-                    self._queue.get(), timeout=1.0
-                )
+                priority, ts, step = await asyncio.wait_for(self._queue.get(), timeout=1.0)
             except TimeoutError:
                 continue
 
@@ -217,21 +214,21 @@ class InMemoryScheduler(Scheduler):
                 return
 
             # Mark step as running
-            await self._engine.update_step(
-                step.run_id, step.step_id, StepStatus.RUNNING
-            )
+            await self._engine.update_step(step.run_id, step.step_id, StepStatus.RUNNING)
             if self._bus:
-                await self._bus.publish(Event(
-                    id=str(time.monotonic()),
-                    type=EventType.AGENT_TASK_STARTED,
-                    timestamp=datetime.now(UTC).isoformat(),
-                    source="scheduler",
-                    data={
-                        "run_id": step.run_id,
-                        "step_id": step.step_id,
-                        "agent_code": step.agent_code,
-                    },
-                ))
+                await self._bus.publish(
+                    Event(
+                        id=str(time.monotonic()),
+                        type=EventType.AGENT_TASK_STARTED,
+                        timestamp=datetime.now(UTC).isoformat(),
+                        source="scheduler",
+                        data={
+                            "run_id": step.run_id,
+                            "step_id": step.step_id,
+                            "agent_code": step.agent_code,
+                        },
+                    )
+                )
 
             t0 = time.monotonic()
             try:
@@ -244,18 +241,14 @@ class InMemoryScheduler(Scheduler):
                 elapsed = time.monotonic() - t0
                 span.set_attribute("scheduler.duration_s", round(elapsed, 3))
                 if self._collector:
-                    self._collector.record_agent_execution(
-                        step.agent_code, "success", elapsed
-                    )
+                    self._collector.record_agent_execution(step.agent_code, "success", elapsed)
                 await self._report_step_success(step, result)
 
             except TimeoutError:
                 elapsed = time.monotonic() - t0
                 span.set_attribute("scheduler.duration_s", round(elapsed, 3))
                 if self._collector:
-                    self._collector.record_agent_execution(
-                        step.agent_code, "timeout", elapsed
-                    )
+                    self._collector.record_agent_execution(step.agent_code, "timeout", elapsed)
                 logger.warning(
                     "step_timeout",
                     run_id=step.run_id,
@@ -265,18 +258,14 @@ class InMemoryScheduler(Scheduler):
                 await self._handle_failure(step, "Step timed out")
 
             except asyncio.CancelledError:
-                await self._engine.update_step(
-                    step.run_id, step.step_id, StepStatus.SKIPPED
-                )
+                await self._engine.update_step(step.run_id, step.step_id, StepStatus.SKIPPED)
 
             except Exception as exc:
                 elapsed = time.monotonic() - t0
                 span.set_attribute("scheduler.duration_s", round(elapsed, 3))
                 span.record_exception(exc)
                 if self._collector:
-                    self._collector.record_agent_execution(
-                        step.agent_code, "error", elapsed
-                    )
+                    self._collector.record_agent_execution(step.agent_code, "error", elapsed)
                 logger.error(
                     "step_execution_error",
                     run_id=step.run_id,
@@ -285,9 +274,7 @@ class InMemoryScheduler(Scheduler):
                 )
                 await self._handle_failure(step, str(exc))
 
-    async def _report_step_success(
-        self, step: ScheduledStep, result: Any
-    ) -> None:
+    async def _report_step_success(self, step: ScheduledStep, result: Any) -> None:
         result_dict: dict[str, Any] = {}
         if isinstance(result, dict):
             result_dict = result
@@ -302,18 +289,20 @@ class InMemoryScheduler(Scheduler):
         )
 
         if self._bus:
-            await self._bus.publish(Event(
-                id=str(time.monotonic()),
-                type=EventType.AGENT_TASK_COMPLETED,
-                timestamp=datetime.now(UTC).isoformat(),
-                source="scheduler",
-                data={
-                    "run_id": step.run_id,
-                    "step_id": step.step_id,
-                    "agent_code": step.agent_code,
-                    "result": result_dict,
-                },
-            ))
+            await self._bus.publish(
+                Event(
+                    id=str(time.monotonic()),
+                    type=EventType.AGENT_TASK_COMPLETED,
+                    timestamp=datetime.now(UTC).isoformat(),
+                    source="scheduler",
+                    data={
+                        "run_id": step.run_id,
+                        "step_id": step.step_id,
+                        "agent_code": step.agent_code,
+                        "result": result_dict,
+                    },
+                )
+            )
 
         logger.info(
             "step_completed",
@@ -333,18 +322,20 @@ class InMemoryScheduler(Scheduler):
             error=error,
         )
         if self._bus:
-            await self._bus.publish(Event(
-                id=str(time.monotonic()),
-                type=EventType.AGENT_TASK_FAILED,
-                timestamp=datetime.now(UTC).isoformat(),
-                source="scheduler",
-                data={
-                    "run_id": step.run_id,
-                    "step_id": step.step_id,
-                    "agent_code": step.agent_code,
-                    "error": error,
-                },
-            ))
+            await self._bus.publish(
+                Event(
+                    id=str(time.monotonic()),
+                    type=EventType.AGENT_TASK_FAILED,
+                    timestamp=datetime.now(UTC).isoformat(),
+                    source="scheduler",
+                    data={
+                        "run_id": step.run_id,
+                        "step_id": step.step_id,
+                        "agent_code": step.agent_code,
+                        "error": error,
+                    },
+                )
+            )
 
     async def _handle_failure(self, step: ScheduledStep, error: str) -> None:
         if step.retry_count < step.retry_policy.max_retries:
@@ -354,7 +345,7 @@ class InMemoryScheduler(Scheduler):
 
     async def _retry_step(self, step: ScheduledStep) -> None:
         delay = step.retry_policy.backoff_seconds * (
-            step.retry_policy.backoff_multiplier ** step.retry_count
+            step.retry_policy.backoff_multiplier**step.retry_count
         )
         step.retry_count += 1
         logger.info(
@@ -384,7 +375,9 @@ class InMemoryScheduler(Scheduler):
                 if ws is None:
                     continue
                 if sr is not None and sr.status not in {
-                    StepStatus.PENDING, StepStatus.WAITING, StepStatus.READY
+                    StepStatus.PENDING,
+                    StepStatus.WAITING,
+                    StepStatus.READY,
                 }:
                     continue
 
@@ -393,9 +386,7 @@ class InMemoryScheduler(Scheduler):
                 continue
 
             # Mark as READY in engine
-            await self._engine.update_step(
-                step.run_id, step_id, StepStatus.READY
-            )
+            await self._engine.update_step(step.run_id, step_id, StepStatus.READY)
 
             # Resolve $ref parameters
             completed_results = {
@@ -403,20 +394,20 @@ class InMemoryScheduler(Scheduler):
                 for sid, sr_item in run.step_results.items()
                 if sr_item.status == StepStatus.COMPLETED
             }
-            resolved_params = self._dep_graph.resolve_step_inputs(
-                ws, completed_results
-            )
+            resolved_params = self._dep_graph.resolve_step_inputs(ws, completed_results)
 
-            await self.schedule_step(ScheduledStep(
-                run_id=step.run_id,
-                step_id=step_id,
-                agent_code=ws.agent_code,
-                task_type=ws.task_type,
-                parameters=resolved_params,
-                branch=run.branch,
-                priority=SchedulerPriority.NORMAL,
-                retry_policy=RetryPolicy(max_retries=ws.retry_max),
-            ))
+            await self.schedule_step(
+                ScheduledStep(
+                    run_id=step.run_id,
+                    step_id=step_id,
+                    agent_code=ws.agent_code,
+                    task_type=ws.task_type,
+                    parameters=resolved_params,
+                    branch=run.branch,
+                    priority=SchedulerPriority.NORMAL,
+                    retry_policy=RetryPolicy(max_retries=ws.retry_max),
+                )
+            )
 
     async def execute_run(self, run: WorkflowRun) -> None:
         """Schedule all initially-ready steps for *run*."""
@@ -428,16 +419,18 @@ class InMemoryScheduler(Scheduler):
             ws = self._dep_graph.get_step(step_id)
             if ws is None:
                 continue
-            await self.schedule_step(ScheduledStep(
-                run_id=run.id,
-                step_id=step_id,
-                agent_code=ws.agent_code,
-                task_type=ws.task_type,
-                parameters=dict(ws.parameters),
-                branch=run.branch,
-                priority=SchedulerPriority.NORMAL,
-                retry_policy=RetryPolicy(max_retries=ws.retry_max),
-            ))
+            await self.schedule_step(
+                ScheduledStep(
+                    run_id=run.id,
+                    step_id=step_id,
+                    agent_code=ws.agent_code,
+                    task_type=ws.task_type,
+                    parameters=dict(ws.parameters),
+                    branch=run.branch,
+                    priority=SchedulerPriority.NORMAL,
+                    retry_policy=RetryPolicy(max_retries=ws.retry_max),
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
