@@ -13,6 +13,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +135,16 @@ def _bounding_box(vertices: np.ndarray) -> dict:
     return {"min": bb_min, "max": bb_max}
 
 
+def _source_format(path: str) -> str:
+    """Determine the source CAD format from file extension."""
+    ext = Path(path).suffix.lower()
+    if ext in (".step", ".stp"):
+        return "STEP-AP242"
+    elif ext in (".iges", ".igs"):
+        return "IGES"
+    return "UNKNOWN"
+
+
 def convert(input_path: str, quality: str, output_dir: str) -> dict:
     """Convert a STEP/IGES file to GLB + metadata JSON.
 
@@ -185,6 +196,10 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
     file_size = glb_path.stat().st_size
 
     metadata = {
+        "format": "metaforge-twin-export",
+        "schemaVersion": "1.0",
+        "sourceFormat": _source_format(input_path),
+        "convertedAt": datetime.now(UTC).isoformat(),
         "parts": parts,
         "materials": [],
         "stats": {

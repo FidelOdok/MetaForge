@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,72 @@ class TestMetadataSchema:
         assert isinstance(metadata["parts"], list)
         assert metadata["parts"][0]["meshName"] == "mesh_0"
         assert metadata["stats"]["triangleCount"] == 12
+
+
+class TestSourceFormat:
+    """Verify source format detection from file extension."""
+
+    def test_step_format(self):
+        from convert import _source_format
+
+        assert _source_format("/some/file.step") == "STEP-AP242"
+        assert _source_format("/some/file.stp") == "STEP-AP242"
+        assert _source_format("/some/file.STEP") == "STEP-AP242"
+        assert _source_format("/some/file.STP") == "STEP-AP242"
+
+    def test_iges_format(self):
+        from convert import _source_format
+
+        assert _source_format("/some/file.iges") == "IGES"
+        assert _source_format("/some/file.igs") == "IGES"
+
+    def test_unknown_format(self):
+        from convert import _source_format
+
+        assert _source_format("/some/file.stl") == "UNKNOWN"
+
+
+class TestMetadataVersioningFields:
+    """Verify format, schemaVersion, sourceFormat, and convertedAt fields."""
+
+    def _make_metadata_sample(self) -> dict:
+        """Build a metadata dict mimicking what convert() produces."""
+        from datetime import UTC
+
+        from convert import _source_format
+
+        return {
+            "format": "metaforge-twin-export",
+            "schemaVersion": "1.0",
+            "sourceFormat": _source_format("/model.step"),
+            "convertedAt": datetime.now(UTC).isoformat(),
+            "parts": [],
+            "materials": [],
+            "stats": {"triangleCount": 0, "fileSize": 0},
+        }
+
+    def test_format_field(self):
+        meta = self._make_metadata_sample()
+        assert meta["format"] == "metaforge-twin-export"
+
+    def test_schema_version_field(self):
+        meta = self._make_metadata_sample()
+        assert meta["schemaVersion"] == "1.0"
+
+    def test_source_format_field(self):
+        meta = self._make_metadata_sample()
+        assert meta["sourceFormat"] == "STEP-AP242"
+
+    def test_converted_at_is_iso8601(self):
+        meta = self._make_metadata_sample()
+        # Should parse without error
+        parsed = datetime.fromisoformat(meta["convertedAt"])
+        assert parsed is not None
+
+    def test_converted_at_is_utc(self):
+        meta = self._make_metadata_sample()
+        parsed = datetime.fromisoformat(meta["convertedAt"])
+        assert parsed.tzinfo is not None
 
 
 class TestCLIArgs:
