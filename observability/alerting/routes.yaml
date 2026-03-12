@@ -10,6 +10,15 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
+    # Fleet alerts — route to dedicated channel before general severity routes
+    - match_re:
+        alertname: "DeviceTelemetryStopped|SensorOutOfRange|DeviceOffline|FleetAnomalyPattern|TSDBIngestionFailing"
+      receiver: slack-fleet
+      group_by: [alertname, device_type]
+      group_wait: 1m
+      group_interval: 5m
+      repeat_interval: 30m
+      continue: true
     - match:
         severity: critical
       receiver: pagerduty-critical
@@ -58,6 +67,15 @@ receivers:
         channel: '#alerts-warning'
         color: '#FFA500'
         title: '[WARNING] {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+
+  - name: slack-fleet
+    slack_configs:
+      - api_url: '{{ .SLACK_WEBHOOK_URL }}'
+        channel: '#alerts-fleet'
+        color: '#9B59B6'
+        title: '[FLEET] {{ .GroupLabels.alertname }}'
         text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
         send_resolved: true
 

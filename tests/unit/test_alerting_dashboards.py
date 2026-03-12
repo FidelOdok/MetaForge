@@ -104,19 +104,19 @@ class TestAlertingRules:
                 f"Missing 'summary' annotation in {rule['alert']}"
             )
 
-    def test_five_critical_rules(self) -> None:
-        """There must be exactly 5 critical rules (3 original + 2 anomaly)."""
+    def test_six_critical_rules(self) -> None:
+        """There must be exactly 6 critical rules (3 original + 3 fleet)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         critical = [r for r in rules if r["labels"]["severity"] == "critical"]
-        assert len(critical) == 5
+        assert len(critical) == 6
 
-    def test_eight_warning_rules(self) -> None:
-        """There must be exactly 8 warning rules (5 original + 3 anomaly)."""
+    def test_seven_warning_rules(self) -> None:
+        """There must be exactly 7 warning rules (5 original + 2 fleet)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 8
+        assert len(warnings) == 7
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -130,6 +130,7 @@ class TestAlertingRules:
                 "GatewayDown",
                 "KafkaConsumerStopped",
                 "Neo4jUnreachable",
+                "TSDBIngestionFailing",
             ]
         )
 
@@ -147,7 +148,6 @@ class TestAlertingRules:
                 "LLMCostSpike",
                 "OscillationDetected",
                 "SensorOutOfRange",
-                "TSDBIngestionFailing",
             ]
         )
 

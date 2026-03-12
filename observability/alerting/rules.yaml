@@ -83,51 +83,95 @@ groups:
           summary: "Design oscillation detected"
           description: "Agent feedback loop detected for {{ $labels.node_type }}."
 
-  - name: metaforge_anomaly
+  - name: metaforge_fleet_alerts
     rules:
+      # Device has not sent telemetry for > N minutes (configurable per device type).
+      # The threshold is set per device_type label on the metric; default 5m window.
       - alert: DeviceTelemetryStopped
-        expr: absent_over_time(metaforge_mqtt_messages_received_total{device_id=~".+"}[5m])
+        expr: |
+          (time() - metaforge_device_last_telemetry_timestamp) > on(device_type)
+          group_left metaforge_device_type_telemetry_interval_seconds * 3
+          or
+          (time() - metaforge_device_last_telemetry_timestamp) > 300
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Device telemetry has stopped"
-          description: "No MQTT messages received from any device in the last 5 minutes."
-          runbook_url: "https://docs.metaforge.dev/runbooks/device-telemetry-stopped"
+          summary: "Device {{ $labels.device_id }} telemetry stopped"
+          description: >-
+            Device {{ $labels.device_id }} (type: {{ $labels.device_type }}) has not sent
+            telemetry for more than 3x its expected reporting interval. Last seen
+            {{ $value | humanizeDuration }} ago.
+          runbook_url: "observability/runbooks/device-telemetry-stopped.md"
 
+      # Sensor value exceeds defined safe operating range (min/max thresholds).
       - alert: SensorOutOfRange
-        expr: metaforge_telemetry_lag_seconds > 300
+        expr: |
+          metaforge_sensor_value > on(device_type, sensor_name)
+          group_left metaforge_sensor_threshold_max
+          or
+          metaforge_sensor_value < on(device_type, sensor_name)
+          group_left metaforge_sensor_threshold_min
         for: 1m
         labels:
           severity: warning
         annotations:
-          summary: "Sensor out of range for device {{ $labels.device_id }}"
-          description: "Device {{ $labels.device_id }} telemetry lag exceeds safe threshold (>300s)."
+          summary: "Sensor {{ $labels.sensor_name }} out of range on device {{ $labels.device_id }}"
+          description: >-
+            Sensor {{ $labels.sensor_name }} on device {{ $labels.device_id }}
+            (type: {{ $labels.device_type }}) reported value {{ $value }} which is
+            outside the safe operating range.
+          runbook_url: "observability/runbooks/sensor-out-of-range.md"
 
+      # Device connection lost (MQTT disconnect without graceful shutdown).
       - alert: DeviceOffline
-        expr: changes(metaforge_mqtt_messages_received_total[2m]) == 0 and metaforge_mqtt_messages_received_total > 0
+        expr: |
+          metaforge_device_connection_status == 0
+          and
+          metaforge_device_graceful_disconnect == 0
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "Device {{ $labels.device_id }} appears offline"
-          description: "Device {{ $labels.device_id }} stopped sending MQTT messages without graceful shutdown."
+          summary: "Device {{ $labels.device_id }} offline (ungraceful disconnect)"
+          description: >-
+            Device {{ $labels.device_id }} (type: {{ $labels.device_type }}) lost MQTT
+            connection without a graceful shutdown. The device has been offline for more
+            than 2 minutes.
+          runbook_url: "observability/runbooks/device-offline.md"
 
+      # Unusual number of devices reporting errors simultaneously.
       - alert: FleetAnomalyPattern
-        expr: (sum(rate(metaforge_telemetry_ingestion_total{status="error"}[5m])) / sum(rate(metaforge_telemetry_ingestion_total[5m]))) > 0.10
+        expr: |
+          count(
+            rate(metaforge_device_error_total[5m]) > 0
+          ) > on() (count(metaforge_device_connection_status) * 0.10)
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Fleet-wide anomaly pattern detected"
-          description: "More than 10% of fleet devices are reporting errors simultaneously."
-          runbook_url: "https://docs.metaforge.dev/runbooks/fleet-anomaly-pattern"
+          summary: "Fleet-wide anomaly: {{ $value }} devices reporting errors simultaneously"
+          description: >-
+            More than 10% of the fleet ({{ $value }} devices) are reporting errors
+            simultaneously over the last 5 minutes. This may indicate a systemic issue
+            such as a firmware bug, infrastructure failure, or environmental event.
+          runbook_url: "observability/runbooks/fleet-anomaly-pattern.md"
 
+      # Telemetry write errors exceeding threshold — TSDB ingestion failing.
       - alert: TSDBIngestionFailing
-        expr: (sum(rate(metaforge_telemetry_ingestion_errors_total[5m])) / sum(rate(metaforge_telemetry_ingestion_total[5m]))) > 0.01
+        expr: |
+          (
+            sum(rate(metaforge_tsdb_write_errors_total[5m]))
+            /
+            clamp_min(sum(rate(metaforge_tsdb_write_requests_total[5m])), 1)
+          ) > 0.01
         for: 5m
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "TSDB ingestion failure rate is elevated"
-          description: "Telemetry write error rate exceeds 1% over the last 5 minutes."
+          summary: "TSDB ingestion failure rate is {{ $value | humanizePercentage }}"
+          description: >-
+            Telemetry write error rate to the time-series database exceeds 1% over the
+            last 5 minutes. Current rate: {{ $value | humanizePercentage }}. Device
+            telemetry data may be lost.
+          runbook_url: "observability/runbooks/tsdb-ingestion-failing.md"

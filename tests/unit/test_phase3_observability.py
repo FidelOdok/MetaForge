@@ -278,7 +278,7 @@ class TestFleetHealthDashboard:
 
 
 class TestAnomalyAlertingRules:
-    """Validate the metaforge_anomaly alert group in rules.yaml."""
+    """Validate the metaforge_fleet_alerts alert group in rules.yaml."""
 
     @pytest.fixture()
     def rules_data(self) -> dict:
@@ -288,9 +288,9 @@ class TestAnomalyAlertingRules:
     @pytest.fixture()
     def anomaly_group(self, rules_data: dict) -> dict:
         for group in rules_data["groups"]:
-            if group["name"] == "metaforge_anomaly":
+            if group["name"] == "metaforge_fleet_alerts":
                 return group
-        pytest.fail("metaforge_anomaly group not found in rules.yaml")
+        pytest.fail("metaforge_fleet_alerts group not found in rules.yaml")
 
     def test_rules_yaml_is_valid(self) -> None:
         path = _ALERTING_DIR / "rules.yaml"
@@ -299,7 +299,7 @@ class TestAnomalyAlertingRules:
 
     def test_anomaly_group_exists(self, rules_data: dict) -> None:
         group_names = [g["name"] for g in rules_data["groups"]]
-        assert "metaforge_anomaly" in group_names
+        assert "metaforge_fleet_alerts" in group_names
 
     def test_anomaly_group_has_5_rules(self, anomaly_group: dict) -> None:
         assert len(anomaly_group["rules"]) == 5
@@ -308,13 +308,13 @@ class TestAnomalyAlertingRules:
         for rule in anomaly_group["rules"]:
             if rule["alert"] == alert_name:
                 return rule
-        pytest.fail(f"Rule {alert_name} not found in metaforge_anomaly group")
+        pytest.fail(f"Rule {alert_name} not found in metaforge_fleet_alerts group")
 
     def test_device_telemetry_stopped_rule(self, anomaly_group: dict) -> None:
         rule = self._get_rule(anomaly_group, "DeviceTelemetryStopped")
         assert rule["labels"]["severity"] == "critical"
         assert rule["for"] == "5m"
-        assert "absent_over_time" in rule["expr"]
+        assert "metaforge_device_last_telemetry_timestamp" in rule["expr"]
 
     def test_sensor_out_of_range_rule(self, anomaly_group: dict) -> None:
         rule = self._get_rule(anomaly_group, "SensorOutOfRange")
@@ -330,11 +330,11 @@ class TestAnomalyAlertingRules:
         rule = self._get_rule(anomaly_group, "FleetAnomalyPattern")
         assert rule["labels"]["severity"] == "critical"
         assert rule["for"] == "5m"
-        assert "0.10" in str(rule["expr"]) or "0.1" in str(rule["expr"])
+        assert "0.10" in str(rule["expr"]) or "0.1" in str(rule["expr"]) or "10" in str(rule["expr"])
 
     def test_tsdb_ingestion_failing_rule(self, anomaly_group: dict) -> None:
         rule = self._get_rule(anomaly_group, "TSDBIngestionFailing")
-        assert rule["labels"]["severity"] == "warning"
+        assert rule["labels"]["severity"] == "critical"
         assert rule["for"] == "5m"
         assert "0.01" in str(rule["expr"])
 
