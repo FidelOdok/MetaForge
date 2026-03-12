@@ -204,6 +204,7 @@ services:
       context: .
       dockerfile: tool_registry/tools/kicad/Dockerfile
     image: metaforge/kicad-adapter:latest
+    stdin_open: true
     volumes:
       - adapter-workspace:/workspace
     environment:
@@ -231,6 +232,7 @@ services:
       context: .
       dockerfile: tool_registry/tools/freecad/Dockerfile
     image: metaforge/freecad-adapter:latest
+    stdin_open: true
     volumes:
       - adapter-workspace:/workspace
     environment:
