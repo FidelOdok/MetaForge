@@ -14,6 +14,11 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 from uuid import UUID, uuid4
 
+try:
+    from pydantic_ai import RunContext
+except ImportError:
+    RunContext = None  # type: ignore[assignment,misc]
+
 import structlog
 from pydantic import BaseModel, Field
 
@@ -128,7 +133,7 @@ def _get_or_create_pydantic_agent() -> Any:
         return _pydantic_agent
 
     try:
-        from pydantic_ai import Agent, RunContext
+        from pydantic_ai import Agent
     except ImportError:
         logger.warning("pydantic_ai_not_installed")
         return None
@@ -140,7 +145,7 @@ def _get_or_create_pydantic_agent() -> Any:
     agent = Agent(
         model,
         system_prompt=SUPPLY_CHAIN_SYSTEM_PROMPT,
-        result_type=SupplyChainResult,
+        output_type=SupplyChainResult,
         deps_type=AgentDependencies,
     )
 
@@ -283,7 +288,7 @@ class SupplyChainAgent:
             elapsed_s=round(elapsed, 3),
         )
 
-        sc_result: SupplyChainResult = result.data
+        sc_result: SupplyChainResult = result.output
 
         return TaskResult(
             task_type=request.task_type,

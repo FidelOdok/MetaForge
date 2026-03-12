@@ -15,6 +15,11 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 from uuid import UUID, uuid4
 
+try:
+    from pydantic_ai import RunContext
+except ImportError:
+    RunContext = None  # type: ignore[assignment,misc]
+
 import structlog
 from pydantic import BaseModel, Field
 
@@ -118,7 +123,7 @@ def _get_or_create_pydantic_agent() -> Any:
         return _pydantic_agent
 
     try:
-        from pydantic_ai import Agent, RunContext
+        from pydantic_ai import Agent
     except ImportError:
         logger.warning("pydantic_ai_not_installed")
         return None
@@ -130,7 +135,7 @@ def _get_or_create_pydantic_agent() -> Any:
     agent = Agent(
         model,
         system_prompt=FIRMWARE_SYSTEM_PROMPT,
-        result_type=FirmwareResult,
+        output_type=FirmwareResult,
         deps_type=AgentDependencies,
     )
 
@@ -389,7 +394,7 @@ class FirmwareAgent:
             elapsed_s=round(elapsed, 3),
         )
 
-        firmware_result: FirmwareResult = result.data
+        firmware_result: FirmwareResult = result.output
 
         return TaskResult(
             task_type=request.task_type,

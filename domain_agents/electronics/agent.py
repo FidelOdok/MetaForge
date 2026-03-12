@@ -15,6 +15,11 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 from uuid import UUID, uuid4
 
+try:
+    from pydantic_ai import RunContext
+except ImportError:
+    RunContext = None  # type: ignore[assignment,misc]
+
 import structlog
 from pydantic import BaseModel, Field
 
@@ -120,7 +125,7 @@ def _get_or_create_pydantic_agent() -> Any:
         return _pydantic_agent
 
     try:
-        from pydantic_ai import Agent, RunContext
+        from pydantic_ai import Agent
     except ImportError:
         logger.warning("pydantic_ai_not_installed")
         return None
@@ -132,7 +137,7 @@ def _get_or_create_pydantic_agent() -> Any:
     agent = Agent(
         model,
         system_prompt=ELECTRONICS_SYSTEM_PROMPT,
-        result_type=ElectronicsResult,
+        output_type=ElectronicsResult,
         deps_type=AgentDependencies,
     )
 
@@ -360,7 +365,7 @@ class ElectronicsAgent:
             elapsed_s=round(elapsed, 3),
         )
 
-        electronics_result: ElectronicsResult = result.data
+        electronics_result: ElectronicsResult = result.output
 
         return TaskResult(
             task_type=request.task_type,
