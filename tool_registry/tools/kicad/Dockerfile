@@ -46,6 +46,7 @@ COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.
 COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Copy adapter source code (only what the adapter needs)
+COPY mcp_core/ ./mcp_core/
 COPY tool_registry/ ./tool_registry/
 COPY observability/ ./observability/
 
