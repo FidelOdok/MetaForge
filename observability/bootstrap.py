@@ -69,6 +69,20 @@ except ImportError:
     OTLPSpanExporter = None  # type: ignore[assignment,misc]
     OTLPMetricExporter = None  # type: ignore[assignment,misc]
 
+_HAS_OTEL_LOG_EXPORTER = False
+try:
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (  # noqa: F401
+        OTLPLogExporter,
+    )
+    from opentelemetry.sdk._logs import LoggerProvider  # noqa: F401
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # noqa: F401
+
+    _HAS_OTEL_LOG_EXPORTER = True
+except ImportError:
+    OTLPLogExporter = None  # type: ignore[assignment,misc]
+    LoggerProvider = None  # type: ignore[assignment,misc]
+    BatchLogRecordProcessor = None  # type: ignore[assignment,misc]
+
 try:
     from opentelemetry.sdk.resources import Resource  # noqa: F401
 
@@ -105,6 +119,7 @@ class ObservabilityState:
 
     tracer_provider: Any = field(default=None)
     meter_provider: Any = field(default=None)
+    logger_provider: Any = field(default=None)
     is_active: bool = field(default=False)
 
 
@@ -163,10 +178,36 @@ def init_observability(config: ObservabilityConfig) -> ObservabilityState:
         otel_metrics.set_meter_provider(meter_provider)
         state.meter_provider = meter_provider
 
+    # -- logs ----------------------------------------------------------------
+    if config.enable_logs and _HAS_OTEL_LOG_EXPORTER:
+        log_exporter = OTLPLogExporter(
+            endpoint=config.otlp.endpoint,
+            insecure=config.otlp.insecure,
+            timeout=config.otlp.timeout_ms,
+        )
+        logger_provider = LoggerProvider(resource=resource)
+        logger_provider.add_log_record_processor(
+            BatchLogRecordProcessor(log_exporter)
+        )
+        # Bridge Python stdlib logging → OTel log exporter
+        from opentelemetry.sdk._logs import LoggingHandler
+
+        otel_handler = LoggingHandler(
+            level=logging.DEBUG,
+            logger_provider=logger_provider,
+        )
+        root_logger = logging.getLogger()
+        root_logger.addHandler(otel_handler)
+        # Ensure root logger level allows INFO+ through to OTel handler
+        if root_logger.level > logging.INFO:
+            root_logger.setLevel(logging.INFO)
+        state.logger_provider = logger_provider
+
     logger.info(
-        "Observability initialised (traces=%s, metrics=%s)",
+        "Observability initialised (traces=%s, metrics=%s, logs=%s)",
         config.enable_traces,
         config.enable_metrics,
+        config.enable_logs and _HAS_OTEL_LOG_EXPORTER,
     )
     return state
 
@@ -187,6 +228,12 @@ def shutdown_observability(state: ObservabilityState) -> None:
             state.meter_provider.shutdown()
         except Exception:
             logger.exception("Error shutting down meter provider")
+
+    if state.logger_provider is not None:
+        try:
+            state.logger_provider.shutdown()
+        except Exception:
+            logger.exception("Error shutting down logger provider")
 
     state.is_active = False
     logger.info("Observability shut down")

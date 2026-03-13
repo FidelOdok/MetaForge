@@ -1,3 +1,5 @@
+stream_over_http_enabled: true
+
 server:
   http_listen_port: 3200
 
@@ -10,6 +12,10 @@ distributor:
 
 ingester:
   max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 48h
 
 storage:
   trace:

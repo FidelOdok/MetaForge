@@ -30,6 +30,8 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 COPY api_gateway/ ./api_gateway/
 COPY orchestrator/ ./orchestrator/
 COPY twin_core/ ./twin_core/
+COPY digital_twin/ ./digital_twin/
+COPY shared/ ./shared/
 COPY skill_registry/ ./skill_registry/
 COPY mcp_core/ ./mcp_core/
 COPY tool_registry/ ./tool_registry/
