@@ -27,6 +27,7 @@ from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from observability.bootstrap import init_observability, shutdown_observability
 from observability.config import ObservabilityConfig, OtlpExporterConfig
+from observability.logging import configure_logging
 from observability.metrics import MetricsCollector, MetricsRegistry
 from observability.middleware import ObservabilityMiddleware
 from observability.tracing import get_tracer
@@ -179,9 +180,37 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
 
 
+def _reattach_otel_log_handler() -> None:
+    """Re-attach the OTel LoggingHandler after uvicorn resets logging.
+
+    Uvicorn's ``configure_logging()`` calls ``dictConfig`` which clears the
+    root logger handlers.  We re-attach the handler so structlog events
+    (which flow through stdlib ``LoggerFactory``) reach the OTLP exporter.
+    """
+    import logging as _logging
+
+    if _otel_state.logger_provider is None:
+        return
+    try:
+        from opentelemetry.sdk._logs import LoggingHandler
+
+        root = _logging.getLogger()
+        # Avoid duplicates
+        if any(isinstance(h, LoggingHandler) for h in root.handlers):
+            return
+        handler = LoggingHandler(level=_logging.DEBUG, logger_provider=_otel_state.logger_provider)
+        root.addHandler(handler)
+        if root.level > _logging.INFO:
+            root.setLevel(_logging.INFO)
+    except ImportError:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle handler."""
+    configure_logging(_otel_config)
+    _reattach_otel_log_handler()
     logger.info("gateway_starting", version="0.1.0", otel_active=_otel_state.is_active)
     await _init_orchestrator(app)
     yield
