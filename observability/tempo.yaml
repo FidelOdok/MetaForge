@@ -13,6 +13,29 @@ distributor:
 ingester:
   max_block_duration: 5m
 
+metrics_generator:
+  ring:
+    kvstore:
+      store: inmemory
+  processor:
+    service_graphs:
+      dimensions:
+        - service.name
+    span_metrics:
+      dimensions:
+        - service.name
+    local_blocks:
+      max_live_traces: 10000
+      flush_check_period: 10s
+      complete_block_timeout: 30s
+      block:
+        version: vParquet4
+  traces_storage:
+    path: /var/tempo/wal
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write: []
+
 compactor:
   compaction:
     block_retention: 48h
@@ -24,3 +47,11 @@ storage:
       path: /var/tempo/wal
     local:
       path: /var/tempo/blocks
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors:
+        - service-graphs
+        - span-metrics
+        - local-blocks

@@ -312,7 +312,7 @@ services:
     restart: unless-stopped
 
   tempo:
-    image: grafana/tempo:2.6.1
+    image: grafana/tempo:2.7.0
     profiles: ["observability"]
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
