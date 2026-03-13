@@ -330,7 +330,8 @@ class TestAnomalyAlertingRules:
         rule = self._get_rule(anomaly_group, "FleetAnomalyPattern")
         assert rule["labels"]["severity"] == "critical"
         assert rule["for"] == "5m"
-        assert "0.10" in str(rule["expr"]) or "0.1" in str(rule["expr"]) or "10" in str(rule["expr"])
+        expr = str(rule["expr"])
+        assert "0.10" in expr or "0.1" in expr or "10" in expr
 
     def test_tsdb_ingestion_failing_rule(self, anomaly_group: dict) -> None:
         rule = self._get_rule(anomaly_group, "TSDBIngestionFailing")

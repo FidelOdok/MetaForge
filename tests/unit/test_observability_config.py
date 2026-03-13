@@ -211,7 +211,7 @@ class TestObservabilityState:
 
     def test_state_has_expected_fields(self) -> None:
         names = {f.name for f in dc_fields(ObservabilityState)}
-        assert names == {"tracer_provider", "meter_provider", "is_active"}
+        assert names == {"tracer_provider", "meter_provider", "logger_provider", "is_active"}
 
 
 # ---------------------------------------------------------------------------
