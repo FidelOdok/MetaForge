@@ -10,17 +10,19 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from api_gateway.db import HAS_SQLALCHEMY
-from api_gateway.db.models import Base, ChatChannelRow, ChatMessageRow, ChatThreadRow
-from api_gateway.db.repository import PgChatRepository
 
-# ---------------------------------------------------------------------------
-# Skip entire module when sqlalchemy is not installed
-# ---------------------------------------------------------------------------
+# Skip entire module when sqlalchemy is not installed.
+# The imports below are guarded so that collection does not crash.
 pytestmark = pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+
+if HAS_SQLALCHEMY:
+    from sqlalchemy import event
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from api_gateway.db.models import Base, ChatChannelRow, ChatMessageRow, ChatThreadRow
+    from api_gateway.db.repository import PgChatRepository
 
 
 # ---------------------------------------------------------------------------
