@@ -26,13 +26,13 @@ const mockUseProposals = vi.mocked(useProposals);
 
 describe('ApprovalsPage', () => {
   it('shows loading state', () => {
-    mockUseProposals.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useProposals>);
+    mockUseProposals.mockReturnValue({ data: undefined, isLoading: true } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
     expect(screen.getByText('Loading proposals...')).toBeInTheDocument();
   });
 
   it('shows empty state', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as ReturnType<typeof useProposals>);
+    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
     expect(screen.getByText('No proposals')).toBeInTheDocument();
   });
@@ -56,7 +56,7 @@ describe('ApprovalsPage', () => {
         total: 1,
       },
       isLoading: false,
-    } as ReturnType<typeof useProposals>);
+    } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
     expect(screen.getByText('Update stress report')).toBeInTheDocument();
   });

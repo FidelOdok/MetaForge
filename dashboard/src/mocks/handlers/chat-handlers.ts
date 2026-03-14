@@ -19,7 +19,6 @@
 import {
   mockChannels,
   mockThreads,
-  mockMessages,
   getHydratedThread,
   actors,
 } from '../data/mock-chat';
@@ -28,7 +27,6 @@ import type {
   ChatThread,
   ChatChannel,
   ChatScopeKind,
-  ChatActor,
 } from '../../types/chat';
 import type { PaginatedResponse } from '../../types/common';
 
@@ -65,7 +63,7 @@ const agentResponses: Record<string, string[]> = {
 };
 
 /** Map from scope kind to the agent actor that typically responds. */
-const scopeAgentMap: Record<string, ChatActor> = {
+const scopeAgentMap = {
   approval: actors.agentEE,
   'bom-entry': actors.agentEE,
   'digital-twin-node': actors.agentME,
@@ -251,13 +249,13 @@ export function generateAgentResponse(
   const responses =
     agentResponses[scopeKind] ?? ['Processing your request...'];
   const content = responses[Math.floor(Math.random() * responses.length)];
-  const agent = scopeAgentMap[scopeKind] ?? actors.agentSE;
+  const agent = scopeAgentMap[scopeKind as keyof typeof scopeAgentMap] ?? actors.agentSE;
 
   return {
     id: `msg-agent-${Date.now()}`,
     threadId,
     actor: agent,
-    content,
+    content: content ?? 'Processing your request...',
     status: 'sent',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

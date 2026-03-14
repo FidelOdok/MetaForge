@@ -10,60 +10,59 @@ import type {
   ChatMessage,
   ChatThread,
   ChatChannel,
-  ChatActor,
 } from '../../types/chat';
 
 // ---------------------------------------------------------------------------
 // Reusable actor identities
 // ---------------------------------------------------------------------------
 
-export const actors: Record<string, ChatActor> = {
+export const actors = {
   userAlex: {
     id: 'user-1',
-    kind: 'user',
+    kind: 'user' as const,
     displayName: 'Alex Chen',
   },
   userMaria: {
     id: 'user-2',
-    kind: 'user',
+    kind: 'user' as const,
     displayName: 'Maria Torres',
   },
   agentME: {
     id: 'agent-me',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Mechanical Agent',
     agentCode: 'ME',
   },
   agentEE: {
     id: 'agent-ee',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Electronics Agent',
     agentCode: 'EE',
   },
   agentFW: {
     id: 'agent-fw',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Firmware Agent',
     agentCode: 'FW',
   },
   agentSE: {
     id: 'agent-se',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Systems Agent',
     agentCode: 'SE',
   },
   agentSIM: {
     id: 'agent-sim',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Simulation Agent',
     agentCode: 'SIM',
   },
   system: {
     id: 'system',
-    kind: 'system',
+    kind: 'system' as const,
     displayName: 'MetaForge',
   },
-};
+} satisfies Record<string, import('../../types/chat').ChatActor>;
 
 // ---------------------------------------------------------------------------
 // Channels
