@@ -49,6 +49,12 @@ from domain_agents.mechanical.skills.generate_mesh.handler import (
 from domain_agents.mechanical.skills.generate_mesh.schema import (
     GenerateMeshInput,
 )
+from domain_agents.mechanical.writeback import (
+    writeback_cad,
+    writeback_mesh,
+    writeback_stress,
+    writeback_tolerance,
+)
 from observability.tracing import get_tracer
 from skill_registry.mcp_bridge import McpBridge
 from skill_registry.skill_base import SkillContext
@@ -555,18 +561,31 @@ class MechanicalAgent:
                     }
                 )
 
+        skill_result_dict: dict[str, Any] = {
+            "skill": "validate_stress",
+            "fea_result": fea_result,
+            "constraint_results": results,
+            "overall_passed": all_passed,
+        }
+
+        # Writeback: update the existing WorkProduct with stress validation metadata
+        try:
+            wb = await writeback_stress(
+                self.twin,
+                self.session_id,
+                request.branch,
+                request.work_product_id,
+                skill_result_dict,
+            )
+            skill_result_dict["work_product_id"] = str(wb.id)
+        except Exception as exc:
+            self.logger.warning("writeback_stress_failed", error=str(exc))
+
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
             success=all_passed,
-            skill_results=[
-                {
-                    "skill": "validate_stress",
-                    "fea_result": fea_result,
-                    "constraint_results": results,
-                    "overall_passed": all_passed,
-                }
-            ],
+            skill_results=[skill_result_dict],
             warnings=[] if all_passed else ["One or more stress constraints violated"],
         )
 
@@ -617,21 +636,34 @@ class MechanicalAgent:
             )
 
         output = result.data
+        skill_result_dict: dict[str, Any] = {
+            "skill": "check_tolerance",
+            "overall_status": output.overall_status,
+            "total_dimensions_checked": output.total_dimensions_checked,
+            "passed": output.passed,
+            "warnings": output.warnings,
+            "failures": output.failures,
+            "summary": output.summary,
+        }
+
+        # Writeback: update the existing WorkProduct with tolerance metadata
+        try:
+            wb = await writeback_tolerance(
+                self.twin,
+                self.session_id,
+                request.branch,
+                request.work_product_id,
+                skill_result_dict,
+            )
+            skill_result_dict["work_product_id"] = str(wb.id)
+        except Exception as exc:
+            self.logger.warning("writeback_tolerance_failed", error=str(exc))
+
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
             success=output.overall_status != "fail",
-            skill_results=[
-                {
-                    "skill": "check_tolerance",
-                    "overall_status": output.overall_status,
-                    "total_dimensions_checked": output.total_dimensions_checked,
-                    "passed": output.passed,
-                    "warnings": output.warnings,
-                    "failures": output.failures,
-                    "summary": output.summary,
-                }
-            ],
+            skill_results=[skill_result_dict],
             warnings=([output.summary] if output.overall_status == "marginal" else []),
         )
 
@@ -671,23 +703,35 @@ class MechanicalAgent:
             )
 
         output = result.data
+        skill_result_dict: dict[str, Any] = {
+            "skill": "generate_mesh",
+            "mesh_file": output.mesh_file,
+            "num_nodes": output.num_nodes,
+            "num_elements": output.num_elements,
+            "element_types": output.element_types,
+            "quality_acceptable": output.quality_acceptable,
+            "quality_issues": output.quality_issues,
+            "algorithm_used": output.algorithm_used,
+            "element_size_used": output.element_size_used,
+        }
+
+        # Writeback: create a new SIMULATION_RESULT WorkProduct for the mesh
+        try:
+            wb = await writeback_mesh(
+                self.twin,
+                self.session_id,
+                request.branch,
+                skill_result_dict,
+            )
+            skill_result_dict["work_product_id"] = str(wb.id)
+        except Exception as exc:
+            self.logger.warning("writeback_mesh_failed", error=str(exc))
+
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
             success=output.quality_acceptable,
-            skill_results=[
-                {
-                    "skill": "generate_mesh",
-                    "mesh_file": output.mesh_file,
-                    "num_nodes": output.num_nodes,
-                    "num_elements": output.num_elements,
-                    "element_types": output.element_types,
-                    "quality_acceptable": output.quality_acceptable,
-                    "quality_issues": output.quality_issues,
-                    "algorithm_used": output.algorithm_used,
-                    "element_size_used": output.element_size_used,
-                }
-            ],
+            skill_results=[skill_result_dict],
             warnings=output.quality_issues if not output.quality_acceptable else [],
         )
 
@@ -734,22 +778,34 @@ class MechanicalAgent:
             )
 
         output = result.data
+        skill_result_dict: dict[str, Any] = {
+            "skill": "generate_cad",
+            "cad_file": output.cad_file,
+            "shape_type": output.shape_type,
+            "volume_mm3": output.volume_mm3,
+            "surface_area_mm2": output.surface_area_mm2,
+            "bounding_box": output.bounding_box.model_dump(),
+            "parameters_used": output.parameters_used,
+            "material": output.material,
+        }
+
+        # Writeback: create a new CAD_MODEL WorkProduct
+        try:
+            wb = await writeback_cad(
+                self.twin,
+                self.session_id,
+                request.branch,
+                skill_result_dict,
+            )
+            skill_result_dict["work_product_id"] = str(wb.id)
+        except Exception as exc:
+            self.logger.warning("writeback_cad_failed", error=str(exc))
+
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
             success=True,
-            skill_results=[
-                {
-                    "skill": "generate_cad",
-                    "cad_file": output.cad_file,
-                    "shape_type": output.shape_type,
-                    "volume_mm3": output.volume_mm3,
-                    "surface_area_mm2": output.surface_area_mm2,
-                    "bounding_box": output.bounding_box.model_dump(),
-                    "parameters_used": output.parameters_used,
-                    "material": output.material,
-                }
-            ],
+            skill_results=[skill_result_dict],
         )
 
     async def _run_full_validation(self, request: TaskRequest) -> TaskResult:
