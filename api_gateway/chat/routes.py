@@ -37,7 +37,7 @@ from api_gateway.chat.schemas import (
     ThreadSummaryResponse,
 )
 from api_gateway.chat.streaming import stream_manager, stream_thread
-from domain_agents.base_agent import is_llm_available
+from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
     run_agent,
@@ -193,12 +193,33 @@ async def _invoke_agent(
                 branch="main",
             )
 
-            result = await run_agent(prompt=user_content, deps=deps)
+            llm_model = get_llm_model()
+            result = await run_agent(prompt=user_content, deps=deps, model=llm_model)
 
-            response_text = (
-                result.get("analysis", {}).get("summary", "")
-                or f"Agent analysis complete. Passed: {result.get('overall_passed', True)}."
-            )
+            analysis = result.get("analysis", {})
+            summary = analysis.get("summary", "")
+            recommendations = result.get("recommendations", [])
+
+            parts: list[str] = []
+            if summary:
+                parts.append(summary)
+            else:
+                passed = result.get("overall_passed", True)
+                stress = result.get("max_stress_mpa", 0.0)
+                region = result.get("critical_region", "")
+                parts.append(
+                    f"**Analysis {'passed' if passed else 'failed'}.**"
+                )
+                if stress:
+                    parts.append(f"Max stress: {stress:.1f} MPa.")
+                if region:
+                    parts.append(f"Critical region: {region}.")
+            if recommendations:
+                parts.append("\n**Recommendations:**")
+                for rec in recommendations:
+                    parts.append(f"- {rec}")
+
+            response_text = " ".join(parts) if parts else "Agent analysis complete."
 
             logger.info(
                 "agent_response_generated",
