@@ -11,7 +11,7 @@ import structlog
 from observability.tracing import get_tracer
 from twin_core.api import TwinAPI
 from twin_core.constraint_engine.models import ConstraintEvaluationResult
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.gate_engine")
@@ -20,13 +20,15 @@ tracer = get_tracer("digital_twin.gate_engine")
 async def calculate_requirement_coverage(twin: TwinAPI, branch: str) -> float:
     """Calculate the percentage of requirements with linked test evidence.
 
-    Queries all PRD artifacts (requirements) and checks how many have
+    Queries all PRD work_products (requirements) and checks how many have
     associated edges with test_evidence metadata. Returns 0-100.
     """
     with tracer.start_as_current_span("gate.scoring.requirement_coverage") as span:
         span.set_attribute("branch", branch)
 
-        requirements = await twin.list_artifacts(branch=branch, artifact_type=ArtifactType.PRD)
+        requirements = await twin.list_work_products(
+            branch=branch, work_product_type=WorkProductType.PRD
+        )
         if not requirements:
             logger.info("requirement_coverage_no_requirements", branch=branch)
             return 100.0  # No requirements = fully covered (vacuously true)
@@ -132,13 +134,15 @@ async def calculate_constraint_compliance(
 async def calculate_test_evidence(twin: TwinAPI, branch: str) -> float:
     """Calculate the percentage of test plans with linked results.
 
-    Queries TEST_PLAN artifacts and checks how many have associated
+    Queries TEST_PLAN work_products and checks how many have associated
     edges with test_result metadata. Returns 0-100.
     """
     with tracer.start_as_current_span("gate.scoring.test_evidence") as span:
         span.set_attribute("branch", branch)
 
-        test_plans = await twin.list_artifacts(branch=branch, artifact_type=ArtifactType.TEST_PLAN)
+        test_plans = await twin.list_work_products(
+            branch=branch, work_product_type=WorkProductType.TEST_PLAN
+        )
         if not test_plans:
             logger.info("test_evidence_no_test_plans", branch=branch)
             return 100.0  # No test plans = vacuously true
@@ -166,34 +170,34 @@ async def calculate_test_evidence(twin: TwinAPI, branch: str) -> float:
 
 
 async def calculate_design_review(twin: TwinAPI, branch: str) -> float:
-    """Calculate the percentage of artifacts with review approval.
+    """Calculate the percentage of work_products with review approval.
 
-    Queries all artifacts and checks their metadata for review_status == 'approved'.
+    Queries all work_products and checks their metadata for review_status == 'approved'.
     Returns 0-100.
     """
     with tracer.start_as_current_span("gate.scoring.design_review") as span:
         span.set_attribute("branch", branch)
 
-        artifacts = await twin.list_artifacts(branch=branch)
-        if not artifacts:
+        work_products = await twin.list_work_products(branch=branch)
+        if not work_products:
             logger.info("design_review_no_artifacts", branch=branch)
-            return 100.0  # No artifacts = nothing to review
+            return 100.0  # No work_products = nothing to review
 
         approved = 0
-        for art in artifacts:
+        for art in work_products:
             review_status = art.metadata.get("review_status") if art.metadata else None
             if review_status == "approved":
                 approved += 1
 
-        score = (approved / len(artifacts)) * 100.0
-        span.set_attribute("gate.artifacts_total", len(artifacts))
+        score = (approved / len(work_products)) * 100.0
+        span.set_attribute("gate.artifacts_total", len(work_products))
         span.set_attribute("gate.artifacts_approved", approved)
         span.set_attribute("gate.score", score)
 
         logger.info(
             "design_review_calculated",
             branch=branch,
-            total=len(artifacts),
+            total=len(work_products),
             approved=approved,
             score=score,
         )

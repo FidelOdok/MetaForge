@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class RunFeaInput(BaseModel):
     """Input for the run_fea skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID for the mechanical design")
+    work_product_id: UUID = Field(..., description="Twin work_product ID for the mechanical design")
     mesh_file: str = Field(..., min_length=1, description="Path to the FEA mesh file (.inp/.unv)")
     load_cases: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -28,7 +28,7 @@ class RunFeaInput(BaseModel):
 class RunFeaOutput(BaseModel):
     """Output from the run_fea skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID")
+    work_product_id: UUID = Field(..., description="Twin work_product ID")
     max_stress_mpa: float = Field(..., ge=0, description="Maximum von Mises stress in MPa")
     max_displacement_mm: float = Field(..., ge=0, description="Maximum displacement in mm")
     safety_factor: float = Field(

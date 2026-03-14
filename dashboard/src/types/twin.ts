@@ -1,4 +1,4 @@
-export type TwinNodeType = 'artifact' | 'constraint' | 'relationship' | 'version';
+export type TwinNodeType = 'work_product' | 'constraint' | 'relationship' | 'version';
 
 export interface TwinNode {
   id: string;

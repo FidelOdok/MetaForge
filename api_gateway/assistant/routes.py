@@ -82,11 +82,11 @@ async def submit_request(body: AssistantRequest, request: Request) -> AssistantR
             f"Available: {', '.join(sorted(action_workflows.keys()))}",
         )
 
-    # Inject artifact_id and parameters into each step
+    # Inject work_product_id and parameters into each step
     for step in defn.steps:
         step.parameters = {
             **step.parameters,
-            "artifact_id": str(body.target_id),
+            "work_product_id": str(body.target_id),
             **body.parameters,
         }
 

@@ -14,15 +14,15 @@ import pytest
 from domain_agents.firmware.agent import FirmwareAgent, TaskRequest
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 
-def _make_firmware_artifact() -> Artifact:
-    """Create a realistic firmware project artifact."""
-    return Artifact(
+def _make_firmware_artifact() -> WorkProduct:
+    """Create a realistic firmware project work_product."""
+    return WorkProduct(
         name="drone-fc-firmware",
-        type=ArtifactType.FIRMWARE_SOURCE,
+        type=WorkProductType.FIRMWARE_SOURCE,
         domain="firmware",
         file_path="firmware/src/main.c",
         content_hash="sha256:fw112233",
@@ -50,9 +50,9 @@ class TestGenerateHalE2E:
     async def stack(self):
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "agent": agent, "artifact": artifact}
+        return {"twin": twin, "agent": agent, "work_product": work_product}
 
     async def test_generate_hal_stm32f4(self, stack):
         """HAL generation for STM32F4 with GPIO and SPI."""
@@ -60,7 +60,7 @@ class TestGenerateHalE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO", "SPI", "I2C"],
@@ -87,7 +87,7 @@ class TestGenerateHalE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mcu_family": "ESP32",
                     "peripherals": ["GPIO", "UART", "ADC"],
@@ -105,7 +105,7 @@ class TestGenerateHalE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mcu_family": "PIC32MX",
                     "peripherals": ["GPIO"],
@@ -121,7 +121,7 @@ class TestGenerateHalE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={"peripherals": ["GPIO"]},
             )
         )
@@ -135,7 +135,7 @@ class TestGenerateHalE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={"mcu_family": "STM32F4"},
             )
         )
@@ -156,9 +156,9 @@ class TestScaffoldDriverE2E:
     async def stack(self):
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "agent": agent, "artifact": artifact}
+        return {"twin": twin, "agent": agent, "work_product": work_product}
 
     async def test_scaffold_spi_driver(self, stack):
         """Scaffold an SPI accelerometer driver."""
@@ -166,7 +166,7 @@ class TestScaffoldDriverE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="scaffold_driver",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "peripheral_type": "accelerometer",
                     "interface": "spi",
@@ -188,7 +188,7 @@ class TestScaffoldDriverE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="scaffold_driver",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "peripheral_type": "temperature_sensor",
                     "interface": "i2c",
@@ -206,7 +206,7 @@ class TestScaffoldDriverE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="scaffold_driver",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={"driver_name": "bmi088"},
             )
         )
@@ -220,7 +220,7 @@ class TestScaffoldDriverE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="scaffold_driver",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={"peripheral_type": "accelerometer"},
             )
         )
@@ -241,9 +241,9 @@ class TestConfigureRtosE2E:
     async def stack(self):
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "agent": agent, "artifact": artifact}
+        return {"twin": twin, "agent": agent, "work_product": work_product}
 
     async def test_configure_freertos(self, stack):
         """Configure FreeRTOS with multiple tasks."""
@@ -251,7 +251,7 @@ class TestConfigureRtosE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="configure_rtos",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "rtos_name": "FreeRTOS",
                     "task_definitions": [
@@ -278,7 +278,7 @@ class TestConfigureRtosE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="configure_rtos",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "task_definitions": [{"name": "main", "priority": 1, "stack_size": 256}],
                 },
@@ -294,7 +294,7 @@ class TestConfigureRtosE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="configure_rtos",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={"rtos_name": "FreeRTOS"},
             )
         )
@@ -315,13 +315,13 @@ class TestFullBuildE2E:
         """Full build runs HAL + driver + RTOS and aggregates results."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="full_build",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO", "SPI"],
@@ -347,13 +347,13 @@ class TestFullBuildE2E:
         """Full build runs only HAL when other params are missing."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="full_build",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO"],
@@ -369,13 +369,13 @@ class TestFullBuildE2E:
         """Full build fails when no step parameters are provided."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="full_build",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={},
             )
         )
@@ -393,7 +393,7 @@ class TestFirmwareAgentCommonE2E:
     """Common agent behaviour tests."""
 
     async def test_artifact_not_found(self):
-        """Agent returns error when artifact doesn't exist."""
+        """Agent returns error when work_product doesn't exist."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
         agent = FirmwareAgent(twin=twin, mcp=mcp)
@@ -401,7 +401,7 @@ class TestFirmwareAgentCommonE2E:
         result = await agent.run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"mcu_family": "STM32F4", "peripherals": ["GPIO"]},
             )
         )
@@ -413,13 +413,13 @@ class TestFirmwareAgentCommonE2E:
         """Agent rejects unknown task types."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="flash_firmware",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
             )
         )
 
@@ -427,16 +427,16 @@ class TestFirmwareAgentCommonE2E:
         assert any("Unsupported" in e for e in result.errors)
 
     async def test_twin_update_after_hal_generation(self):
-        """Verify Twin artifact can be updated after HAL generation."""
+        """Verify Twin work_product can be updated after HAL generation."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        artifact = await twin.create_artifact(_make_firmware_artifact())
+        work_product = await twin.create_work_product(_make_firmware_artifact())
         agent = FirmwareAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="generate_hal",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO", "SPI"],
@@ -445,11 +445,11 @@ class TestFirmwareAgentCommonE2E:
         )
         assert result.success is True
 
-        updated = await twin.update_artifact(
-            artifact.id,
+        updated = await twin.update_work_product(
+            work_product.id,
             {
                 "metadata": {
-                    **artifact.metadata,
+                    **work_product.metadata,
                     "hal_generated": True,
                     "hal_files": result.skill_results[0]["generated_files"],
                 },

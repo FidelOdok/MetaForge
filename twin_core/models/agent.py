@@ -1,4 +1,4 @@
-"""AgentNode — records which agent produced or modified artifacts."""
+"""AgentNode — records which agent produced or modified work_products."""
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4

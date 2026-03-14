@@ -17,7 +17,7 @@ describe('getProjects', () => {
       data: {
         projects: [{
           id: '1', name: 'Test', description: '', status: 'active',
-          artifacts: [{ id: 'a1', name: 'S', type: 'schematic', status: 'valid', updated_at: '2024-01-01' }],
+          work_products: [{ id: 'a1', name: 'S', type: 'schematic', status: 'valid', updated_at: '2024-01-01' }],
           agent_count: 2, last_updated: '2024-01-01', created_at: '2024-01-01',
         }],
         total: 1,
@@ -27,7 +27,7 @@ describe('getProjects', () => {
     const result = await getProjects();
     expect(result[0]?.agentCount).toBe(2);
     expect(result[0]?.lastUpdated).toBe('2024-01-01');
-    expect(result[0]?.artifacts[0]?.updatedAt).toBe('2024-01-01');
+    expect(result[0]?.work_products[0]?.updatedAt).toBe('2024-01-01');
   });
 });
 

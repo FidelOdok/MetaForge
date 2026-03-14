@@ -33,7 +33,7 @@ class CrossDomainCheck(BaseModel):
 class CrossDomainValidator:
     """Validates constraints that span multiple engineering domains.
 
-    Queries the Digital Twin for artifacts from different domains and runs
+    Queries the Digital Twin for work_products from different domains and runs
     cross-domain checks to ensure physical, thermal, and spatial consistency.
     """
 
@@ -55,13 +55,15 @@ class CrossDomainValidator:
     def register_check(self, check_fn: Callable[..., Any]) -> None:
         """Register a custom cross-domain check function.
 
-        The function must accept (artifact_id: UUID, branch: str) and return
+        The function must accept (work_product_id: UUID, branch: str) and return
         a CrossDomainCheck.
         """
         self._checks.append(check_fn)
 
-    async def validate_all(self, artifact_id: UUID, branch: str = "main") -> list[CrossDomainCheck]:
-        """Run all cross-domain checks for an artifact.
+    async def validate_all(
+        self, work_product_id: UUID, branch: str = "main"
+    ) -> list[CrossDomainCheck]:
+        """Run all cross-domain checks for an work_product.
 
         Each check runs independently. If a check raises an exception, it is
         caught and reported as a failed check with severity "error".
@@ -69,7 +71,7 @@ class CrossDomainValidator:
         results: list[CrossDomainCheck] = []
         for check in self._checks:
             try:
-                result = await check(artifact_id, branch)
+                result = await check(work_product_id, branch)
                 results.append(result)
             except Exception as e:
                 self.logger.error(
@@ -90,15 +92,15 @@ class CrossDomainValidator:
         return results
 
     async def check_pcb_enclosure_fit(
-        self, artifact_id: UUID, branch: str = "main"
+        self, work_product_id: UUID, branch: str = "main"
     ) -> CrossDomainCheck:
         """Verify PCB dimensions fit within mechanical enclosure.
 
-        Looks for PCB artifacts (electronics domain) and enclosure artifacts
+        Looks for PCB work_products (electronics domain) and enclosure work_products
         (mechanical domain) and compares their dimensions.
         """
-        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
-        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
+        pcb_artifacts = await self.twin.list_work_products(branch=branch, domain="electronics")
+        mech_work_products = await self.twin.list_work_products(branch=branch, domain="mechanical")
 
         # Find PCB and enclosure by metadata
         pcb = None
@@ -108,7 +110,7 @@ class CrossDomainValidator:
                 pcb = a
                 break
 
-        for a in mech_artifacts:
+        for a in mech_work_products:
             if a.metadata.get("subtype") == "enclosure":
                 enclosure = a
                 break
@@ -119,7 +121,7 @@ class CrossDomainValidator:
                 domain_a="electronics",
                 domain_b="mechanical",
                 passed=True,
-                message="PCB or enclosure artifact not found — skipping check",
+                message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
                 details={"pcb_found": pcb is not None, "enclosure_found": enclosure is not None},
             )
@@ -176,15 +178,15 @@ class CrossDomainValidator:
         )
 
     async def check_mounting_hole_alignment(
-        self, artifact_id: UUID, branch: str = "main"
+        self, work_product_id: UUID, branch: str = "main"
     ) -> CrossDomainCheck:
         """Verify PCB mounting holes align with enclosure mounting points.
 
         Compares mounting hole positions from PCB metadata with mounting
         standoff positions from enclosure metadata.
         """
-        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
-        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
+        pcb_artifacts = await self.twin.list_work_products(branch=branch, domain="electronics")
+        mech_work_products = await self.twin.list_work_products(branch=branch, domain="mechanical")
 
         pcb = None
         enclosure = None
@@ -192,7 +194,7 @@ class CrossDomainValidator:
             if a.metadata.get("subtype") == "pcb":
                 pcb = a
                 break
-        for a in mech_artifacts:
+        for a in mech_work_products:
             if a.metadata.get("subtype") == "enclosure":
                 enclosure = a
                 break
@@ -203,7 +205,7 @@ class CrossDomainValidator:
                 domain_a="electronics",
                 domain_b="mechanical",
                 passed=True,
-                message="PCB or enclosure artifact not found — skipping check",
+                message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
                 details={"pcb_found": pcb is not None, "enclosure_found": enclosure is not None},
             )
@@ -273,7 +275,7 @@ class CrossDomainValidator:
         )
 
     async def check_thermal_zones(
-        self, artifact_id: UUID, branch: str = "main"
+        self, work_product_id: UUID, branch: str = "main"
     ) -> CrossDomainCheck:
         """Validate thermal zones don't conflict between domains.
 
@@ -281,8 +283,8 @@ class CrossDomainValidator:
         thermally restricted mechanical zones (e.g., near battery, near
         plastic walls with low melting points).
         """
-        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
-        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
+        pcb_artifacts = await self.twin.list_work_products(branch=branch, domain="electronics")
+        mech_work_products = await self.twin.list_work_products(branch=branch, domain="mechanical")
 
         pcb = None
         enclosure = None
@@ -290,7 +292,7 @@ class CrossDomainValidator:
             if a.metadata.get("subtype") == "pcb":
                 pcb = a
                 break
-        for a in mech_artifacts:
+        for a in mech_work_products:
             if a.metadata.get("subtype") == "enclosure":
                 enclosure = a
                 break
@@ -301,7 +303,7 @@ class CrossDomainValidator:
                 domain_a="electronics",
                 domain_b="mechanical",
                 passed=True,
-                message="PCB or enclosure artifact not found — skipping check",
+                message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
             )
 
@@ -367,15 +369,15 @@ class CrossDomainValidator:
         )
 
     async def check_connector_clearances(
-        self, artifact_id: UUID, branch: str = "main"
+        self, work_product_id: UUID, branch: str = "main"
     ) -> CrossDomainCheck:
         """Ensure connector positions have adequate clearance in enclosure.
 
         Verifies that connectors on the PCB have corresponding cutouts in the
         enclosure and that there is sufficient clearance around each connector.
         """
-        pcb_artifacts = await self.twin.list_artifacts(branch=branch, domain="electronics")
-        mech_artifacts = await self.twin.list_artifacts(branch=branch, domain="mechanical")
+        pcb_artifacts = await self.twin.list_work_products(branch=branch, domain="electronics")
+        mech_work_products = await self.twin.list_work_products(branch=branch, domain="mechanical")
 
         pcb = None
         enclosure = None
@@ -383,7 +385,7 @@ class CrossDomainValidator:
             if a.metadata.get("subtype") == "pcb":
                 pcb = a
                 break
-        for a in mech_artifacts:
+        for a in mech_work_products:
             if a.metadata.get("subtype") == "enclosure":
                 enclosure = a
                 break
@@ -394,7 +396,7 @@ class CrossDomainValidator:
                 domain_a="electronics",
                 domain_b="mechanical",
                 passed=True,
-                message="PCB or enclosure artifact not found — skipping check",
+                message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
             )
 

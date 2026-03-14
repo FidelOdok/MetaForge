@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class GenerateHalInput(BaseModel):
     """Input for the generate_hal skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID for the firmware project")
+    work_product_id: UUID = Field(..., description="Twin work_product ID for the firmware project")
     mcu_family: str = Field(
         ..., min_length=1, description="MCU family identifier (e.g., 'STM32F4', 'ESP32', 'nRF52')"
     )
@@ -26,7 +26,7 @@ class GenerateHalInput(BaseModel):
 class GenerateHalOutput(BaseModel):
     """Output from the generate_hal skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID")
+    work_product_id: UUID = Field(..., description="Twin work_product ID")
     generated_files: list[str] = Field(
         default_factory=list, description="List of generated HAL source file paths"
     )

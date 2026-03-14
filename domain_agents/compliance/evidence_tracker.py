@@ -49,7 +49,7 @@ class EvidenceTracker:
         evidence_type: EvidenceType,
         title: str,
         description: str = "",
-        artifact_id: UUID | None = None,
+        work_product_id: UUID | None = None,
     ) -> ComplianceEvidence:
         """Create and store a new evidence record linked to a checklist item.
 
@@ -66,7 +66,7 @@ class EvidenceTracker:
                 status=EvidenceStatus.UPLOADED,
                 title=title,
                 description=description,
-                artifact_id=artifact_id,
+                work_product_id=work_product_id,
             )
 
             self._evidence[evidence.id] = evidence

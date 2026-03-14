@@ -27,11 +27,11 @@ from twin_core.aas.models import (
     SubmodelElement,
     SubmodelElementCollection,
 )
-from twin_core.models.artifact import Artifact
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
-from twin_core.models.enums import ArtifactType, NodeType
+from twin_core.models.enums import NodeType, WorkProductType
 from twin_core.models.relationship import SubGraph
+from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.aas.mapper")
@@ -91,13 +91,13 @@ class AASMapper:
             )
 
             # Classify nodes
-            artifacts: list[Artifact] = []
+            work_products: list[WorkProduct] = []
             components: list[Component] = []
             constraints: list[Constraint] = []
 
             for node in subgraph.nodes:
-                if node.node_type == NodeType.ARTIFACT and isinstance(node, Artifact):
-                    artifacts.append(node)
+                if node.node_type == NodeType.WORK_PRODUCT and isinstance(node, WorkProduct):
+                    work_products.append(node)
                 elif node.node_type == NodeType.COMPONENT and isinstance(node, Component):
                     components.append(node)
                 elif node.node_type == NodeType.CONSTRAINT and isinstance(node, Constraint):
@@ -106,7 +106,7 @@ class AASMapper:
             # Build submodels
             submodels: list[Submodel] = []
 
-            nameplate = self._build_nameplate_submodel(artifacts)
+            nameplate = self._build_nameplate_submodel(work_products)
             submodels.append(nameplate)
 
             bom = self._build_bom_submodel(components)
@@ -115,7 +115,7 @@ class AASMapper:
             tech_data = self._build_technical_data_submodel(constraints)
             submodels.append(tech_data)
 
-            doc_artifacts = [a for a in artifacts if a.type == ArtifactType.DOCUMENTATION]
+            doc_artifacts = [a for a in work_products if a.type == WorkProductType.DOCUMENTATION]
             documentation = self._build_documentation_submodel(doc_artifacts)
             submodels.append(documentation)
 
@@ -144,8 +144,8 @@ class AASMapper:
 
             return env
 
-    def _build_nameplate_submodel(self, artifacts: list[Artifact]) -> Submodel:
-        """Build DigitalNameplate submodel from artifact metadata."""
+    def _build_nameplate_submodel(self, work_products: list[WorkProduct]) -> Submodel:
+        """Build DigitalNameplate submodel from work_product metadata."""
         with tracer.start_as_current_span("aas.build_nameplate"):
             elements: list[SubmodelElement] = [
                 Property(
@@ -160,18 +160,18 @@ class AASMapper:
                 ),
             ]
 
-            # Add artifact summary
-            if artifacts:
+            # Add work_product summary
+            if work_products:
                 elements.append(
                     Property(
                         idShort="ArtifactCount",
                         valueType=DataTypeDefXsd.INT,
-                        value=str(len(artifacts)),
+                        value=str(len(work_products)),
                     )
                 )
 
                 # Collect unique domains
-                domains = sorted({a.domain for a in artifacts})
+                domains = sorted({a.domain for a in work_products})
                 if domains:
                     elements.append(
                         Property(
@@ -322,41 +322,41 @@ class AASMapper:
                 submodelElements=elements,
             )
 
-    def _build_documentation_submodel(self, doc_artifacts: list[Artifact]) -> Submodel:
+    def _build_documentation_submodel(self, doc_artifacts: list[WorkProduct]) -> Submodel:
         """Build Documentation submodel from documentation-type Artifacts."""
         with tracer.start_as_current_span("aas.build_documentation") as span:
             span.set_attribute("aas.doc_count", len(doc_artifacts))
 
             elements: list[SubmodelElement] = []
 
-            for idx, artifact in enumerate(doc_artifacts):
+            for idx, work_product in enumerate(doc_artifacts):
                 doc_element = SubmodelElementCollection(
                     idShort=f"Document_{idx}",
                     value=[
                         Property(
                             idShort="Title",
                             valueType=DataTypeDefXsd.STRING,
-                            value=artifact.name,
+                            value=work_product.name,
                         ),
                         Property(
                             idShort="FilePath",
                             valueType=DataTypeDefXsd.STRING,
-                            value=artifact.file_path,
+                            value=work_product.file_path,
                         ),
                         Property(
                             idShort="Format",
                             valueType=DataTypeDefXsd.STRING,
-                            value=artifact.format,
+                            value=work_product.format,
                         ),
                         Property(
                             idShort="Domain",
                             valueType=DataTypeDefXsd.STRING,
-                            value=artifact.domain,
+                            value=work_product.domain,
                         ),
                         Property(
                             idShort="ContentHash",
                             valueType=DataTypeDefXsd.STRING,
-                            value=artifact.content_hash,
+                            value=work_product.content_hash,
                         ),
                     ],
                 )

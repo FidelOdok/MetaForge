@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is MetaForge
 
-MetaForge is a **local-first control plane** that turns human intent into reviewable, manufacturable hardware artifacts. It orchestrates specialist AI agents that interface with real engineering tools (KiCad, FreeCAD, CalculiX, SPICE) to produce schematics, BOMs, PCB layouts, firmware scaffolds, manufacturing files, and test plans.
+MetaForge is a **local-first control plane** that turns human intent into reviewable, manufacturable hardware deliverables. It orchestrates specialist AI agents that interface with real engineering tools (KiCad, FreeCAD, CalculiX, SPICE) to produce schematics, BOMs, PCB layouts, firmware scaffolds, manufacturing files, and test plans.
 
 **Prime Rule**: If it can't be versioned, reviewed, and built — MetaForge doesn't output it.
 
@@ -143,11 +143,11 @@ MetaForge/
 │   └── scheduler.py            # Agent execution queuing
 │
 ├── twin_core/                  # Digital Twin — single source of design truth
-│   ├── models/                 # Artifact, Constraint, Relationship, Version
+│   ├── models/                 # WorkProduct, Constraint, Relationship, Version
 │   ├── graph_engine.py         # Core graph CRUD + traversal
 │   ├── versioning/             # Branch, merge, diff operations
 │   ├── constraint_engine/      # Cross-domain constraint validation
-│   ├── validation_engine/      # Schema validation for artifact types
+│   ├── validation_engine/      # Schema validation for work product types
 │   └── api.py                  # Public Twin API
 │
 ├── skill_registry/             # Skill management layer
@@ -243,7 +243,7 @@ Human Intent (PRD, constraints)
          |
     Tool Adapters (KiCad, FreeCAD, CalculiX, SPICE — containerized)
          |
-    Digital Twin (artifact graph — single source of design truth)
+    Digital Twin (Digital Thread — single source of design truth)
 ```
 
 Key architectural rules:
@@ -264,7 +264,7 @@ Key architectural rules:
 - **Gateway Service**: HTTP/WebSocket API server (the "front door")
 - **Orchestrator**: Coordination engine within Gateway (the "brain")
 - **Skill**: Atomic unit of domain expertise (deterministic, schema-validated)
-- **Digital Twin**: Artifact graph that owns all design state
+- **Digital Twin**: WorkProduct graph that owns all design state
 - **MCP**: Model Context Protocol — the wire protocol for tool access
 - **Domain Agent**: Specialist agent for one engineering discipline (1:1 ratio)
 

@@ -24,7 +24,9 @@ class ErcViolation(BaseModel):
 class RunErcInput(BaseModel):
     """Input for the run_erc skill."""
 
-    artifact_id: UUID = Field(..., description="ID of the schematic artifact in the Digital Twin")
+    work_product_id: UUID = Field(
+        ..., description="ID of the schematic work_product in the Digital Twin"
+    )
     schematic_file: str = Field(
         ..., min_length=1, description="Path to the KiCad schematic file (.kicad_sch)"
     )
@@ -37,7 +39,7 @@ class RunErcInput(BaseModel):
 class RunErcOutput(BaseModel):
     """Output from the run_erc skill."""
 
-    artifact_id: UUID = Field(..., description="ID of the analyzed artifact")
+    work_product_id: UUID = Field(..., description="ID of the analyzed work_product")
     schematic_file: str = Field(..., description="Path to the schematic file that was checked")
     violations: list[ErcViolation] = Field(
         default_factory=list, description="List of ERC violations found"

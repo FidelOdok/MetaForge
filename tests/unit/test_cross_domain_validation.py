@@ -11,7 +11,7 @@ from twin_core.constraint_engine.cross_domain import (
     CrossDomainCheck,
     CrossDomainValidator,
 )
-from twin_core.models import Artifact, ArtifactType
+from twin_core.models import WorkProduct, WorkProductType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,8 +24,8 @@ def _make_pcb(
     mounting_holes: list | None = None,
     thermal_zones: list | None = None,
     connectors: list | None = None,
-) -> Artifact:
-    """Create a PCB artifact with dimensional metadata."""
+) -> WorkProduct:
+    """Create a PCB work_product with dimensional metadata."""
     meta: dict = {
         "subtype": "pcb",
         "dimensions": {"width": width, "height": height},
@@ -36,9 +36,9 @@ def _make_pcb(
         meta["thermal_zones"] = thermal_zones
     if connectors is not None:
         meta["connectors"] = connectors
-    return Artifact(
+    return WorkProduct(
         name="main_pcb",
-        type=ArtifactType.PCB_LAYOUT,
+        type=WorkProductType.PCB_LAYOUT,
         domain="electronics",
         file_path="eda/kicad/main.kicad_pcb",
         content_hash="pcbhash",
@@ -57,8 +57,8 @@ def _make_enclosure(
     cutouts: list | None = None,
     mounting_tolerance: float = 0.5,
     min_connector_clearance: float = 0.5,
-) -> Artifact:
-    """Create an enclosure artifact with dimensional metadata."""
+) -> WorkProduct:
+    """Create an enclosure work_product with dimensional metadata."""
     meta: dict = {
         "subtype": "enclosure",
         "dimensions": {"width": width, "height": height},
@@ -72,9 +72,9 @@ def _make_enclosure(
         meta["thermal_restricted_zones"] = thermal_restricted_zones
     if cutouts is not None:
         meta["cutouts"] = cutouts
-    return Artifact(
+    return WorkProduct(
         name="enclosure",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="cad/enclosure.step",
         content_hash="enchash",
@@ -153,7 +153,7 @@ class TestCrossDomainValidatorInit:
     def test_register_custom_check(self, validator):
         """Custom check should be added to the list."""
 
-        async def custom_check(artifact_id, branch):
+        async def custom_check(work_product_id, branch):
             return CrossDomainCheck(
                 name="custom",
                 domain_a="a",
@@ -177,8 +177,8 @@ class TestValidateAll:
         """validate_all should return results from all registered checks."""
         pcb = _make_pcb()
         enclosure = _make_enclosure()
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enclosure)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enclosure)
 
         results = await validator.validate_all(pcb.id)
         assert len(results) == 4
@@ -187,7 +187,7 @@ class TestValidateAll:
     async def test_handles_check_exception(self, twin, validator):
         """If a check raises, it should be caught and reported as failed."""
 
-        async def broken_check(artifact_id, branch):
+        async def broken_check(work_product_id, branch):
             raise ValueError("Something went wrong")
 
         validator._checks = [broken_check]
@@ -198,10 +198,10 @@ class TestValidateAll:
         assert results[0].domain_a == "unknown"
 
     async def test_with_no_artifacts(self, twin, validator):
-        """Checks should pass (skip) when no artifacts exist."""
+        """Checks should pass (skip) when no work_products exist."""
         results = await validator.validate_all(uuid4())
         assert len(results) == 4
-        # All should pass with "skipping" messages since no artifacts found
+        # All should pass with "skipping" messages since no work_products found
         assert all(r.passed is True for r in results)
 
 
@@ -216,8 +216,8 @@ class TestPcbEnclosureFit:
         pcb = _make_pcb(width=50.0, height=30.0)
         enc = _make_enclosure(width=60.0, height=40.0, internal_clearance=2.0)
         # Available: 56x36 — PCB 50x30 fits
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_pcb_enclosure_fit(pcb.id, "main")
         assert result.passed is True
@@ -230,8 +230,8 @@ class TestPcbEnclosureFit:
         pcb = _make_pcb(width=60.0, height=30.0)
         enc = _make_enclosure(width=60.0, height=40.0, internal_clearance=2.0)
         # Available: 56x36 — PCB width 60 > 56
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_pcb_enclosure_fit(pcb.id, "main")
         assert result.passed is False
@@ -243,8 +243,8 @@ class TestPcbEnclosureFit:
         pcb = _make_pcb(width=40.0, height=50.0)
         enc = _make_enclosure(width=60.0, height=40.0, internal_clearance=2.0)
         # Available: 56x36 — PCB height 50 > 36
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_pcb_enclosure_fit(pcb.id, "main")
         assert result.passed is False
@@ -253,7 +253,7 @@ class TestPcbEnclosureFit:
     async def test_missing_pcb_artifact(self, twin, validator):
         """Missing PCB should skip with info severity."""
         enc = _make_enclosure()
-        await twin.create_artifact(enc)
+        await twin.create_work_product(enc)
 
         result = await validator.check_pcb_enclosure_fit(uuid4(), "main")
         assert result.passed is True
@@ -264,8 +264,8 @@ class TestPcbEnclosureFit:
         """PCB exactly matching available space should pass."""
         pcb = _make_pcb(width=56.0, height=36.0)
         enc = _make_enclosure(width=60.0, height=40.0, internal_clearance=2.0)
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_pcb_enclosure_fit(pcb.id, "main")
         assert result.passed is True
@@ -295,8 +295,8 @@ class TestMountingHoleAlignment:
                 {"x": 45.0, "y": 25.0},
             ]
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_mounting_hole_alignment(pcb.id, "main")
         assert result.passed is True
@@ -316,8 +316,8 @@ class TestMountingHoleAlignment:
                 {"x": 45.0, "y": 25.0},
             ]
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_mounting_hole_alignment(pcb.id, "main")
         assert result.passed is False
@@ -328,8 +328,8 @@ class TestMountingHoleAlignment:
         """No holes defined should skip check."""
         pcb = _make_pcb(mounting_holes=[])
         enc = _make_enclosure(mounting_standoffs=[{"x": 5.0, "y": 5.0}])
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_mounting_hole_alignment(pcb.id, "main")
         assert result.passed is True
@@ -342,8 +342,8 @@ class TestMountingHoleAlignment:
             mounting_standoffs=[{"x": 5.0, "y": 5.0}],
             mounting_tolerance=0.5,
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_mounting_hole_alignment(pcb.id, "main")
         assert result.passed is True
@@ -355,8 +355,8 @@ class TestMountingHoleAlignment:
             mounting_standoffs=[{"x": 5.0, "y": 5.0}],
             mounting_tolerance=0.5,
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_mounting_hole_alignment(pcb.id, "main")
         assert result.passed is False
@@ -386,8 +386,8 @@ class TestThermalZones:
                 }
             ]
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_thermal_zones(pcb.id, "main")
         assert result.passed is True
@@ -410,8 +410,8 @@ class TestThermalZones:
                 }
             ]
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_thermal_zones(pcb.id, "main")
         assert result.passed is False
@@ -436,8 +436,8 @@ class TestThermalZones:
                 }
             ]
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_thermal_zones(pcb.id, "main")
         assert result.passed is True
@@ -446,8 +446,8 @@ class TestThermalZones:
         """No thermal zones should skip check."""
         pcb = _make_pcb()
         enc = _make_enclosure()
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_thermal_zones(pcb.id, "main")
         assert result.passed is True
@@ -469,8 +469,8 @@ class TestConnectorClearances:
             cutouts=[{"connector_name": "usb_c", "width": 12.0, "height": 5.0}],
             min_connector_clearance=0.5,
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_connector_clearances(pcb.id, "main")
         assert result.passed is True
@@ -484,8 +484,8 @@ class TestConnectorClearances:
             cutouts=[{"connector_name": "usb_c", "width": 9.5, "height": 3.5}],
             min_connector_clearance=0.5,
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_connector_clearances(pcb.id, "main")
         assert result.passed is False
@@ -499,8 +499,8 @@ class TestConnectorClearances:
         enc = _make_enclosure(
             cutouts=[{"connector_name": "usb_c", "width": 12.0, "height": 5.0}],
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_connector_clearances(pcb.id, "main")
         assert result.passed is False
@@ -510,8 +510,8 @@ class TestConnectorClearances:
         """No connectors defined should skip check."""
         pcb = _make_pcb(connectors=[])
         enc = _make_enclosure()
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_connector_clearances(pcb.id, "main")
         assert result.passed is True
@@ -532,15 +532,15 @@ class TestConnectorClearances:
             ],
             min_connector_clearance=0.5,
         )
-        await twin.create_artifact(pcb)
-        await twin.create_artifact(enc)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
 
         result = await validator.check_connector_clearances(pcb.id, "main")
         assert result.passed is False
 
 
 # ---------------------------------------------------------------------------
-# Missing artifacts tests
+# Missing work_products tests
 # ---------------------------------------------------------------------------
 
 

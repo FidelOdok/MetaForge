@@ -83,7 +83,7 @@ class TestModels:
             evidence_type=EvidenceType.TEST_REPORT,
         )
         assert item.evidence_status == EvidenceStatus.MISSING
-        assert item.evidence_artifact_id is None
+        assert item.evidence_work_product_id is None
         assert item.notes == ""
 
     def test_compliance_checklist_defaults(self):

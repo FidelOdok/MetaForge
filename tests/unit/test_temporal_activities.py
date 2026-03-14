@@ -47,7 +47,7 @@ def _make_input(agent_code: str, task_type: str, **extra: Any) -> AgentActivityI
     """Build a standard AgentActivityInput for testing."""
     task_request = {
         "task_type": task_type,
-        "artifact_id": ARTIFACT_ID,
+        "work_product_id": ARTIFACT_ID,
         "parameters": extra.get("parameters", {}),
         "branch": "main",
     }
@@ -67,7 +67,7 @@ def _mock_agent(success: bool = True) -> AsyncMock:
     result.success = success
     result.model_dump.return_value = {
         "task_type": "test",
-        "artifact_id": ARTIFACT_ID,
+        "work_product_id": ARTIFACT_ID,
         "success": success,
         "skill_results": [],
         "errors": [] if success else ["Test error"],
@@ -284,7 +284,7 @@ class TestSingleAgentWorkflow:
                 agent_code="mechanical",
                 task_request={
                     "task_type": "validate_stress",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
@@ -316,7 +316,7 @@ class TestSingleAgentWorkflow:
                 agent_code="electronics",
                 task_request={
                     "task_type": "run_erc",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
@@ -373,25 +373,25 @@ class TestHardwareDesignWorkflow:
             inp = HardwareDesignWorkflowInput(
                 mechanical_task={
                     "task_type": "validate_stress",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
                 electronics_task={
                     "task_type": "run_erc",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
                 firmware_task={
                     "task_type": "generate_hal",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
                 simulation_task={
                     "task_type": "run_spice",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
@@ -419,13 +419,13 @@ class TestHardwareDesignWorkflow:
                 mechanical_task={},  # skip mechanical
                 electronics_task={
                     "task_type": "run_erc",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
                 firmware_task={
                     "task_type": "generate_hal",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
@@ -463,13 +463,13 @@ class TestHardwareDesignWorkflow:
             inp = HardwareDesignWorkflowInput(
                 mechanical_task={
                     "task_type": "validate_stress",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
                 electronics_task={
                     "task_type": "run_erc",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
@@ -492,7 +492,7 @@ class TestHardwareDesignWorkflow:
             inp = HardwareDesignWorkflowInput(
                 mechanical_task={
                     "task_type": "validate_stress",
-                    "artifact_id": ARTIFACT_ID,
+                    "work_product_id": ARTIFACT_ID,
                     "parameters": {},
                     "branch": "main",
                 },
@@ -540,7 +540,7 @@ class TestRetryBehavior:
             result.success = True
             result.model_dump.return_value = {
                 "task_type": "test",
-                "artifact_id": ARTIFACT_ID,
+                "work_product_id": ARTIFACT_ID,
                 "success": True,
                 "skill_results": [],
                 "errors": [],

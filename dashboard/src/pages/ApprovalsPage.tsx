@@ -45,14 +45,14 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
         <StatusBadge status={proposal.status} />
       </div>
 
-      {proposal.artifacts_affected.length > 0 && (
+      {proposal.work_products_affected.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {proposal.artifacts_affected.map((artifact) => (
+          {proposal.work_products_affected.map((work_product) => (
             <span
-              key={artifact}
+              key={work_product}
               className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
             >
-              {artifact}
+              {work_product}
             </span>
           ))}
         </div>

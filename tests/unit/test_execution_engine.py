@@ -113,17 +113,17 @@ class TestExecutionResult:
         result = ExecutionResult(
             success=True,
             exit_code=0,
-            artifacts=["/output/result.vtk", "/output/stress.dat"],
+            work_products=["/output/result.vtk", "/output/stress.dat"],
         )
-        assert len(result.artifacts) == 2
-        assert "/output/result.vtk" in result.artifacts
+        assert len(result.work_products) == 2
+        assert "/output/result.vtk" in result.work_products
 
     def test_result_defaults(self):
         result = ExecutionResult(success=True, exit_code=0)
         assert result.stdout == ""
         assert result.stderr == ""
         assert result.duration_seconds == 0.0
-        assert result.artifacts == []
+        assert result.work_products == []
 
 
 # ---------------------------------------------------------------------------
@@ -242,13 +242,13 @@ class TestContainerExecutionEngine:
             exit_code=0,
             stdout="fea output",
             duration_seconds=12.5,
-            artifacts=["/output/stress.vtk"],
+            work_products=["/output/stress.vtk"],
         )
         runtime.register_result("metaforge/calculix", custom)
         config = ContainerConfig(image="metaforge/calculix")
         result = await engine.execute("calculix", config, ["run_fea"])
         assert result.stdout == "fea output"
-        assert len(result.artifacts) == 1
+        assert len(result.work_products) == 1
 
     async def test_execute_failure_result(self, runtime, engine):
         runtime.register_result(

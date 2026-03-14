@@ -86,7 +86,7 @@ export function RunAgentDialog({ onClose }: RunAgentDialogProps) {
                 htmlFor="target"
                 className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
               >
-                Target Artifact ID
+                Target WorkProduct ID
               </label>
               <input
                 id="target"

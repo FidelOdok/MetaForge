@@ -72,7 +72,7 @@ def evaluate_sysml_feasibility() -> FeasibilityReport:
         report = FeasibilityReport(
             summary=(
                 "SysML v2 integration is feasible with moderate effort. "
-                "The core MetaForge node types (Artifact, Constraint, Component, "
+                "The core MetaForge node types (WorkProduct, Constraint, Component, "
                 "Relationship) map well to SysML v2 usages (PartUsage, "
                 "RequirementUsage, ConstraintUsage, ConnectionUsage). Key gaps "
                 "include behavioral modeling, allocation/traceability matrices, "
@@ -101,20 +101,20 @@ def _assess_mapping_coverage() -> list[MappingCoverage]:
     """Assess how well MetaForge types map to SysML v2 elements."""
     return [
         MappingCoverage(
-            metaforge_type="Artifact (CAD_MODEL, SCHEMATIC, PCB_LAYOUT, BOM)",
+            metaforge_type="WorkProduct (CAD_MODEL, SCHEMATIC, PCB_LAYOUT, BOM)",
             sysml_type="PartUsage",
             coverage="full",
             notes=(
-                "Physical artifact types map cleanly to PartUsage. "
-                "Artifact metadata preserved in properties dict."
+                "Physical work_product types map cleanly to PartUsage. "
+                "WorkProduct metadata preserved in properties dict."
             ),
         ),
         MappingCoverage(
-            metaforge_type="Artifact (PRD, DOCUMENTATION, TEST_PLAN)",
+            metaforge_type="WorkProduct (PRD, DOCUMENTATION, TEST_PLAN)",
             sysml_type="RequirementUsage",
             coverage="full",
             notes=(
-                "Requirement-like artifacts map to RequirementUsage. "
+                "Requirement-like work_products map to RequirementUsage. "
                 "Requirement text extracted from metadata."
             ),
         ),
@@ -153,7 +153,7 @@ def _assess_mapping_coverage() -> list[MappingCoverage]:
             coverage="none",
             notes=(
                 "SysML v2 API has commits/branches but they model "
-                "project-level versioning, not per-artifact versioning "
+                "project-level versioning, not per-work_product versioning "
                 "as in MetaForge."
             ),
         ),

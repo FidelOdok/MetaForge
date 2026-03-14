@@ -1,4 +1,4 @@
-"""Integration test: artifacts -> constraints -> gate evaluation -> readiness score.
+"""Integration test: work_products -> constraints -> gate evaluation -> readiness score.
 
 End-to-end workflow testing the constraint engine and gate engine together.
 """
@@ -10,19 +10,19 @@ from twin_core.constraint_engine.yaml_loader import convert_to_constraints, load
 from twin_core.gate_engine.engine import InMemoryGateEngine
 from twin_core.gate_engine.models import GateCriterion, GateDefinition, GatePhase
 from twin_core.graph_engine import InMemoryGraphEngine
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType, ConstraintSeverity
+from twin_core.models.enums import ConstraintSeverity, WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # --- Helpers ---
 
 
-def _make_artifact(
+def _make_work_product(
     name: str,
     domain: str = "mechanical",
-    art_type: ArtifactType = ArtifactType.CAD_MODEL,
+    art_type: WorkProductType = WorkProductType.CAD_MODEL,
     metadata: dict | None = None,
-) -> Artifact:
-    return Artifact(
+) -> WorkProduct:
+    return WorkProduct(
         name=name,
         type=art_type,
         domain=domain,
@@ -53,19 +53,19 @@ def gate_engine():
 
 
 class TestEndToEndGateWorkflow:
-    """End-to-end: create artifacts -> run constraints -> evaluate gate -> readiness."""
+    """End-to-end: create work_products -> run constraints -> evaluate gate -> readiness."""
 
     async def test_full_workflow_passing(self, graph, constraint_engine, gate_engine):
-        """Full pipeline: artifacts pass constraints, gate passes."""
-        # 1. Create artifacts in the graph
+        """Full pipeline: work_products pass constraints, gate passes."""
+        # 1. Create work_products in the graph
         bracket = await graph.add_node(
-            _make_artifact("bracket", domain="mechanical", metadata={"weight_grams": 50})
+            _make_work_product("bracket", domain="mechanical", metadata={"weight_grams": 50})
         )
         pcb = await graph.add_node(
-            _make_artifact(
+            _make_work_product(
                 "main_pcb",
                 domain="electronics",
-                art_type=ArtifactType.SCHEMATIC,
+                art_type=WorkProductType.SCHEMATIC,
                 metadata={"erc_errors": 0},
             )
         )
@@ -77,7 +77,7 @@ class TestEndToEndGateWorkflow:
             name="weight_ok",
             expression=(
                 "sum(a.metadata.get('weight_grams', 0)"
-                " for a in ctx.artifacts(domain='mechanical')) <= 500"
+                " for a in ctx.work_products(domain='mechanical')) <= 500"
             ),
             severity=ConstraintSeverity.ERROR,
             domain="mechanical",
@@ -87,7 +87,7 @@ class TestEndToEndGateWorkflow:
             name="erc_clean",
             expression=(
                 "all(a.metadata.get('erc_errors', 0) == 0"
-                " for a in ctx.artifacts(domain='electronics'))"
+                " for a in ctx.work_products(domain='electronics'))"
             ),
             severity=ConstraintSeverity.ERROR,
             domain="electronics",
@@ -135,9 +135,9 @@ class TestEndToEndGateWorkflow:
         self, graph, constraint_engine, gate_engine
     ):
         """Constraint failure should cause gate to fail."""
-        # 1. Create artifact that will fail constraint
+        # 1. Create work_product that will fail constraint
         heavy_part = await graph.add_node(
-            _make_artifact("heavy", domain="mechanical", metadata={"weight_grams": 9999})
+            _make_work_product("heavy", domain="mechanical", metadata={"weight_grams": 9999})
         )
 
         # 2. Add constraint that will fail
@@ -147,7 +147,7 @@ class TestEndToEndGateWorkflow:
             name="weight_limit",
             expression=(
                 "sum(a.metadata.get('weight_grams', 0)"
-                " for a in ctx.artifacts(domain='mechanical')) <= 500"
+                " for a in ctx.work_products(domain='mechanical')) <= 500"
             ),
             severity=ConstraintSeverity.ERROR,
             domain="mechanical",
@@ -184,7 +184,7 @@ class TestEndToEndGateWorkflow:
 
     async def test_multi_phase_gate_progression(self, graph, constraint_engine, gate_engine):
         """EVT -> DVT progression with constraint-driven scores."""
-        art = await graph.add_node(_make_artifact("part", metadata={"weight_grams": 100}))
+        art = await graph.add_node(_make_work_product("part", metadata={"weight_grams": 100}))
 
         from twin_core.models.constraint import Constraint
 
@@ -236,9 +236,9 @@ class TestEndToEndGateWorkflow:
 domain: mechanical
 version: "1.0"
 rules:
-  - name: has_artifacts
-    description: "Must have at least one artifact"
-    condition: "len(ctx.artifacts()) > 0"
+  - name: has_work_products
+    description: "Must have at least one work_product"
+    condition: "len(ctx.work_products()) > 0"
     severity: critical
 """,
             encoding="utf-8",
@@ -249,7 +249,7 @@ rules:
         constraints = convert_to_constraints(ruleset)
         assert len(constraints) == 1
 
-        art = await graph.add_node(_make_artifact("test_part"))
+        art = await graph.add_node(_make_work_product("test_part"))
         await constraint_engine.add_constraint(constraints[0], [art.id])
 
         # Evaluate

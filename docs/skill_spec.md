@@ -150,7 +150,7 @@ class StressConstraint(BaseModel):
 
 class ValidateStressInput(BaseModel):
     """Input for stress validation skill."""
-    artifact_id: UUID = Field(..., description="ID of the CAD model artifact in the Twin")
+    work_product_id: UUID = Field(..., description="ID of the CAD model work_product in the Twin")
     mesh_file_path: str = Field(..., description="Path to the mesh file (e.g., .inp)")
     load_case: str = Field(..., description="Load case identifier")
     constraints: list[StressConstraint] = Field(..., min_length=1, description="Stress constraints to validate against")
@@ -167,7 +167,7 @@ class StressResult(BaseModel):
 
 class ValidateStressOutput(BaseModel):
     """Output from stress validation skill."""
-    artifact_id: UUID = Field(..., description="ID of the analyzed artifact")
+    work_product_id: UUID = Field(..., description="ID of the analyzed work_product")
     overall_passed: bool = Field(..., description="Whether all constraints passed")
     results: list[StressResult] = Field(..., description="Per-region stress results")
     max_stress_mpa: float = Field(..., description="Global maximum stress found")
@@ -182,7 +182,7 @@ class ValidateStressOutput(BaseModel):
 2. Use appropriate validators (`ge`, `le`, `min_length`, `pattern`, etc.).
 3. Input models inherit from `BaseModel` — no defaults for required fields.
 4. Output models inherit from `BaseModel` — all fields are populated by the handler.
-5. Use `UUID` for artifact/constraint references, not strings.
+5. Use `UUID` for work_product/constraint references, not strings.
 6. Domain-specific units must be stated in field names or descriptions (e.g., `_mpa`, `_seconds`).
 
 ---
@@ -260,7 +260,7 @@ class SkillContext:
     Dependency-injected context for skill execution.
 
     Provides access to:
-    - Digital Twin API (read/write artifacts, constraints)
+    - Digital Twin API (read/write work_products, constraints)
     - MCP Bridge (invoke external tools)
     - Structured logger (with trace correlation)
     """
@@ -617,12 +617,12 @@ class ValidateStressHandler(SkillBase[ValidateStressInput, ValidateStressOutput]
 
     async def validate_preconditions(self, input_data: ValidateStressInput) -> list[str]:
         errors = []
-        # Check that the mesh file artifact exists in the Twin
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        # Check that the mesh file work_product exists in the Twin
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
         # Check that CalculiX is available
         if not await self.context.mcp.is_available("calculix.run_fea"):
             errors.append("CalculiX FEA tool is not available")
@@ -631,7 +631,7 @@ class ValidateStressHandler(SkillBase[ValidateStressInput, ValidateStressOutput]
     async def execute(self, input_data: ValidateStressInput) -> ValidateStressOutput:
         self.logger.info(
             "Running stress validation",
-            artifact_id=str(input_data.artifact_id),
+            work_product_id=str(input_data.work_product_id),
             load_case=input_data.load_case,
         )
 
@@ -673,7 +673,7 @@ class ValidateStressHandler(SkillBase[ValidateStressInput, ValidateStressOutput]
         overall_passed = all(r.passed for r in results)
 
         return ValidateStressOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             overall_passed=overall_passed,
             results=results,
             max_stress_mpa=max_stress,
@@ -710,7 +710,7 @@ def mock_context():
 @pytest.fixture
 def sample_input():
     return ValidateStressInput(
-        artifact_id=uuid4(),
+        work_product_id=uuid4(),
         mesh_file_path="/project/mesh/bracket.inp",
         load_case="static_load_1",
         constraints=[
@@ -726,7 +726,7 @@ def sample_input():
 @pytest.mark.asyncio
 async def test_stress_passes(mock_context, sample_input):
     # Arrange
-    mock_context.twin.get_artifact.return_value = MagicMock()
+    mock_context.twin.get_work_product.return_value = MagicMock()
     mock_context.mcp.is_available.return_value = True
     mock_context.mcp.invoke.return_value = {
         "max_von_mises": {"bracket_body": 100.0},
@@ -744,7 +744,7 @@ async def test_stress_passes(mock_context, sample_input):
 
 @pytest.mark.asyncio
 async def test_stress_fails(mock_context, sample_input):
-    mock_context.twin.get_artifact.return_value = MagicMock()
+    mock_context.twin.get_work_product.return_value = MagicMock()
     mock_context.mcp.is_available.return_value = True
     mock_context.mcp.invoke.return_value = {
         "max_von_mises": {"bracket_body": 200.0},
@@ -761,7 +761,7 @@ async def test_stress_fails(mock_context, sample_input):
 
 @pytest.mark.asyncio
 async def test_precondition_missing_artifact(mock_context, sample_input):
-    mock_context.twin.get_artifact.return_value = None
+    mock_context.twin.get_work_product.return_value = None
     mock_context.mcp.is_available.return_value = True
 
     handler = ValidateStressHandler(mock_context)
@@ -812,7 +812,7 @@ async def execute(self, input_data: MyInput) -> MyOutput:
 
 ```python
 async def execute(self, input_data: MyInput) -> MyOutput:
-    artifact = await self.context.twin.get_artifact(input_data.artifact_id, branch=self.context.branch)
-    constraints = await self.context.twin.get_edges(artifact.id, edge_type="CONSTRAINED_BY")
+    work_product = await self.context.twin.get_work_product(input_data.work_product_id, branch=self.context.branch)
+    constraints = await self.context.twin.get_edges(work_product.id, edge_type="CONSTRAINED_BY")
     # ... process
 ```

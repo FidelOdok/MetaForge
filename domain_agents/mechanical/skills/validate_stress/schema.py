@@ -20,7 +20,7 @@ class StressConstraint(BaseModel):
 class ValidateStressInput(BaseModel):
     """Input for stress validation skill."""
 
-    artifact_id: UUID = Field(..., description="ID of the CAD model artifact in the Twin")
+    work_product_id: UUID = Field(..., description="ID of the CAD model work_product in the Twin")
     mesh_file_path: str = Field(..., min_length=1, description="Path to the mesh file (.inp)")
     load_case: str = Field(..., min_length=1, description="Load case identifier")
     constraints: list[StressConstraint] = Field(
@@ -41,7 +41,7 @@ class StressResult(BaseModel):
 class ValidateStressOutput(BaseModel):
     """Output from stress validation skill."""
 
-    artifact_id: UUID = Field(..., description="ID of the analyzed artifact")
+    work_product_id: UUID = Field(..., description="ID of the analyzed work_product")
     overall_passed: bool = Field(..., description="Whether all constraints passed")
     results: list[StressResult] = Field(..., description="Per-region stress results")
     max_stress_mpa: float = Field(..., description="Global maximum stress found")

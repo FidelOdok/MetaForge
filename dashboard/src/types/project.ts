@@ -1,6 +1,6 @@
-/** Project and artifact types for the dashboard. */
+/** Project and work product types for the dashboard. */
 
-export interface ProjectArtifact {
+export interface ProjectWorkProduct {
   id: string;
   name: string;
   type: 'schematic' | 'pcb' | 'cad_model' | 'firmware' | 'bom' | 'gerber';
@@ -13,7 +13,7 @@ export interface Project {
   name: string;
   description: string;
   status: 'active' | 'archived' | 'draft';
-  artifacts: ProjectArtifact[];
+  work_products: ProjectWorkProduct[];
   agentCount: number;
   lastUpdated: string;
   createdAt: string;

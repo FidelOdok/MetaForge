@@ -262,8 +262,8 @@ class TestKnowledgeConsumer:
 
     def test_event_types(self, consumer: KnowledgeConsumer) -> None:
         assert consumer.event_types == {
-            EventType.ARTIFACT_CREATED,
-            EventType.ARTIFACT_UPDATED,
+            EventType.WORK_PRODUCT_CREATED,
+            EventType.WORK_PRODUCT_UPDATED,
         }
 
     async def test_on_event_indexes_artifact(
@@ -273,13 +273,13 @@ class TestKnowledgeConsumer:
     ) -> None:
         event = Event(
             id=str(uuid4()),
-            type=EventType.ARTIFACT_CREATED,
+            type=EventType.WORK_PRODUCT_CREATED,
             timestamp=datetime.now(UTC).isoformat(),
             source="test",
             data={
                 "content": "Design decision: use aluminum",
-                "artifact_type": "design_decision",
-                "artifact_id": uuid4(),
+                "work_product_type": "design_decision",
+                "work_product_id": uuid4(),
             },
         )
         await consumer.on_event(event)
@@ -295,7 +295,7 @@ class TestKnowledgeConsumer:
     ) -> None:
         event = Event(
             id=str(uuid4()),
-            type=EventType.ARTIFACT_CREATED,
+            type=EventType.WORK_PRODUCT_CREATED,
             timestamp=datetime.now(UTC).isoformat(),
             source="test",
             data={},  # No content

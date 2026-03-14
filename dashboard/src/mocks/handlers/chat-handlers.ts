@@ -19,7 +19,6 @@
 import {
   mockChannels,
   mockThreads,
-  mockMessages,
   getHydratedThread,
   actors,
 } from '../data/mock-chat';
@@ -28,7 +27,6 @@ import type {
   ChatThread,
   ChatChannel,
   ChatScopeKind,
-  ChatActor,
 } from '../../types/chat';
 import type { PaginatedResponse } from '../../types/common';
 
@@ -53,7 +51,7 @@ const agentResponses: Record<string, string[]> = {
     'Version diff generated. The change affects 2 geometry parameters and 1 material property. No interface changes detected.',
   ],
   session: [
-    'Analysis session results are ready. Processing took 42 seconds. Full report attached to the artifact node.',
+    'Analysis session results are ready. Processing took 42 seconds. Full report attached to the work_product node.',
     'Mesh quality check passed. All elements have aspect ratio < 5:1. Proceeding with solver run.',
     'Simulation converged after 847 iterations. Maximum residual: 2.3e-6. Results are within the acceptance tolerance.',
   ],
@@ -65,7 +63,7 @@ const agentResponses: Record<string, string[]> = {
 };
 
 /** Map from scope kind to the agent actor that typically responds. */
-const scopeAgentMap: Record<string, ChatActor> = {
+const scopeAgentMap = {
   approval: actors.agentEE,
   'bom-entry': actors.agentEE,
   'digital-twin-node': actors.agentME,
@@ -251,13 +249,13 @@ export function generateAgentResponse(
   const responses =
     agentResponses[scopeKind] ?? ['Processing your request...'];
   const content = responses[Math.floor(Math.random() * responses.length)];
-  const agent = scopeAgentMap[scopeKind] ?? actors.agentSE;
+  const agent = scopeAgentMap[scopeKind as keyof typeof scopeAgentMap] ?? actors.agentSE;
 
   return {
     id: `msg-agent-${Date.now()}`,
     threadId,
     actor: agent,
-    content,
+    content: content ?? 'Processing your request...',
     status: 'sent',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

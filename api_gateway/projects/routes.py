@@ -14,9 +14,9 @@ import structlog
 from fastapi import APIRouter, HTTPException
 
 from api_gateway.projects.schemas import (
-    ProjectArtifactResponse,
     ProjectListResponse,
     ProjectResponse,
+    ProjectWorkProductResponse,
 )
 from observability.tracing import get_tracer
 
@@ -56,22 +56,22 @@ _SEED_PROJECTS: list[ProjectResponse] = [
         agent_count=3,
         last_updated=(_now - timedelta(hours=2)).isoformat(),
         created_at=(_now - timedelta(days=7)).isoformat(),
-        artifacts=[
-            ProjectArtifactResponse(
+        work_products=[
+            ProjectWorkProductResponse(
                 id="art-001",
                 name="Main Schematic",
                 type="schematic",
                 status="valid",
                 updated_at=_now.isoformat(),
             ),
-            ProjectArtifactResponse(
+            ProjectWorkProductResponse(
                 id="art-002",
                 name="PCB Layout",
                 type="pcb",
                 status="warning",
                 updated_at=_now.isoformat(),
             ),
-            ProjectArtifactResponse(
+            ProjectWorkProductResponse(
                 id="art-003",
                 name="Enclosure CAD",
                 type="cad_model",
@@ -88,15 +88,15 @@ _SEED_PROJECTS: list[ProjectResponse] = [
         agent_count=2,
         last_updated=(_now - timedelta(days=1)).isoformat(),
         created_at=(_now - timedelta(days=14)).isoformat(),
-        artifacts=[
-            ProjectArtifactResponse(
+        work_products=[
+            ProjectWorkProductResponse(
                 id="art-004",
                 name="Sensor Board Schematic",
                 type="schematic",
                 status="valid",
                 updated_at=_now.isoformat(),
             ),
-            ProjectArtifactResponse(
+            ProjectWorkProductResponse(
                 id="art-005",
                 name="Firmware",
                 type="firmware",
@@ -113,7 +113,7 @@ _SEED_PROJECTS: list[ProjectResponse] = [
         agent_count=0,
         last_updated=(_now - timedelta(days=3)).isoformat(),
         created_at=(_now - timedelta(days=3)).isoformat(),
-        artifacts=[],
+        work_products=[],
     ),
 ]
 

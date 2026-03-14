@@ -10,7 +10,7 @@ from twin_core.models.enums import NodeType
 
 
 class TwinModel(NodeBase):
-    """A product-level digital twin definition that aggregates artifacts.
+    """A product-level digital twin definition that aggregates work_products.
 
     Represents a complete product design at a specific version. The
     ``global_asset_id`` follows the URN convention

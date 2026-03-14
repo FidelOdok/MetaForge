@@ -17,7 +17,7 @@ from twin_core.versioning.merge import MergeConflict, detect_conflicts, perform_
 
 
 class VersionEngine(ABC):
-    """Abstract interface for Git-like versioning of the artifact graph.
+    """Abstract interface for Git-like versioning of the work_product graph.
 
     Implementations manage branches, commits, merges, diffs, and history.
     """
@@ -42,19 +42,19 @@ class VersionEngine(ABC):
         self,
         branch: str,
         message: str,
-        artifact_ids: list[UUID],
+        work_product_ids: list[UUID],
         author: str,
     ) -> Version:
         """Create a new version on the given branch.
 
-        Captures a snapshot of all tracked artifacts, overlaying changes
-        from the provided artifact_ids.
+        Captures a snapshot of all tracked work_products, overlaying changes
+        from the provided work_product_ids.
 
         Returns:
             The newly created Version node.
 
         Raises:
-            KeyError: If branch doesn't exist or an artifact_id is not in the graph.
+            KeyError: If branch doesn't exist or an work_product_id is not in the graph.
         """
         ...
 
@@ -84,7 +84,7 @@ class VersionEngine(ABC):
         """Compute the diff between two versions.
 
         Returns:
-            VersionDiff with added/modified/deleted artifacts.
+            VersionDiff with added/modified/deleted work_products.
 
         Raises:
             KeyError: If either version doesn't exist.
@@ -162,7 +162,7 @@ class InMemoryVersionEngine(VersionEngine):
         self,
         branch: str,
         message: str,
-        artifact_ids: list[UUID],
+        work_product_ids: list[UUID],
         author: str,
     ) -> Version:
         if branch not in self._branches:
@@ -176,11 +176,11 @@ class InMemoryVersionEngine(VersionEngine):
         else:
             snapshot = {}
 
-        # Overlay changes from the provided artifact IDs
-        for aid in artifact_ids:
+        # Overlay changes from the provided work_product IDs
+        for aid in work_product_ids:
             node = await self._graph.get_node(aid)
             if node is None:
-                raise KeyError(f"Artifact {aid} not found in graph")
+                raise KeyError(f"WorkProduct {aid} not found in graph")
             snapshot[aid] = node.content_hash  # type: ignore[union-attr]
 
         snapshot_hash = self._compute_snapshot_hash(snapshot)
@@ -191,7 +191,7 @@ class InMemoryVersionEngine(VersionEngine):
             commit_message=message,
             snapshot_hash=snapshot_hash,
             author=author,
-            artifact_ids=artifact_ids,
+            work_product_ids=work_product_ids,
         )
 
         await self._graph.add_node(version)
@@ -206,8 +206,8 @@ class InMemoryVersionEngine(VersionEngine):
                 )
             )
 
-        # Create VERSIONED_BY edges: artifact → version
-        for aid in artifact_ids:
+        # Create VERSIONED_BY edges: work_product → version
+        for aid in work_product_ids:
             await self._graph.add_edge(
                 EdgeBase(
                     source_id=aid,
@@ -251,7 +251,7 @@ class InMemoryVersionEngine(VersionEngine):
         merged_snap = perform_merge(ancestor_snap, source_snap, target_snap)
         snapshot_hash = self._compute_snapshot_hash(merged_snap)
 
-        # Determine which artifacts changed in the merge
+        # Determine which work_products changed in the merge
         changed_ids = []
         for aid in set(merged_snap) | set(target_snap):
             if merged_snap.get(aid) != target_snap.get(aid):
@@ -264,7 +264,7 @@ class InMemoryVersionEngine(VersionEngine):
             commit_message=message,
             snapshot_hash=snapshot_hash,
             author=author,
-            artifact_ids=changed_ids,
+            work_product_ids=changed_ids,
         )
 
         await self._graph.add_node(version)

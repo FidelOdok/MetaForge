@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-The Digital Twin is the **single source of design truth** in MetaForge. It is a versioned, directed property graph that captures every artifact, constraint, relationship, and version in a hardware design.
+The Digital Twin is the **single source of design truth** in MetaForge. It is a versioned, directed property graph that captures every work product, constraint, relationship, and version in a hardware design.
 
 All agents read from and propose changes to the Twin. No agent maintains its own persistent state — the Twin is the canonical record of what exists, what constrains it, and how it evolved.
 
@@ -20,7 +20,7 @@ All agents read from and propose changes to the Twin. No agent maintains its own
 1. **Graph-native**: Hardware designs are naturally graphs (components depend on each other, constraints span domains). A property graph captures this directly.
 2. **Version-everything**: Every mutation creates a version record. The graph supports branching and merging like Git.
 3. **Constraint-first**: Constraints are first-class nodes, not annotations. They are evaluated automatically on every proposed change.
-4. **Domain-agnostic core**: The Twin schema is generic. Domain-specific semantics live in artifact metadata and constraint expressions.
+4. **Domain-agnostic core**: The Twin schema is generic. Domain-specific semantics live in work product metadata and constraint expressions.
 
 ---
 
@@ -36,7 +36,7 @@ from enum import StrEnum
 class NodeType(StrEnum):
     """Discriminator for graph node types."""
 
-    ARTIFACT = "artifact"
+    WORK_PRODUCT = "work_product"
     CONSTRAINT = "constraint"
     VERSION = "version"
     COMPONENT = "component"
@@ -59,7 +59,7 @@ class NodeBase(BaseModel):
     node_type: NodeType
 ```
 
-All node models (`Artifact`, `Constraint`, `Version`, `Component`, `AgentNode`) inherit from `NodeBase` and set `node_type` to a default value matching their type.
+All node models (`WorkProduct`, `Constraint`, `Version`, `Component`, `AgentNode`) inherit from `NodeBase` and set `node_type` to a default value matching their type.
 
 *Source: `twin_core/models/base.py`*
 
@@ -104,16 +104,16 @@ class EdgeBase(BaseModel):
 
 ## 2. Node Types
 
-### 2.1 Artifact
+### 2.1 WorkProduct
 
-An Artifact represents any design output: a schematic, BOM, PCB layout, firmware source file, test plan, simulation result, or manufacturing file.
+An WorkProduct represents any design output: a schematic, BOM, PCB layout, firmware source file, test plan, simulation result, or manufacturing file.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `id` | `UUID` | Yes | Unique identifier (inherited from `NodeBase`) |
-| `node_type` | `NodeType` | Yes | Always `NodeType.ARTIFACT` |
+| `node_type` | `NodeType` | Yes | Always `NodeType.WORK_PRODUCT` |
 | `name` | `str` | Yes | Human-readable name (e.g., `"main_schematic"`) |
-| `type` | `ArtifactType` | Yes | Enum: see below |
+| `type` | `WorkProductType` | Yes | Enum: see below |
 | `domain` | `str` | Yes | Engineering domain (e.g., `"mechanical"`, `"electronics"`) |
 | `file_path` | `str` | Yes | Relative path within the project directory |
 | `content_hash` | `str` | Yes | SHA-256 hash of file contents |
@@ -123,12 +123,12 @@ An Artifact represents any design output: a schematic, BOM, PCB layout, firmware
 | `updated_at` | `datetime` | Yes | Last modification timestamp |
 | `created_by` | `str` | Yes | Agent ID or `"human"` |
 
-**ArtifactType enum**:
+**WorkProductType enum**:
 
 ```python
 from enum import StrEnum
 
-class ArtifactType(StrEnum):
+class WorkProductType(StrEnum):
     SCHEMATIC = "schematic"
     PCB_LAYOUT = "pcb_layout"
     BOM = "bom"
@@ -153,13 +153,13 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 from pydantic import Field
 from twin_core.models.base import NodeBase
-from twin_core.models.enums import ArtifactType, NodeType
+from twin_core.models.enums import WorkProductType, NodeType
 
-class Artifact(NodeBase):
+class WorkProduct(NodeBase):
     id: UUID = Field(default_factory=uuid4)
-    node_type: NodeType = NodeType.ARTIFACT
+    node_type: NodeType = NodeType.WORK_PRODUCT
     name: str
-    type: ArtifactType
+    type: WorkProductType
     domain: str
     file_path: str
     content_hash: str
@@ -170,11 +170,11 @@ class Artifact(NodeBase):
     created_by: str
 ```
 
-*Source: `twin_core/models/artifact.py`*
+*Source: `twin_core/models/work product.py`*
 
 ### 2.2 Constraint
 
-A Constraint is a rule that must be satisfied across one or more artifacts. Constraints are first-class graph nodes evaluated by the Constraint Engine.
+A Constraint is a rule that must be satisfied across one or more work products. Constraints are first-class graph nodes evaluated by the Constraint Engine.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -223,7 +223,7 @@ class Constraint(NodeBase):
 
 ### 2.3 Version
 
-A Version represents a point-in-time snapshot of the artifact graph. Versions form a DAG (directed acyclic graph) that supports branching and merging.
+A Version represents a point-in-time snapshot of the work product graph. Versions form a DAG (directed acyclic graph) that supports branching and merging.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -236,7 +236,7 @@ A Version represents a point-in-time snapshot of the artifact graph. Versions fo
 | `snapshot_hash` | `str` | Yes | SHA-256 hash of the complete graph state at this version |
 | `author` | `str` | Yes | Agent ID, `"human"`, or `"system"` |
 | `created_at` | `datetime` | Yes | Version creation timestamp |
-| `artifact_ids` | `list[UUID]` | Yes | Artifacts modified in this version |
+| `work_product_ids` | `list[UUID]` | Yes | Artifacts modified in this version |
 
 ```python
 class Version(NodeBase):
@@ -249,7 +249,7 @@ class Version(NodeBase):
     snapshot_hash: str
     author: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    artifact_ids: list[UUID] = Field(default_factory=list)
+    work_product_ids: list[UUID] = Field(default_factory=list)
 ```
 
 *Source: `twin_core/models/version.py`*
@@ -302,7 +302,7 @@ class Component(NodeBase):
 
 ### 2.5 Agent
 
-An Agent node records which agent produced or modified artifacts. It connects the provenance chain from human intent through agent execution to artifact output.
+An Agent node records which agent produced or modified work products. It connects the provenance chain from human intent through agent execution to work product output.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -401,7 +401,7 @@ class DeviceInstance(NodeBase):
 
 ### 2.8 TwinModel
 
-A TwinModel represents a product-level digital twin definition that aggregates artifacts at a specific version.
+A TwinModel represents a product-level digital twin definition that aggregates work products at a specific version.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -465,14 +465,14 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 
 | Edge Type | Source -> Target | Description |
 |-----------|-----------------|-------------|
-| `DEPENDS_ON` | Artifact -> Artifact | Artifact A requires Artifact B (e.g., PCB depends on schematic) |
-| `IMPLEMENTS` | Artifact -> Artifact | Artifact A implements the spec defined in Artifact B |
-| `VALIDATES` | Artifact -> Artifact | Artifact A (test result) validates Artifact B (design) |
-| `CONTAINS` | Artifact -> Artifact | Artifact A contains Artifact B (hierarchical composition) |
-| `VERSIONED_BY` | Artifact -> Version | Links an artifact to the version that last modified it |
-| `CONSTRAINED_BY` | Artifact -> Constraint | Constraint applies to this artifact |
-| `PRODUCED_BY` | Artifact -> Agent | Artifact was produced or modified by this agent |
-| `USES_COMPONENT` | Artifact -> Component | Artifact references this component (e.g., BOM uses resistor) |
+| `DEPENDS_ON` | WorkProduct -> WorkProduct | WorkProduct A requires WorkProduct B (e.g., PCB depends on schematic) |
+| `IMPLEMENTS` | WorkProduct -> WorkProduct | WorkProduct A implements the spec defined in WorkProduct B |
+| `VALIDATES` | WorkProduct -> WorkProduct | WorkProduct A (test result) validates WorkProduct B (design) |
+| `CONTAINS` | WorkProduct -> WorkProduct | WorkProduct A contains WorkProduct B (hierarchical composition) |
+| `VERSIONED_BY` | WorkProduct -> Version | Links an work_product to the version that last modified it |
+| `CONSTRAINED_BY` | WorkProduct -> Constraint | Constraint applies to this work_product |
+| `PRODUCED_BY` | WorkProduct -> Agent | WorkProduct was produced or modified by this agent |
+| `USES_COMPONENT` | WorkProduct -> Component | WorkProduct references this component (e.g., BOM uses resistor) |
 | `PARENT_OF` | Version -> Version | Version lineage (parent -> child) |
 | `CONFLICTS_WITH` | Constraint -> Constraint | Two constraints that cannot both be satisfied |
 
@@ -482,7 +482,7 @@ Edges with domain-specific properties are modeled as typed subclasses of `EdgeBa
 
 ```python
 class DependsOnEdge(EdgeBase):
-    """Artifact A requires Artifact B."""
+    """WorkProduct A requires WorkProduct B."""
 
     edge_type: EdgeType = EdgeType.DEPENDS_ON
     dependency_type: str = "hard"  # "hard" or "soft"
@@ -490,7 +490,7 @@ class DependsOnEdge(EdgeBase):
 
 
 class UsesComponentEdge(EdgeBase):
-    """Artifact references a physical component."""
+    """WorkProduct references a physical component."""
 
     edge_type: EdgeType = EdgeType.USES_COMPONENT
     reference_designator: str = ""  # e.g. "R1", "U3"
@@ -498,7 +498,7 @@ class UsesComponentEdge(EdgeBase):
 
 
 class ConstrainedByEdge(EdgeBase):
-    """Constraint applies to an artifact."""
+    """Constraint applies to an work_product."""
 
     edge_type: EdgeType = EdgeType.CONSTRAINED_BY
     scope: str = "local"  # "local" or "global"
@@ -638,13 +638,13 @@ class GraphEngine(ABC):
 
 ## 4. Versioning Model
 
-The Twin uses a Git-like branching model for the artifact graph. Every mutation goes through a version, and changes can be isolated in branches before merging.
+The Twin uses a Git-like branching model for the work product graph. Every mutation goes through a version, and changes can be isolated in branches before merging.
 
 ### Branch Types
 
 | Branch | Purpose | Lifecycle |
 |--------|---------|-----------|
-| `main` | Canonical design state — approved artifacts only | Persistent |
+| `main` | Canonical design state — approved work_products only | Persistent |
 | `agent/<domain>/<task>` | Agent working branch for a specific task | Temporary — merged or discarded |
 | `review/<id>` | Human review branch for approval workflow | Temporary — merged or discarded |
 
@@ -654,7 +654,7 @@ The Twin uses a Git-like branching model for the artifact graph. Every mutation 
 from abc import ABC, abstractmethod
 
 class VersionEngine(ABC):
-    """Abstract interface for Git-like versioning of the artifact graph."""
+    """Abstract interface for Git-like versioning of the work_product graph."""
 
     @abstractmethod
     async def create_branch(self, name: str, from_version: UUID | None = None) -> str:
@@ -673,16 +673,16 @@ class VersionEngine(ABC):
         self,
         branch: str,
         message: str,
-        artifact_ids: list[UUID],
+        work_product_ids: list[UUID],
         author: str,
     ) -> Version:
         """Create a new version on the given branch.
 
-        Captures a snapshot of all tracked artifacts, overlaying changes
-        from the provided artifact_ids.
+        Captures a snapshot of all tracked work_products, overlaying changes
+        from the provided work_product_ids.
 
         Raises:
-            KeyError: If branch doesn't exist or an artifact_id is not in the graph.
+            KeyError: If branch doesn't exist or an work_product_id is not in the graph.
         """
         ...
 
@@ -737,10 +737,10 @@ class VersionEngine(ABC):
 ### Version Diff
 
 ```python
-class ArtifactChange(BaseModel):
-    """A single artifact change between two versions."""
+class WorkProductChange(BaseModel):
+    """A single work_product change between two versions."""
 
-    artifact_id: UUID
+    work_product_id: UUID
     change_type: str  # "added", "modified", "deleted"
     old_content_hash: str | None = None
     new_content_hash: str | None = None
@@ -750,7 +750,7 @@ class VersionDiff(BaseModel):
 
     version_a: UUID
     version_b: UUID
-    changes: list[ArtifactChange]
+    changes: list[WorkProductChange]
     constraints_added: list[UUID] = Field(default_factory=list)
     constraints_removed: list[UUID] = Field(default_factory=list)
 ```
@@ -764,8 +764,8 @@ The merge implementation follows Git's three-way merge strategy:
 1. **Common ancestor detection**: `_find_common_ancestor()` uses interleaved BFS from both branch HEADs, walking `parent_id` and `merge_parent_id` links, to find the nearest shared commit.
 
 2. **Conflict detection**: `detect_conflicts()` compares source and target snapshots against the ancestor:
-   - **Content conflict**: Both branches modified the same artifact with different content hashes.
-   - **Structural conflict**: One branch deleted an artifact that the other branch modified (or added differently).
+   - **Content conflict**: Both branches modified the same work product with different content hashes.
+   - **Structural conflict**: One branch deleted a work product that the other branch modified (or added differently).
    - **No conflict**: If only one side changed, or both sides made identical changes.
 
 3. **Merge execution**: `perform_merge()` starts from the target snapshot and applies non-conflicting source changes. If any conflicts exist, it raises `MergeConflict`.
@@ -774,7 +774,7 @@ The merge implementation follows Git's three-way merge strategy:
 class ConflictDetail(BaseModel):
     """Description of a single merge conflict."""
 
-    artifact_id: UUID
+    work_product_id: UUID
     conflict_type: str  # "content" or "structural"
     source_hash: str | None = None
     target_hash: str | None = None
@@ -785,8 +785,8 @@ class MergeConflict(Exception):
 
     def __init__(self, conflicts: list[ConflictDetail]) -> None:
         self.conflicts = conflicts
-        ids = ", ".join(str(c.artifact_id)[:8] for c in conflicts)
-        super().__init__(f"Merge conflicts on artifacts: {ids}")
+        ids = ", ".join(str(c.work_product_id)[:8] for c in conflicts)
+        super().__init__(f"Merge conflicts on work_products: {ids}")
 ```
 
 *Source: `twin_core/versioning/merge.py`*
@@ -813,9 +813,9 @@ class ConstraintEngine(ABC):
 
     @abstractmethod
     async def evaluate(
-        self, artifact_ids: list[UUID]
+        self, work_product_ids: list[UUID]
     ) -> ConstraintEvaluationResult:
-        """Evaluate constraints relevant to the given artifacts.
+        """Evaluate constraints relevant to the given work_products.
 
         Returns a result indicating whether all ERROR-severity constraints pass.
         """
@@ -828,9 +828,9 @@ class ConstraintEngine(ABC):
 
     @abstractmethod
     async def add_constraint(
-        self, constraint: Constraint, artifact_ids: list[UUID]
+        self, constraint: Constraint, work_product_ids: list[UUID]
     ) -> Constraint:
-        """Register a constraint and create CONSTRAINED_BY edges to the given artifacts."""
+        """Register a constraint and create CONSTRAINED_BY edges to the given work_products."""
         ...
 
     @abstractmethod
@@ -856,16 +856,16 @@ Constraints are expressed as Python expressions evaluated against a context obje
 # Example constraint expressions:
 
 # Voltage rail must not exceed 3.3V
-"ctx.artifact('power_budget').metadata.get('max_voltage', 0) <= 3.3"
+"ctx.work_product('power_budget').metadata.get('max_voltage', 0) <= 3.3"
 
 # BOM cost must stay under $50
-"ctx.artifact('bom').metadata.get('total_cost', 0) < 50.0"
+"ctx.work_product('bom').metadata.get('total_cost', 0) < 50.0"
 
 # All components must be ACTIVE lifecycle
 "all(c.lifecycle == 'active' for c in ctx.components())"
 
 # PCB must have DRC passing
-"ctx.artifact('pcb_layout').metadata.get('drc_status') == 'pass'"
+"ctx.work_product('pcb_layout').metadata.get('drc_status') == 'pass'"
 ```
 
 ### Safe Builtins Whitelist
@@ -892,37 +892,37 @@ class ConstraintContext:
 
     def __init__(
         self,
-        artifacts_by_name: dict[str, Artifact],
-        artifacts_by_id: dict[UUID, Artifact],
+        artifacts_by_name: dict[str, WorkProduct],
+        artifacts_by_id: dict[UUID, WorkProduct],
         all_components: list[Component],
         dependency_map: dict[UUID, list[UUID]],
     ) -> None: ...
 
-    def artifact(self, name: str) -> Artifact:
-        """Lookup an artifact by name. Raises KeyError if not found."""
+    def work_product(self, name: str) -> WorkProduct:
+        """Lookup an work_product by name. Raises KeyError if not found."""
         ...
 
-    def artifacts(
+    def work_products(
         self,
         domain: str | None = None,
         type: str | None = None,
-    ) -> list[Artifact]:
-        """Return artifacts, optionally filtered by domain and/or type."""
+    ) -> list[WorkProduct]:
+        """Return work_products, optionally filtered by domain and/or type."""
         ...
 
     def components(self) -> list[Component]:
         """Return all components in the graph."""
         ...
 
-    def dependents(self, artifact_id: UUID) -> list[Artifact]:
-        """Return artifacts that have incoming DEPENDS_ON edges to artifact_id."""
+    def dependents(self, work_product_id: UUID) -> list[WorkProduct]:
+        """Return work_products that have incoming DEPENDS_ON edges to work_product_id."""
         ...
 
 
 async def build_context(graph: GraphEngine) -> ConstraintContext:
     """Async factory that pre-loads graph state into a synchronous ConstraintContext.
 
-    Loads all artifacts (indexed by name and ID), all components, and builds
+    Loads all work_products (indexed by name and ID), all components, and builds
     a dependency map by following incoming DEPENDS_ON edges.
     """
     ...
@@ -937,22 +937,22 @@ The resolver module handles two-phase constraint discovery:
 ```python
 async def resolve_constraints(
     graph: GraphEngine,
-    artifact_ids: list[UUID],
+    work_product_ids: list[UUID],
 ) -> list[Constraint]:
     """Two-phase constraint resolution.
 
-    1. Follow outgoing CONSTRAINED_BY edges from each artifact to find direct constraints.
+    1. Follow outgoing CONSTRAINED_BY edges from each work_product to find direct constraints.
     2. Include all cross_domain=True constraints from the graph.
     3. Deduplicate by constraint ID.
     """
     ...
 
 
-async def find_constrained_artifacts(
+async def find_constrained_work_products(
     graph: GraphEngine,
     constraint_id: UUID,
 ) -> list[UUID]:
-    """Reverse lookup: find which artifacts a constraint applies to.
+    """Reverse lookup: find which work_products a constraint applies to.
 
     Follows incoming CONSTRAINED_BY edges to the constraint node.
     """
@@ -967,7 +967,7 @@ async def find_constrained_artifacts(
 Proposed commit arrives
         |
         v
-  Load all constraints linked to modified artifacts
+  Load all constraints linked to modified work_products
   (resolve_constraints: direct CONSTRAINED_BY edges + cross_domain constraints)
         |
         v
@@ -993,7 +993,7 @@ class ConstraintViolation(BaseModel):
     constraint_name: str
     severity: ConstraintSeverity
     message: str
-    artifact_ids: list[UUID] = Field(default_factory=list)
+    work_product_ids: list[UUID] = Field(default_factory=list)
     expression: str
     evaluated_at: datetime
 
@@ -1022,28 +1022,28 @@ The Twin API is the public interface for all graph operations. Agents, the orche
 class TwinAPI(ABC):
     # --- Artifacts ---
     @abstractmethod
-    async def create_artifact(self, artifact: Artifact, branch: str = "main") -> Artifact:
+    async def create_work_product(self, work_product: WorkProduct, branch: str = "main") -> WorkProduct:
         ...
 
     @abstractmethod
-    async def get_artifact(self, artifact_id: UUID, branch: str = "main") -> Artifact | None:
+    async def get_work_product(self, work_product_id: UUID, branch: str = "main") -> WorkProduct | None:
         ...
 
     @abstractmethod
-    async def update_artifact(self, artifact_id: UUID, updates: dict, branch: str = "main") -> Artifact:
+    async def update_work_product(self, work_product_id: UUID, updates: dict, branch: str = "main") -> WorkProduct:
         ...
 
     @abstractmethod
-    async def delete_artifact(self, artifact_id: UUID, branch: str = "main") -> bool:
+    async def delete_work_product(self, work_product_id: UUID, branch: str = "main") -> bool:
         ...
 
     @abstractmethod
-    async def list_artifacts(
+    async def list_work_products(
         self,
         branch: str = "main",
         domain: str | None = None,
-        artifact_type: ArtifactType | None = None,
-    ) -> list[Artifact]:
+        work_product_type: WorkProductType | None = None,
+    ) -> list[WorkProduct]:
         ...
 
     # --- Constraints ---
@@ -1127,16 +1127,16 @@ class TwinAPI(ABC):
 
 ```cypher
 -- Primary key indexes
-CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (a:Artifact) REQUIRE a.id IS UNIQUE;
+CREATE CONSTRAINT work_product_id IF NOT EXISTS FOR (a:WorkProduct) REQUIRE a.id IS UNIQUE;
 CREATE CONSTRAINT constraint_id IF NOT EXISTS FOR (c:Constraint) REQUIRE c.id IS UNIQUE;
 CREATE CONSTRAINT version_id IF NOT EXISTS FOR (v:Version) REQUIRE v.id IS UNIQUE;
 CREATE CONSTRAINT component_id IF NOT EXISTS FOR (p:Component) REQUIRE p.id IS UNIQUE;
 CREATE CONSTRAINT agent_id IF NOT EXISTS FOR (ag:Agent) REQUIRE ag.id IS UNIQUE;
 
 -- Lookup indexes
-CREATE INDEX artifact_domain IF NOT EXISTS FOR (a:Artifact) ON (a.domain);
-CREATE INDEX artifact_type IF NOT EXISTS FOR (a:Artifact) ON (a.type);
-CREATE INDEX artifact_path IF NOT EXISTS FOR (a:Artifact) ON (a.file_path);
+CREATE INDEX artifact_domain IF NOT EXISTS FOR (a:WorkProduct) ON (a.domain);
+CREATE INDEX work_product_type IF NOT EXISTS FOR (a:WorkProduct) ON (a.type);
+CREATE INDEX artifact_path IF NOT EXISTS FOR (a:WorkProduct) ON (a.file_path);
 CREATE INDEX constraint_domain IF NOT EXISTS FOR (c:Constraint) ON (c.domain);
 CREATE INDEX constraint_status IF NOT EXISTS FOR (c:Constraint) ON (c.status);
 CREATE INDEX version_branch IF NOT EXISTS FOR (v:Version) ON (v.branch_name);
@@ -1146,25 +1146,25 @@ CREATE INDEX component_mfr IF NOT EXISTS FOR (p:Component) ON (p.manufacturer);
 
 ### Common Cypher Patterns
 
-**Get all artifacts in a domain with their constraints**:
+**Get all work products in a domain with their constraints**:
 
 ```cypher
-MATCH (a:Artifact {domain: $domain})
+MATCH (a:WorkProduct {domain: $domain})
 OPTIONAL MATCH (a)-[:CONSTRAINED_BY]->(c:Constraint)
 RETURN a, collect(c) AS constraints
 ```
 
-**Get the dependency tree for an artifact**:
+**Get the dependency tree for a work product**:
 
 ```cypher
-MATCH path = (root:Artifact {id: $artifact_id})-[:DEPENDS_ON*1..5]->(dep:Artifact)
+MATCH path = (root:WorkProduct {id: $work_product_id})-[:DEPENDS_ON*1..5]->(dep:WorkProduct)
 RETURN root, nodes(path) AS chain, relationships(path) AS edges
 ```
 
-**Find all artifacts produced by an agent session**:
+**Find all work products produced by an agent session**:
 
 ```cypher
-MATCH (ag:Agent {session_id: $session_id})<-[:PRODUCED_BY]-(a:Artifact)
+MATCH (ag:Agent {session_id: $session_id})<-[:PRODUCED_BY]-(a:WorkProduct)
 RETURN a ORDER BY a.created_at
 ```
 
@@ -1178,11 +1178,11 @@ ORDER BY v.created_at DESC
 LIMIT $limit
 ```
 
-**Evaluate which constraints apply to modified artifacts**:
+**Evaluate which constraints apply to modified work products**:
 
 ```cypher
-MATCH (a:Artifact)
-WHERE a.id IN $modified_artifact_ids
+MATCH (a:WorkProduct)
+WHERE a.id IN $modified_work_product_ids
 MATCH (a)-[:CONSTRAINED_BY]->(c:Constraint)
 RETURN DISTINCT c
 ```
@@ -1190,7 +1190,7 @@ RETURN DISTINCT c
 **Get BOM with components and reference designators**:
 
 ```cypher
-MATCH (bom:Artifact {type: 'bom'})-[r:USES_COMPONENT]->(comp:Component)
+MATCH (bom:WorkProduct {type: 'bom'})-[r:USES_COMPONENT]->(comp:Component)
 RETURN comp.part_number, comp.manufacturer, comp.description,
        r.reference_designator, r.quantity, comp.unit_cost
 ORDER BY r.reference_designator
@@ -1211,12 +1211,12 @@ The Twin schema will evolve across phases. Schema changes follow these rules:
 
 Phase 1 implements the full schema defined in this document. The following node types and edge types are required for the mechanical vertical (MET-8):
 
-- **Nodes**: Artifact (CAD_MODEL, SIMULATION_RESULT), Constraint, Version, Component, Agent
+- **Nodes**: WorkProduct (CAD_MODEL, SIMULATION_RESULT), Constraint, Version, Component, Agent
 - **Edges**: DEPENDS_ON, CONSTRAINED_BY, PRODUCED_BY, VERSIONED_BY, USES_COMPONENT
 
 ### Phase 2 Additions
 
-- Additional ArtifactType values for electronics (SCHEMATIC write support)
+- Additional WorkProductType values for electronics (SCHEMATIC write support)
 - Extended Component specs for electronics parts (voltage rating, current rating, ESR)
 - New edge type: `ROUTED_TO` (net-to-pad routing in PCB)
 

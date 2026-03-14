@@ -5,8 +5,8 @@ Provides conversion in both directions:
   - SysML v2 -> MetaForge: for importing models from MBSE tools
 
 Mapping rules:
-  - Artifact (CAD_MODEL, SCHEMATIC, PCB_LAYOUT, BOM, etc.) -> PartUsage
-  - Artifact (PRD, DOCUMENTATION, TEST_PLAN) -> RequirementUsage
+  - WorkProduct (CAD_MODEL, SCHEMATIC, PCB_LAYOUT, BOM, etc.) -> PartUsage
+  - WorkProduct (PRD, DOCUMENTATION, TEST_PLAN) -> RequirementUsage
   - Constraint -> ConstraintUsage
   - Relationship (EdgeBase) -> ConnectionUsage
   - Component -> PartUsage (with component-specific properties)
@@ -19,17 +19,17 @@ from uuid import UUID
 import structlog
 
 from observability.tracing import get_tracer
-from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase, NodeBase
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import (
-    ArtifactType,
     ConstraintSeverity,
     ConstraintStatus,
     EdgeType,
     NodeType,
+    WorkProductType,
 )
+from twin_core.models.work_product import WorkProduct
 from twin_core.sysml.models import (
     ConnectionUsage,
     ConstraintUsage,
@@ -43,11 +43,11 @@ from twin_core.sysml.models import (
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.sysml.mapper")
 
-# Artifact types that map to RequirementUsage rather than PartUsage
-_REQUIREMENT_ARTIFACT_TYPES: set[ArtifactType] = {
-    ArtifactType.PRD,
-    ArtifactType.DOCUMENTATION,
-    ArtifactType.TEST_PLAN,
+# WorkProduct types that map to RequirementUsage rather than PartUsage
+_REQUIREMENT_WORK_PRODUCT_TYPES: set[WorkProductType] = {
+    WorkProductType.PRD,
+    WorkProductType.DOCUMENTATION,
+    WorkProductType.TEST_PLAN,
 }
 
 # Mapping from EdgeType to ConnectionUsage connection_kind
@@ -81,7 +81,7 @@ class SysMLMapper:
         """Convert a MetaForge graph node to its SysML v2 equivalent.
 
         Dispatches based on node_type:
-          - ARTIFACT -> PartUsage or RequirementUsage (depending on artifact type)
+          - ARTIFACT -> PartUsage or RequirementUsage (depending on work_product type)
           - CONSTRAINT -> ConstraintUsage
           - COMPONENT -> PartUsage
           - Others -> generic SysMLElement
@@ -90,7 +90,7 @@ class SysMLMapper:
             span.set_attribute("node.type", str(node.node_type))
             span.set_attribute("node.id", str(node.id))
 
-            if node.node_type == NodeType.ARTIFACT and isinstance(node, Artifact):
+            if node.node_type == NodeType.WORK_PRODUCT and isinstance(node, WorkProduct):
                 return self._artifact_to_sysml(node)
             elif node.node_type == NodeType.CONSTRAINT and isinstance(node, Constraint):
                 return self._constraint_to_sysml(node)
@@ -182,8 +182,8 @@ class SysMLMapper:
         """Convert a SysML v2 element to a MetaForge graph node.
 
         Dispatches based on element @type:
-          - PartUsage -> Artifact (CAD_MODEL) or Component
-          - RequirementUsage -> Artifact (PRD)
+          - PartUsage -> WorkProduct (CAD_MODEL) or Component
+          - RequirementUsage -> WorkProduct (PRD)
           - ConstraintUsage -> Constraint
           - Others -> raises ValueError
         """
@@ -239,43 +239,43 @@ class SysMLMapper:
     # Private helpers: MetaForge -> SysML
     # ------------------------------------------------------------------
 
-    def _artifact_to_sysml(self, artifact: Artifact) -> SysMLElement:
-        """Map an Artifact to either RequirementUsage or PartUsage."""
-        if artifact.type in _REQUIREMENT_ARTIFACT_TYPES:
+    def _artifact_to_sysml(self, work_product: WorkProduct) -> SysMLElement:
+        """Map an WorkProduct to either RequirementUsage or PartUsage."""
+        if work_product.type in _REQUIREMENT_WORK_PRODUCT_TYPES:
             logger.debug(
                 "mapping_artifact_to_requirement",
-                artifact_type=str(artifact.type),
-                artifact_id=str(artifact.id),
+                work_product_type=str(work_product.type),
+                work_product_id=str(work_product.id),
             )
             return RequirementUsage(
                 **{
-                    "@id": artifact.id,
+                    "@id": work_product.id,
                     "@type": SysMLElementType.REQUIREMENT_USAGE,
                 },
-                name=artifact.name,
-                requirement_text=artifact.metadata.get("requirement_text", ""),
-                requirement_id=str(artifact.id),
-                source=artifact.created_by,
+                name=work_product.name,
+                requirement_text=work_product.metadata.get("requirement_text", ""),
+                requirement_id=str(work_product.id),
+                source=work_product.created_by,
             )
         else:
             logger.debug(
                 "mapping_artifact_to_part",
-                artifact_type=str(artifact.type),
-                artifact_id=str(artifact.id),
+                work_product_type=str(work_product.type),
+                work_product_id=str(work_product.id),
             )
             return PartUsage(
                 **{
-                    "@id": artifact.id,
+                    "@id": work_product.id,
                     "@type": SysMLElementType.PART_USAGE,
                 },
-                name=artifact.name,
-                domain=artifact.domain,
-                file_path=artifact.file_path,
+                name=work_product.name,
+                domain=work_product.domain,
+                file_path=work_product.file_path,
                 properties={
-                    "artifact_type": str(artifact.type),
-                    "format": artifact.format,
-                    "content_hash": artifact.content_hash,
-                    **artifact.metadata,
+                    "work_product_type": str(work_product.type),
+                    "format": work_product.format,
+                    "content_hash": work_product.content_hash,
+                    **work_product.metadata,
                 },
             )
 
@@ -329,7 +329,7 @@ class SysMLMapper:
     # ------------------------------------------------------------------
 
     def _part_usage_to_node(self, part: PartUsage) -> NodeBase:
-        """Map a PartUsage to either an Artifact or Component."""
+        """Map a PartUsage to either an WorkProduct or Component."""
         is_component = part.properties.get("is_component", False)
 
         if is_component:
@@ -363,22 +363,24 @@ class SysMLMapper:
                 specs=specs,
             )
         else:
-            artifact_type_str = part.properties.get("artifact_type", str(ArtifactType.CAD_MODEL))
-            # Parse the ArtifactType, default to CAD_MODEL
+            work_product_type_str = part.properties.get(
+                "work_product_type", str(WorkProductType.CAD_MODEL)
+            )
+            # Parse the WorkProductType, default to CAD_MODEL
             try:
-                artifact_type = ArtifactType(artifact_type_str)
+                work_product_type = WorkProductType(work_product_type_str)
             except ValueError:
-                artifact_type = ArtifactType.CAD_MODEL
+                work_product_type = WorkProductType.CAD_MODEL
 
             logger.debug(
                 "mapping_part_to_artifact",
                 part_name=part.name,
-                artifact_type=str(artifact_type),
+                work_product_type=str(work_product_type),
             )
-            return Artifact(
+            return WorkProduct(
                 id=part.element_id,
                 name=part.name,
-                type=artifact_type,
+                type=work_product_type,
                 domain=part.domain or "general",
                 file_path=part.file_path or "",
                 content_hash=part.properties.get("content_hash", ""),
@@ -387,17 +389,17 @@ class SysMLMapper:
                 metadata={
                     k: v
                     for k, v in part.properties.items()
-                    if k not in {"artifact_type", "format", "content_hash"}
+                    if k not in {"work_product_type", "format", "content_hash"}
                 },
             )
 
-    def _requirement_usage_to_node(self, req: RequirementUsage) -> Artifact:
-        """Map a RequirementUsage to an Artifact of type PRD."""
+    def _requirement_usage_to_node(self, req: RequirementUsage) -> WorkProduct:
+        """Map a RequirementUsage to an WorkProduct of type PRD."""
         logger.debug("mapping_requirement_to_artifact", req_name=req.name)
-        return Artifact(
+        return WorkProduct(
             id=req.element_id,
             name=req.name or "Imported Requirement",
-            type=ArtifactType.PRD,
+            type=WorkProductType.PRD,
             domain="requirements",
             file_path="",
             content_hash="",

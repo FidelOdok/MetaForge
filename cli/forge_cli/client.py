@@ -53,14 +53,14 @@ class ForgeClient:
     def run_skill(
         self,
         skill_name: str,
-        artifact_id: str,
+        work_product_id: str,
         parameters: dict[str, Any] | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
         """Invoke a skill via ``POST /api/v1/assistant/request``."""
         payload: dict[str, Any] = {
             "action": skill_name,
-            "target_id": artifact_id,
+            "target_id": work_product_id,
             "parameters": parameters or {},
         }
         if session_id:
@@ -99,14 +99,14 @@ class ForgeClient:
     def twin_list(
         self,
         domain: str | None = None,
-        artifact_type: str | None = None,
+        work_product_type: str | None = None,
     ) -> dict[str, Any]:
-        """List Digital Twin artifacts via ``GET /api/v1/twin/nodes``."""
+        """List Digital Twin work_products via ``GET /api/v1/twin/nodes``."""
         params: dict[str, str] = {}
         if domain:
             params["domain"] = domain
-        if artifact_type:
-            params["type"] = artifact_type
+        if work_product_type:
+            params["type"] = work_product_type
         with self._client() as client:
             resp = client.get(self._url("/twin/nodes"), params=params)
             resp.raise_for_status()

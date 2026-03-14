@@ -26,8 +26,8 @@ from orchestrator.workflow_dag import (
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Realistic tool mock data
@@ -95,10 +95,10 @@ def _make_mcp_bridge() -> InMemoryMcpBridge:
     return mcp
 
 
-def _make_artifact(twin_api: InMemoryTwinAPI) -> Artifact:
-    return Artifact(
+def _make_work_product(twin_api: InMemoryTwinAPI) -> WorkProduct:
+    return WorkProduct(
         name="drone-fc-assembly",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="models/drone_fc_assembly.step",
         content_hash="sha256:orch1234",
@@ -120,7 +120,7 @@ class TestSingleStepWorkflowE2E:
         """A single validate_stress step runs and completes."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_artifact(twin))
+        work_product = await twin.create_work_product(_make_work_product(twin))
 
         engine = InMemoryWorkflowEngine.create()
         event_bus = create_default_bus(engine)
@@ -135,7 +135,7 @@ class TestSingleStepWorkflowE2E:
                     agent_code="MECH",
                     task_type="validate_stress",
                     parameters={
-                        "artifact_id": str(artifact.id),
+                        "work_product_id": str(work_product.id),
                         "mesh_file_path": "models/bracket.inp",
                         "load_case": "hover_3g",
                         "constraints": [
@@ -203,7 +203,7 @@ class TestMultiStepWorkflowE2E:
         """Two independent steps (stress + erc) run in parallel."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_artifact(twin))
+        work_product = await twin.create_work_product(_make_work_product(twin))
 
         engine = InMemoryWorkflowEngine.create()
         event_bus = create_default_bus(engine)
@@ -218,7 +218,7 @@ class TestMultiStepWorkflowE2E:
                     agent_code="MECH",
                     task_type="validate_stress",
                     parameters={
-                        "artifact_id": str(artifact.id),
+                        "work_product_id": str(work_product.id),
                         "mesh_file_path": "models/bracket.inp",
                         "load_case": "hover_3g",
                         "constraints": [
@@ -235,7 +235,7 @@ class TestMultiStepWorkflowE2E:
                     agent_code="EE",
                     task_type="run_erc",
                     parameters={
-                        "artifact_id": str(artifact.id),
+                        "work_product_id": str(work_product.id),
                         "schematic_file": "eda/kicad/main.kicad_sch",
                     },
                 ),
@@ -300,7 +300,7 @@ class TestDependencyChainE2E:
         """ERC must complete before DRC starts (depends_on)."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_artifact(twin))
+        work_product = await twin.create_work_product(_make_work_product(twin))
 
         engine = InMemoryWorkflowEngine.create()
         event_bus = create_default_bus(engine)
@@ -315,7 +315,7 @@ class TestDependencyChainE2E:
                     agent_code="EE",
                     task_type="run_erc",
                     parameters={
-                        "artifact_id": str(artifact.id),
+                        "work_product_id": str(work_product.id),
                         "schematic_file": "eda/kicad/main.kicad_sch",
                     },
                 ),
@@ -325,7 +325,7 @@ class TestDependencyChainE2E:
                     task_type="run_drc",
                     depends_on=["erc"],
                     parameters={
-                        "artifact_id": str(artifact.id),
+                        "work_product_id": str(work_product.id),
                         "pcb_file": "eda/kicad/main.kicad_pcb",
                     },
                 ),
@@ -430,7 +430,7 @@ class TestEventBusIntegrationE2E:
         """A successful step publishes STARTED + COMPLETED events."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_artifact(twin))
+        work_product = await twin.create_work_product(_make_work_product(twin))
 
         engine = InMemoryWorkflowEngine.create()
         event_bus = create_default_bus(engine)
@@ -445,7 +445,7 @@ class TestEventBusIntegrationE2E:
                     agent_code="EE",
                     task_type="run_erc",
                     parameters={
-                        "artifact_id": str(artifact.id),
+                        "work_product_id": str(work_product.id),
                         "schematic_file": "eda/kicad/main.kicad_sch",
                     },
                 ),

@@ -26,12 +26,12 @@ class TestChatContextAssembler:
         self.assembler = ChatContextAssembler()
 
     def test_session_scope(self) -> None:
-        """Session scope should return traces, artifacts, recent_mutations."""
+        """Session scope should return traces, work_products, recent_mutations."""
         ctx = self.assembler.assemble("session", "sess-001")
         assert ctx["scope_kind"] == "session"
         assert ctx["session_id"] == "sess-001"
         assert "traces" in ctx
-        assert "artifacts" in ctx
+        assert "work_products" in ctx
         assert "recent_mutations" in ctx
 
     def test_approval_scope(self) -> None:

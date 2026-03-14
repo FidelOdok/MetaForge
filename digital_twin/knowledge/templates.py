@@ -55,14 +55,14 @@ def render_session_summary(context: dict[str, object]) -> str:
         - ``session_id``: Identifier for the session
         - ``summary``: High-level summary of the session
         - ``decisions``: Decisions made during the session (optional)
-        - ``artifacts_modified``: List of modified artifacts (optional)
+        - ``work_products_modified``: List of modified work_products (optional)
         - ``next_steps``: Planned next steps (optional)
     """
     with tracer.start_as_current_span("template.session_summary") as span:
         session_id = context.get("session_id", "unknown")
         summary = context.get("summary", "")
         decisions = context.get("decisions", "")
-        artifacts = context.get("artifacts_modified", "")
+        work_products = context.get("work_products_modified", "")
         next_steps = context.get("next_steps", "")
 
         parts = [f"Session Summary (ID: {session_id})"]
@@ -70,8 +70,8 @@ def render_session_summary(context: dict[str, object]) -> str:
             parts.append(f"Summary: {summary}")
         if decisions:
             parts.append(f"Decisions: {decisions}")
-        if artifacts:
-            parts.append(f"Artifacts Modified: {artifacts}")
+        if work_products:
+            parts.append(f"Artifacts Modified: {work_products}")
         if next_steps:
             parts.append(f"Next Steps: {next_steps}")
 

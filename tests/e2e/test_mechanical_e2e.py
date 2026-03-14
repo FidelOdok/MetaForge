@@ -25,8 +25,8 @@ from skill_registry.mcp_client_bridge import McpClientBridge
 from skill_registry.skill_base import SkillContext
 from tool_registry.tools.calculix.adapter import CalculixServer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # Realistic FEA results for a drone motor mount bracket
 BRACKET_FEA_RESULT = {
@@ -92,11 +92,11 @@ async def _setup_mcp_stack() -> tuple[McpClient, McpClientBridge, CalculixServer
     return client, bridge, server
 
 
-def _make_bracket_artifact() -> Artifact:
-    """Create a realistic drone motor mount bracket artifact."""
-    return Artifact(
+def _make_bracket_artifact() -> WorkProduct:
+    """Create a realistic drone motor mount bracket work_product."""
+    return WorkProduct(
         name="motor-mount-bracket",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="models/motor_mount_bracket.step",
         content_hash="sha256:a1b2c3d4e5f6",
@@ -124,9 +124,9 @@ class TestMechanicalAgentE2E:
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_mcp_stack()
 
-        # Add artifact to the Twin
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
+        # Add work_product to the Twin
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
 
         agent = MechanicalAgent(twin=twin, mcp=bridge)
 
@@ -136,7 +136,7 @@ class TestMechanicalAgentE2E:
             "bridge": bridge,
             "server": server,
             "agent": agent,
-            "artifact": created,
+            "work_product": created,
         }
 
     async def test_validate_stress_passes(self, stack):
@@ -145,7 +145,7 @@ class TestMechanicalAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="validate_stress",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mesh_file_path": "models/motor_mount_bracket.inp",
                     "load_case": "hover_3g",
@@ -177,7 +177,7 @@ class TestMechanicalAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="validate_stress",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mesh_file_path": "models/motor_mount_bracket.inp",
                     "load_case": "crash_10g",
@@ -201,12 +201,12 @@ class TestMechanicalAgentE2E:
         assert fillet[0]["passed"] is False
 
     async def test_artifact_not_found(self, stack):
-        """Agent returns error when artifact doesn't exist in Twin."""
+        """Agent returns error when work_product doesn't exist in Twin."""
         s = stack
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="validate_stress",
-                artifact_id=uuid4(),  # Non-existent
+                work_product_id=uuid4(),  # Non-existent
                 parameters={"mesh_file_path": "x.inp", "load_case": "lc1"},
             )
         )
@@ -220,7 +220,7 @@ class TestMechanicalAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="full_validation",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mesh_file_path": "models/motor_mount_bracket.inp",
                     "load_case": "hover_3g",
@@ -244,7 +244,7 @@ class TestMechanicalAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="analyze_vibration",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
             )
         )
 
@@ -266,8 +266,8 @@ class TestValidateStressSkillE2E:
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_mcp_stack()
 
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
 
         context = SkillContext(
             twin=twin,
@@ -282,7 +282,7 @@ class TestValidateStressSkillE2E:
             "twin": twin,
             "server": server,
             "handler": handler,
-            "artifact": created,
+            "work_product": created,
         }
 
     async def test_skill_execute_pass(self, skill_stack):
@@ -290,7 +290,7 @@ class TestValidateStressSkillE2E:
         s = skill_stack
         output = await s["handler"].execute(
             ValidateStressInput(
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 mesh_file_path="models/motor_mount_bracket.inp",
                 load_case="hover_3g",
                 constraints=[
@@ -304,7 +304,7 @@ class TestValidateStressSkillE2E:
         )
 
         assert output.overall_passed is True
-        assert output.artifact_id == s["artifact"].id
+        assert output.work_product_id == s["work_product"].id
         assert output.max_stress_mpa == 120.7  # fillet_region
         assert output.critical_region == "fillet_region"
         assert output.solver_time_seconds == 14.2
@@ -321,7 +321,7 @@ class TestValidateStressSkillE2E:
         s = skill_stack
         output = await s["handler"].execute(
             ValidateStressInput(
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 mesh_file_path="models/motor_mount_bracket.inp",
                 load_case="crash_10g",
                 constraints=[
@@ -344,7 +344,7 @@ class TestValidateStressSkillE2E:
         s = skill_stack
         skill_result = await s["handler"].run(
             ValidateStressInput(
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 mesh_file_path="models/motor_mount_bracket.inp",
                 load_case="hover_3g",
                 constraints=[
@@ -363,11 +363,11 @@ class TestValidateStressSkillE2E:
         assert skill_result.errors == []
 
     async def test_skill_precondition_missing_artifact(self, skill_stack):
-        """Skill fails preconditions when artifact not in Twin."""
+        """Skill fails preconditions when work_product not in Twin."""
         s = skill_stack
         skill_result = await s["handler"].run(
             ValidateStressInput(
-                artifact_id=uuid4(),  # Not in Twin
+                work_product_id=uuid4(),  # Not in Twin
                 mesh_file_path="models/missing.inp",
                 load_case="lc1",
                 constraints=[StressConstraint(max_von_mises_mpa=276.0, material="Al6061-T6")],
@@ -452,21 +452,21 @@ class TestTwinIntegrationE2E:
     """Verify Digital Twin operations work within the E2E pipeline."""
 
     async def test_artifact_lifecycle_in_pipeline(self):
-        """Create artifact, run analysis, update with results."""
+        """Create work_product, run analysis, update with results."""
         twin = InMemoryTwinAPI.create()
         _client, bridge, _server = await _setup_mcp_stack()
 
-        # 1. Create artifact in Twin
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
-        assert await twin.get_artifact(created.id) is not None
+        # 1. Create work_product in Twin
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
+        assert await twin.get_work_product(created.id) is not None
 
         # 2. Run agent analysis
         agent = MechanicalAgent(twin=twin, mcp=bridge)
         result = await agent.run_task(
             TaskRequest(
                 task_type="validate_stress",
-                artifact_id=created.id,
+                work_product_id=created.id,
                 parameters={
                     "mesh_file_path": "models/motor_mount_bracket.inp",
                     "load_case": "hover_3g",
@@ -482,8 +482,8 @@ class TestTwinIntegrationE2E:
         )
         assert result.success is True
 
-        # 3. Update artifact with analysis results
-        updated = await twin.update_artifact(
+        # 3. Update work_product with analysis results
+        updated = await twin.update_work_product(
             created.id,
             {
                 "metadata": {
@@ -504,9 +504,9 @@ class TestTwinIntegrationE2E:
         twin = InMemoryTwinAPI.create()
         _client, bridge, _server = await _setup_mcp_stack()
 
-        # Create artifact on main
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
+        # Create work_product on main
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
 
         # Initialize main branch and commit, then create design branch
         await twin.create_branch("main")
@@ -518,7 +518,7 @@ class TestTwinIntegrationE2E:
         result = await agent.run_task(
             TaskRequest(
                 task_type="validate_stress",
-                artifact_id=created.id,
+                work_product_id=created.id,
                 parameters={
                     "mesh_file_path": "models/motor_mount_bracket.inp",
                     "load_case": "hover_3g",
@@ -548,10 +548,10 @@ class TestCheckTolerancesE2E:
         """Set up Twin + MCP + Agent for tolerance checking."""
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_mcp_stack()
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
         agent = MechanicalAgent(twin=twin, mcp=bridge)
-        return {"twin": twin, "agent": agent, "artifact": created}
+        return {"twin": twin, "agent": agent, "work_product": created}
 
     async def test_tolerances_all_pass(self, stack):
         """All tolerances pass CNC milling capabilities (Cp >= 1.33)."""
@@ -559,7 +559,7 @@ class TestCheckTolerancesE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="check_tolerances",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "manufacturing_process": {
                         "process_type": "cnc_milling",
@@ -602,7 +602,7 @@ class TestCheckTolerancesE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="check_tolerances",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "manufacturing_process": {
                         "process_type": "3d_printing_fdm",
@@ -631,7 +631,7 @@ class TestCheckTolerancesE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="check_tolerances",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "manufacturing_process": {
                         "process_type": "cnc_milling",
@@ -661,7 +661,7 @@ class TestCheckTolerancesE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="check_tolerances",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "tolerances": [
                         {
@@ -685,7 +685,7 @@ class TestCheckTolerancesE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="check_tolerances",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "manufacturing_process": {
                         "process_type": "cnc_milling",
@@ -763,10 +763,10 @@ class TestGenerateMeshE2E:
         )
         mcp.register_tool_response("freecad.generate_mesh", FREECAD_MESH_RESULT)
 
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
         agent = MechanicalAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "mcp": mcp, "agent": agent, "artifact": created}
+        return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": created}
 
     async def test_generate_mesh_good_quality(self, stack):
         """Mesh generation succeeds with acceptable quality metrics."""
@@ -774,7 +774,7 @@ class TestGenerateMeshE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_mesh",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "cad_file": "models/motor_mount_bracket.step",
                     "element_size": 0.5,
@@ -807,13 +807,13 @@ class TestGenerateMeshE2E:
         )
         mcp.register_tool_response("freecad.generate_mesh", FREECAD_MESH_BAD_QUALITY)
 
-        artifact = await twin.create_artifact(_make_bracket_artifact())
+        work_product = await twin.create_work_product(_make_bracket_artifact())
         agent = MechanicalAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="generate_mesh",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "cad_file": "models/motor_mount_bracket.step",
                     "min_angle_threshold": 15.0,
@@ -833,7 +833,7 @@ class TestGenerateMeshE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_mesh",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={},
             )
         )
@@ -847,7 +847,7 @@ class TestGenerateMeshE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_mesh",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "cad_file": "models/bracket.dwg",
                 },
@@ -862,7 +862,7 @@ class TestGenerateMeshE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_mesh",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "cad_file": "models/motor_mount_bracket.stp",
                     "algorithm": "gmsh",
@@ -913,10 +913,10 @@ class TestGenerateCadE2E:
         )
         mcp.register_tool_response("freecad.create_parametric", FREECAD_CAD_RESULT)
 
-        artifact = _make_bracket_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_bracket_artifact()
+        created = await twin.create_work_product(work_product)
         agent = MechanicalAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "mcp": mcp, "agent": agent, "artifact": created}
+        return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": created}
 
     async def test_generate_bracket(self, stack):
         """Happy path: generate a bracket with full dimensions."""
@@ -924,7 +924,7 @@ class TestGenerateCadE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_cad",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "shape_type": "bracket",
                     "dimensions": {"width": 50.0, "height": 30.0, "thickness": 5.0},
@@ -952,7 +952,7 @@ class TestGenerateCadE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_cad",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "shape_type": "plate",
                     "dimensions": {"width": 100.0, "height": 80.0, "thickness": 2.0},
@@ -969,7 +969,7 @@ class TestGenerateCadE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_cad",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "dimensions": {"width": 50.0},
                 },
@@ -985,7 +985,7 @@ class TestGenerateCadE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_cad",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "shape_type": "bracket",
                 },
@@ -1001,7 +1001,7 @@ class TestGenerateCadE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="generate_cad",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "shape_type": "gearbox",
                     "dimensions": {"width": 50.0},

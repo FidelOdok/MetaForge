@@ -10,60 +10,59 @@ import type {
   ChatMessage,
   ChatThread,
   ChatChannel,
-  ChatActor,
 } from '../../types/chat';
 
 // ---------------------------------------------------------------------------
 // Reusable actor identities
 // ---------------------------------------------------------------------------
 
-export const actors: Record<string, ChatActor> = {
+export const actors = {
   userAlex: {
     id: 'user-1',
-    kind: 'user',
+    kind: 'user' as const,
     displayName: 'Alex Chen',
   },
   userMaria: {
     id: 'user-2',
-    kind: 'user',
+    kind: 'user' as const,
     displayName: 'Maria Torres',
   },
   agentME: {
     id: 'agent-me',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Mechanical Agent',
     agentCode: 'ME',
   },
   agentEE: {
     id: 'agent-ee',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Electronics Agent',
     agentCode: 'EE',
   },
   agentFW: {
     id: 'agent-fw',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Firmware Agent',
     agentCode: 'FW',
   },
   agentSE: {
     id: 'agent-se',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Systems Agent',
     agentCode: 'SE',
   },
   agentSIM: {
     id: 'agent-sim',
-    kind: 'agent',
+    kind: 'agent' as const,
     displayName: 'Simulation Agent',
     agentCode: 'SIM',
   },
   system: {
     id: 'system',
-    kind: 'system',
+    kind: 'system' as const,
     displayName: 'MetaForge',
   },
-};
+} satisfies Record<string, import('../../types/chat').ChatActor>;
 
 // ---------------------------------------------------------------------------
 // Channels
@@ -258,8 +257,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-01T10:32:00Z',
       updatedAt: '2026-03-01T10:32:00Z',
       graphRef: {
-        nodeId: 'artifact-pcb-001',
-        nodeType: 'artifact',
+        nodeId: 'work_product-pcb-001',
+        nodeType: 'work_product',
         label: 'main-pcb.kicad_pcb',
       },
     },
@@ -298,8 +297,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-01T10:36:00Z',
       updatedAt: '2026-03-01T10:36:00Z',
       graphRef: {
-        nodeId: 'artifact-pcb-001',
-        nodeType: 'artifact',
+        nodeId: 'work_product-pcb-001',
+        nodeType: 'work_product',
         label: 'main-pcb.kicad_pcb',
       },
     },
@@ -340,8 +339,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-01T14:05:00Z',
       updatedAt: '2026-03-01T14:05:00Z',
       graphRef: {
-        nodeId: 'artifact-bracket-001',
-        nodeType: 'artifact',
+        nodeId: 'work_product-bracket-001',
+        nodeType: 'work_product',
         label: 'motor-bracket.step',
       },
     },
@@ -371,8 +370,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-01T15:20:00Z',
       updatedAt: '2026-03-01T15:20:00Z',
       graphRef: {
-        nodeId: 'artifact-bracket-001',
-        nodeType: 'artifact',
+        nodeId: 'work_product-bracket-001',
+        nodeType: 'work_product',
         label: 'motor-bracket.step',
       },
     },
@@ -580,8 +579,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-02T13:10:00Z',
       updatedAt: '2026-03-02T13:10:00Z',
       graphRef: {
-        nodeId: 'artifact-pinmap-003',
-        nodeType: 'artifact',
+        nodeId: 'work_product-pinmap-003',
+        nodeType: 'work_product',
         label: 'pinmap.json',
       },
     },
@@ -598,8 +597,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-02T13:15:00Z',
       updatedAt: '2026-03-02T13:15:00Z',
       graphRef: {
-        nodeId: 'artifact-sch-001',
-        nodeType: 'artifact',
+        nodeId: 'work_product-sch-001',
+        nodeType: 'work_product',
         label: 'drone-fc.kicad_sch',
       },
     },
@@ -711,8 +710,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-03T10:05:00Z',
       updatedAt: '2026-03-03T10:05:00Z',
       graphRef: {
-        nodeId: 'artifact-pcb-002',
-        nodeType: 'artifact',
+        nodeId: 'work_product-pcb-002',
+        nodeType: 'work_product',
         label: 'power-board-v2.kicad_pcb',
       },
     },
@@ -739,8 +738,8 @@ export const mockMessages: Record<string, ChatMessage[]> = {
       createdAt: '2026-03-03T11:30:00Z',
       updatedAt: '2026-03-03T11:30:00Z',
       graphRef: {
-        nodeId: 'artifact-pcb-002',
-        nodeType: 'artifact',
+        nodeId: 'work_product-pcb-002',
+        nodeType: 'work_product',
         label: 'power-board-v2.kicad_pcb',
       },
     },

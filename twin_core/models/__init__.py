@@ -1,7 +1,6 @@
 """Digital Twin graph models — all node types, edge types, and enumerations."""
 
 from twin_core.models.agent import AgentNode
-from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase, NodeBase
 from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
@@ -9,12 +8,12 @@ from twin_core.models.constraint import Constraint
 from twin_core.models.design_element import DesignElement
 from twin_core.models.device_instance import DeviceInstance
 from twin_core.models.enums import (
-    ArtifactType,
     ComponentLifecycle,
     ConstraintSeverity,
     ConstraintStatus,
     EdgeType,
     NodeType,
+    WorkProductType,
 )
 from twin_core.models.relationship import (
     ConstrainedByEdge,
@@ -23,12 +22,13 @@ from twin_core.models.relationship import (
     UsesComponentEdge,
 )
 from twin_core.models.twin_model import TwinModel
-from twin_core.models.version import ArtifactChange, Version, VersionDiff
+from twin_core.models.version import Version, VersionDiff, WorkProductChange
+from twin_core.models.work_product import WorkProduct
 
 __all__ = [
     # Enums
     "NodeType",
-    "ArtifactType",
+    "WorkProductType",
     "ConstraintSeverity",
     "ConstraintStatus",
     "ComponentLifecycle",
@@ -37,7 +37,7 @@ __all__ = [
     "NodeBase",
     "EdgeBase",
     # Nodes
-    "Artifact",
+    "WorkProduct",
     "Constraint",
     "Version",
     "Component",
@@ -52,6 +52,6 @@ __all__ = [
     "ConstrainedByEdge",
     # Responses
     "SubGraph",
-    "ArtifactChange",
+    "WorkProductChange",
     "VersionDiff",
 ]

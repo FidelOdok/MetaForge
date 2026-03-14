@@ -9,7 +9,7 @@ from twin_core.models.enums import EdgeType
 
 
 class DependsOnEdge(EdgeBase):
-    """Artifact A requires Artifact B."""
+    """WorkProduct A requires WorkProduct B."""
 
     edge_type: EdgeType = EdgeType.DEPENDS_ON
     dependency_type: str = "hard"  # "hard" or "soft"
@@ -17,7 +17,7 @@ class DependsOnEdge(EdgeBase):
 
 
 class UsesComponentEdge(EdgeBase):
-    """Artifact references a physical component."""
+    """WorkProduct references a physical component."""
 
     edge_type: EdgeType = EdgeType.USES_COMPONENT
     reference_designator: str = ""  # e.g. "R1", "U3"
@@ -25,7 +25,7 @@ class UsesComponentEdge(EdgeBase):
 
 
 class ConstrainedByEdge(EdgeBase):
-    """Constraint applies to an artifact."""
+    """Constraint applies to an work_product."""
 
     edge_type: EdgeType = EdgeType.CONSTRAINED_BY
     scope: str = "local"  # "local" or "global"

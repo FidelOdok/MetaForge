@@ -49,9 +49,9 @@ class TestEventType:
 
     def test_twin_event_types_exist(self) -> None:
         """Digital Twin event types must be present."""
-        assert EventType.ARTIFACT_CREATED == "twin.artifact.created"
-        assert EventType.ARTIFACT_UPDATED == "twin.artifact.updated"
-        assert EventType.ARTIFACT_DELETED == "twin.artifact.deleted"
+        assert EventType.WORK_PRODUCT_CREATED == "twin.work_product.created"
+        assert EventType.WORK_PRODUCT_UPDATED == "twin.work_product.updated"
+        assert EventType.WORK_PRODUCT_DELETED == "twin.work_product.deleted"
         assert EventType.CONSTRAINT_VIOLATED == "twin.constraint.violated"
         assert EventType.BRANCH_CREATED == "twin.branch.created"
         assert EventType.BRANCH_MERGED == "twin.branch.merged"
@@ -87,11 +87,11 @@ class TestEvent:
         """Base Event model should accept all required fields."""
         event = Event(
             id=str(uuid4()),
-            type=EventType.ARTIFACT_CREATED,
+            type=EventType.WORK_PRODUCT_CREATED,
             timestamp="2026-03-04T12:00:00Z",
             source="twin-core",
         )
-        assert event.type == EventType.ARTIFACT_CREATED
+        assert event.type == EventType.WORK_PRODUCT_CREATED
         assert event.data == {}
         assert event.metadata == {}
 

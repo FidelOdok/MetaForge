@@ -70,7 +70,7 @@ class TaskRequest(BaseModel):
     """A request for the simulation agent to perform a task."""
 
     task_type: str  # "run_spice", "run_fea", "run_cfd", "full_simulation"
-    artifact_id: UUID
+    work_product_id: UUID
     parameters: dict[str, Any] = {}
     branch: str = "main"
 
@@ -79,7 +79,7 @@ class TaskResult(BaseModel):
     """Result of a simulation agent task."""
 
     task_type: str
-    artifact_id: UUID
+    work_product_id: UUID
     success: bool
     skill_results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -165,7 +165,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = RunFeaInput(
-            artifact_id=str(UUID("00000000-0000-0000-0000-000000000000")),
+            work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             mesh_file=mesh_file,
             load_cases=load_cases or [],
             analysis_type=analysis_type,
@@ -213,7 +213,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = RunSpiceInput(
-            artifact_id=str(UUID("00000000-0000-0000-0000-000000000000")),
+            work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             netlist_path=netlist_path,
             analysis_type=analysis_type,
             params=params or {},
@@ -262,7 +262,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = RunCfdInput(
-            artifact_id=str(UUID("00000000-0000-0000-0000-000000000000")),
+            work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             geometry_file=geometry_file,
             fluid_properties=fluid_properties or {},
             boundary_conditions=boundary_conditions or {},
@@ -313,7 +313,7 @@ class SimulationAgent:
         agent = SimulationAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(TaskRequest(
             task_type="run_spice",
-            artifact_id=artifact.id,
+            work_product_id=work_product.id,
             parameters={"netlist_path": "sim/power_supply.cir", ...},
         ))
     """
@@ -345,7 +345,7 @@ class SimulationAgent:
             self.logger.info(
                 "Running task",
                 task_type=request.task_type,
-                artifact_id=str(request.artifact_id),
+                work_product_id=str(request.work_product_id),
             )
 
             # Try PydanticAI path if LLM is available
@@ -371,14 +371,18 @@ class SimulationAgent:
         if agent is None:
             raise RuntimeError("PydanticAI agent could not be created")
 
-        # Verify artifact exists first
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists first
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         deps = AgentDependencies(
@@ -404,7 +408,7 @@ class SimulationAgent:
 
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=simulation_result.overall_passed,
             skill_results=simulation_result.tool_calls
             if simulation_result.tool_calls
@@ -416,7 +420,9 @@ class SimulationAgent:
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [f"Perform a '{request.task_type}' simulation on artifact {request.artifact_id}."]
+        parts = [
+            f"Perform a '{request.task_type}' simulation on work_product {request.work_product_id}."
+        ]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -428,7 +434,7 @@ class SimulationAgent:
         if request.task_type not in self.SUPPORTED_TASKS:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     f"Unsupported task type: {request.task_type}. "
@@ -436,14 +442,18 @@ class SimulationAgent:
                 ],
             )
 
-        # Verify artifact exists
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         # Route to handler
@@ -468,7 +478,7 @@ class SimulationAgent:
         if not netlist_path:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: netlist_path"],
             )
@@ -477,7 +487,7 @@ class SimulationAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = RunSpiceInput(
-            artifact_id=str(request.artifact_id),
+            work_product_id=str(request.work_product_id),
             netlist_path=netlist_path,
             analysis_type=request.parameters.get("analysis_type", "dc"),
             params=request.parameters.get("params", {}),
@@ -489,7 +499,7 @@ class SimulationAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -497,7 +507,7 @@ class SimulationAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=output.convergence,
             skill_results=[
                 {
@@ -517,7 +527,7 @@ class SimulationAgent:
         if not mesh_file:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: mesh_file"],
             )
@@ -526,7 +536,7 @@ class SimulationAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = RunFeaInput(
-            artifact_id=str(request.artifact_id),
+            work_product_id=str(request.work_product_id),
             mesh_file=mesh_file,
             load_cases=request.parameters.get("load_cases", []),
             analysis_type=request.parameters.get("analysis_type", "static"),
@@ -539,7 +549,7 @@ class SimulationAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -548,7 +558,7 @@ class SimulationAgent:
         passed = output.safety_factor >= 1.0
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=passed,
             skill_results=[
                 {
@@ -570,7 +580,7 @@ class SimulationAgent:
         if not geometry_file:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: geometry_file"],
             )
@@ -579,7 +589,7 @@ class SimulationAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = RunCfdInput(
-            artifact_id=str(request.artifact_id),
+            work_product_id=str(request.work_product_id),
             geometry_file=geometry_file,
             fluid_properties=request.parameters.get("fluid_properties", {}),
             boundary_conditions=request.parameters.get("boundary_conditions", {}),
@@ -592,7 +602,7 @@ class SimulationAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -601,7 +611,7 @@ class SimulationAgent:
         converged = output.convergence_residual < 1e-3
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=converged,
             skill_results=[
                 {
@@ -660,7 +670,7 @@ class SimulationAgent:
         if sims_run == 0:
             return TaskResult(
                 task_type="full_simulation",
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     "No simulations could be run. "
@@ -670,7 +680,7 @@ class SimulationAgent:
 
         return TaskResult(
             task_type="full_simulation",
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=overall_success,
             skill_results=all_results,
             errors=all_errors,

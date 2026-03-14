@@ -89,7 +89,7 @@ class MechanicalAgentResult(BaseModel):
         default="",
         description="Region with the highest stress",
     )
-    artifacts: list[dict[str, Any]] = Field(
+    work_products: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Artifacts produced or modified",
     )
@@ -253,7 +253,7 @@ def create_mechanical_agent(
             )
 
             skill_input = GenerateMeshInput(
-                artifact_id=UUID(int=0),
+                work_product_id=UUID(int=0),
                 cad_file=cad_file,
                 element_size=element_size,
                 algorithm=algorithm,
@@ -307,7 +307,7 @@ def create_mechanical_agent(
             process = ManufacturingProcess.model_validate(manufacturing_process)
 
             skill_input = CheckToleranceInput(
-                artifact_id=UUID(int=0),
+                work_product_id=UUID(int=0),
                 tolerances=tol_specs,
                 manufacturing_process=process,
                 material=material,
@@ -359,7 +359,7 @@ def create_mechanical_agent(
             )
 
             skill_input = GenerateCadInput(
-                artifact_id=UUID(int=0),
+                work_product_id=UUID(int=0),
                 shape_type=shape_type,
                 dimensions=dimensions,
                 material=material,
@@ -426,7 +426,7 @@ async def run_agent(
             "overall_passed": data.overall_passed,
             "max_stress_mpa": data.max_stress_mpa,
             "critical_region": data.critical_region,
-            "artifacts": data.artifacts,
+            "work_products": data.work_products,
             "analysis": data.analysis,
             "recommendations": data.recommendations,
             "tool_calls": data.tool_calls,

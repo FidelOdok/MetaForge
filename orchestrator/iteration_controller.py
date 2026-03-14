@@ -100,7 +100,7 @@ class IterationController:
         agent: Any,  # AgentProtocol
         agent_code: str,
         task_type: str,
-        artifact_id: str,
+        work_product_id: str,
         parameters: dict[str, Any],
         source_branch: str = "main",
     ) -> IterationResult:
@@ -165,10 +165,14 @@ class IterationController:
 
                         from domain_agents.mechanical.agent import TaskRequest
 
-                        aid = _UUID(artifact_id) if isinstance(artifact_id, str) else artifact_id
+                        aid = (
+                            _UUID(work_product_id)
+                            if isinstance(work_product_id, str)
+                            else work_product_id
+                        )
                         request = TaskRequest(
                             task_type=task_type,
-                            artifact_id=aid,
+                            work_product_id=aid,
                             parameters=current_params,
                             branch=branch,
                         )

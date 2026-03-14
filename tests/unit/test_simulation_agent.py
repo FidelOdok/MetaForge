@@ -53,7 +53,7 @@ def _cfd_response(convergence_residual: float = 1e-5) -> dict:
 @pytest.fixture
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
-    twin.get_artifact.return_value = MagicMock(id=uuid4(), name="drone-fc", domain="simulation")
+    twin.get_work_product.return_value = MagicMock(id=uuid4(), name="drone-fc", domain="simulation")
     return twin
 
 
@@ -106,7 +106,7 @@ class TestSimulationAgent:
     async def test_unsupported_task_type_fails(self, agent: SimulationAgent):
         request = TaskRequest(
             task_type="do_magic",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -115,11 +115,11 @@ class TestSimulationAgent:
         assert "do_magic" in result.errors[0]
 
     async def test_missing_artifact(self, agent: SimulationAgent, mock_twin: AsyncMock):
-        """Missing artifact should produce an error."""
-        mock_twin.get_artifact.return_value = None
+        """Missing work_product should produce an error."""
+        mock_twin.get_work_product.return_value = None
         request = TaskRequest(
             task_type="run_spice",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"netlist_path": "sim/power_supply.cir"},
         )
         result = await agent.run_task(request)
@@ -136,10 +136,10 @@ class TestRunSpice:
 
     async def test_spice_passes_convergence(self, agent: SimulationAgent):
         """SPICE with converged simulation should succeed."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="run_spice",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "netlist_path": "sim/power_supply.cir",
                 "analysis_type": "dc",
@@ -165,7 +165,7 @@ class TestRunSpice:
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_spice",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"netlist_path": "sim/power_supply.cir"},
         )
         result = await agent.run_task(request)
@@ -177,7 +177,7 @@ class TestRunSpice:
         """SPICE should fail when netlist_path is missing."""
         request = TaskRequest(
             task_type="run_spice",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -193,10 +193,10 @@ class TestRunFea:
 
     async def test_fea_passes_high_safety(self, agent: SimulationAgent):
         """FEA with high safety factor should succeed."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="run_fea",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "mesh_file": "mesh/bracket.inp",
                 "load_cases": [{"name": "gravity", "force_n": 100}],
@@ -221,7 +221,7 @@ class TestRunFea:
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_fea",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"mesh_file": "mesh/bracket.inp"},
         )
         result = await agent.run_task(request)
@@ -233,7 +233,7 @@ class TestRunFea:
         """FEA should fail when mesh_file is missing."""
         request = TaskRequest(
             task_type="run_fea",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -249,10 +249,10 @@ class TestRunCfd:
 
     async def test_cfd_passes_convergence(self, agent: SimulationAgent):
         """CFD with good convergence should succeed."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="run_cfd",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "geometry_file": "cad/enclosure.step",
                 "fluid_properties": {"density_kg_m3": 1.225, "viscosity_pa_s": 1.8e-5},
@@ -279,7 +279,7 @@ class TestRunCfd:
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_cfd",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"geometry_file": "cad/enclosure.step"},
         )
         result = await agent.run_task(request)
@@ -291,7 +291,7 @@ class TestRunCfd:
         """CFD should fail when geometry_file is missing."""
         request = TaskRequest(
             task_type="run_cfd",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -307,10 +307,10 @@ class TestFullSimulation:
 
     async def test_full_simulation_runs_all(self, agent: SimulationAgent):
         """Full simulation should run all three and aggregate results."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="full_simulation",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "netlist_path": "sim/power_supply.cir",
                 "mesh_file": "mesh/bracket.inp",
@@ -320,7 +320,7 @@ class TestFullSimulation:
         result = await agent.run_task(request)
 
         assert result.task_type == "full_simulation"
-        assert result.artifact_id == artifact_id
+        assert result.work_product_id == work_product_id
         assert result.success is True
         assert len(result.skill_results) == 3
         skills_run = {r["skill"] for r in result.skill_results}
@@ -330,7 +330,7 @@ class TestFullSimulation:
         """Full simulation should only run sims for which parameters are provided."""
         request = TaskRequest(
             task_type="full_simulation",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"netlist_path": "sim/power_supply.cir"},
         )
         result = await agent.run_task(request)
@@ -344,7 +344,7 @@ class TestFullSimulation:
         """Full simulation with no parameters should error."""
         request = TaskRequest(
             task_type="full_simulation",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -363,7 +363,7 @@ class TestFullSimulation:
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="full_simulation",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "netlist_path": "sim/power_supply.cir",
                 "mesh_file": "mesh/bracket.inp",
@@ -382,23 +382,23 @@ class TestTaskRequest:
     """Tests for the TaskRequest Pydantic model."""
 
     def test_task_request_defaults(self):
-        artifact_id = uuid4()
-        req = TaskRequest(task_type="run_spice", artifact_id=artifact_id)
+        work_product_id = uuid4()
+        req = TaskRequest(task_type="run_spice", work_product_id=work_product_id)
         assert req.branch == "main"
         assert req.parameters == {}
 
     def test_task_request_with_parameters(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         params = {"netlist_path": "sim/power_supply.cir"}
         req = TaskRequest(
             task_type="run_spice",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters=params,
             branch="feature-1",
         )
         assert req.branch == "feature-1"
         assert req.parameters == params
-        assert req.artifact_id == artifact_id
+        assert req.work_product_id == work_product_id
 
 
 # --- TaskResult model ---
@@ -408,10 +408,10 @@ class TestTaskResult:
     """Tests for the TaskResult Pydantic model."""
 
     def test_task_result_defaults(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="run_spice",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=True,
         )
         assert res.skill_results == []
@@ -419,10 +419,10 @@ class TestTaskResult:
         assert res.warnings == []
 
     def test_task_result_with_data(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="run_spice",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=False,
             errors=["Simulation failed"],
             warnings=["High residual"],
@@ -444,7 +444,7 @@ class TestSimulationResult:
         result = SimulationResult()
         assert result.overall_passed is True
         assert result.convergence_achieved is True
-        assert result.artifacts == []
+        assert result.work_products == []
         assert result.analysis == {}
 
     def test_simulation_result_with_data(self):
@@ -476,7 +476,7 @@ class TestSimulationHardcodedFallback:
 
             request = TaskRequest(
                 task_type="run_spice",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
                     "analysis_type": "dc",
@@ -497,7 +497,7 @@ class TestSimulationHardcodedFallback:
 
             request = TaskRequest(
                 task_type="unsupported_task",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
             )
             result = await agent.run_task(request)
 

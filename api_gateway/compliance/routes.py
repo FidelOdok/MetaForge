@@ -48,7 +48,7 @@ class LinkEvidenceRequest(BaseModel):
     evidence_type: EvidenceType = Field(..., description="Type of evidence")
     title: str = Field(..., description="Evidence title")
     description: str = Field(default="", description="Evidence description")
-    artifact_id: UUID | None = Field(default=None, description="Artifact UUID")
+    work_product_id: UUID | None = Field(default=None, description="WorkProduct UUID")
 
 
 class ChecklistResponse(BaseModel):

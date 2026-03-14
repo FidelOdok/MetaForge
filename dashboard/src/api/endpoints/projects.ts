@@ -1,7 +1,7 @@
 import apiClient from '../client';
-import type { Project, ProjectArtifact } from '../../types/project';
+import type { Project, ProjectWorkProduct } from '../../types/project';
 
-interface ProjectArtifactRaw {
+interface ProjectWorkProductRaw {
   id: string;
   name: string;
   type: string;
@@ -14,7 +14,7 @@ interface ProjectResponseRaw {
   name: string;
   description: string;
   status: string;
-  artifacts: ProjectArtifactRaw[];
+  work_products: ProjectWorkProductRaw[];
   agent_count: number;
   last_updated: string;
   created_at: string;
@@ -25,12 +25,12 @@ interface ProjectListResponseRaw {
   total: number;
 }
 
-function mapArtifact(raw: ProjectArtifactRaw): ProjectArtifact {
+function mapWorkProduct(raw: ProjectWorkProductRaw): ProjectWorkProduct {
   return {
     id: raw.id,
     name: raw.name,
-    type: raw.type as ProjectArtifact['type'],
-    status: raw.status as ProjectArtifact['status'],
+    type: raw.type as ProjectWorkProduct['type'],
+    status: raw.status as ProjectWorkProduct['status'],
     updatedAt: raw.updated_at,
   };
 }
@@ -41,7 +41,7 @@ function mapProject(raw: ProjectResponseRaw): Project {
     name: raw.name,
     description: raw.description,
     status: raw.status as Project['status'],
-    artifacts: raw.artifacts.map(mapArtifact),
+    work_products: raw.work_products.map(mapWorkProduct),
     agentCount: raw.agent_count,
     lastUpdated: raw.last_updated,
     createdAt: raw.created_at,

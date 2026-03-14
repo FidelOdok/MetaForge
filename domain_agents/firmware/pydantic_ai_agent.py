@@ -71,7 +71,7 @@ class FirmwareAgentResult(BaseModel):
         default_factory=list,
         description="List of generated firmware files",
     )
-    artifacts: list[dict[str, Any]] = Field(
+    work_products: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Artifacts produced or modified",
     )
@@ -111,7 +111,7 @@ and tick_rate_hz.
 
 Given a user request, determine which tools to call and in what order. \
 For a full firmware build, generate HAL first, then scaffold drivers, \
-then configure RTOS. Provide a clear assessment of generated artifacts.
+then configure RTOS. Provide a clear assessment of generated work_products.
 """
 
 
@@ -168,7 +168,7 @@ def create_firmware_agent(
             )
 
             skill_input = GenerateHalInput(
-                artifact_id=str(UUID(int=0)),
+                work_product_id=str(UUID(int=0)),
                 mcu_family=mcu_family,
                 peripherals=peripherals,
                 output_dir=output_dir,
@@ -218,7 +218,7 @@ def create_firmware_agent(
             )
 
             skill_input = ScaffoldDriverInput(
-                artifact_id=str(UUID(int=0)),
+                work_product_id=str(UUID(int=0)),
                 peripheral_type=peripheral_type,
                 interface=interface,
                 driver_name=driver_name,
@@ -270,7 +270,7 @@ def create_firmware_agent(
             )
 
             skill_input = ConfigureRtosInput(
-                artifact_id=str(UUID(int=0)),
+                work_product_id=str(UUID(int=0)),
                 rtos_name=rtos_name,
                 task_definitions=task_definitions,
                 heap_size_kb=heap_size_kb,
@@ -335,7 +335,7 @@ async def run_agent(
         return {
             "overall_passed": data.overall_passed,
             "generated_files": data.generated_files,
-            "artifacts": data.artifacts,
+            "work_products": data.work_products,
             "analysis": data.analysis,
             "recommendations": data.recommendations,
             "tool_calls": data.tool_calls,

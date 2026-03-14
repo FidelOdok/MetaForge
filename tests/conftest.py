@@ -1,7 +1,7 @@
 """Root-level test fixtures shared across unit and integration tests.
 
 Provides reusable in-memory implementations of all MetaForge core components:
-TwinAPI, McpBridge, EventBus, WorkflowEngine, Scheduler, and test artifacts.
+TwinAPI, McpBridge, EventBus, WorkflowEngine, Scheduler, and test work_products.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from orchestrator.workflow_dag import (
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Spy subscriber for capturing events
@@ -91,29 +91,29 @@ def workflow_engine() -> InMemoryWorkflowEngine:
 
 
 # ---------------------------------------------------------------------------
-# Artifact factories
+# WorkProduct factories
 # ---------------------------------------------------------------------------
 
-MECH_ARTIFACT_ID = UUID("00000000-0000-0000-0000-000000000001")
-EE_ARTIFACT_ID = UUID("00000000-0000-0000-0000-000000000002")
+MECH_WORK_PRODUCT_ID = UUID("00000000-0000-0000-0000-000000000001")
+EE_WORK_PRODUCT_ID = UUID("00000000-0000-0000-0000-000000000002")
 
 
-def make_artifact(
+def make_work_product(
     *,
-    artifact_id: UUID | None = None,
+    work_product_id: UUID | None = None,
     name: str = "test-part",
-    artifact_type: ArtifactType = ArtifactType.CAD_MODEL,
+    work_product_type: WorkProductType = WorkProductType.CAD_MODEL,
     domain: str = "mechanical",
     file_path: str = "cad/bracket.step",
     content_hash: str = "abc123",
     fmt: str = "step",
     created_by: str = "test",
-) -> Artifact:
-    """Create a test artifact with sensible defaults."""
-    return Artifact(
-        id=artifact_id or uuid4(),
+) -> WorkProduct:
+    """Create a test work_product with sensible defaults."""
+    return WorkProduct(
+        id=work_product_id or uuid4(),
         name=name,
-        type=artifact_type,
+        type=work_product_type,
         domain=domain,
         file_path=file_path,
         content_hash=content_hash,
@@ -123,32 +123,32 @@ def make_artifact(
 
 
 @pytest.fixture
-async def mech_artifact(twin: InMemoryTwinAPI) -> Artifact:
-    """A mechanical CAD model artifact stored in the Twin."""
-    artifact = make_artifact(
-        artifact_id=MECH_ARTIFACT_ID,
+async def mech_work_product(twin: InMemoryTwinAPI) -> WorkProduct:
+    """A mechanical CAD model work_product stored in the Twin."""
+    work_product = make_work_product(
+        work_product_id=MECH_WORK_PRODUCT_ID,
         name="bracket-v1",
-        artifact_type=ArtifactType.CAD_MODEL,
+        work_product_type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="cad/bracket.step",
     )
-    await twin.create_artifact(artifact)
-    return artifact
+    await twin.create_work_product(work_product)
+    return work_product
 
 
 @pytest.fixture
-async def ee_artifact(twin: InMemoryTwinAPI) -> Artifact:
-    """An electronics schematic artifact stored in the Twin."""
-    artifact = make_artifact(
-        artifact_id=EE_ARTIFACT_ID,
+async def ee_work_product(twin: InMemoryTwinAPI) -> WorkProduct:
+    """An electronics schematic work_product stored in the Twin."""
+    work_product = make_work_product(
+        work_product_id=EE_WORK_PRODUCT_ID,
         name="main-schematic",
-        artifact_type=ArtifactType.SCHEMATIC,
+        work_product_type=WorkProductType.SCHEMATIC,
         domain="electronics",
         file_path="eda/kicad/main.kicad_sch",
         fmt="kicad_sch",
     )
-    await twin.create_artifact(artifact)
-    return artifact
+    await twin.create_work_product(work_product)
+    return work_product
 
 
 # ---------------------------------------------------------------------------

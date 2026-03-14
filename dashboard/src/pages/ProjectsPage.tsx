@@ -44,7 +44,7 @@ export function ProjectsPage() {
                 {project.description}
               </p>
               <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span>{project.artifacts.length} artifacts</span>
+                <span>{project.work_products.length} work_products</span>
                 <span>{project.agentCount} agents</span>
                 <span>{formatRelativeTime(project.lastUpdated)}</span>
               </div>

@@ -75,7 +75,9 @@ class RetrieveKnowledgeHandler(SkillBase[RetrieveKnowledgeInput, RetrieveKnowled
                     entry_id=str(entry.id),
                     content=entry.content,
                     knowledge_type=str(entry.knowledge_type),
-                    source=str(entry.source_artifact_id) if entry.source_artifact_id else "",
+                    source=str(entry.source_work_product_id)
+                    if entry.source_work_product_id
+                    else "",
                     score=0.0,
                     metadata=entry.metadata or {},
                 )

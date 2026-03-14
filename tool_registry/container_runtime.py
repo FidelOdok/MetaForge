@@ -42,7 +42,7 @@ class ExecutionResult(BaseModel):
     stdout: str = ""
     stderr: str = ""
     duration_seconds: float = 0.0
-    artifacts: list[str] = Field(default_factory=list)  # paths to output files
+    work_products: list[str] = Field(default_factory=list)  # paths to output files
 
 
 class ContainerRuntime(ABC):
@@ -169,7 +169,7 @@ class ContainerExecutionEngine:
             input_data: Optional data to pass into the container.
 
         Returns:
-            ExecutionResult with stdout, stderr, exit code, and artifacts.
+            ExecutionResult with stdout, stderr, exit code, and work_products.
 
         Raises:
             TimeoutError: If execution exceeds config.timeout_seconds.
@@ -213,7 +213,7 @@ class ContainerExecutionEngine:
                 image=config.full_image,
                 exit_code=result.exit_code,
                 duration_seconds=round(elapsed, 3),
-                artifact_count=len(result.artifacts),
+                artifact_count=len(result.work_products),
             )
         else:
             self.logger.warning(

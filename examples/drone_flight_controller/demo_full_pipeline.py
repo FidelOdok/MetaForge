@@ -48,8 +48,8 @@ from domain_agents.supply_chain.agent import SupplyChainAgent  # noqa: E402
 from domain_agents.supply_chain.agent import TaskRequest as SCTaskRequest  # noqa: E402
 from skill_registry.mcp_bridge import InMemoryMcpBridge  # noqa: E402
 from twin_core.api import InMemoryTwinAPI  # noqa: E402
-from twin_core.models.artifact import Artifact  # noqa: E402
-from twin_core.models.enums import ArtifactType  # noqa: E402
+from twin_core.models.enums import WorkProductType  # noqa: E402
+from twin_core.models.work_product import WorkProduct  # noqa: E402
 
 structlog.configure(
     processors=[
@@ -168,14 +168,14 @@ async def run_pipeline() -> dict[str, Any]:
     )
 
     # -----------------------------------------------------------------------
-    # Step 2: Create artifacts in the twin
+    # Step 2: Create work_products in the twin
     # -----------------------------------------------------------------------
-    print("[2/8] Creating project artifacts in the Digital Twin...")
+    print("[2/8] Creating project work_products in the Digital Twin...")
 
-    cad_artifact = await twin.create_artifact(
-        Artifact(
+    cad_artifact = await twin.create_work_product(
+        WorkProduct(
             name="motor-mount-bracket-v1",
-            type=ArtifactType.CAD_MODEL,
+            type=WorkProductType.CAD_MODEL,
             domain="mechanical",
             file_path="models/motor_mount_bracket.step",
             content_hash="sha256:a1b2c3d4e5f6",
@@ -190,10 +190,10 @@ async def run_pipeline() -> dict[str, Any]:
     )
     print(f"       CAD model: {cad_artifact.name} (id={cad_artifact.id})")
 
-    schematic_artifact = await twin.create_artifact(
-        Artifact(
+    schematic_artifact = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-schematic-v1",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="eda/kicad/drone_fc.kicad_sch",
             content_hash="sha256:b2c3d4e5f6a7",
@@ -204,10 +204,10 @@ async def run_pipeline() -> dict[str, Any]:
     )
     print(f"       Schematic: {schematic_artifact.name}")
 
-    fw_artifact = await twin.create_artifact(
-        Artifact(
+    fw_artifact = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-firmware-v1",
-            type=ArtifactType.FIRMWARE_SOURCE,
+            type=WorkProductType.FIRMWARE_SOURCE,
             domain="firmware",
             file_path="firmware/src/main.c",
             content_hash="sha256:c3d4e5f6a7b8",
@@ -218,10 +218,10 @@ async def run_pipeline() -> dict[str, Any]:
     )
     print(f"       Firmware:  {fw_artifact.name}")
 
-    bom_artifact = await twin.create_artifact(
-        Artifact(
+    bom_artifact = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-bom-v1",
-            type=ArtifactType.BOM,
+            type=WorkProductType.BOM,
             domain="supply_chain",
             file_path="bom/drone_fc_bom.csv",
             content_hash="sha256:d4e5f6a7b8c9",
@@ -233,7 +233,7 @@ async def run_pipeline() -> dict[str, Any]:
     print(f"       BOM:       {bom_artifact.name}")
 
     await twin.create_branch("main")
-    await twin.commit("main", "Add initial drone FC design artifacts", "engineer")
+    await twin.commit("main", "Add initial drone FC design work_products", "engineer")
 
     # -----------------------------------------------------------------------
     # Step 3: Run Mechanical Agent -- stress analysis
@@ -243,7 +243,7 @@ async def run_pipeline() -> dict[str, Any]:
     mech_result = await mech_agent.run_task(
         MechTaskRequest(
             task_type="validate_stress",
-            artifact_id=cad_artifact.id,
+            work_product_id=cad_artifact.id,
             parameters={
                 "mesh_file_path": "models/motor_mount_bracket.inp",
                 "load_case": "hover_3g",
@@ -269,7 +269,7 @@ async def run_pipeline() -> dict[str, Any]:
     ee_result = await ee_agent.run_task(
         EETaskRequest(
             task_type="run_erc",
-            artifact_id=schematic_artifact.id,
+            work_product_id=schematic_artifact.id,
             parameters={
                 "schematic_file": "eda/kicad/drone_fc.kicad_sch",
             },
@@ -287,7 +287,7 @@ async def run_pipeline() -> dict[str, Any]:
     fw_result = await fw_agent.run_task(
         FWTaskRequest(
             task_type="generate_hal",
-            artifact_id=fw_artifact.id,
+            work_product_id=fw_artifact.id,
             parameters={
                 "mcu_family": "STM32F4",
                 "peripherals": ["GPIO", "SPI", "I2C", "UART", "TIM", "ADC"],
@@ -307,7 +307,7 @@ async def run_pipeline() -> dict[str, Any]:
     sim_result = await sim_agent.run_task(
         SimTaskRequest(
             task_type="run_fea",
-            artifact_id=cad_artifact.id,
+            work_product_id=cad_artifact.id,
             parameters={
                 "mesh_file": "models/motor_mount_bracket.inp",
                 "load_cases": [{"name": "hover_3g", "force_n": 30.0}],
@@ -328,7 +328,7 @@ async def run_pipeline() -> dict[str, Any]:
     sc_result = await sc_agent.run_task(
         SCTaskRequest(
             task_type="score_bom_risk",
-            artifact_id=bom_artifact.id,
+            work_product_id=bom_artifact.id,
             parameters={
                 "parts": DRONE_BOM_PARTS,
                 "risk_threshold": 0.6,
@@ -347,7 +347,7 @@ async def run_pipeline() -> dict[str, Any]:
     compliance_result = await compliance_agent.run_task(
         ComplianceTaskRequest(
             task_type="generate_checklist",
-            artifact_id=bom_artifact.id,
+            work_product_id=bom_artifact.id,
             parameters={
                 "markets": ["UKCA", "CE", "FCC"],
                 "product_category": "electronic_device",

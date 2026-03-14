@@ -15,7 +15,7 @@ class ConstraintViolation(BaseModel):
     constraint_name: str
     severity: ConstraintSeverity
     message: str
-    artifact_ids: list[UUID] = Field(default_factory=list)
+    work_product_ids: list[UUID] = Field(default_factory=list)
     expression: str
     evaluated_at: datetime
 

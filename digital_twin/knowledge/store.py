@@ -49,8 +49,8 @@ class KnowledgeEntry(BaseModel):
     embedding: list[float] = Field(default_factory=list, description="Vector embedding")
     knowledge_type: KnowledgeType = Field(..., description="Category of knowledge")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
-    source_artifact_id: UUID | None = Field(
-        default=None, description="ID of the source artifact in the Digital Twin"
+    source_work_product_id: UUID | None = Field(
+        default=None, description="ID of the source work_product in the Digital Twin"
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
@@ -231,7 +231,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                         embedding vector(384),
                         knowledge_type VARCHAR(50) NOT NULL,
                         metadata JSONB NOT NULL DEFAULT '{}',
-                        source_artifact_id UUID,
+                        source_work_product_id UUID,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """)
@@ -260,21 +260,21 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                         """
                         INSERT INTO knowledge_entries
                             (id, content, embedding, knowledge_type, metadata,
-                             source_artifact_id, created_at)
+                             source_work_product_id, created_at)
                         VALUES ($1, $2, $3::vector, $4, $5::jsonb, $6, $7)
                         ON CONFLICT (id) DO UPDATE SET
                             content = EXCLUDED.content,
                             embedding = EXCLUDED.embedding,
                             knowledge_type = EXCLUDED.knowledge_type,
                             metadata = EXCLUDED.metadata,
-                            source_artifact_id = EXCLUDED.source_artifact_id
+                            source_work_product_id = EXCLUDED.source_work_product_id
                         """,
                         entry.id,
                         entry.content,
                         embedding_str,
                         str(entry.knowledge_type),
                         json.dumps(entry.metadata),
-                        entry.source_artifact_id,
+                        entry.source_work_product_id,
                         entry.created_at,
                     )
                 logger.info(
@@ -306,7 +306,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 if knowledge_type is not None:
                     query = """
                         SELECT id, content, embedding::text, knowledge_type,
-                               metadata, source_artifact_id, created_at
+                               metadata, source_work_product_id, created_at
                         FROM knowledge_entries
                         WHERE knowledge_type = $1
                         ORDER BY embedding <=> $2::vector
@@ -316,7 +316,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 else:
                     query = """
                         SELECT id, content, embedding::text, knowledge_type,
-                               metadata, source_artifact_id, created_at
+                               metadata, source_work_product_id, created_at
                         FROM knowledge_entries
                         ORDER BY embedding <=> $1::vector
                         LIMIT $2
@@ -342,7 +342,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                             embedding=emb_values,
                             knowledge_type=KnowledgeType(row["knowledge_type"]),
                             metadata=meta,
-                            source_artifact_id=row["source_artifact_id"],
+                            source_work_product_id=row["source_work_product_id"],
                             created_at=row["created_at"],
                         )
                     )
@@ -370,7 +370,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                     row = await conn.fetchrow(
                         """
                         SELECT id, content, embedding::text, knowledge_type,
-                               metadata, source_artifact_id, created_at
+                               metadata, source_work_product_id, created_at
                         FROM knowledge_entries
                         WHERE id = $1
                         """,
@@ -389,7 +389,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                     embedding=emb_values,
                     knowledge_type=KnowledgeType(row["knowledge_type"]),
                     metadata=meta,
-                    source_artifact_id=row["source_artifact_id"],
+                    source_work_product_id=row["source_work_product_id"],
                     created_at=row["created_at"],
                 )
             except Exception as exc:
@@ -427,7 +427,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 if knowledge_type is not None:
                     query = """
                         SELECT id, content, embedding::text, knowledge_type,
-                               metadata, source_artifact_id, created_at
+                               metadata, source_work_product_id, created_at
                         FROM knowledge_entries
                         WHERE knowledge_type = $1
                         ORDER BY created_at DESC
@@ -437,7 +437,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                 else:
                     query = """
                         SELECT id, content, embedding::text, knowledge_type,
-                               metadata, source_artifact_id, created_at
+                               metadata, source_work_product_id, created_at
                         FROM knowledge_entries
                         ORDER BY created_at DESC
                         LIMIT $1
@@ -463,7 +463,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):
                             embedding=emb_values,
                             knowledge_type=KnowledgeType(row["knowledge_type"]),
                             metadata=meta,
-                            source_artifact_id=row["source_artifact_id"],
+                            source_work_product_id=row["source_work_product_id"],
                             created_at=row["created_at"],
                         )
                     )

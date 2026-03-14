@@ -68,7 +68,7 @@ def fdm_process() -> ManufacturingProcess:
 def passing_input(cnc_process: ManufacturingProcess) -> CheckToleranceInput:
     """Input where all tolerances should pass with CNC milling."""
     return CheckToleranceInput(
-        artifact_id=uuid4(),
+        work_product_id=uuid4(),
         tolerances=[
             ToleranceSpec(
                 dimension_id="D1",
@@ -95,7 +95,7 @@ def passing_input(cnc_process: ManufacturingProcess) -> CheckToleranceInput:
 def tight_input(cnc_process: ManufacturingProcess) -> CheckToleranceInput:
     """Input where tolerance is tighter than process capability."""
     return CheckToleranceInput(
-        artifact_id=uuid4(),
+        work_product_id=uuid4(),
         tolerances=[
             ToleranceSpec(
                 dimension_id="D1",
@@ -137,7 +137,7 @@ class TestToleranceModels:
 
     def test_check_tolerance_input_model(self, cnc_process: ManufacturingProcess) -> None:
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[],
             manufacturing_process=cnc_process,
         )
@@ -147,7 +147,7 @@ class TestToleranceModels:
 
     def test_check_tolerance_output_model(self) -> None:
         output = CheckToleranceOutput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             process_type="cnc_milling",
             total_dimensions_checked=1,
             passed=1,
@@ -215,7 +215,7 @@ class TestCheckToleranceHandler:
         passing_input: CheckToleranceInput,
     ) -> None:
         """All tolerances well within CNC capability should pass."""
-        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": passing_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
 
@@ -231,7 +231,7 @@ class TestCheckToleranceHandler:
         tight_input: CheckToleranceInput,
     ) -> None:
         """Tolerance tighter than achievable should fail."""
-        mock_context.twin.get_artifact.return_value = {"id": tight_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": tight_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(tight_input)
 
@@ -251,7 +251,7 @@ class TestCheckToleranceHandler:
         # CNC achievable = 0.05mm, process_sigma = 0.05/3 = 0.01667
         # For Cp = 1.2 (marginal): tol_range = 1.2 * 6 * 0.01667 = 0.12
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -263,7 +263,7 @@ class TestCheckToleranceHandler:
             ],
             manufacturing_process=cnc_process,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -280,7 +280,7 @@ class TestCheckToleranceHandler:
     ) -> None:
         """Feature smaller than min_feature_size should generate violation."""
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -292,7 +292,7 @@ class TestCheckToleranceHandler:
             ],
             manufacturing_process=cnc_process,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -308,7 +308,7 @@ class TestCheckToleranceHandler:
     ) -> None:
         """Mix of passing and failing tolerances."""
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -327,7 +327,7 @@ class TestCheckToleranceHandler:
             ],
             manufacturing_process=cnc_process,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -346,7 +346,7 @@ class TestCheckToleranceHandler:
         # achievable = 0.05, sigma = 0.05/3
         # tol_range = 0.2, Cp = 0.2 / (6 * 0.05/3) = 0.2 / 0.1 = 2.0
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -358,7 +358,7 @@ class TestCheckToleranceHandler:
             ],
             manufacturing_process=cnc_process,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -371,7 +371,7 @@ class TestCheckToleranceHandler:
         passing_input: CheckToleranceInput,
     ) -> None:
         """All passing dimensions should yield 'pass' overall."""
-        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": passing_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
 
@@ -384,7 +384,7 @@ class TestCheckToleranceHandler:
     ) -> None:
         """Warnings but no failures should yield 'marginal' overall."""
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -396,7 +396,7 @@ class TestCheckToleranceHandler:
             ],
             manufacturing_process=cnc_process,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -409,7 +409,7 @@ class TestCheckToleranceHandler:
         tight_input: CheckToleranceInput,
     ) -> None:
         """Failures should yield 'fail' overall."""
-        mock_context.twin.get_artifact.return_value = {"id": tight_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": tight_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(tight_input)
 
@@ -421,7 +421,7 @@ class TestCheckToleranceHandler:
         tight_input: CheckToleranceInput,
     ) -> None:
         """Violations list should be populated when there are failures."""
-        mock_context.twin.get_artifact.return_value = {"id": tight_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": tight_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(tight_input)
 
@@ -435,7 +435,7 @@ class TestCheckToleranceHandler:
         passing_input: CheckToleranceInput,
     ) -> None:
         """Summary string should be generated."""
-        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": passing_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
 
@@ -450,11 +450,11 @@ class TestCheckToleranceHandler:
     ) -> None:
         """Empty tolerances list should produce pass with zero dimensions."""
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[],
             manufacturing_process=cnc_process,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -479,8 +479,8 @@ class TestCheckTolerancePreconditions:
         mock_context: SkillContext,
         passing_input: CheckToleranceInput,
     ) -> None:
-        """Missing artifact should fail preconditions."""
-        mock_context.twin.get_artifact.return_value = None
+        """Missing work_product should fail preconditions."""
+        mock_context.twin.get_work_product.return_value = None
 
         handler = CheckToleranceHandler(mock_context)
         errors = await handler.validate_preconditions(passing_input)
@@ -493,8 +493,8 @@ class TestCheckTolerancePreconditions:
         mock_context: SkillContext,
         passing_input: CheckToleranceInput,
     ) -> None:
-        """Existing artifact should pass preconditions."""
-        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
+        """Existing work_product should pass preconditions."""
+        mock_context.twin.get_work_product.return_value = {"id": passing_input.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         errors = await handler.validate_preconditions(passing_input)
@@ -514,7 +514,7 @@ class TestCheckToleranceRunPipeline:
         passing_input: CheckToleranceInput,
     ) -> None:
         """Full run() pipeline should return SkillResult with success=True."""
-        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": passing_input.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         result = await handler.run(passing_input)
@@ -532,7 +532,7 @@ class TestCheckToleranceRunPipeline:
         passing_input: CheckToleranceInput,
     ) -> None:
         """run() should return failure when preconditions not met."""
-        mock_context.twin.get_artifact.return_value = None
+        mock_context.twin.get_work_product.return_value = None
 
         handler = CheckToleranceHandler(mock_context)
         result = await handler.run(passing_input)
@@ -560,7 +560,7 @@ class TestCheckToleranceStackUp:
         # 0.3464 / 0.6 = 57.7% < 75% => no warning
         # Need tolerances closer to worst-case to trigger
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -580,7 +580,7 @@ class TestCheckToleranceStackUp:
             manufacturing_process=cnc_process,
             check_stack_up=True,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -601,7 +601,7 @@ class TestCheckToleranceStackUp:
         # WC = 0.51
         # 0.5001 / 0.51 = 98% > 75% => warning triggered
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -621,7 +621,7 @@ class TestCheckToleranceStackUp:
             manufacturing_process=cnc_process,
             check_stack_up=True,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -637,7 +637,7 @@ class TestCheckToleranceStackUp:
     ) -> None:
         """Stack-up check should not run when check_stack_up=False."""
         inp = CheckToleranceInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             tolerances=[
                 ToleranceSpec(
                     dimension_id="D1",
@@ -657,7 +657,7 @@ class TestCheckToleranceStackUp:
             manufacturing_process=cnc_process,
             check_stack_up=False,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
 
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(inp)
@@ -678,12 +678,12 @@ class TestCheckToleranceWithAgent:
         mcp = InMemoryMcpBridge()
         agent = MechanicalAgent(twin=twin, mcp=mcp)
 
-        artifact_id = uuid4()
-        twin.get_artifact.return_value = {"id": str(artifact_id)}
+        work_product_id = uuid4()
+        twin.get_work_product.return_value = {"id": str(work_product_id)}
 
         request = TaskRequest(
             task_type="check_tolerances",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "tolerances": [
                     {
@@ -715,12 +715,12 @@ class TestCheckToleranceWithAgent:
         mcp = InMemoryMcpBridge()
         agent = MechanicalAgent(twin=twin, mcp=mcp)
 
-        artifact_id = uuid4()
-        twin.get_artifact.return_value = {"id": str(artifact_id)}
+        work_product_id = uuid4()
+        twin.get_work_product.return_value = {"id": str(work_product_id)}
 
         request = TaskRequest(
             task_type="check_tolerances",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "tolerances": [
                     {
@@ -740,17 +740,17 @@ class TestCheckToleranceWithAgent:
         assert any("manufacturing_process" in e for e in result.errors)
 
     async def test_agent_check_tolerances_artifact_not_found(self) -> None:
-        """Agent should return error when artifact does not exist."""
+        """Agent should return error when work_product does not exist."""
         twin = AsyncMock()
         mcp = InMemoryMcpBridge()
         agent = MechanicalAgent(twin=twin, mcp=mcp)
 
-        artifact_id = uuid4()
-        twin.get_artifact.return_value = None
+        work_product_id = uuid4()
+        twin.get_work_product.return_value = None
 
         request = TaskRequest(
             task_type="check_tolerances",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "tolerances": [],
                 "manufacturing_process": {

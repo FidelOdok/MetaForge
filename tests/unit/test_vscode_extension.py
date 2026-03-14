@@ -220,20 +220,20 @@ class TestTwinSidebar:
     """Tests that validate the twin sidebar tree data structure."""
 
     def test_leaf_node_has_no_children(self) -> None:
-        node = _twin_node("a1", "artifact", "PCB Layout")
+        node = _twin_node("a1", "work_product", "PCB Layout")
         assert "children" not in node or node.get("children") is None
 
     def test_parent_node_has_children(self) -> None:
         child = _twin_node("c1", "component", "U1")
-        parent = _twin_node("a1", "artifact", "Schematic", children=[child])
+        parent = _twin_node("a1", "work_product", "Schematic", children=[child])
         assert len(parent["children"]) == 1
         assert parent["children"][0]["label"] == "U1"
 
     def test_node_type_icon_mapping(self) -> None:
         """Verify that every supported node type has a known icon mapping."""
-        supported_types = {"artifact", "constraint", "component", "relationship"}
+        supported_types = {"work_product", "constraint", "component", "relationship"}
         icon_map: dict[str, str] = {
-            "artifact": "file-code",
+            "work_product": "file-code",
             "constraint": "shield",
             "component": "circuit-board",
             "relationship": "link",
@@ -244,7 +244,7 @@ class TestTwinSidebar:
     def test_tree_response_structure(self) -> None:
         response = {
             "nodes": [
-                _twin_node("a1", "artifact", "PCB Layout"),
+                _twin_node("a1", "work_product", "PCB Layout"),
                 _twin_node("c1", "constraint", "Max current 2A"),
             ],
             "version": "v0.1.0",

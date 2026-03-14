@@ -73,12 +73,12 @@ class ChatContextAssembler:
     # ------------------------------------------------------------------
 
     def _assemble_session(self, entity_id: str) -> dict[str, Any]:
-        """Session scope: traces, artifacts, recent mutations."""
+        """Session scope: traces, work_products, recent mutations."""
         return {
             "scope_kind": "session",
             "session_id": entity_id,
             "traces": [],
-            "artifacts": [],
+            "work_products": [],
             "recent_mutations": [],
         }
 

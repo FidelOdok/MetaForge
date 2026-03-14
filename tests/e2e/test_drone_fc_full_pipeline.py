@@ -26,8 +26,8 @@ from domain_agents.supply_chain.agent import SupplyChainAgent
 from domain_agents.supply_chain.agent import TaskRequest as SCTaskRequest
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Mock FEA results
@@ -133,12 +133,12 @@ def mcp() -> InMemoryMcpBridge:
 
 
 @pytest.fixture()
-async def artifacts(twin: InMemoryTwinAPI) -> dict[str, Artifact]:
-    """Create all project artifacts in the twin."""
-    cad = await twin.create_artifact(
-        Artifact(
+async def work_products(twin: InMemoryTwinAPI) -> dict[str, WorkProduct]:
+    """Create all project work_products in the twin."""
+    cad = await twin.create_work_product(
+        WorkProduct(
             name="motor-mount-bracket-v1",
-            type=ArtifactType.CAD_MODEL,
+            type=WorkProductType.CAD_MODEL,
             domain="mechanical",
             file_path="models/motor_mount_bracket.step",
             content_hash="sha256:a1b2c3",
@@ -147,10 +147,10 @@ async def artifacts(twin: InMemoryTwinAPI) -> dict[str, Artifact]:
             metadata={"material": "Al6061-T6", "yield_strength_mpa": 276.0},
         )
     )
-    schematic = await twin.create_artifact(
-        Artifact(
+    schematic = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-schematic-v1",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="eda/kicad/drone_fc.kicad_sch",
             content_hash="sha256:b2c3d4",
@@ -158,10 +158,10 @@ async def artifacts(twin: InMemoryTwinAPI) -> dict[str, Artifact]:
             created_by="test",
         )
     )
-    firmware = await twin.create_artifact(
-        Artifact(
+    firmware = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-firmware-v1",
-            type=ArtifactType.FIRMWARE_SOURCE,
+            type=WorkProductType.FIRMWARE_SOURCE,
             domain="firmware",
             file_path="firmware/src/main.c",
             content_hash="sha256:c3d4e5",
@@ -169,10 +169,10 @@ async def artifacts(twin: InMemoryTwinAPI) -> dict[str, Artifact]:
             created_by="test",
         )
     )
-    bom = await twin.create_artifact(
-        Artifact(
+    bom = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-bom-v1",
-            type=ArtifactType.BOM,
+            type=WorkProductType.BOM,
             domain="supply_chain",
             file_path="bom/drone_fc_bom.csv",
             content_hash="sha256:d4e5f6",
@@ -181,7 +181,7 @@ async def artifacts(twin: InMemoryTwinAPI) -> dict[str, Artifact]:
         )
     )
     await twin.create_branch("main")
-    await twin.commit("main", "Add test artifacts", "test")
+    await twin.commit("main", "Add test work_products", "test")
     return {"cad": cad, "schematic": schematic, "firmware": firmware, "bom": bom}
 
 
@@ -195,13 +195,13 @@ class TestMechanicalAgent:
 
     @pytest.mark.asyncio
     async def test_stress_validation_executes(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = MechanicalAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             MechTaskRequest(
                 task_type="validate_stress",
-                artifact_id=artifacts["cad"].id,
+                work_product_id=work_products["cad"].id,
                 parameters={
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -215,13 +215,13 @@ class TestMechanicalAgent:
 
     @pytest.mark.asyncio
     async def test_stress_produces_fea_result(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = MechanicalAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             MechTaskRequest(
                 task_type="validate_stress",
-                artifact_id=artifacts["cad"].id,
+                work_product_id=work_products["cad"].id,
                 parameters={
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -240,13 +240,13 @@ class TestElectronicsAgent:
 
     @pytest.mark.asyncio
     async def test_erc_executes(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = ElectronicsAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             EETaskRequest(
                 task_type="run_erc",
-                artifact_id=artifacts["schematic"].id,
+                work_product_id=work_products["schematic"].id,
                 parameters={"schematic_file": "eda/kicad/drone_fc.kicad_sch"},
             )
         )
@@ -255,13 +255,13 @@ class TestElectronicsAgent:
 
     @pytest.mark.asyncio
     async def test_erc_produces_result(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = ElectronicsAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             EETaskRequest(
                 task_type="run_erc",
-                artifact_id=artifacts["schematic"].id,
+                work_product_id=work_products["schematic"].id,
                 parameters={"schematic_file": "eda/kicad/drone_fc.kicad_sch"},
             )
         )
@@ -276,13 +276,13 @@ class TestFirmwareAgent:
 
     @pytest.mark.asyncio
     async def test_hal_generation_executes(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = FirmwareAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             FWTaskRequest(
                 task_type="generate_hal",
-                artifact_id=artifacts["firmware"].id,
+                work_product_id=work_products["firmware"].id,
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO", "SPI", "I2C"],
@@ -294,13 +294,13 @@ class TestFirmwareAgent:
 
     @pytest.mark.asyncio
     async def test_hal_produces_files(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = FirmwareAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             FWTaskRequest(
                 task_type="generate_hal",
-                artifact_id=artifacts["firmware"].id,
+                work_product_id=work_products["firmware"].id,
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO", "SPI"],
@@ -318,13 +318,13 @@ class TestSimulationAgent:
 
     @pytest.mark.asyncio
     async def test_fea_executes(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = SimulationAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
             SimTaskRequest(
                 task_type="run_fea",
-                artifact_id=artifacts["cad"].id,
+                work_product_id=work_products["cad"].id,
                 parameters={
                     "mesh_file": "models/bracket.inp",
                     "analysis_type": "static",
@@ -344,7 +344,7 @@ class TestSupplyChainAgent:
 
     @pytest.mark.asyncio
     async def test_bom_risk_executes(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = SupplyChainAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
@@ -359,7 +359,7 @@ class TestSupplyChainAgent:
 
     @pytest.mark.asyncio
     async def test_bom_risk_produces_report(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = SupplyChainAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(
@@ -379,7 +379,7 @@ class TestComplianceAgent:
 
     @pytest.mark.asyncio
     async def test_checklist_executes(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = ComplianceAgent()
         result = await agent.run_task(
@@ -394,7 +394,7 @@ class TestComplianceAgent:
 
     @pytest.mark.asyncio
     async def test_checklist_produces_items(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         agent = ComplianceAgent()
         result = await agent.run_task(
@@ -479,7 +479,7 @@ class TestPipelineResilience:
 
     @pytest.mark.asyncio
     async def test_pipeline_continues_after_agent_failure(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         """One agent failing should not prevent others from running."""
         results: dict[str, Any] = {}
@@ -489,7 +489,7 @@ class TestPipelineResilience:
         mech_result = await mech_agent.run_task(
             MechTaskRequest(
                 task_type="validate_stress",
-                artifact_id=artifacts["cad"].id,
+                work_product_id=work_products["cad"].id,
                 parameters={
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -526,7 +526,7 @@ class TestPipelineResilience:
 
     @pytest.mark.asyncio
     async def test_unsupported_task_returns_error(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         """Agents should return a clear error for unsupported task types."""
         agent = SupplyChainAgent(twin=twin, mcp=mcp)
@@ -550,17 +550,17 @@ class TestTwinState:
 
     @pytest.mark.asyncio
     async def test_artifacts_exist_after_creation(
-        self, twin: InMemoryTwinAPI, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, work_products: dict[str, WorkProduct]
     ) -> None:
-        """All artifacts should be retrievable from the twin."""
-        for name, artifact in artifacts.items():
-            retrieved = await twin.get_artifact(artifact.id)
-            assert retrieved is not None, f"Artifact '{name}' not found in twin"
-            assert retrieved.name == artifact.name
+        """All work_products should be retrievable from the twin."""
+        for name, work_product in work_products.items():
+            retrieved = await twin.get_work_product(work_product.id)
+            assert retrieved is not None, f"WorkProduct '{name}' not found in twin"
+            assert retrieved.name == work_product.name
 
     @pytest.mark.asyncio
     async def test_twin_update_after_agent_run(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, artifacts: dict[str, Artifact]
+        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge, work_products: dict[str, WorkProduct]
     ) -> None:
         """Agent results can be written back to the twin."""
         agent = SupplyChainAgent(twin=twin, mcp=mcp)
@@ -573,10 +573,10 @@ class TestTwinState:
         assert result.success is True
 
         # Update the twin with results
-        await twin.update_artifact(
-            artifacts["bom"].id,
+        await twin.update_work_product(
+            work_products["bom"].id,
             {"metadata": {"bom_risk_score": result.skill_results[0]["overall_score"]}},
         )
-        updated = await twin.get_artifact(artifacts["bom"].id)
+        updated = await twin.get_work_product(work_products["bom"].id)
         assert updated is not None
         assert "bom_risk_score" in updated.metadata

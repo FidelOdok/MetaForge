@@ -39,11 +39,11 @@ class TestSharedTypesImport:
 class TestIdentityReExports:
     """Re-exported types must be the exact same object as the source."""
 
-    def test_artifact_identity(self) -> None:
-        from shared.types import Artifact
-        from twin_core.models import Artifact as SourceArtifact
+    def test_work_product_identity(self) -> None:
+        from shared.types import WorkProduct
+        from twin_core.models import WorkProduct as SourceArtifact
 
-        assert Artifact is SourceArtifact
+        assert WorkProduct is SourceArtifact
 
     def test_constraint_identity(self) -> None:
         from shared.types import Constraint
@@ -107,47 +107,47 @@ class TestIdentityReExports:
 
 
 class TestArtifactRoundTrip:
-    """Artifact model creation and JSON serialization round-trip."""
+    """WorkProduct model creation and JSON serialization round-trip."""
 
     def test_create_and_serialize(self) -> None:
-        from shared.types import Artifact, ArtifactType, NodeType
+        from shared.types import NodeType, WorkProduct, WorkProductType
 
-        artifact = Artifact(
-            node_type=NodeType.ARTIFACT,
+        work_product = WorkProduct(
+            node_type=NodeType.WORK_PRODUCT,
             name="main-schematic",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="eda/kicad/main.kicad_sch",
             content_hash="abc123",
             format="kicad_sch",
             created_by="test-agent",
         )
-        data = artifact.model_dump()
-        restored = Artifact.model_validate(data)
+        data = work_product.model_dump()
+        restored = WorkProduct.model_validate(data)
 
         assert restored.name == "main-schematic"
-        assert restored.type == ArtifactType.SCHEMATIC
+        assert restored.type == WorkProductType.SCHEMATIC
         assert restored.file_path == "eda/kicad/main.kicad_sch"
         assert isinstance(restored.id, UUID)
 
     def test_json_round_trip(self) -> None:
-        from shared.types import Artifact, ArtifactType, NodeType
+        from shared.types import NodeType, WorkProduct, WorkProductType
 
-        artifact = Artifact(
-            node_type=NodeType.ARTIFACT,
+        work_product = WorkProduct(
+            node_type=NodeType.WORK_PRODUCT,
             name="pcb-layout",
-            type=ArtifactType.PCB_LAYOUT,
+            type=WorkProductType.PCB_LAYOUT,
             domain="electronics",
             file_path="eda/kicad/main.kicad_pcb",
             content_hash="def456",
             format="kicad_pcb",
             created_by="test-agent",
         )
-        json_str = artifact.model_dump_json()
-        restored = Artifact.model_validate_json(json_str)
+        json_str = work_product.model_dump_json()
+        restored = WorkProduct.model_validate_json(json_str)
 
-        assert restored.name == artifact.name
-        assert restored.id == artifact.id
+        assert restored.name == work_product.name
+        assert restored.id == work_product.id
 
 
 class TestEventModel:
@@ -158,12 +158,12 @@ class TestEventModel:
 
         event = Event(
             id=str(uuid4()),
-            type=EventType.ARTIFACT_CREATED,
+            type=EventType.WORK_PRODUCT_CREATED,
             timestamp=datetime.now(UTC).isoformat(),
             source="test-agent",
-            data={"artifact_id": str(uuid4())},
+            data={"work_product_id": str(uuid4())},
         )
-        assert event.type == EventType.ARTIFACT_CREATED
+        assert event.type == EventType.WORK_PRODUCT_CREATED
         assert event.source == "test-agent"
 
     def test_event_serialization(self) -> None:
@@ -194,10 +194,10 @@ class TestCommonTypeAliases:
 
         assert VersionId is UUID
 
-    def test_artifact_id_is_uuid(self) -> None:
-        from shared.types import ArtifactId
+    def test_work_product_id_is_uuid(self) -> None:
+        from shared.types import WorkProductId
 
-        assert ArtifactId is UUID
+        assert WorkProductId is UUID
 
     def test_timestamp_is_datetime(self) -> None:
         from shared.types import Timestamp

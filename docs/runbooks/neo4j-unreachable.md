@@ -2,7 +2,7 @@
 
 ## Alert Description
 
-The **Neo4jUnreachable** alert fires when the MetaForge platform has zero active connections to the Neo4j graph database. Neo4j is the Digital Twin's backing store -- all artifact nodes, relationships, and constraints live here. Without Neo4j, agents cannot read or propose changes to the design graph.
+The **Neo4jUnreachable** alert fires when the MetaForge platform has zero active connections to the Neo4j graph database. Neo4j is the Digital Twin's backing store -- all work_product nodes, relationships, and constraints live here. Without Neo4j, agents cannot read or propose changes to the design graph.
 
 **Alert rule**: `metaforge_neo4j_active_connections == 0` for 1 minute.
 

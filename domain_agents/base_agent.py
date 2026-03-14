@@ -43,7 +43,7 @@ class AgentDependencies:
 class AgentResult(BaseModel):
     """Structured output from a PydanticAI agent run."""
 
-    artifacts: list[dict[str, Any]] = Field(
+    work_products: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Artifacts produced or modified by the agent",
     )

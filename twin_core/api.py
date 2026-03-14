@@ -17,13 +17,13 @@ if TYPE_CHECKING:
 from twin_core.constraint_engine.models import ConstraintEvaluationResult
 from twin_core.constraint_engine.validator import ConstraintEngine, InMemoryConstraintEngine
 from twin_core.graph_engine import GraphEngine, InMemoryGraphEngine
-from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
-from twin_core.models.enums import ArtifactType, EdgeType, NodeType
+from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.relationship import SubGraph
 from twin_core.models.version import Version, VersionDiff
+from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
 
 
@@ -42,26 +42,30 @@ class TwinAPI(ABC):
     # --- Artifacts ---
 
     @abstractmethod
-    async def create_artifact(self, artifact: Artifact, branch: str = "main") -> Artifact: ...
+    async def create_work_product(
+        self, work_product: WorkProduct, branch: str = "main"
+    ) -> WorkProduct: ...
 
     @abstractmethod
-    async def get_artifact(self, artifact_id: UUID, branch: str = "main") -> Artifact | None: ...
+    async def get_work_product(
+        self, work_product_id: UUID, branch: str = "main"
+    ) -> WorkProduct | None: ...
 
     @abstractmethod
-    async def update_artifact(
-        self, artifact_id: UUID, updates: dict[str, Any], branch: str = "main"
-    ) -> Artifact: ...
+    async def update_work_product(
+        self, work_product_id: UUID, updates: dict[str, Any], branch: str = "main"
+    ) -> WorkProduct: ...
 
     @abstractmethod
-    async def delete_artifact(self, artifact_id: UUID, branch: str = "main") -> bool: ...
+    async def delete_work_product(self, work_product_id: UUID, branch: str = "main") -> bool: ...
 
     @abstractmethod
-    async def list_artifacts(
+    async def list_work_products(
         self,
         branch: str = "main",
         domain: str | None = None,
-        artifact_type: ArtifactType | None = None,
-    ) -> list[Artifact]: ...
+        work_product_type: WorkProductType | None = None,
+    ) -> list[WorkProduct]: ...
 
     # --- Constraints ---
 
@@ -206,45 +210,49 @@ class InMemoryTwinAPI(TwinAPI):
 
     # --- Artifacts ---
 
-    async def create_artifact(self, artifact: Artifact, branch: str = "main") -> Artifact:
-        result = await self._graph.add_node(artifact)
+    async def create_work_product(
+        self, work_product: WorkProduct, branch: str = "main"
+    ) -> WorkProduct:
+        result = await self._graph.add_node(work_product)
         return result  # type: ignore[return-value]
 
-    async def get_artifact(self, artifact_id: UUID, branch: str = "main") -> Artifact | None:
-        node = await self._graph.get_node(artifact_id)
-        if node is not None and isinstance(node, Artifact):
+    async def get_work_product(
+        self, work_product_id: UUID, branch: str = "main"
+    ) -> WorkProduct | None:
+        node = await self._graph.get_node(work_product_id)
+        if node is not None and isinstance(node, WorkProduct):
             return node
         return None
 
-    async def update_artifact(
-        self, artifact_id: UUID, updates: dict[str, Any], branch: str = "main"
-    ) -> Artifact:
-        result = await self._graph.update_node(artifact_id, updates)
+    async def update_work_product(
+        self, work_product_id: UUID, updates: dict[str, Any], branch: str = "main"
+    ) -> WorkProduct:
+        result = await self._graph.update_node(work_product_id, updates)
         return result  # type: ignore[return-value]
 
-    async def delete_artifact(self, artifact_id: UUID, branch: str = "main") -> bool:
-        return await self._graph.delete_node(artifact_id)
+    async def delete_work_product(self, work_product_id: UUID, branch: str = "main") -> bool:
+        return await self._graph.delete_node(work_product_id)
 
-    async def list_artifacts(
+    async def list_work_products(
         self,
         branch: str = "main",
         domain: str | None = None,
-        artifact_type: ArtifactType | None = None,
-    ) -> list[Artifact]:
+        work_product_type: WorkProductType | None = None,
+    ) -> list[WorkProduct]:
         filters: dict[str, Any] = {}
         if domain is not None:
             filters["domain"] = domain
-        if artifact_type is not None:
-            filters["type"] = artifact_type
+        if work_product_type is not None:
+            filters["type"] = work_product_type
         nodes = await self._graph.list_nodes(
-            node_type=NodeType.ARTIFACT, filters=filters if filters else None
+            node_type=NodeType.WORK_PRODUCT, filters=filters if filters else None
         )
         return nodes  # type: ignore[return-value]
 
     # --- Constraints ---
 
     async def create_constraint(self, constraint: Constraint) -> Constraint:
-        # Add constraint node without artifact bindings — caller uses add_edge separately
+        # Add constraint node without work_product bindings — caller uses add_edge separately
         existing = await self._graph.get_node(constraint.id)
         if existing is not None:
             raise ValueError(f"Constraint with ID {constraint.id} already exists")
@@ -316,7 +324,7 @@ class InMemoryTwinAPI(TwinAPI):
     ) -> list[dict[str, Any]]:
         raise NotImplementedError(
             "Cypher queries require the Neo4j backend (planned for v0.2+). "
-            "Use get_subgraph() or list_artifacts() for in-memory queries."
+            "Use get_subgraph() or list_work_products() for in-memory queries."
         )
 
     # --- Versioning ---

@@ -175,10 +175,10 @@ class Neo4jGraphEngine(GraphEngine):
 
         # Use the node_type to determine which model to construct
         node_type = data.get("node_type", "")
-        if node_type == NodeType.ARTIFACT:
-            from twin_core.models.artifact import Artifact
+        if node_type == NodeType.WORK_PRODUCT:
+            from twin_core.models.work_product import WorkProduct
 
-            return Artifact.model_validate(data)
+            return WorkProduct.model_validate(data)
         elif node_type == NodeType.CONSTRAINT:
             from twin_core.models.constraint import Constraint
 

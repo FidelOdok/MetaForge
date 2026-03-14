@@ -15,7 +15,7 @@ describe('logger', () => {
     const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
     logger.info('test message', { key: 'value' });
     expect(spy).toHaveBeenCalledOnce();
-    const parsed = JSON.parse(spy.mock.calls[0][0] as string);
+    const parsed = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(parsed.msg).toBe('test message');
     expect(parsed.key).toBe('value');
     expect(parsed.level).toBe('info');
@@ -26,7 +26,7 @@ describe('logger', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     logger.error('bad thing');
     expect(spy).toHaveBeenCalledOnce();
-    const parsed = JSON.parse(spy.mock.calls[0][0] as string);
+    const parsed = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(parsed.level).toBe('error');
   });
 

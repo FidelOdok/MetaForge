@@ -35,7 +35,7 @@ describe('ProjectDetailPage', () => {
         name: 'Drone FC',
         description: 'Flight controller',
         status: 'active',
-        artifacts: [{ id: 'a1', name: 'Schematic', type: 'schematic', status: 'valid', updatedAt: new Date().toISOString() }],
+        work_products: [{ id: 'a1', name: 'Schematic', type: 'schematic', status: 'valid', updatedAt: new Date().toISOString() }],
         agentCount: 2,
         lastUpdated: new Date().toISOString(),
         createdAt: new Date().toISOString(),

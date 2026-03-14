@@ -14,17 +14,17 @@ from uuid import uuid4
 
 import pytest
 
-from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import (
-    ArtifactType,
     ConstraintSeverity,
     ConstraintStatus,
     EdgeType,
     NodeType,
+    WorkProductType,
 )
+from twin_core.models.work_product import WorkProduct
 from twin_core.sysml.evaluation import FeasibilityReport, evaluate_sysml_feasibility
 from twin_core.sysml.mapper import SysMLMapper
 from twin_core.sysml.models import (
@@ -54,10 +54,10 @@ def serializer() -> SysMLSerializer:
 
 
 @pytest.fixture
-def cad_artifact() -> Artifact:
-    return Artifact(
+def cad_artifact() -> WorkProduct:
+    return WorkProduct(
         name="motor_mount",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="cad/motor_mount.step",
         content_hash="abc123",
@@ -68,10 +68,10 @@ def cad_artifact() -> Artifact:
 
 
 @pytest.fixture
-def schematic_artifact() -> Artifact:
-    return Artifact(
+def schematic_artifact() -> WorkProduct:
+    return WorkProduct(
         name="power_supply",
-        type=ArtifactType.SCHEMATIC,
+        type=WorkProductType.SCHEMATIC,
         domain="electronics",
         file_path="eda/power_supply.kicad_sch",
         content_hash="def456",
@@ -81,10 +81,10 @@ def schematic_artifact() -> Artifact:
 
 
 @pytest.fixture
-def prd_artifact() -> Artifact:
-    return Artifact(
+def prd_artifact() -> WorkProduct:
+    return WorkProduct(
         name="Drone FC Requirements",
-        type=ArtifactType.PRD,
+        type=WorkProductType.PRD,
         domain="requirements",
         file_path="PRD.md",
         content_hash="req789",
@@ -95,10 +95,10 @@ def prd_artifact() -> Artifact:
 
 
 @pytest.fixture
-def test_plan_artifact() -> Artifact:
-    return Artifact(
+def test_plan_artifact() -> WorkProduct:
+    return WorkProduct(
         name="Vibration Test Plan",
-        type=ArtifactType.TEST_PLAN,
+        type=WorkProductType.TEST_PLAN,
         domain="testing",
         file_path="tests/vibration.md",
         content_hash="test111",
@@ -137,7 +137,7 @@ def component() -> Component:
 
 
 @pytest.fixture
-def edge(cad_artifact: Artifact, schematic_artifact: Artifact) -> EdgeBase:
+def edge(cad_artifact: WorkProduct, schematic_artifact: WorkProduct) -> EdgeBase:
     return EdgeBase(
         source_id=cad_artifact.id,
         target_id=schematic_artifact.id,
@@ -154,29 +154,31 @@ def edge(cad_artifact: Artifact, schematic_artifact: Artifact) -> EdgeBase:
 class TestNodeToSysML:
     """Test MetaForge node -> SysML v2 element conversion."""
 
-    def test_cad_artifact_to_part_usage(self, mapper: SysMLMapper, cad_artifact: Artifact) -> None:
+    def test_cad_artifact_to_part_usage(
+        self, mapper: SysMLMapper, cad_artifact: WorkProduct
+    ) -> None:
         result = mapper.node_to_sysml(cad_artifact)
         assert isinstance(result, PartUsage)
         assert result.element_type == SysMLElementType.PART_USAGE
         assert result.name == "motor_mount"
         assert result.domain == "mechanical"
         assert result.file_path == "cad/motor_mount.step"
-        assert result.properties["artifact_type"] == "cad_model"
+        assert result.properties["work_product_type"] == "cad_model"
         assert result.properties["format"] == "STEP"
         assert result.properties["material"] == "aluminum"
         assert result.element_id == cad_artifact.id
 
     def test_schematic_artifact_to_part_usage(
-        self, mapper: SysMLMapper, schematic_artifact: Artifact
+        self, mapper: SysMLMapper, schematic_artifact: WorkProduct
     ) -> None:
         result = mapper.node_to_sysml(schematic_artifact)
         assert isinstance(result, PartUsage)
         assert result.element_type == SysMLElementType.PART_USAGE
         assert result.name == "power_supply"
-        assert result.properties["artifact_type"] == "schematic"
+        assert result.properties["work_product_type"] == "schematic"
 
     def test_prd_artifact_to_requirement_usage(
-        self, mapper: SysMLMapper, prd_artifact: Artifact
+        self, mapper: SysMLMapper, prd_artifact: WorkProduct
     ) -> None:
         result = mapper.node_to_sysml(prd_artifact)
         assert isinstance(result, RequirementUsage)
@@ -187,7 +189,7 @@ class TestNodeToSysML:
         assert result.element_id == prd_artifact.id
 
     def test_test_plan_artifact_to_requirement_usage(
-        self, mapper: SysMLMapper, test_plan_artifact: Artifact
+        self, mapper: SysMLMapper, test_plan_artifact: WorkProduct
     ) -> None:
         result = mapper.node_to_sysml(test_plan_artifact)
         assert isinstance(result, RequirementUsage)
@@ -239,17 +241,17 @@ class TestSysMLToNode:
             domain="mechanical",
             file_path="cad/motor_mount.step",
             properties={
-                "artifact_type": "cad_model",
+                "work_product_type": "cad_model",
                 "format": "STEP",
                 "content_hash": "abc123",
                 "material": "aluminum",
             },
         )
         result = mapper.sysml_to_node(part)
-        assert isinstance(result, Artifact)
-        assert result.node_type == NodeType.ARTIFACT
+        assert isinstance(result, WorkProduct)
+        assert result.node_type == NodeType.WORK_PRODUCT
         assert result.name == "motor_mount"
-        assert result.type == ArtifactType.CAD_MODEL
+        assert result.type == WorkProductType.CAD_MODEL
         assert result.domain == "mechanical"
         assert result.format == "STEP"
         assert result.metadata["material"] == "aluminum"
@@ -280,9 +282,9 @@ class TestSysMLToNode:
             priority="high",
         )
         result = mapper.sysml_to_node(req)
-        assert isinstance(result, Artifact)
-        assert result.node_type == NodeType.ARTIFACT
-        assert result.type == ArtifactType.PRD
+        assert isinstance(result, WorkProduct)
+        assert result.node_type == NodeType.WORK_PRODUCT
+        assert result.type == WorkProductType.PRD
         assert result.name == "IMU Requirement"
         assert result.metadata["requirement_text"] == "The FC shall support 6-axis IMU"
         assert result.metadata["priority"] == "high"
@@ -406,7 +408,7 @@ class TestSerializationRoundTrip:
             name="motor_mount",
             domain="mechanical",
             file_path="cad/motor_mount.step",
-            properties={"artifact_type": "cad_model", "format": "STEP"},
+            properties={"work_product_type": "cad_model", "format": "STEP"},
         )
         json_data = serializer.to_json(original)
         assert json_data["@type"] == "PartUsage"
@@ -513,8 +515,8 @@ class TestGraphExport:
     def test_graph_to_package(
         self,
         mapper: SysMLMapper,
-        cad_artifact: Artifact,
-        prd_artifact: Artifact,
+        cad_artifact: WorkProduct,
+        prd_artifact: WorkProduct,
         constraint: Constraint,
         edge: EdgeBase,
     ) -> None:
@@ -548,7 +550,7 @@ class TestGraphImport:
         part = PartUsage(
             name="imu_sensor",
             domain="electronics",
-            properties={"artifact_type": "schematic"},
+            properties={"work_product_type": "schematic"},
         )
         req = RequirementUsage(
             name="Vibration Tolerance",
@@ -571,8 +573,8 @@ class TestGraphImport:
         # Map to MetaForge nodes
         nodes = [mapper.sysml_to_node(e) for e in restored_elements]
         assert len(nodes) == 3
-        assert isinstance(nodes[0], Artifact)
-        assert isinstance(nodes[1], Artifact)
+        assert isinstance(nodes[0], WorkProduct)
+        assert isinstance(nodes[1], WorkProduct)
         assert isinstance(nodes[2], Constraint)
 
         # Verify content
@@ -584,7 +586,7 @@ class TestGraphImport:
         self,
         mapper: SysMLMapper,
         serializer: SysMLSerializer,
-        cad_artifact: Artifact,
+        cad_artifact: WorkProduct,
         constraint: Constraint,
     ) -> None:
         """Round-trip: MetaForge -> SysML -> JSON -> SysML -> MetaForge."""
@@ -605,7 +607,7 @@ class TestGraphImport:
         node_constraint = mapper.sysml_to_node(restored_constraint)
 
         # Verify round-trip fidelity
-        assert isinstance(node_part, Artifact)
+        assert isinstance(node_part, WorkProduct)
         assert node_part.name == cad_artifact.name
         assert node_part.type == cad_artifact.type
         assert node_part.domain == cad_artifact.domain

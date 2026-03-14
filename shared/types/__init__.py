@@ -6,10 +6,10 @@ across the MetaForge platform. Types are defined in their owning modules
 
 Usage::
 
-    from shared.types import Artifact, Constraint, Event, GateStage
+    from shared.types import WorkProduct, Constraint, Event, GateStage
 
 All re-exported types are identical objects to their source definitions
-(i.e., ``shared.types.Artifact is twin_core.models.Artifact``).
+(i.e., ``shared.types.WorkProduct is twin_core.models.WorkProduct``).
 """
 
 import structlog
@@ -46,13 +46,13 @@ from orchestrator.event_bus.events import (
     EventType,
 )
 from shared.types.common import (
-    ArtifactId,
     ComponentId,
     ConstraintId,
     NodeId,
     SessionId,
     Timestamp,
     VersionId,
+    WorkProductId,
 )
 from skill_registry.schema_validator import (
     SkillDefinition,
@@ -60,8 +60,6 @@ from skill_registry.schema_validator import (
 )
 from twin_core.models import (
     AgentNode,
-    Artifact,
-    ArtifactChange,
     BOMItem,
     Component,
     ConstrainedByEdge,
@@ -76,14 +74,16 @@ from twin_core.models import (
     UsesComponentEdge,
     Version,
     VersionDiff,
+    WorkProduct,
+    WorkProductChange,
 )
 from twin_core.models.enums import (
-    ArtifactType,
     ComponentLifecycle,
     ConstraintSeverity,
     ConstraintStatus,
     EdgeType,
     NodeType,
+    WorkProductType,
 )
 
 # --- Structured logging and tracing ---
@@ -94,7 +94,7 @@ logger.debug("shared.types facade loaded")
 
 __all__ = [
     # Twin Core — enums
-    "ArtifactType",
+    "WorkProductType",
     "ComponentLifecycle",
     "ConstraintSeverity",
     "ConstraintStatus",
@@ -105,7 +105,7 @@ __all__ = [
     "NodeBase",
     # Twin Core — nodes
     "AgentNode",
-    "Artifact",
+    "WorkProduct",
     "BOMItem",
     "Component",
     "Constraint",
@@ -118,7 +118,7 @@ __all__ = [
     "DependsOnEdge",
     "UsesComponentEdge",
     # Twin Core — responses
-    "ArtifactChange",
+    "WorkProductChange",
     "SubGraph",
     "VersionDiff",
     # Event bus
@@ -152,7 +152,7 @@ __all__ = [
     "SkillDefinition",
     "ToolRef",
     # Common aliases
-    "ArtifactId",
+    "WorkProductId",
     "ComponentId",
     "ConstraintId",
     "NodeId",

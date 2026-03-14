@@ -5,8 +5,8 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
-class ProjectArtifactResponse(BaseModel):
-    """A single artifact within a project."""
+class ProjectWorkProductResponse(BaseModel):
+    """A single work product within a project."""
 
     id: str
     name: str
@@ -22,7 +22,7 @@ class ProjectResponse(BaseModel):
     name: str
     description: str
     status: str
-    artifacts: list[ProjectArtifactResponse] = Field(default_factory=list)
+    work_products: list[ProjectWorkProductResponse] = Field(default_factory=list)
     agent_count: int = 0
     last_updated: str
     created_at: str

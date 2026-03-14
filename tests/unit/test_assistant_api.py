@@ -130,9 +130,9 @@ class TestDesignChangeProposalSchema:
         p = DesignChangeProposal(
             agent_code="electronics",
             description="Add decoupling cap",
-            artifacts_affected=ids,
+            work_products_affected=ids,
         )
-        assert len(p.artifacts_affected) == 2
+        assert len(p.work_products_affected) == 2
 
     def test_empty_agent_code_rejected(self) -> None:
         with pytest.raises(Exception):  # noqa: B017
@@ -276,7 +276,7 @@ class TestApprovalWorkflow:
             agent_code="mechanical",
             description="Stress update",
             diff={"field": "value"},
-            artifacts=[uuid4()],
+            work_products=[uuid4()],
         )
         assert proposal.status == ChangeStatus.PENDING
         assert proposal.agent_code == "mechanical"

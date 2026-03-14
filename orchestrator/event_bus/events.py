@@ -12,9 +12,9 @@ class EventType(StrEnum):
     """All event types published on the event bus."""
 
     # Digital Twin events
-    ARTIFACT_CREATED = "twin.artifact.created"
-    ARTIFACT_UPDATED = "twin.artifact.updated"
-    ARTIFACT_DELETED = "twin.artifact.deleted"
+    WORK_PRODUCT_CREATED = "twin.work_product.created"
+    WORK_PRODUCT_UPDATED = "twin.work_product.updated"
+    WORK_PRODUCT_DELETED = "twin.work_product.deleted"
     CONSTRAINT_VIOLATED = "twin.constraint.violated"
     BRANCH_CREATED = "twin.branch.created"
     BRANCH_MERGED = "twin.branch.merged"

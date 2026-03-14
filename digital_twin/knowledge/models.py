@@ -52,7 +52,7 @@ class SearchQuery(BaseModel):
         default=None,
         description="Optional metadata key-value filter",
     )
-    source_artifact_id: UUID | None = Field(
+    source_work_product_id: UUID | None = Field(
         default=None,
-        description="Optional filter to entries linked to a specific artifact",
+        description="Optional filter to entries linked to a specific work_product",
     )

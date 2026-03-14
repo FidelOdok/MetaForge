@@ -87,7 +87,7 @@ describe('TwinViewerPage', () => {
   it('renders node list in graph mode', () => {
     mockUseTwinNodes.mockReturnValue({
       data: [
-        { id: 'n1', name: 'bracket-v1.step', type: 'artifact', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: new Date().toISOString() },
+        { id: 'n1', name: 'bracket-v1.step', type: 'work_product', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: new Date().toISOString() },
       ],
       isLoading: false,
     } as unknown as ReturnType<typeof useTwinNodes>);

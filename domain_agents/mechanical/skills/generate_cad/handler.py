@@ -30,15 +30,15 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
     output_type = GenerateCadOutput
 
     async def validate_preconditions(self, input_data: GenerateCadInput) -> list[str]:
-        """Check that the artifact exists and FreeCAD tool is available."""
+        """Check that the work_product exists and FreeCAD tool is available."""
         errors: list[str] = []
 
-        # Check artifact exists in the Twin
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        # Check work_product exists in the Twin
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         # Check FreeCAD create_parametric tool is available
         if not await self.context.mcp.is_available("freecad.create_parametric"):
@@ -55,7 +55,7 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
 
             self.logger.info(
                 "Generating CAD",
-                artifact_id=str(input_data.artifact_id),
+                work_product_id=str(input_data.work_product_id),
                 shape_type=input_data.shape_type,
                 material=input_data.material,
             )
@@ -72,7 +72,7 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             # 2. Build output path if not provided
             output_path = input_data.output_path
             if not output_path:
-                output_path = f"output/{input_data.shape_type}_{input_data.artifact_id}.step"
+                output_path = f"output/{input_data.shape_type}_{input_data.work_product_id}.step"
 
             # 3. Invoke freecad.create_parametric via MCP bridge
             try:
@@ -119,7 +119,7 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             span.set_attribute("elapsed_s", elapsed)
 
             return GenerateCadOutput(
-                artifact_id=input_data.artifact_id,
+                work_product_id=input_data.work_product_id,
                 cad_file=cad_file,
                 shape_type=input_data.shape_type,
                 volume_mm3=volume_mm3,

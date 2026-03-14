@@ -67,7 +67,7 @@ python -m examples.drone_flight_controller.demo_validate_stress
 
 **What it does:**
 
-1. Initializes a Digital Twin with a motor mount bracket CAD artifact
+1. Initializes a Digital Twin with a motor mount bracket CAD work_product
 2. Starts a CalculiX tool adapter (mocked FEA solver)
 3. Wires up the MCP protocol stack (client, transport, bridge)
 4. Creates the Mechanical Agent
@@ -143,7 +143,7 @@ This runs all six agents in sequence, coordinated by the orchestrator.
 
 - Builds compliance checklists for selected regimes (UKCA, CE, FCC)
 - Each checklist contains regime-specific requirements with standard references
-- Tracks evidence artifacts (test reports, certificates) linked to checklist items
+- Tracks evidence work_products (test reports, certificates) linked to checklist items
 - Computes coverage percentage: (items with accepted evidence) / (mandatory items)
 - Supports multi-regime tracking (e.g., UKCA + CE + FCC = 23 checklist items)
 
@@ -212,7 +212,7 @@ Edit the `constraints` list in the demo script to add stress constraints:
 result = await agent.run_task(
     TaskRequest(
         task_type="validate_stress",
-        artifact_id=artifact.id,
+        work_product_id=work_product.id,
         parameters={
             "mesh_file_path": "models/your_part.inp",
             "load_case": "max_thrust",
@@ -295,7 +295,7 @@ Human Intent (PRD.md, constraints.json)
              +-------------+-------------+
                            |
                     Digital Twin
-                 (artifact graph —
+                 (work_product graph —
               single source of truth)
                            |
          +-----------------+-----------------+

@@ -6,7 +6,7 @@ This directory stores session logs from MetaForge agent runs. Each session recor
 - Agent type and configuration
 - Input parameters and constraints applied
 - Decisions made and rationale
-- Output artifacts produced
+- Output work_products produced
 - Validation results
 
 Session files are created automatically by MetaForge during agent execution.

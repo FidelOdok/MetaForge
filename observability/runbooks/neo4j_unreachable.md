@@ -7,7 +7,7 @@
 - **Duration**: Fires after 1 minute
 - **Dashboard**: [System Overview](../dashboards/system-overview.json), [Data Stores](../dashboards/data-stores.json)
 
-Neo4j is the graph database backing the Digital Twin -- the single source of design truth. When there are zero active connections, all artifact graph operations (reads, writes, traversals, constraint checks) will fail. This blocks every agent and orchestrator workflow that interacts with design state.
+Neo4j is the graph database backing the Digital Twin -- the single source of design truth. When there are zero active connections, all work_product graph operations (reads, writes, traversals, constraint checks) will fail. This blocks every agent and orchestrator workflow that interacts with design state.
 
 ## Symptoms
 

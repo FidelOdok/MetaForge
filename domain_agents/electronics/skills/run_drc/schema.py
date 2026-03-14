@@ -24,7 +24,7 @@ class DrcViolation(BaseModel):
 class RunDrcInput(BaseModel):
     """Input for the run_drc skill."""
 
-    artifact_id: UUID = Field(..., description="ID of the PCB artifact in the Digital Twin")
+    work_product_id: UUID = Field(..., description="ID of the PCB work_product in the Digital Twin")
     pcb_file: str = Field(..., min_length=1, description="Path to the KiCad PCB file (.kicad_pcb)")
     severity_filter: str = Field(
         default="all",
@@ -35,7 +35,7 @@ class RunDrcInput(BaseModel):
 class RunDrcOutput(BaseModel):
     """Output from the run_drc skill."""
 
-    artifact_id: UUID = Field(..., description="ID of the analyzed artifact")
+    work_product_id: UUID = Field(..., description="ID of the analyzed work_product")
     pcb_file: str = Field(..., description="Path to the PCB file that was checked")
     violations: list[DrcViolation] = Field(
         default_factory=list, description="List of DRC violations found"

@@ -88,7 +88,7 @@ class TaskRequest(BaseModel):
     """A request for the mechanical agent to perform a task."""
 
     task_type: str  # "validate_stress", "check_tolerances", "generate_mesh", "full_validation"
-    artifact_id: UUID
+    work_product_id: UUID
     parameters: dict[str, Any] = {}
     branch: str = "main"
 
@@ -97,7 +97,7 @@ class TaskResult(BaseModel):
     """Result of a mechanical agent task."""
 
     task_type: str
-    artifact_id: UUID
+    work_product_id: UUID
     success: bool
     skill_results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -238,7 +238,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = GenerateMeshInput(
-            artifact_id=UUID("00000000-0000-0000-0000-000000000000"),
+            work_product_id=UUID("00000000-0000-0000-0000-000000000000"),
             cad_file=cad_file,
             element_size=element_size,
             algorithm=algorithm,
@@ -288,7 +288,7 @@ def _get_or_create_pydantic_agent() -> Any:
         process = ManufacturingProcess.model_validate(manufacturing_process)
 
         skill_input = CheckToleranceInput(
-            artifact_id=UUID("00000000-0000-0000-0000-000000000000"),
+            work_product_id=UUID("00000000-0000-0000-0000-000000000000"),
             tolerances=tol_specs,
             manufacturing_process=process,
             material=material,
@@ -334,7 +334,7 @@ class MechanicalAgent:
         agent = MechanicalAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(TaskRequest(
             task_type="validate_stress",
-            artifact_id=artifact.id,
+            work_product_id=work_product.id,
             parameters={"mesh_file_path": "mesh/bracket.inp", ...},
         ))
     """
@@ -372,7 +372,7 @@ class MechanicalAgent:
             self.logger.info(
                 "Running task",
                 task_type=request.task_type,
-                artifact_id=str(request.artifact_id),
+                work_product_id=str(request.work_product_id),
             )
 
             # Try PydanticAI path if LLM is available
@@ -398,14 +398,18 @@ class MechanicalAgent:
         if agent is None:
             raise RuntimeError("PydanticAI agent could not be created")
 
-        # Verify artifact exists first
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists first
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         deps = AgentDependencies(
@@ -432,7 +436,7 @@ class MechanicalAgent:
 
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=mechanical_result.overall_passed,
             skill_results=mechanical_result.tool_calls
             if mechanical_result.tool_calls
@@ -444,7 +448,7 @@ class MechanicalAgent:
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."]
+        parts = [f"Perform a '{request.task_type}' task on work_product {request.work_product_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -456,7 +460,7 @@ class MechanicalAgent:
         if request.task_type not in self.SUPPORTED_TASKS:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     f"Unsupported task type: {request.task_type}. "
@@ -464,14 +468,18 @@ class MechanicalAgent:
                 ],
             )
 
-        # Verify artifact exists
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         # Route to handler
@@ -497,7 +505,7 @@ class MechanicalAgent:
 
         # Build skill input from request parameters
         skill_input_data: dict[str, Any] = {
-            "artifact_id": request.artifact_id,
+            "work_product_id": request.work_product_id,
             "mesh_file_path": request.parameters.get("mesh_file_path", ""),
             "load_case": request.parameters.get("load_case", "default"),
             "constraints": request.parameters.get("constraints", []),
@@ -516,7 +524,7 @@ class MechanicalAgent:
         except Exception as exc:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[f"FEA solver failed: {exc}"],
             )
@@ -549,7 +557,7 @@ class MechanicalAgent:
 
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=all_passed,
             skill_results=[
                 {
@@ -574,7 +582,7 @@ class MechanicalAgent:
         if not raw_process:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: manufacturing_process"],
             )
@@ -584,13 +592,13 @@ class MechanicalAgent:
         except Exception as exc:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[f"Invalid manufacturing_process: {exc}"],
             )
 
         skill_input = CheckToleranceInput(
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             tolerances=tolerances,
             manufacturing_process=process,
             material=request.parameters.get("material", "aluminum_6061"),
@@ -603,7 +611,7 @@ class MechanicalAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -611,7 +619,7 @@ class MechanicalAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=output.overall_status != "fail",
             skill_results=[
                 {
@@ -635,13 +643,13 @@ class MechanicalAgent:
         if not cad_file:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: cad_file"],
             )
 
         skill_input = GenerateMeshInput(
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             cad_file=cad_file,
             element_size=request.parameters.get("element_size", 1.0),
             algorithm=request.parameters.get("algorithm", "netgen"),
@@ -657,7 +665,7 @@ class MechanicalAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -665,7 +673,7 @@ class MechanicalAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=output.quality_acceptable,
             skill_results=[
                 {
@@ -691,7 +699,7 @@ class MechanicalAgent:
         if not shape_type:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: shape_type"],
             )
@@ -700,13 +708,13 @@ class MechanicalAgent:
         if not dimensions:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: dimensions"],
             )
 
         skill_input = GenerateCadInput(
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             shape_type=shape_type,
             dimensions=dimensions,
             material=request.parameters.get("material", "aluminum_6061"),
@@ -720,7 +728,7 @@ class MechanicalAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -728,7 +736,7 @@ class MechanicalAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=True,
             skill_results=[
                 {
@@ -766,7 +774,7 @@ class MechanicalAgent:
 
         return TaskResult(
             task_type="full_validation",
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=overall_success,
             skill_results=all_results,
             errors=all_errors,

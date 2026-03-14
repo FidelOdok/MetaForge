@@ -71,7 +71,7 @@ class SimulationAgentResult(BaseModel):
         default=True,
         description="Whether all simulations converged",
     )
-    artifacts: list[dict[str, Any]] = Field(
+    work_products: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Artifacts produced or modified",
     )
@@ -170,7 +170,7 @@ def create_simulation_agent(
             )
 
             skill_input = RunFeaInput(
-                artifact_id=str(UUID(int=0)),
+                work_product_id=str(UUID(int=0)),
                 mesh_file=mesh_file,
                 load_cases=load_cases or [],
                 analysis_type=analysis_type,
@@ -223,7 +223,7 @@ def create_simulation_agent(
             )
 
             skill_input = RunSpiceInput(
-                artifact_id=str(UUID(int=0)),
+                work_product_id=str(UUID(int=0)),
                 netlist_path=netlist_path,
                 analysis_type=analysis_type,
                 params=params or {},
@@ -276,7 +276,7 @@ def create_simulation_agent(
             )
 
             skill_input = RunCfdInput(
-                artifact_id=str(UUID(int=0)),
+                work_product_id=str(UUID(int=0)),
                 geometry_file=geometry_file,
                 fluid_properties=fluid_properties or {},
                 boundary_conditions=boundary_conditions or {},
@@ -342,7 +342,7 @@ async def run_agent(
         return {
             "overall_passed": data.overall_passed,
             "convergence_achieved": data.convergence_achieved,
-            "artifacts": data.artifacts,
+            "work_products": data.work_products,
             "analysis": data.analysis,
             "recommendations": data.recommendations,
             "tool_calls": data.tool_calls,

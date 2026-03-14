@@ -4,10 +4,10 @@ import { useProjects, useProject } from '../use-projects';
 
 vi.mock('../../api/endpoints/projects', () => ({
   getProjects: vi.fn().mockResolvedValue([
-    { id: '1', name: 'P1', description: '', status: 'active', artifacts: [], agentCount: 0, lastUpdated: '', createdAt: '' },
+    { id: '1', name: 'P1', description: '', status: 'active', work_products: [], agentCount: 0, lastUpdated: '', createdAt: '' },
   ]),
   getProject: vi.fn().mockResolvedValue(
-    { id: '1', name: 'P1', description: '', status: 'active', artifacts: [], agentCount: 0, lastUpdated: '', createdAt: '' },
+    { id: '1', name: 'P1', description: '', status: 'active', work_products: [], agentCount: 0, lastUpdated: '', createdAt: '' },
   ),
 }));
 

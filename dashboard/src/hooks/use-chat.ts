@@ -147,12 +147,12 @@ export function useSendChatMessage(
 
   return useMutation<ChatMessage, Error, SendChatMessageVars>({
     mutationFn: ({ threadId, payload }) => sendChatMessage(threadId, payload),
-    onSuccess: (data, variables, context) => {
+    onSuccess: (...args) => {
       void queryClient.invalidateQueries({
-        queryKey: chatKeys.thread(variables.threadId),
+        queryKey: chatKeys.thread(args[1].threadId),
       });
       void queryClient.invalidateQueries({ queryKey: chatKeys.threads() });
-      options?.onSuccess?.(data, variables, context);
+      options?.onSuccess?.(...args);
     },
     ...options,
   });

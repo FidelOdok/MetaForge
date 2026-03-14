@@ -1,4 +1,4 @@
-"""Constraint node — a rule that must be satisfied across artifacts."""
+"""Constraint node — a rule that must be satisfied across work_products."""
 
 from datetime import datetime
 from uuid import UUID, uuid4

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class ScaffoldDriverInput(BaseModel):
     """Input for the scaffold_driver skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID for the firmware project")
+    work_product_id: UUID = Field(..., description="Twin work_product ID for the firmware project")
     peripheral_type: str = Field(
         ...,
         min_length=1,
@@ -28,7 +28,7 @@ class ScaffoldDriverInput(BaseModel):
 class ScaffoldDriverOutput(BaseModel):
     """Output from the scaffold_driver skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID")
+    work_product_id: UUID = Field(..., description="Twin work_product ID")
     driver_files: list[str] = Field(
         default_factory=list, description="List of generated driver file paths"
     )

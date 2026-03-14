@@ -64,8 +64,8 @@ from skill_registry.mcp_bridge import InMemoryMcpBridge
 @pytest.fixture
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
-    twin.get_artifact.return_value = MagicMock(
-        id=uuid4(), name="test-artifact", domain="mechanical"
+    twin.get_work_product.return_value = MagicMock(
+        id=uuid4(), name="test-work_product", domain="mechanical"
     )
     return twin
 
@@ -152,7 +152,7 @@ class TestResultModels:
         r = MechanicalResult(overall_passed=False, max_stress_mpa=200.0, critical_region="flange")
         assert r.overall_passed is False
         assert r.max_stress_mpa == 200.0
-        assert r.artifacts == []
+        assert r.work_products == []
         assert r.tool_calls == []
 
     def test_electronics_result_inherits(self):
@@ -459,7 +459,7 @@ class TestDualModeDispatch:
             agent = MechanicalAgent(twin=mock_twin, mcp=mcp_bridge)
             request = METaskRequest(
                 task_type="validate_stress",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={
                     "mesh_file_path": "mesh/bracket.inp",
                     "load_case": "gravity",
@@ -477,7 +477,7 @@ class TestDualModeDispatch:
             agent = ElectronicsAgent(twin=mock_twin, mcp=mcp_bridge)
             request = EETaskRequest(
                 task_type="run_erc",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
             )
             result = await agent.run_task(request)
@@ -491,7 +491,7 @@ class TestDualModeDispatch:
             agent = FirmwareAgent(twin=mock_twin, mcp=mcp_bridge)
             request = FWTaskRequest(
                 task_type="generate_hal",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"mcu_family": "STM32F4", "peripherals": ["GPIO"]},
             )
             result = await agent.run_task(request)
@@ -505,7 +505,7 @@ class TestDualModeDispatch:
             agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
             request = SIMTaskRequest(
                 task_type="run_fea",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"mesh_file": "mesh/bracket.inp"},
             )
             result = await agent.run_task(request)

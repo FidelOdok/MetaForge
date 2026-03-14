@@ -73,7 +73,7 @@ class ElectronicsAgentResult(BaseModel):
         default=0,
         description="Total DRC errors found",
     )
-    artifacts: list[dict[str, Any]] = Field(
+    work_products: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Artifacts produced or modified",
     )
@@ -168,7 +168,7 @@ def create_electronics_agent(
             )
 
             skill_input = RunErcInput(
-                artifact_id=UUID(int=0),
+                work_product_id=UUID(int=0),
                 schematic_file=schematic_file,
                 severity_filter=severity_filter,
             )
@@ -217,7 +217,7 @@ def create_electronics_agent(
             )
 
             skill_input = RunDrcInput(
-                artifact_id=UUID(int=0),
+                work_product_id=UUID(int=0),
                 pcb_file=pcb_file,
                 severity_filter=severity_filter,
             )
@@ -307,7 +307,7 @@ async def run_agent(
             "overall_passed": data.overall_passed,
             "total_erc_errors": data.total_erc_errors,
             "total_drc_errors": data.total_drc_errors,
-            "artifacts": data.artifacts,
+            "work_products": data.work_products,
             "analysis": data.analysis,
             "recommendations": data.recommendations,
             "tool_calls": data.tool_calls,

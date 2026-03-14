@@ -26,7 +26,7 @@ from orchestrator.event_bus.subscribers import EventBus, EventSubscriber
 # ---------------------------------------------------------------------------
 
 
-def _make_event(event_type: EventType = EventType.ARTIFACT_CREATED) -> Event:
+def _make_event(event_type: EventType = EventType.WORK_PRODUCT_CREATED) -> Event:
     return Event(
         id=str(uuid4()),
         type=event_type,
@@ -104,9 +104,9 @@ class TestResolveTopicRouting:
     @pytest.mark.parametrize(
         "event_type,expected_topic",
         [
-            (EventType.ARTIFACT_CREATED, TOPIC_TWIN_EVENTS),
-            (EventType.ARTIFACT_UPDATED, TOPIC_TWIN_EVENTS),
-            (EventType.ARTIFACT_DELETED, TOPIC_TWIN_EVENTS),
+            (EventType.WORK_PRODUCT_CREATED, TOPIC_TWIN_EVENTS),
+            (EventType.WORK_PRODUCT_UPDATED, TOPIC_TWIN_EVENTS),
+            (EventType.WORK_PRODUCT_DELETED, TOPIC_TWIN_EVENTS),
             (EventType.CONSTRAINT_VIOLATED, TOPIC_TWIN_EVENTS),
             (EventType.BRANCH_CREATED, TOPIC_TWIN_EVENTS),
             (EventType.BRANCH_MERGED, TOPIC_TWIN_EVENTS),
@@ -162,14 +162,14 @@ class TestKafkaEventPublisher:
         publisher._producer = mock_producer
         publisher._started = True
 
-        event = _make_event(EventType.ARTIFACT_UPDATED)
+        event = _make_event(EventType.WORK_PRODUCT_UPDATED)
         await publisher.publish(event)
 
         call_kwargs = mock_producer.send_and_wait.call_args
         value = call_kwargs.kwargs["value"]
         parsed = json.loads(value)
         assert parsed["id"] == event.id
-        assert parsed["type"] == str(EventType.ARTIFACT_UPDATED)
+        assert parsed["type"] == str(EventType.WORK_PRODUCT_UPDATED)
 
     async def test_publish_uses_event_id_as_key(self) -> None:
         publisher = KafkaEventPublisher()
