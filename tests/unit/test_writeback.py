@@ -35,16 +35,21 @@ def session_id():  # type: ignore[no-untyped-def]
 class TestWritebackCad:
     """writeback_cad creates a CAD_MODEL WorkProduct."""
 
-    async def test_creates_cad_model_work_product(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_creates_cad_model_work_product(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         skill_output = {
             "skill": "generate_cad",
             "cad_file": "/out/bracket.step",
             "shape_type": "bracket",
             "volume_mm3": 1234.5,
             "surface_area_mm2": 678.9,
-            "bounding_box": {"min_x": 0, "min_y": 0, "min_z": 0, "max_x": 10, "max_y": 10, "max_z": 5},
+            "bounding_box": {
+                "min_x": 0,
+                "min_y": 0,
+                "min_z": 0,
+                "max_x": 10,
+                "max_y": 10,
+                "max_z": 5,
+            },
             "parameters_used": {"width": 10, "height": 10},
             "material": "aluminum_6061",
         }
@@ -60,9 +65,7 @@ class TestWritebackCad:
         assert wp.metadata["shape_type"] == "bracket"
         assert wp.metadata["volume_mm3"] == 1234.5
 
-    async def test_includes_session_id_and_timestamp(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_includes_session_id_and_timestamp(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         skill_output = {
             "cad_file": "/out/plate.step",
             "shape_type": "plate",
@@ -77,9 +80,7 @@ class TestWritebackCad:
         assert "timestamp" in wp.metadata
         assert wp.created_at is not None
 
-    async def test_persists_in_twin(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_persists_in_twin(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         skill_output = {"cad_file": "/out/cyl.step", "shape_type": "cylinder"}
 
         wp = await writeback_cad(twin, session_id, "main", skill_output)
@@ -97,9 +98,7 @@ class TestWritebackCad:
 class TestWritebackMesh:
     """writeback_mesh creates a SIMULATION_RESULT WorkProduct."""
 
-    async def test_creates_mesh_work_product(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_creates_mesh_work_product(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         skill_output = {
             "skill": "generate_mesh",
             "mesh_file": "/out/bracket.inp",
@@ -122,9 +121,7 @@ class TestWritebackMesh:
         assert wp.metadata["num_nodes"] == 5000
         assert wp.metadata["num_elements"] == 12000
 
-    async def test_includes_session_id_and_timestamp(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_includes_session_id_and_timestamp(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         skill_output = {
             "mesh_file": "/out/m.inp",
             "algorithm_used": "gmsh",
@@ -171,18 +168,14 @@ class TestWritebackStress:
             "overall_passed": True,
         }
 
-        updated = await writeback_stress(
-            twin, session_id, "main", original.id, skill_output
-        )
+        updated = await writeback_stress(twin, session_id, "main", original.id, skill_output)
 
         assert updated.metadata["validation_status"] == "pass"
         assert updated.metadata["skill"] == "validate_stress"
         assert updated.metadata["session_id"] == str(session_id)
         assert "timestamp" in updated.metadata
 
-    async def test_records_fail_status(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_records_fail_status(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         original = await self._create_wp(twin)
 
         skill_output = {
@@ -191,22 +184,16 @@ class TestWritebackStress:
             "constraint_results": [],
         }
 
-        updated = await writeback_stress(
-            twin, session_id, "main", original.id, skill_output
-        )
+        updated = await writeback_stress(twin, session_id, "main", original.id, skill_output)
 
         assert updated.metadata["validation_status"] == "fail"
 
-    async def test_includes_session_id_and_timestamp(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_includes_session_id_and_timestamp(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         original = await self._create_wp(twin)
 
         skill_output = {"overall_passed": True, "fea_result": {}, "constraint_results": []}
 
-        updated = await writeback_stress(
-            twin, session_id, "main", original.id, skill_output
-        )
+        updated = await writeback_stress(twin, session_id, "main", original.id, skill_output)
 
         assert updated.metadata["session_id"] == str(session_id)
         assert "timestamp" in updated.metadata
@@ -248,9 +235,7 @@ class TestWritebackTolerance:
             "summary": "All dimensions within tolerance",
         }
 
-        updated = await writeback_tolerance(
-            twin, session_id, "main", original.id, skill_output
-        )
+        updated = await writeback_tolerance(twin, session_id, "main", original.id, skill_output)
 
         assert updated.metadata["overall_status"] == "pass"
         assert updated.metadata["total_dimensions_checked"] == 5
@@ -258,9 +243,7 @@ class TestWritebackTolerance:
         assert updated.metadata["session_id"] == str(session_id)
         assert "timestamp" in updated.metadata
 
-    async def test_records_fail_status(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_records_fail_status(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         original = await self._create_wp(twin)
 
         skill_output = {
@@ -272,16 +255,12 @@ class TestWritebackTolerance:
             "summary": "2 dimensions out of tolerance",
         }
 
-        updated = await writeback_tolerance(
-            twin, session_id, "main", original.id, skill_output
-        )
+        updated = await writeback_tolerance(twin, session_id, "main", original.id, skill_output)
 
         assert updated.metadata["overall_status"] == "fail"
         assert updated.metadata["failures"] == 2
 
-    async def test_includes_session_id_and_timestamp(
-        self, twin: InMemoryTwinAPI, session_id
-    ):  # type: ignore[no-untyped-def]
+    async def test_includes_session_id_and_timestamp(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
         original = await self._create_wp(twin)
 
         skill_output = {
@@ -293,9 +272,7 @@ class TestWritebackTolerance:
             "summary": "OK",
         }
 
-        updated = await writeback_tolerance(
-            twin, session_id, "main", original.id, skill_output
-        )
+        updated = await writeback_tolerance(twin, session_id, "main", original.id, skill_output)
 
         assert updated.metadata["session_id"] == str(session_id)
         assert "timestamp" in updated.metadata

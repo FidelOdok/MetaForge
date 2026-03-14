@@ -21,7 +21,6 @@ from fastapi.testclient import TestClient
 from api_gateway.chat.routes import ChatStore, router
 from api_gateway.chat.routes import store as _module_store
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

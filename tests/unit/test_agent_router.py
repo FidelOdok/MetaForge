@@ -89,14 +89,10 @@ class TestAgentRouter:
         assert agent.twin is twin
         assert agent.mcp is mcp
 
-    def test_agent_receives_session_id(
-        self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge
-    ) -> None:
+    def test_agent_receives_session_id(self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge) -> None:
         """When session_id is provided it should be forwarded to the agent."""
         sid = uuid4()
-        agent = default_router.get_agent(
-            "session", twin=twin, mcp_bridge=mcp, session_id=sid
-        )
+        agent = default_router.get_agent("session", twin=twin, mcp_bridge=mcp, session_id=sid)
         assert agent is not None
         assert agent.session_id == sid
 
