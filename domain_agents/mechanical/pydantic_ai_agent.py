@@ -91,7 +91,7 @@ class MechanicalAgentResult(BaseModel):
     )
     work_products: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Artifacts produced or modified",
+        description="Work products produced or modified",
     )
     analysis: dict[str, Any] = Field(
         default_factory=dict,
@@ -156,7 +156,7 @@ def create_mechanical_agent(
     agent: Agent[MechanicalAgentDeps, MechanicalAgentResult] = Agent(
         model,
         system_prompt=SYSTEM_PROMPT,
-        result_type=MechanicalAgentResult,
+        output_type=MechanicalAgentResult,
         deps_type=MechanicalAgentDeps,
     )
 
@@ -414,7 +414,7 @@ async def run_agent(
 
         agent = create_mechanical_agent(model=model)
         result = await agent.run(prompt, deps=deps)
-        data: MechanicalAgentResult = result.data
+        data: MechanicalAgentResult = result.output
 
         logger.info(
             "Mechanical agent completed",

@@ -45,7 +45,7 @@ class AgentResult(BaseModel):
 
     work_products: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Artifacts produced or modified by the agent",
+        description="Work products produced or modified by the agent",
     )
     analysis: dict[str, Any] = Field(
         default_factory=dict,
@@ -66,10 +66,17 @@ class AgentResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def get_llm_model() -> str | None:
-    """Resolve the LLM model string from environment variables.
+def get_llm_model() -> Any | None:
+    """Resolve the LLM model from environment variables.
 
-    Returns a PydanticAI-compatible model string like 'openai:gpt-4o'
+    Supported env vars:
+        METAFORGE_LLM_PROVIDER: 'openai' or 'anthropic'
+        METAFORGE_LLM_MODEL: model name (e.g. 'claude-sonnet-4-20250514')
+        METAFORGE_LLM_BASE_URL: custom API base URL for proxy setups
+            (e.g. CLIProxyAPI, LiteLLM)
+        METAFORGE_LLM_API_KEY: API key for the provider or proxy
+
+    Returns a PydanticAI-compatible model string or model instance,
     or None if the LLM provider is not configured.
     """
     provider = os.environ.get("METAFORGE_LLM_PROVIDER", "").strip().lower()
@@ -77,10 +84,42 @@ def get_llm_model() -> str | None:
         return None
 
     model_name = os.environ.get("METAFORGE_LLM_MODEL", "").strip()
+    base_url = os.environ.get("METAFORGE_LLM_BASE_URL", "").strip()
+    api_key = os.environ.get("METAFORGE_LLM_API_KEY", "").strip()
 
     if provider == "openai":
+        if base_url:
+            try:
+                from pydantic_ai.models.openai import OpenAIModel
+                from pydantic_ai.providers.openai import OpenAIProvider
+
+                return OpenAIModel(
+                    model_name or "gpt-4o",
+                    provider=OpenAIProvider(
+                        api_key=api_key or None,
+                        base_url=base_url,
+                    ),
+                )
+            except ImportError:
+                logger.warning("openai_model_import_failed")
+                return None
         return f"openai:{model_name or 'gpt-4o'}"
     elif provider == "anthropic":
+        if base_url:
+            try:
+                from pydantic_ai.models.anthropic import AnthropicModel
+                from pydantic_ai.providers.anthropic import AnthropicProvider
+
+                return AnthropicModel(
+                    model_name or "claude-sonnet-4-20250514",
+                    provider=AnthropicProvider(
+                        api_key=api_key or None,
+                        base_url=base_url,
+                    ),
+                )
+            except ImportError:
+                logger.warning("anthropic_model_import_failed")
+                return None
         return f"anthropic:{model_name or 'claude-sonnet-4-20250514'}"
     else:
         logger.warning("unknown_llm_provider", provider=provider)
