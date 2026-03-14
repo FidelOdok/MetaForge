@@ -34,7 +34,7 @@ class KnowledgeEntryResponse(BaseModel):
     content: str
     knowledge_type: KnowledgeType = Field(alias="knowledgeType")
     metadata: dict[str, Any]
-    source_artifact_id: UUID | None = Field(default=None, alias="sourceArtifactId")
+    source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
     created_at: datetime = Field(alias="createdAt")
 
     model_config = {"populate_by_name": True}
@@ -56,7 +56,7 @@ class IngestRequest(BaseModel):
     content: str = Field(..., min_length=1)
     knowledge_type: KnowledgeType = Field(alias="knowledgeType")
     metadata: dict[str, Any] = Field(default_factory=dict)
-    source_artifact_id: UUID | None = Field(default=None, alias="sourceArtifactId")
+    source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
 
     model_config = {"populate_by_name": True}
 
@@ -122,7 +122,7 @@ async def search_knowledge(
                 content=e.content,
                 knowledgeType=e.knowledge_type,
                 metadata=e.metadata,
-                sourceArtifactId=e.source_artifact_id,
+                sourceWorkProductId=e.source_work_product_id,
                 createdAt=e.created_at,
             )
             for e in entries
@@ -162,7 +162,7 @@ async def ingest_knowledge(
             embedding=embedding,
             knowledge_type=body.knowledge_type,
             metadata=body.metadata,
-            source_artifact_id=body.source_artifact_id,
+            source_work_product_id=body.source_work_product_id,
         )
         stored = await store.store(entry)
         logger.info(
@@ -188,6 +188,6 @@ async def get_knowledge_entry(
         content=entry.content,
         knowledgeType=entry.knowledge_type,
         metadata=entry.metadata,
-        sourceArtifactId=entry.source_artifact_id,
+        sourceWorkProductId=entry.source_work_product_id,
         createdAt=entry.created_at,
     )

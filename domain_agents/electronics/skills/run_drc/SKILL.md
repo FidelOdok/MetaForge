@@ -4,7 +4,7 @@ Runs Design Rules Check (DRC) on a KiCad PCB layout and returns categorised viol
 
 ## What it does
 
-1. Takes a PCB artifact ID and file path as input
+1. Takes a PCB work_product ID and file path as input
 2. Invokes the KiCad DRC tool via MCP bridge
 3. Parses and categorises violations by severity (error / warning)
 4. Returns a structured report with pass/fail status
@@ -15,7 +15,7 @@ Runs Design Rules Check (DRC) on a KiCad PCB layout and returns categorised viol
 
 ## Input
 
-- `artifact_id` -- ID of the PCB artifact in the Digital Twin
+- `work_product_id` -- ID of the PCB work_product in the Digital Twin
 - `pcb_file` -- Path to the KiCad PCB file (.kicad_pcb)
 - `severity_filter` -- Filter violations by severity: "all", "error", or "warning" (default: "all")
 

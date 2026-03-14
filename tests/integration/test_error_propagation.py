@@ -85,7 +85,7 @@ class TestMcpErrorPropagation:
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
         spy: SpySubscriber,
-        mech_artifact,
+        mech_work_product,
     ):
         """MCP tool not registered -> agent catches the error and returns
         TaskResult(success=False) rather than raising an exception.
@@ -108,7 +108,7 @@ class TestMcpErrorPropagation:
             step_id="s1",
             agent_code="MECH",
             task_type="validate_stress",
-            artifact_id=str(mech_artifact.id),
+            work_product_id=str(mech_work_product.id),
             parameters={"mesh_file_path": "cad/bracket.inp"},
         )
         await _run_step_and_wait(scheduler, workflow_engine, step)

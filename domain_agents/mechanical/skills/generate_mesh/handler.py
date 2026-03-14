@@ -25,15 +25,15 @@ class GenerateMeshHandler(SkillBase[GenerateMeshInput, GenerateMeshOutput]):
     output_type = GenerateMeshOutput
 
     async def validate_preconditions(self, input_data: GenerateMeshInput) -> list[str]:
-        """Check that the artifact exists and FreeCAD meshing tool is available."""
+        """Check that the work_product exists and FreeCAD meshing tool is available."""
         errors: list[str] = []
 
-        # Check artifact exists in the Twin
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        # Check work_product exists in the Twin
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         # Check FreeCAD generate_mesh tool is available
         if not await self.context.mcp.is_available("freecad.generate_mesh"):
@@ -45,7 +45,7 @@ class GenerateMeshHandler(SkillBase[GenerateMeshInput, GenerateMeshOutput]):
         """Generate mesh via FreeCAD MCP tool and assess quality."""
         self.logger.info(
             "Generating mesh",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             cad_file=input_data.cad_file,
             algorithm=input_data.algorithm,
             element_size=input_data.element_size,
@@ -121,7 +121,7 @@ class GenerateMeshHandler(SkillBase[GenerateMeshInput, GenerateMeshOutput]):
         quality_acceptable = len(quality_issues) == 0
 
         return GenerateMeshOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             mesh_file=mesh_file,
             num_nodes=num_nodes,
             num_elements=num_elements,

@@ -45,7 +45,7 @@ describe('ApprovalsPage', () => {
           agent_code: 'MECH',
           description: 'Update stress report',
           diff: {},
-          artifacts_affected: [],
+          work_products_affected: [],
           status: 'pending',
           session_id: 's1',
           created_at: new Date().toISOString(),

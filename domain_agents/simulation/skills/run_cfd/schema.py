@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class RunCfdInput(BaseModel):
     """Input for the run_cfd skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID for the mechanical design")
+    work_product_id: UUID = Field(..., description="Twin work_product ID for the mechanical design")
     geometry_file: str = Field(
         ..., min_length=1, description="Path to the geometry file (STEP/STL)"
     )
@@ -31,7 +31,7 @@ class RunCfdInput(BaseModel):
 class RunCfdOutput(BaseModel):
     """Output from the run_cfd skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID")
+    work_product_id: UUID = Field(..., description="Twin work_product ID")
     max_velocity_ms: float = Field(..., ge=0, description="Maximum fluid velocity in m/s")
     pressure_drop_pa: float = Field(..., ge=0, description="Pressure drop across the domain in Pa")
     max_temperature_c: float = Field(

@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import pytest
 
-from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase, NodeBase
-from twin_core.models.enums import ArtifactType, EdgeType, NodeType
+from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.work_product import WorkProduct
 from twin_core.neo4j_graph_engine import (
     Neo4jConnectionError,
     Neo4jGraphEngine,
@@ -21,10 +21,10 @@ from twin_core.neo4j_graph_engine import (
 # ---------------------------------------------------------------------------
 
 
-def _make_artifact(name: str = "test", domain: str = "mechanical") -> Artifact:
-    return Artifact(
+def _make_work_product(name: str = "test", domain: str = "mechanical") -> WorkProduct:
+    return WorkProduct(
         name=name,
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain=domain,
         file_path=f"models/{name}.step",
         content_hash="hash123",
@@ -168,7 +168,7 @@ class TestConnectionLifecycle:
 
 class TestNodeOperations:
     async def test_add_node(self, engine, mock_session):
-        artifact = _make_artifact()
+        work_product = _make_work_product()
 
         # First run: check existence (returns None = not found)
         mock_result_check = AsyncMock()
@@ -179,13 +179,13 @@ class TestNodeOperations:
 
         mock_session.run = AsyncMock(side_effect=[mock_result_check, mock_result_create])
 
-        result = await engine.add_node(artifact)
-        assert result.id == artifact.id
+        result = await engine.add_node(work_product)
+        assert result.id == work_product.id
         assert result.name == "test"
         assert mock_session.run.await_count == 2
 
     async def test_add_node_duplicate_raises_value_error(self, engine, mock_session):
-        artifact = _make_artifact()
+        work_product = _make_work_product()
 
         # Existence check returns a record (node exists)
         mock_result = AsyncMock()
@@ -193,19 +193,19 @@ class TestNodeOperations:
         mock_session.run = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="already exists"):
-            await engine.add_node(artifact)
+            await engine.add_node(work_product)
 
     async def test_get_node_found(self, engine, mock_session):
-        artifact = _make_artifact()
-        record = _make_mock_record(artifact)
+        work_product = _make_work_product()
+        record = _make_mock_record(work_product)
 
         mock_result = AsyncMock()
         mock_result.single = AsyncMock(return_value=record)
         mock_session.run = AsyncMock(return_value=mock_result)
 
-        result = await engine.get_node(artifact.id)
+        result = await engine.get_node(work_product.id)
         assert result is not None
-        assert result.id == artifact.id
+        assert result.id == work_product.id
 
     async def test_get_node_not_found(self, engine, mock_session):
         mock_result = AsyncMock()
@@ -216,8 +216,8 @@ class TestNodeOperations:
         assert result is None
 
     async def test_update_node(self, engine, mock_session):
-        artifact = _make_artifact()
-        record = _make_mock_record(artifact)
+        work_product = _make_work_product()
+        record = _make_mock_record(work_product)
 
         # get_node call (for current state)
         mock_result_get = AsyncMock()
@@ -227,7 +227,7 @@ class TestNodeOperations:
         mock_result_update = AsyncMock()
 
         # get_node call (for re-fetch after update)
-        updated_artifact = artifact.model_copy(update={"name": "updated"})
+        updated_artifact = work_product.model_copy(update={"name": "updated"})
         record_updated = _make_mock_record(updated_artifact)
         mock_result_refetch = AsyncMock()
         mock_result_refetch.single = AsyncMock(return_value=record_updated)
@@ -240,7 +240,7 @@ class TestNodeOperations:
             ]
         )
 
-        result = await engine.update_node(artifact.id, {"name": "updated"})
+        result = await engine.update_node(work_product.id, {"name": "updated"})
         assert result is not None
         assert result.name == "updated"
 
@@ -273,8 +273,8 @@ class TestNodeOperations:
         assert result is False
 
     async def test_list_nodes_all(self, engine, mock_session):
-        a1 = _make_artifact("a")
-        a2 = _make_artifact("b")
+        a1 = _make_work_product("a")
+        a2 = _make_work_product("b")
         props1 = Neo4jGraphEngine._node_to_props(a1)
         props2 = Neo4jGraphEngine._node_to_props(a2)
 
@@ -286,14 +286,14 @@ class TestNodeOperations:
         assert len(result) == 2
 
     async def test_list_nodes_filtered_by_type(self, engine, mock_session):
-        a1 = _make_artifact("a")
+        a1 = _make_work_product("a")
         props1 = Neo4jGraphEngine._node_to_props(a1)
 
         mock_result = AsyncMock()
         mock_result.data = AsyncMock(return_value=[{"n": props1}])
         mock_session.run = AsyncMock(return_value=mock_result)
 
-        result = await engine.list_nodes(node_type=NodeType.ARTIFACT)
+        result = await engine.list_nodes(node_type=NodeType.WORK_PRODUCT)
         assert len(result) == 1
 
         # Verify the query included the WHERE clause
@@ -308,8 +308,8 @@ class TestNodeOperations:
 
 class TestEdgeOperations:
     async def test_add_edge(self, engine, mock_session):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         edge = EdgeBase(
             source_id=a.id,
             target_id=b.id,
@@ -368,8 +368,8 @@ class TestEdgeOperations:
             await engine.add_edge(edge)
 
     async def test_get_edges_outgoing(self, engine, mock_session):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         edge = EdgeBase(
             source_id=a.id,
             target_id=b.id,
@@ -427,8 +427,8 @@ class TestEdgeOperations:
 
 class TestTraversalQueries:
     async def test_get_neighbors(self, engine, mock_session):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
         # get_edges returns one edge
@@ -448,8 +448,8 @@ class TestTraversalQueries:
         assert result[0].id == b.id
 
     async def test_get_subgraph(self, engine, mock_session):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
         # get_node for root
@@ -494,8 +494,8 @@ class TestTraversalQueries:
             await engine.get_subgraph(uuid4())
 
     async def test_traverse(self, engine, mock_session):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
         # get_node for root
@@ -557,10 +557,10 @@ class TestCypherQuery:
 class TestErrorHandling:
     async def test_operations_fail_when_not_connected(self):
         eng = Neo4jGraphEngine()
-        artifact = _make_artifact()
+        work_product = _make_work_product()
 
         with pytest.raises(Neo4jConnectionError):
-            await eng.add_node(artifact)
+            await eng.add_node(work_product)
 
         with pytest.raises(Neo4jConnectionError):
             await eng.get_node(uuid4())
@@ -615,11 +615,11 @@ class TestErrorHandling:
 
 class TestSerialization:
     def test_node_round_trip(self):
-        artifact = _make_artifact()
-        props = Neo4jGraphEngine._node_to_props(artifact)
+        work_product = _make_work_product()
+        props = Neo4jGraphEngine._node_to_props(work_product)
         restored = Neo4jGraphEngine._props_to_node(props)
-        assert restored.id == artifact.id
-        assert restored.node_type == NodeType.ARTIFACT
+        assert restored.id == work_product.id
+        assert restored.node_type == NodeType.WORK_PRODUCT
 
     def test_edge_round_trip(self):
         edge = EdgeBase(

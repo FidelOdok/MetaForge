@@ -151,7 +151,7 @@ class TestFormatOutput:
 class TestBuildParser:
     def test_run_command(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(["run", "validate_stress", "--artifact", str(uuid4())])
+        args = parser.parse_args(["run", "validate_stress", "--work_product", str(uuid4())])
         assert args.command == "run"
         assert args.skill_name == "validate_stress"
 
@@ -161,7 +161,7 @@ class TestBuildParser:
             [
                 "run",
                 "validate_stress",
-                "--artifact",
+                "--work_product",
                 str(uuid4()),
                 "--params",
                 '{"load": 500}',
@@ -176,7 +176,7 @@ class TestBuildParser:
             [
                 "run",
                 "check_bom",
-                "--artifact",
+                "--work_product",
                 str(uuid4()),
                 "--session-id",
                 sid,
@@ -213,7 +213,7 @@ class TestBuildParser:
         assert args.command == "twin"
         assert args.twin_command == "list"
         assert args.domain == "mechanical"
-        assert args.artifact_type == "cad_model"
+        assert args.work_product_type == "cad_model"
 
     def test_proposals_command(self) -> None:
         parser = build_parser()
@@ -418,7 +418,7 @@ class TestForgeClientTwin:
         mock_client_cls.return_value = mock_ctx
 
         fc = ForgeClient()
-        fc.twin_list(domain="electronics", artifact_type="schematic")
+        fc.twin_list(domain="electronics", work_product_type="schematic")
         call_args = mock_ctx.get.call_args
         params = call_args[1].get("params", {})
         assert params.get("domain") == "electronics"

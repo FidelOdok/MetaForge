@@ -10,8 +10,8 @@ import structlog
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.skill_base import SkillContext
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 from .handler import GenerateCadHandler
 from .schema import GenerateCadInput
@@ -32,10 +32,10 @@ FREECAD_CAD_RESULT = {
 }
 
 
-def _make_artifact() -> Artifact:
-    return Artifact(
+def _make_work_product() -> WorkProduct:
+    return WorkProduct(
         name="test-bracket",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="models/test_bracket.step",
         content_hash="sha256:test123",
@@ -45,7 +45,7 @@ def _make_artifact() -> Artifact:
     )
 
 
-async def _make_ctx_and_handler() -> tuple[SkillContext, GenerateCadHandler, Artifact]:
+async def _make_ctx_and_handler() -> tuple[SkillContext, GenerateCadHandler, WorkProduct]:
     twin = InMemoryTwinAPI.create()
     mcp = InMemoryMcpBridge()
     mcp.register_tool(
@@ -53,7 +53,7 @@ async def _make_ctx_and_handler() -> tuple[SkillContext, GenerateCadHandler, Art
     )
     mcp.register_tool_response("freecad.create_parametric", FREECAD_CAD_RESULT)
 
-    artifact = await twin.create_artifact(_make_artifact())
+    work_product = await twin.create_work_product(_make_work_product())
 
     ctx = SkillContext(
         twin=twin,
@@ -63,7 +63,7 @@ async def _make_ctx_and_handler() -> tuple[SkillContext, GenerateCadHandler, Art
         branch="main",
     )
     handler = GenerateCadHandler(ctx)
-    return ctx, handler, artifact
+    return ctx, handler, work_product
 
 
 class TestGenerateCadHandler:
@@ -71,11 +71,11 @@ class TestGenerateCadHandler:
 
     async def test_execute_bracket(self):
         """Happy path: generate a bracket shape."""
-        _ctx, handler, artifact = await _make_ctx_and_handler()
+        _ctx, handler, work_product = await _make_ctx_and_handler()
 
         output = await handler.execute(
             GenerateCadInput(
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
                 material="aluminum_6061",
@@ -91,11 +91,11 @@ class TestGenerateCadHandler:
 
     async def test_execute_plate(self):
         """Generate a plate shape."""
-        _ctx, handler, artifact = await _make_ctx_and_handler()
+        _ctx, handler, work_product = await _make_ctx_and_handler()
 
         output = await handler.execute(
             GenerateCadInput(
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 shape_type="plate",
                 dimensions={"width": 100.0, "height": 80.0, "thickness": 2.0},
             )
@@ -106,24 +106,24 @@ class TestGenerateCadHandler:
 
     async def test_unsupported_shape_raises(self):
         """Unsupported shape type raises ValueError."""
-        _ctx, handler, artifact = await _make_ctx_and_handler()
+        _ctx, handler, work_product = await _make_ctx_and_handler()
 
         with pytest.raises(ValueError, match="Unsupported shape type"):
             await handler.execute(
                 GenerateCadInput(
-                    artifact_id=artifact.id,
+                    work_product_id=work_product.id,
                     shape_type="gearbox",
                     dimensions={"width": 10.0},
                 )
             )
 
     async def test_preconditions_missing_artifact(self):
-        """Precondition check fails when artifact is missing."""
+        """Precondition check fails when work_product is missing."""
         _ctx, handler, _artifact = await _make_ctx_and_handler()
 
         errors = await handler.validate_preconditions(
             GenerateCadInput(
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 shape_type="bracket",
                 dimensions={"width": 50.0},
             )
@@ -135,7 +135,7 @@ class TestGenerateCadHandler:
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
         # Don't register the tool
-        artifact = await twin.create_artifact(_make_artifact())
+        work_product = await twin.create_work_product(_make_work_product())
 
         ctx = SkillContext(
             twin=twin,
@@ -148,7 +148,7 @@ class TestGenerateCadHandler:
 
         errors = await handler.validate_preconditions(
             GenerateCadInput(
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0},
             )
@@ -157,11 +157,11 @@ class TestGenerateCadHandler:
 
     async def test_run_pipeline(self):
         """Full skill pipeline (preconditions -> execute -> wrap)."""
-        _ctx, handler, artifact = await _make_ctx_and_handler()
+        _ctx, handler, work_product = await _make_ctx_and_handler()
 
         result = await handler.run(
             GenerateCadInput(
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
             )
@@ -176,11 +176,11 @@ class TestGenerateCadHandler:
         """Output validation catches empty CAD file path."""
         from .schema import BoundingBox, GenerateCadOutput
 
-        _ctx, handler, artifact = await _make_ctx_and_handler()
+        _ctx, handler, work_product = await _make_ctx_and_handler()
 
         errors = await handler.validate_output(
             GenerateCadOutput(
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 cad_file="",
                 shape_type="bracket",
                 volume_mm3=100.0,
@@ -196,11 +196,11 @@ class TestGenerateCadHandler:
         """Output validation catches zero volume."""
         from .schema import BoundingBox, GenerateCadOutput
 
-        _ctx, handler, artifact = await _make_ctx_and_handler()
+        _ctx, handler, work_product = await _make_ctx_and_handler()
 
         errors = await handler.validate_output(
             GenerateCadOutput(
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 cad_file="output/test.step",
                 shape_type="bracket",
                 volume_mm3=0.0,

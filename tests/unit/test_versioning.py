@@ -5,18 +5,18 @@ from uuid import uuid4
 import pytest
 
 from twin_core.graph_engine import InMemoryGraphEngine
-from twin_core.models import Artifact, ArtifactType, EdgeType, NodeType
+from twin_core.models import EdgeType, NodeType, WorkProduct, WorkProductType
 from twin_core.versioning import InMemoryVersionEngine, MergeConflict
 
 
-def _make_artifact(
+def _make_work_product(
     name: str = "test",
     content_hash: str = "hash_default",
     domain: str = "mechanical",
-) -> Artifact:
-    return Artifact(
+) -> WorkProduct:
+    return WorkProduct(
         name=name,
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain=domain,
         file_path=f"models/{name}.step",
         content_hash=content_hash,
@@ -31,8 +31,8 @@ async def setup():
     graph = InMemoryGraphEngine()
     veng = InMemoryVersionEngine(graph)
 
-    # Create an initial artifact and commit on main
-    art = _make_artifact("root_artifact", content_hash="root_hash")
+    # Create an initial work_product and commit on main
+    art = _make_work_product("root_artifact", content_hash="root_hash")
     await graph.add_node(art)
 
     await veng.create_branch("main")
@@ -81,7 +81,7 @@ class TestCommit:
         graph, veng, art, initial = setup
         await veng.create_branch("dev")
 
-        new_art = _make_artifact("new_part", content_hash="new_hash")
+        new_art = _make_work_product("new_part", content_hash="new_hash")
         await graph.add_node(new_art)
 
         v = await veng.commit("dev", "Add new part", [new_art.id], "alice")
@@ -89,13 +89,13 @@ class TestCommit:
         assert v.commit_message == "Add new part"
         assert v.author == "alice"
         assert v.parent_id == initial.id
-        assert new_art.id in v.artifact_ids
+        assert new_art.id in v.work_product_ids
 
     async def test_second_commit_links_parent(self, setup):
         graph, veng, art, initial = setup
 
-        a1 = _make_artifact("a1", content_hash="h1")
-        a2 = _make_artifact("a2", content_hash="h2")
+        a1 = _make_work_product("a1", content_hash="h1")
+        a2 = _make_work_product("a2", content_hash="h2")
         await graph.add_node(a1)
         await graph.add_node(a2)
 
@@ -109,17 +109,17 @@ class TestCommit:
 
         arts = []
         for i in range(3):
-            a = _make_artifact(f"multi_{i}", content_hash=f"mhash_{i}")
+            a = _make_work_product(f"multi_{i}", content_hash=f"mhash_{i}")
             await graph.add_node(a)
             arts.append(a)
 
-        v = await veng.commit("main", "Multi-artifact commit", [a.id for a in arts], "charlie")
-        assert len(v.artifact_ids) == 3
+        v = await veng.commit("main", "Multi-work_product commit", [a.id for a in arts], "charlie")
+        assert len(v.work_product_ids) == 3
 
     async def test_snapshot_hash_is_deterministic(self, setup):
         graph, veng, art, initial = setup
 
-        a = _make_artifact("det", content_hash="det_hash")
+        a = _make_work_product("det", content_hash="det_hash")
         await graph.add_node(a)
 
         v = await veng.commit("main", "Deterministic", [a.id], "test")
@@ -136,10 +136,10 @@ class TestCommit:
             await veng.commit("main", "bad", [uuid4()], "test")
 
     async def test_snapshot_inherits_parent_artifacts(self, setup):
-        """A commit with new artifacts should still contain parent artifacts in snapshot."""
+        """A commit with new work_products should still contain parent work_products in snapshot."""
         graph, veng, art, initial = setup
 
-        a2 = _make_artifact("second", content_hash="second_hash")
+        a2 = _make_work_product("second", content_hash="second_hash")
         await graph.add_node(a2)
         v2 = await veng.commit("main", "Second", [a2.id], "test")
 
@@ -147,8 +147,8 @@ class TestCommit:
         d = await veng.diff(initial.id, v2.id)
         change_types = {c.change_type for c in d.changes}
         assert "added" in change_types
-        # Root artifact should NOT be deleted
-        deleted_ids = {c.artifact_id for c in d.changes if c.change_type == "deleted"}
+        # Root work_product should NOT be deleted
+        deleted_ids = {c.work_product_id for c in d.changes if c.change_type == "deleted"}
         assert art.id not in deleted_ids
 
 
@@ -180,8 +180,8 @@ class TestLog:
     async def test_multi_commit_history(self, setup):
         graph, veng, art, initial = setup
 
-        a1 = _make_artifact("log1", content_hash="lh1")
-        a2 = _make_artifact("log2", content_hash="lh2")
+        a1 = _make_work_product("log1", content_hash="lh1")
+        a2 = _make_work_product("log2", content_hash="lh2")
         await graph.add_node(a1)
         await graph.add_node(a2)
 
@@ -199,7 +199,7 @@ class TestLog:
         graph, veng, art, initial = setup
 
         for i in range(5):
-            a = _make_artifact(f"lim_{i}", content_hash=f"limh_{i}")
+            a = _make_work_product(f"lim_{i}", content_hash=f"limh_{i}")
             await graph.add_node(a)
             await veng.commit("main", f"Commit {i}", [a.id], "test")
 
@@ -219,34 +219,34 @@ class TestDiff:
     async def test_added_artifacts(self, setup):
         graph, veng, art, initial = setup
 
-        new_art = _make_artifact("added", content_hash="added_h")
+        new_art = _make_work_product("added", content_hash="added_h")
         await graph.add_node(new_art)
-        v2 = await veng.commit("main", "Add artifact", [new_art.id], "test")
+        v2 = await veng.commit("main", "Add work_product", [new_art.id], "test")
 
         d = await veng.diff(initial.id, v2.id)
         added = [c for c in d.changes if c.change_type == "added"]
         assert len(added) == 1
-        assert added[0].artifact_id == new_art.id
+        assert added[0].work_product_id == new_art.id
         assert added[0].new_content_hash == "added_h"
 
     async def test_modified_artifacts(self, setup):
         graph, veng, art, initial = setup
 
-        # Update the artifact's content_hash
+        # Update the work_product's content_hash
         await graph.update_node(art.id, {"content_hash": "modified_hash"})
-        v2 = await veng.commit("main", "Modify artifact", [art.id], "test")
+        v2 = await veng.commit("main", "Modify work_product", [art.id], "test")
 
         d = await veng.diff(initial.id, v2.id)
         modified = [c for c in d.changes if c.change_type == "modified"]
         assert len(modified) == 1
-        assert modified[0].artifact_id == art.id
+        assert modified[0].work_product_id == art.id
         assert modified[0].old_content_hash == "root_hash"
         assert modified[0].new_content_hash == "modified_hash"
 
     async def test_no_changes(self, setup):
         graph, veng, art, initial = setup
 
-        # Commit the same artifact with same hash
+        # Commit the same work_product with same hash
         v2 = await veng.commit("main", "Same content", [art.id], "test")
 
         d = await veng.diff(initial.id, v2.id)
@@ -259,7 +259,7 @@ class TestDiff:
 
     async def test_diff_version_ids_match(self, setup):
         graph, veng, art, initial = setup
-        a = _make_artifact("x", content_hash="xh")
+        a = _make_work_product("x", content_hash="xh")
         await graph.add_node(a)
         v2 = await veng.commit("main", "x", [a.id], "test")
 
@@ -273,18 +273,18 @@ class TestDiff:
 
 class TestMerge:
     async def test_clean_merge_non_overlapping(self, setup):
-        """Source adds artifact A, target adds artifact B — merge should contain both."""
+        """Source adds work_product A, target adds work_product B — merge should contain both."""
         graph, veng, art, initial = setup
 
         await veng.create_branch("feature")
 
         # Commit on feature
-        fa = _make_artifact("feature_art", content_hash="fh")
+        fa = _make_work_product("feature_art", content_hash="fh")
         await graph.add_node(fa)
         await veng.commit("feature", "Feature work", [fa.id], "dev")
 
         # Commit on main
-        ma = _make_artifact("main_art", content_hash="mh")
+        ma = _make_work_product("main_art", content_hash="mh")
         await graph.add_node(ma)
         await veng.commit("main", "Main work", [ma.id], "lead")
 
@@ -293,14 +293,14 @@ class TestMerge:
         assert merge_v.merge_parent_id is not None
         assert merge_v.branch_name == "main"
 
-        # Merged snapshot should have all three artifacts
+        # Merged snapshot should have all three work_products
         snap = veng._snapshots[merge_v.id]
         assert art.id in snap
         assert fa.id in snap
         assert ma.id in snap
 
     async def test_content_conflict_raises(self, setup):
-        """Both branches modify the same artifact differently — should raise MergeConflict."""
+        """Both branches modify the same work_product differently — should raise MergeConflict."""
         graph, veng, art, initial = setup
 
         await veng.create_branch("feature")
@@ -323,20 +323,20 @@ class TestMerge:
         """One branch deletes, other modifies — should raise MergeConflict."""
         graph, veng, art, initial = setup
 
-        # Add an artifact to both branches
-        shared = _make_artifact("shared", content_hash="shared_h")
+        # Add an work_product to both branches
+        shared = _make_work_product("shared", content_hash="shared_h")
         await graph.add_node(shared)
         await veng.commit("main", "Add shared", [shared.id], "test")
 
         await veng.create_branch("feature")
 
-        # On feature: modify the shared artifact
+        # On feature: modify the shared work_product
         await graph.update_node(shared.id, {"content_hash": "modified_shared"})
         await veng.commit("feature", "Modify shared", [shared.id], "dev")
 
-        # On main: "delete" the shared artifact by committing without it
+        # On main: "delete" the shared work_product by committing without it
         # and manually removing from snapshot
-        other = _make_artifact("other", content_hash="oh")
+        other = _make_work_product("other", content_hash="oh")
         await graph.add_node(other)
         v_main = await veng.commit("main", "Add other", [other.id], "lead")
         # Simulate deletion by removing from snapshot
@@ -352,7 +352,7 @@ class TestMerge:
         graph, veng, art, initial = setup
 
         await veng.create_branch("feat")
-        fa = _make_artifact("fa", content_hash="fah")
+        fa = _make_work_product("fa", content_hash="fah")
         await graph.add_node(fa)
         feat_commit = await veng.commit("feat", "Feat", [fa.id], "dev")
 
@@ -374,7 +374,7 @@ class TestEdgeCreation:
         """Commits should create PARENT_OF edges between versions."""
         graph, veng, art, initial = setup
 
-        a = _make_artifact("edge_test", content_hash="eth")
+        a = _make_work_product("edge_test", content_hash="eth")
         await graph.add_node(a)
         v2 = await veng.commit("main", "Second", [a.id], "test")
 
@@ -385,10 +385,10 @@ class TestEdgeCreation:
         assert edges[0].target_id == v2.id
 
     async def test_versioned_by_edges(self, setup):
-        """Commits should create VERSIONED_BY edges from artifacts to versions."""
+        """Commits should create VERSIONED_BY edges from work_products to versions."""
         graph, veng, art, initial = setup
 
-        a = _make_artifact("vby", content_hash="vbyh")
+        a = _make_work_product("vby", content_hash="vbyh")
         await graph.add_node(a)
         v2 = await veng.commit("main", "VBy test", [a.id], "test")
 
@@ -401,7 +401,7 @@ class TestEdgeCreation:
         graph, veng, art, initial = setup
 
         await veng.create_branch("feat")
-        fa = _make_artifact("mfa", content_hash="mfah")
+        fa = _make_work_product("mfa", content_hash="mfah")
         await graph.add_node(fa)
         feat_head = await veng.commit("feat", "Feat", [fa.id], "dev")
 

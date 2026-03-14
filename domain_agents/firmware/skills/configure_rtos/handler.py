@@ -25,20 +25,20 @@ class ConfigureRtosHandler(SkillBase[ConfigureRtosInput, ConfigureRtosOutput]):
     output_type = ConfigureRtosOutput
 
     async def validate_preconditions(self, input_data: ConfigureRtosInput) -> list[str]:
-        """Check that the artifact exists in the Twin."""
+        """Check that the work_product exists in the Twin."""
         errors: list[str] = []
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
         return errors
 
     async def execute(self, input_data: ConfigureRtosInput) -> ConfigureRtosOutput:
         """Generate RTOS configuration from task definitions."""
         self.logger.info(
             "Configuring RTOS",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             rtos_name=input_data.rtos_name,
             num_tasks=len(input_data.task_definitions),
             heap_size_kb=input_data.heap_size_kb,
@@ -58,7 +58,7 @@ class ConfigureRtosHandler(SkillBase[ConfigureRtosInput, ConfigureRtosOutput]):
         config_file = self._config_file_path(input_data.rtos_name)
 
         return ConfigureRtosOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             config_file=config_file,
             tasks_configured=len(input_data.task_definitions),
             memory_estimate_kb=memory_estimate_kb,

@@ -76,12 +76,12 @@ class TestKnowledgeEntry:
         assert isinstance(entry.id, UUID)
         assert entry.embedding == []
         assert entry.metadata == {}
-        assert entry.source_artifact_id is None
+        assert entry.source_work_product_id is None
         assert isinstance(entry.created_at, datetime)
 
     def test_entry_with_all_fields(self) -> None:
         uid = uuid4()
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         now = datetime.now(UTC)
         entry = KnowledgeEntry(
             id=uid,
@@ -89,12 +89,12 @@ class TestKnowledgeEntry:
             embedding=[0.1, 0.2, 0.3],
             knowledge_type=KnowledgeType.COMPONENT,
             metadata={"key": "value"},
-            source_artifact_id=artifact_id,
+            source_work_product_id=work_product_id,
             created_at=now,
         )
         assert entry.id == uid
         assert entry.embedding == [0.1, 0.2, 0.3]
-        assert entry.source_artifact_id == artifact_id
+        assert entry.source_work_product_id == work_product_id
         assert entry.created_at == now
 
     def test_entry_empty_content_rejected(self) -> None:
@@ -159,7 +159,7 @@ class TestSearchQuery:
         assert q.knowledge_type is None
         assert q.limit == 10
         assert q.metadata_filter is None
-        assert q.source_artifact_id is None
+        assert q.source_work_product_id is None
 
     def test_query_with_type_filter(self) -> None:
         q = SearchQuery(

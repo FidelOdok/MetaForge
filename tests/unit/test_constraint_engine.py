@@ -7,13 +7,11 @@ import pytest
 from twin_core.constraint_engine import InMemoryConstraintEngine
 from twin_core.constraint_engine.context import ConstraintContext, build_context
 from twin_core.constraint_engine.resolver import (
-    find_constrained_artifacts,
+    find_constrained_work_products,
     resolve_constraints,
 )
 from twin_core.graph_engine import InMemoryGraphEngine
 from twin_core.models import (
-    Artifact,
-    ArtifactType,
     Component,
     ConstrainedByEdge,
     Constraint,
@@ -21,17 +19,19 @@ from twin_core.models import (
     ConstraintStatus,
     DependsOnEdge,
     EdgeType,
+    WorkProduct,
+    WorkProductType,
 )
 
 # --- Helpers ---
 
 
-def _make_artifact(
+def _make_work_product(
     name: str = "test",
     domain: str = "mechanical",
-    art_type: ArtifactType = ArtifactType.CAD_MODEL,
-) -> Artifact:
-    return Artifact(
+    art_type: WorkProductType = WorkProductType.CAD_MODEL,
+) -> WorkProduct:
+    return WorkProduct(
         name=name,
         type=art_type,
         domain=domain,
@@ -78,8 +78,8 @@ def engine(graph):
 
 
 @pytest.fixture
-async def artifact(graph):
-    a = _make_artifact()
+async def work_product(graph):
+    a = _make_work_product()
     return await graph.add_node(a)
 
 
@@ -87,9 +87,9 @@ async def artifact(graph):
 
 
 class TestAddConstraint:
-    async def test_creates_constraint_node(self, engine, graph, artifact):
+    async def test_creates_constraint_node(self, engine, graph, work_product):
         c = _make_constraint()
-        result = await engine.add_constraint(c, [artifact.id])
+        result = await engine.add_constraint(c, [work_product.id])
         assert result.id == c.id
 
         node = await graph.get_node(c.id)
@@ -97,37 +97,37 @@ class TestAddConstraint:
         assert isinstance(node, Constraint)
         assert node.name == "test_constraint"
 
-    async def test_creates_constrained_by_edges(self, engine, graph, artifact):
+    async def test_creates_constrained_by_edges(self, engine, graph, work_product):
         c = _make_constraint()
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
         edges = await graph.get_edges(
-            artifact.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+            work_product.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
         )
         assert len(edges) == 1
         assert edges[0].target_id == c.id
 
-    async def test_sets_scope_local(self, engine, graph, artifact):
+    async def test_sets_scope_local(self, engine, graph, work_product):
         c = _make_constraint(cross_domain=False)
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
         edges = await graph.get_edges(
-            artifact.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+            work_product.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
         )
         assert edges[0].scope == "local"
 
-    async def test_sets_scope_global(self, engine, graph, artifact):
+    async def test_sets_scope_global(self, engine, graph, work_product):
         c = _make_constraint(cross_domain=True)
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
         edges = await graph.get_edges(
-            artifact.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+            work_product.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
         )
         assert edges[0].scope == "global"
 
     async def test_multiple_artifacts(self, engine, graph):
-        a1 = await graph.add_node(_make_artifact("a1"))
-        a2 = await graph.add_node(_make_artifact("a2"))
+        a1 = await graph.add_node(_make_work_product("a1"))
+        a2 = await graph.add_node(_make_work_product("a2"))
         c = _make_constraint()
         await engine.add_constraint(c, [a1.id, a2.id])
 
@@ -140,11 +140,11 @@ class TestAddConstraint:
         assert len(edges1) == 1
         assert len(edges2) == 1
 
-    async def test_duplicate_raises(self, engine, artifact):
+    async def test_duplicate_raises(self, engine, work_product):
         c = _make_constraint()
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
         with pytest.raises(ValueError, match="already exists"):
-            await engine.add_constraint(c, [artifact.id])
+            await engine.add_constraint(c, [work_product.id])
 
     async def test_nonexistent_artifact_raises(self, engine):
         c = _make_constraint()
@@ -156,9 +156,9 @@ class TestAddConstraint:
 
 
 class TestGetConstraint:
-    async def test_existing(self, engine, artifact):
+    async def test_existing(self, engine, work_product):
         c = _make_constraint()
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
         result = await engine.get_constraint(c.id)
         assert result is not None
         assert result.id == c.id
@@ -173,9 +173,9 @@ class TestGetConstraint:
 
 
 class TestRemoveConstraint:
-    async def test_existing(self, engine, graph, artifact):
+    async def test_existing(self, engine, graph, work_product):
         c = _make_constraint()
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
         result = await engine.remove_constraint(c.id)
         assert result is True
@@ -185,7 +185,7 @@ class TestRemoveConstraint:
 
         # Edges gone
         edges = await graph.get_edges(
-            artifact.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+            work_product.id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
         )
         assert len(edges) == 0
 
@@ -199,7 +199,7 @@ class TestRemoveConstraint:
 
 class TestConstraintResolver:
     async def test_finds_direct_constraints(self, graph):
-        a = await graph.add_node(_make_artifact())
+        a = await graph.add_node(_make_work_product())
         c = await graph.add_node(_make_constraint())
         await graph.add_edge(ConstrainedByEdge(source_id=a.id, target_id=c.id))
 
@@ -208,7 +208,7 @@ class TestConstraintResolver:
         assert result[0].id == c.id
 
     async def test_finds_cross_domain(self, graph):
-        a = await graph.add_node(_make_artifact())
+        a = await graph.add_node(_make_work_product())
         c = await graph.add_node(_make_constraint(name="cross", cross_domain=True))
         # No edge linking them — cross-domain is discovered via flag
 
@@ -217,8 +217,8 @@ class TestConstraintResolver:
         assert result[0].id == c.id
 
     async def test_deduplicates(self, graph):
-        a1 = await graph.add_node(_make_artifact("a1"))
-        a2 = await graph.add_node(_make_artifact("a2"))
+        a1 = await graph.add_node(_make_work_product("a1"))
+        a2 = await graph.add_node(_make_work_product("a2"))
         c = await graph.add_node(_make_constraint())
         await graph.add_edge(ConstrainedByEdge(source_id=a1.id, target_id=c.id))
         await graph.add_edge(ConstrainedByEdge(source_id=a2.id, target_id=c.id))
@@ -230,14 +230,14 @@ class TestConstraintResolver:
         result = await resolve_constraints(graph, [uuid4()])
         assert result == []
 
-    async def test_find_constrained_artifacts(self, graph):
-        a1 = await graph.add_node(_make_artifact("a1"))
-        a2 = await graph.add_node(_make_artifact("a2"))
+    async def test_find_constrained_work_products(self, graph):
+        a1 = await graph.add_node(_make_work_product("a1"))
+        a2 = await graph.add_node(_make_work_product("a2"))
         c = await graph.add_node(_make_constraint())
         await graph.add_edge(ConstrainedByEdge(source_id=a1.id, target_id=c.id))
         await graph.add_edge(ConstrainedByEdge(source_id=a2.id, target_id=c.id))
 
-        result = await find_constrained_artifacts(graph, c.id)
+        result = await find_constrained_work_products(graph, c.id)
         assert set(result) == {a1.id, a2.id}
 
 
@@ -246,32 +246,32 @@ class TestConstraintResolver:
 
 class TestConstraintContext:
     async def test_artifact_by_name(self, graph):
-        a = await graph.add_node(_make_artifact("bracket"))
+        a = await graph.add_node(_make_work_product("bracket"))
         ctx = await build_context(graph)
-        found = ctx.artifact("bracket")
+        found = ctx.work_product("bracket")
         assert found.id == a.id
 
     async def test_artifact_not_found_raises(self, graph):
-        await graph.add_node(_make_artifact("bracket"))
+        await graph.add_node(_make_work_product("bracket"))
         ctx = await build_context(graph)
         with pytest.raises(KeyError, match="not found"):
-            ctx.artifact("nonexistent")
+            ctx.work_product("nonexistent")
 
     async def test_filter_by_domain(self, graph):
-        await graph.add_node(_make_artifact("mech1", domain="mechanical"))
-        await graph.add_node(_make_artifact("elec1", domain="electronics"))
+        await graph.add_node(_make_work_product("mech1", domain="mechanical"))
+        await graph.add_node(_make_work_product("elec1", domain="electronics"))
         ctx = await build_context(graph)
 
-        mech = ctx.artifacts(domain="mechanical")
+        mech = ctx.work_products(domain="mechanical")
         assert len(mech) == 1
         assert mech[0].name == "mech1"
 
     async def test_filter_by_type(self, graph):
-        await graph.add_node(_make_artifact("sch1", art_type=ArtifactType.SCHEMATIC))
-        await graph.add_node(_make_artifact("cad1", art_type=ArtifactType.CAD_MODEL))
+        await graph.add_node(_make_work_product("sch1", art_type=WorkProductType.SCHEMATIC))
+        await graph.add_node(_make_work_product("cad1", art_type=WorkProductType.CAD_MODEL))
         ctx = await build_context(graph)
 
-        schematics = ctx.artifacts(type=ArtifactType.SCHEMATIC)
+        schematics = ctx.work_products(type=WorkProductType.SCHEMATIC)
         assert len(schematics) == 1
         assert schematics[0].name == "sch1"
 
@@ -284,8 +284,8 @@ class TestConstraintContext:
         assert len(comps) == 2
 
     async def test_dependents(self, graph):
-        a1 = await graph.add_node(_make_artifact("source"))
-        a2 = await graph.add_node(_make_artifact("target"))
+        a1 = await graph.add_node(_make_work_product("source"))
+        a2 = await graph.add_node(_make_work_product("target"))
         await graph.add_edge(DependsOnEdge(source_id=a1.id, target_id=a2.id))
         ctx = await build_context(graph)
 
@@ -294,7 +294,7 @@ class TestConstraintContext:
         assert deps[0].id == a1.id
 
     async def test_no_dependents(self, graph):
-        a = await graph.add_node(_make_artifact())
+        a = await graph.add_node(_make_work_product())
         ctx = await build_context(graph)
         assert ctx.dependents(a.id) == []
 
@@ -314,7 +314,7 @@ class TestExpressionEvaluation:
         assert status == ConstraintStatus.FAIL
 
     def test_context_access(self, graph):
-        a = _make_artifact("bracket")
+        a = _make_work_product("bracket")
         ctx = ConstraintContext(
             artifacts_by_name={"bracket": a},
             artifacts_by_id={a.id: a},
@@ -322,13 +322,13 @@ class TestExpressionEvaluation:
             dependency_map={},
         )
         status, _ = InMemoryConstraintEngine._eval_expression(
-            "ctx.artifact('bracket').domain == 'mechanical'", ctx
+            "ctx.work_product('bracket').domain == 'mechanical'", ctx
         )
         assert status == ConstraintStatus.PASS
 
     def test_all_builtin_works(self):
-        a1 = _make_artifact("a1", domain="mechanical")
-        a2 = _make_artifact("a2", domain="mechanical")
+        a1 = _make_work_product("a1", domain="mechanical")
+        a2 = _make_work_product("a2", domain="mechanical")
         ctx = ConstraintContext(
             artifacts_by_name={"a1": a1, "a2": a2},
             artifacts_by_id={a1.id: a1, a2.id: a2},
@@ -336,7 +336,7 @@ class TestExpressionEvaluation:
             dependency_map={},
         )
         status, _ = InMemoryConstraintEngine._eval_expression(
-            "all(a.domain == 'mechanical' for a in ctx.artifacts())", ctx
+            "all(a.domain == 'mechanical' for a in ctx.work_products())", ctx
         )
         assert status == ConstraintStatus.PASS
 
@@ -372,102 +372,102 @@ class TestExpressionEvaluation:
 
 
 class TestEvaluate:
-    async def test_all_pass(self, engine, graph, artifact):
+    async def test_all_pass(self, engine, graph, work_product):
         c = _make_constraint(expression="True")
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.passed is True
         assert result.violations == []
         assert result.warnings == []
         assert result.evaluated_count == 1
 
-    async def test_error_fail_blocks(self, engine, graph, artifact):
+    async def test_error_fail_blocks(self, engine, graph, work_product):
         c = _make_constraint(
             expression="False",
             severity=ConstraintSeverity.ERROR,
         )
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.passed is False
         assert len(result.violations) == 1
         assert result.violations[0].constraint_id == c.id
         assert result.violations[0].severity == ConstraintSeverity.ERROR
 
-    async def test_warning_fail_allows(self, engine, graph, artifact):
+    async def test_warning_fail_allows(self, engine, graph, work_product):
         c = _make_constraint(
             expression="False",
             severity=ConstraintSeverity.WARNING,
         )
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.passed is True
         assert len(result.warnings) == 1
         assert result.warnings[0].severity == ConstraintSeverity.WARNING
 
-    async def test_info_fail_allows(self, engine, graph, artifact):
+    async def test_info_fail_allows(self, engine, graph, work_product):
         c = _make_constraint(
             expression="False",
             severity=ConstraintSeverity.INFO,
         )
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.passed is True
         assert len(result.warnings) == 1
         assert result.warnings[0].severity == ConstraintSeverity.INFO
 
-    async def test_updates_constraint_status(self, engine, graph, artifact):
+    async def test_updates_constraint_status(self, engine, graph, work_product):
         c = _make_constraint(expression="True")
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        await engine.evaluate([artifact.id])
+        await engine.evaluate([work_product.id])
 
         updated = await engine.get_constraint(c.id)
         assert updated is not None
         assert updated.status == ConstraintStatus.PASS
         assert updated.last_evaluated is not None
 
-    async def test_updates_failed_status(self, engine, graph, artifact):
+    async def test_updates_failed_status(self, engine, graph, work_product):
         c = _make_constraint(expression="False", severity=ConstraintSeverity.ERROR)
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        await engine.evaluate([artifact.id])
+        await engine.evaluate([work_product.id])
 
         updated = await engine.get_constraint(c.id)
         assert updated is not None
         assert updated.status == ConstraintStatus.FAIL
 
-    async def test_skipped_count(self, engine, graph, artifact):
+    async def test_skipped_count(self, engine, graph, work_product):
         c = _make_constraint(expression="def foo():")
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.skipped_count == 1
         assert result.evaluated_count == 0
         assert result.passed is True
 
-    async def test_duration_positive(self, engine, graph, artifact):
+    async def test_duration_positive(self, engine, graph, work_product):
         c = _make_constraint(expression="True")
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.duration_ms >= 0
 
-    async def test_no_constraints_passes(self, engine, artifact):
-        result = await engine.evaluate([artifact.id])
+    async def test_no_constraints_passes(self, engine, work_product):
+        result = await engine.evaluate([work_product.id])
         assert result.passed is True
         assert result.evaluated_count == 0
 
-    async def test_context_expression(self, engine, graph, artifact):
+    async def test_context_expression(self, engine, graph, work_product):
         c = _make_constraint(
-            expression="ctx.artifact('test').domain == 'mechanical'",
+            expression="ctx.work_product('test').domain == 'mechanical'",
         )
-        await engine.add_constraint(c, [artifact.id])
+        await engine.add_constraint(c, [work_product.id])
 
-        result = await engine.evaluate([artifact.id])
+        result = await engine.evaluate([work_product.id])
         assert result.passed is True
 
 
@@ -476,8 +476,8 @@ class TestEvaluate:
 
 class TestEvaluateAll:
     async def test_runs_every_constraint(self, engine, graph):
-        a1 = await graph.add_node(_make_artifact("a1"))
-        a2 = await graph.add_node(_make_artifact("a2"))
+        a1 = await graph.add_node(_make_work_product("a1"))
+        a2 = await graph.add_node(_make_work_product("a2"))
 
         c1 = _make_constraint(name="c1", expression="True")
         c2 = _make_constraint(name="c2", expression="True")
@@ -489,7 +489,7 @@ class TestEvaluateAll:
         assert result.evaluated_count == 2
 
     async def test_includes_cross_domain(self, engine, graph):
-        a = await graph.add_node(_make_artifact())
+        a = await graph.add_node(_make_work_product())
         c_local = _make_constraint(name="local", expression="True")
         c_cross = _make_constraint(name="cross", expression="True", cross_domain=True)
         await engine.add_constraint(c_local, [a.id])
@@ -504,24 +504,24 @@ class TestEvaluateAll:
 
 class TestIntegration:
     async def test_cross_domain_constraint_evaluation(self, engine, graph):
-        mech = await graph.add_node(_make_artifact("bracket", domain="mechanical"))
-        elec = await graph.add_node(_make_artifact("pcb", domain="electronics"))
+        mech = await graph.add_node(_make_work_product("bracket", domain="mechanical"))
+        elec = await graph.add_node(_make_work_product("pcb", domain="electronics"))
 
-        # Cross-domain constraint: all artifacts must have a non-empty name
+        # Cross-domain constraint: all work_products must have a non-empty name
         c = _make_constraint(
             name="non_empty_names",
-            expression="all(len(a.name) > 0 for a in ctx.artifacts())",
+            expression="all(len(a.name) > 0 for a in ctx.work_products())",
             cross_domain=True,
         )
         await engine.add_constraint(c, [mech.id])
 
-        # Evaluate only electronics artifact — cross-domain still picked up
+        # Evaluate only electronics work_product — cross-domain still picked up
         result = await engine.evaluate([elec.id])
         assert result.passed is True
         assert result.evaluated_count == 1
 
     async def test_mixed_results(self, engine, graph):
-        a = await graph.add_node(_make_artifact())
+        a = await graph.add_node(_make_work_product())
 
         c_pass = _make_constraint(
             name="pass_constraint",
@@ -551,7 +551,7 @@ class TestIntegration:
         assert result.evaluated_count == 3
 
     async def test_component_count_constraint(self, engine, graph):
-        a = await graph.add_node(_make_artifact())
+        a = await graph.add_node(_make_work_product())
         await graph.add_node(_make_component("STM32F4"))
         await graph.add_node(_make_component("LM1117"))
 
@@ -565,13 +565,13 @@ class TestIntegration:
         assert result.passed is True
 
     async def test_dependency_constraint(self, engine, graph):
-        source = await graph.add_node(_make_artifact("firmware"))
-        target = await graph.add_node(_make_artifact("pinmap"))
+        source = await graph.add_node(_make_work_product("firmware"))
+        target = await graph.add_node(_make_work_product("pinmap"))
         await graph.add_edge(DependsOnEdge(source_id=source.id, target_id=target.id))
 
         c = _make_constraint(
             name="pinmap_has_dependents",
-            expression="len(ctx.dependents(ctx.artifact('pinmap').id)) > 0",
+            expression="len(ctx.dependents(ctx.work_product('pinmap').id)) > 0",
         )
         await engine.add_constraint(c, [target.id])
 

@@ -1,7 +1,7 @@
 /**
  * TreeDataProvider for the Digital Twin sidebar view.
  *
- * Shows artifacts, constraints, and components fetched from the MetaForge
+ * Shows work_products, constraints, and components fetched from the MetaForge
  * gateway as a tree structure in the VS Code sidebar.
  */
 
@@ -32,7 +32,7 @@ export class TwinTreeItem extends vscode.TreeItem {
    */
   static iconForType(nodeType: TwinNodeType): vscode.ThemeIcon {
     switch (nodeType) {
-      case "artifact":
+      case "work_product":
         return new vscode.ThemeIcon("file-code");
       case "constraint":
         return new vscode.ThemeIcon("shield");

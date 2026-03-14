@@ -33,8 +33,8 @@ from mcp_core.transports import LoopbackTransport  # noqa: E402
 from skill_registry.mcp_client_bridge import McpClientBridge  # noqa: E402
 from tool_registry.tools.calculix.adapter import CalculixServer  # noqa: E402
 from twin_core.api import InMemoryTwinAPI  # noqa: E402
-from twin_core.models.artifact import Artifact  # noqa: E402
-from twin_core.models.enums import ArtifactType  # noqa: E402
+from twin_core.models.enums import WorkProductType  # noqa: E402
+from twin_core.models.work_product import WorkProduct  # noqa: E402
 
 structlog.configure(
     processors=[
@@ -67,9 +67,9 @@ async def main() -> None:
     print("[1/6] Initializing Digital Twin...")
     twin = InMemoryTwinAPI.create()
 
-    artifact = Artifact(
+    work_product = WorkProduct(
         name="motor-mount-bracket-v1",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="models/motor_mount_bracket.step",
         content_hash="sha256:a1b2c3d4e5f6",
@@ -82,10 +82,10 @@ async def main() -> None:
             "description": "Motor mount bracket for drone flight controller",
         },
     )
-    created = await twin.create_artifact(artifact)
+    created = await twin.create_work_product(work_product)
     await twin.create_branch("main")
     await twin.commit("main", "Add motor mount bracket CAD model", "engineer")
-    print(f"       Artifact '{created.name}' added to Twin (id={created.id})")
+    print(f"       WorkProduct '{created.name}' added to Twin (id={created.id})")
 
     # --- Step 2: Set up CalculiX tool adapter ---
     print("[2/6] Starting CalculiX tool adapter...")
@@ -136,7 +136,7 @@ async def main() -> None:
     result = await agent.run_task(
         TaskRequest(
             task_type="validate_stress",
-            artifact_id=created.id,
+            work_product_id=created.id,
             parameters={
                 "mesh_file_path": "models/motor_mount_bracket.inp",
                 "load_case": "hover_3g",
@@ -195,7 +195,7 @@ async def main() -> None:
     # --- Update Twin with results ---
     if result.success and result.skill_results:
         sr = result.skill_results[0]
-        await twin.update_artifact(
+        await twin.update_work_product(
             created.id,
             {
                 "metadata": {

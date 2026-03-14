@@ -21,8 +21,8 @@ from skill_registry.mcp_bridge import InMemoryMcpBridge
 @pytest.fixture
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
-    # Default: artifact exists
-    twin.get_artifact.return_value = MagicMock(id=uuid4(), name="bracket", domain="mechanical")
+    # Default: work_product exists
+    twin.get_work_product.return_value = MagicMock(id=uuid4(), name="bracket", domain="mechanical")
     return twin
 
 
@@ -83,10 +83,10 @@ class TestValidateStress:
 
     async def test_stress_passes(self, agent: MechanicalAgent):
         """Stress below allowable limit should pass."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "mesh_file_path": "mesh/bracket.inp",
                 "load_case": "gravity",
@@ -99,17 +99,17 @@ class TestValidateStress:
 
         assert result.success is True
         assert result.task_type == "validate_stress"
-        assert result.artifact_id == artifact_id
+        assert result.work_product_id == work_product_id
         assert len(result.errors) == 0
         assert len(result.skill_results) == 1
         assert result.skill_results[0]["overall_passed"] is True
 
     async def test_stress_fails(self, agent: MechanicalAgent):
         """Stress exceeding allowable limit should fail."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "mesh_file_path": "mesh/bracket.inp",
                 "load_case": "gravity",
@@ -129,12 +129,12 @@ class TestValidateStress:
         assert len(failed) >= 1
 
     async def test_missing_artifact(self, agent: MechanicalAgent, mock_twin: AsyncMock):
-        """Missing artifact should produce an error."""
-        mock_twin.get_artifact.return_value = None
-        artifact_id = uuid4()
+        """Missing work_product should produce an error."""
+        mock_twin.get_work_product.return_value = None
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
         )
         result = await agent.run_task(request)
 
@@ -148,10 +148,10 @@ class TestValidateStress:
         # No tool response registered -- invoke will raise McpToolError
         agent = MechanicalAgent(twin=mock_twin, mcp=bad_bridge)
 
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={"mesh_file_path": "mesh/bracket.inp"},
         )
         result = await agent.run_task(request)
@@ -163,7 +163,7 @@ class TestValidateStress:
         """No constraints means all pass (vacuous truth)."""
         request = TaskRequest(
             task_type="validate_stress",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "mesh_file_path": "mesh/bracket.inp",
                 "constraints": [],
@@ -184,7 +184,7 @@ class TestCheckTolerances:
     async def test_missing_manufacturing_process(self, agent: MechanicalAgent):
         request = TaskRequest(
             task_type="check_tolerances",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -202,7 +202,7 @@ class TestGenerateMesh:
         """Agent should return error when cad_file parameter is missing."""
         request = TaskRequest(
             task_type="generate_mesh",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -218,10 +218,10 @@ class TestFullValidation:
 
     async def test_full_validation_delegates_to_stress(self, agent: MechanicalAgent):
         """Full validation should run stress validation and aggregate results."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="full_validation",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "mesh_file_path": "mesh/bracket.inp",
                 "load_case": "gravity",
@@ -233,7 +233,7 @@ class TestFullValidation:
         result = await agent.run_task(request)
 
         assert result.task_type == "full_validation"
-        assert result.artifact_id == artifact_id
+        assert result.work_product_id == work_product_id
         assert result.success is True
         assert len(result.skill_results) >= 1
         assert result.skill_results[0]["skill"] == "validate_stress"
@@ -248,7 +248,7 @@ class TestUnsupportedTask:
     async def test_unsupported_task_type(self, agent: MechanicalAgent):
         request = TaskRequest(
             task_type="do_magic",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -264,23 +264,23 @@ class TestTaskRequest:
     """Tests for the TaskRequest Pydantic model."""
 
     def test_task_request_defaults(self):
-        artifact_id = uuid4()
-        req = TaskRequest(task_type="validate_stress", artifact_id=artifact_id)
+        work_product_id = uuid4()
+        req = TaskRequest(task_type="validate_stress", work_product_id=work_product_id)
         assert req.branch == "main"
         assert req.parameters == {}
 
     def test_task_request_with_parameters(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         params = {"mesh_file_path": "mesh/bracket.inp", "load_case": "gravity"}
         req = TaskRequest(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters=params,
             branch="feature-1",
         )
         assert req.branch == "feature-1"
         assert req.parameters == params
-        assert req.artifact_id == artifact_id
+        assert req.work_product_id == work_product_id
 
 
 # --- TaskResult model ---
@@ -290,10 +290,10 @@ class TestTaskResult:
     """Tests for the TaskResult Pydantic model."""
 
     def test_task_result_defaults(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=True,
         )
         assert res.skill_results == []
@@ -301,10 +301,10 @@ class TestTaskResult:
         assert res.warnings == []
 
     def test_task_result_with_data(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="validate_stress",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=False,
             errors=["Something failed"],
             warnings=["Low quality mesh"],
@@ -327,7 +327,7 @@ class TestMechanicalResult:
         assert result.overall_passed is True
         assert result.max_stress_mpa == 0.0
         assert result.critical_region == ""
-        assert result.artifacts == []
+        assert result.work_products == []
         assert result.analysis == {}
         assert result.recommendations == []
         assert result.tool_calls == []
@@ -337,7 +337,7 @@ class TestMechanicalResult:
             overall_passed=False,
             max_stress_mpa=250.5,
             critical_region="bracket_mount",
-            artifacts=[{"type": "mesh", "path": "mesh/bracket.inp"}],
+            work_products=[{"type": "mesh", "path": "mesh/bracket.inp"}],
             analysis={"solver": "calculix", "time_s": 12.5},
             recommendations=["Increase wall thickness"],
             tool_calls=[{"tool": "validate_stress", "result": "fail"}],
@@ -345,7 +345,7 @@ class TestMechanicalResult:
         assert not result.overall_passed
         assert result.max_stress_mpa == 250.5
         assert result.critical_region == "bracket_mount"
-        assert len(result.artifacts) == 1
+        assert len(result.work_products) == 1
         assert len(result.tool_calls) == 1
 
 
@@ -432,7 +432,7 @@ class TestHardcodedFallback:
 
             request = TaskRequest(
                 task_type="validate_stress",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={
                     "mesh_file_path": "mesh/bracket.inp",
                     "load_case": "gravity",
@@ -457,7 +457,7 @@ class TestHardcodedFallback:
 
             request = TaskRequest(
                 task_type="unsupported_task",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
             )
             result = await agent.run_task(request)
 

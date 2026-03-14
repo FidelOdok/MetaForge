@@ -4,7 +4,7 @@ Runs Electrical Rules Check (ERC) on a KiCad schematic and returns categorised v
 
 ## What it does
 
-1. Takes a schematic artifact ID and file path as input
+1. Takes a schematic work_product ID and file path as input
 2. Invokes the KiCad ERC tool via MCP bridge
 3. Parses and categorises violations by severity (error / warning)
 4. Returns a structured report with pass/fail status
@@ -15,7 +15,7 @@ Runs Electrical Rules Check (ERC) on a KiCad schematic and returns categorised v
 
 ## Input
 
-- `artifact_id` -- ID of the schematic artifact in the Digital Twin
+- `work_product_id` -- ID of the schematic work_product in the Digital Twin
 - `schematic_file` -- Path to the KiCad schematic file (.kicad_sch)
 - `severity_filter` -- Filter violations by severity: "all", "error", or "warning" (default: "all")
 

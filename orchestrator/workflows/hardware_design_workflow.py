@@ -6,7 +6,7 @@ Implements the canonical DAG for a hardware product design cycle:
 
 Steps run sequentially except EE and FW which execute in parallel.
 An approval gate before EVT transition blocks until a human reviewer
-approves the design artifacts.
+approves the design work_products.
 """
 
 from __future__ import annotations

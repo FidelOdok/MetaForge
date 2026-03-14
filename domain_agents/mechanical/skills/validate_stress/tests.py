@@ -33,7 +33,7 @@ def mock_context() -> SkillContext:
 @pytest.fixture()
 def sample_input() -> ValidateStressInput:
     return ValidateStressInput(
-        artifact_id=uuid4(),
+        work_product_id=uuid4(),
         mesh_file_path="/project/mesh/bracket.inp",
         load_case="static_load_1",
         constraints=[
@@ -52,7 +52,7 @@ class TestValidateStressSkill:
     async def test_execute_returns_output(
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -67,12 +67,12 @@ class TestValidateStressSkill:
         output = await handler.execute(sample_input)
 
         assert output.overall_passed is True
-        assert output.artifact_id == sample_input.artifact_id
+        assert output.work_product_id == sample_input.work_product_id
 
     async def test_preconditions_catch_missing_artifact(
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
-        mock_context.twin.get_artifact.return_value = None
+        mock_context.twin.get_work_product.return_value = None
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
 
         handler = ValidateStressHandler(mock_context)

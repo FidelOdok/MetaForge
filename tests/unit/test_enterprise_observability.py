@@ -509,7 +509,7 @@ class TestAuditEventModel:
             event_type=AuditEventType.graph_mutation,
             actor="user@example.com",
             action="create",
-            resource_type="artifact",
+            resource_type="work_product",
             resource_id="art-123",
         )
         assert ev.event_type == AuditEventType.graph_mutation
@@ -642,7 +642,7 @@ class TestAuditLogger:
             event_type=event_type,
             actor=actor,
             action=action,
-            resource_type="artifact",
+            resource_type="work_product",
             resource_id="art-1",
             timestamp=ts or datetime(2024, 6, 1, 12, 0, 0),
         )
@@ -713,7 +713,7 @@ class TestAuditLogger:
         audit_logger.log_graph_mutation(
             actor="mech-agent",
             action="update",
-            resource_type="artifact",
+            resource_type="work_product",
             resource_id="art-42",
             details={"field": "stress_result"},
         )
@@ -778,7 +778,7 @@ class TestAuditIntegrity:
             event_type=AuditEventType.graph_mutation,
             actor="user@test.com",
             action=action,
-            resource_type="artifact",
+            resource_type="work_product",
             resource_id="art-1",
             timestamp=datetime(2024, 6, 1, 12, 0, 0),
         )

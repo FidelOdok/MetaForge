@@ -17,21 +17,21 @@ if TYPE_CHECKING:
 
 
 async def check_total_weight_budget(
-    twin: TwinAPI, artifact_id: UUID, branch: str = "main"
+    twin: TwinAPI, work_product_id: UUID, branch: str = "main"
 ) -> CrossDomainCheck:
     """Verify total assembly weight stays within budget.
 
     Sums weights from both mechanical and electronics domains and compares
     against the weight budget defined in mechanical metadata.
     """
-    mech_artifacts = await twin.list_artifacts(branch=branch, domain="mechanical")
-    elec_artifacts = await twin.list_artifacts(branch=branch, domain="electronics")
+    mech_work_products = await twin.list_work_products(branch=branch, domain="mechanical")
+    elec_artifacts = await twin.list_work_products(branch=branch, domain="electronics")
 
     total_weight = 0.0
     weight_budget = 0.0
     component_weights: dict[str, float] = {}
 
-    for a in mech_artifacts:
+    for a in mech_work_products:
         w = a.metadata.get("weight_grams", 0.0)
         total_weight += w
         if w > 0:
@@ -76,22 +76,22 @@ async def check_total_weight_budget(
 
 
 async def check_power_thermal_consistency(
-    twin: TwinAPI, artifact_id: UUID, branch: str = "main"
+    twin: TwinAPI, work_product_id: UUID, branch: str = "main"
 ) -> CrossDomainCheck:
     """Verify that total power dissipation is consistent with thermal design.
 
     Checks that the thermal solution (heatsink, airflow) can handle
     the total power dissipation from electronic components.
     """
-    elec_artifacts = await twin.list_artifacts(branch=branch, domain="electronics")
-    mech_artifacts = await twin.list_artifacts(branch=branch, domain="mechanical")
+    elec_artifacts = await twin.list_work_products(branch=branch, domain="electronics")
+    mech_work_products = await twin.list_work_products(branch=branch, domain="mechanical")
 
     total_power_w = 0.0
     for a in elec_artifacts:
         total_power_w += a.metadata.get("power_dissipation_w", 0.0)
 
     thermal_capacity_w = 0.0
-    for a in mech_artifacts:
+    for a in mech_work_products:
         thermal_capacity_w += a.metadata.get("thermal_capacity_w", 0.0)
 
     if total_power_w <= 0 or thermal_capacity_w <= 0:

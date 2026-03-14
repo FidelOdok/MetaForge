@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class RunSpiceInput(BaseModel):
     """Input for the run_spice skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID for the circuit design")
+    work_product_id: UUID = Field(..., description="Twin work_product ID for the circuit design")
     netlist_path: str = Field(
         ..., min_length=1, description="Path to the SPICE netlist file (.cir/.spice)"
     )
@@ -22,7 +22,7 @@ class RunSpiceInput(BaseModel):
 class RunSpiceOutput(BaseModel):
     """Output from the run_spice skill."""
 
-    artifact_id: UUID = Field(..., description="Twin artifact ID")
+    work_product_id: UUID = Field(..., description="Twin work_product ID")
     results: dict[str, Any] = Field(
         default_factory=dict, description="Simulation results keyed by node/signal name"
     )

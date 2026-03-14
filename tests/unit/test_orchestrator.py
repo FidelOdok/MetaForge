@@ -53,7 +53,7 @@ from orchestrator.workflow_dag import (
 
 
 def _make_event(
-    event_type: EventType = EventType.ARTIFACT_CREATED,
+    event_type: EventType = EventType.WORK_PRODUCT_CREATED,
     data: dict[str, Any] | None = None,
 ) -> Event:
     return Event(
@@ -232,7 +232,7 @@ class TestEventBus:
     async def test_filtered_subscriber(self, bus: EventBus) -> None:
         spy = _SpySubscriber(types={EventType.AGENT_TASK_COMPLETED})
         bus.subscribe(spy)
-        await bus.publish(_make_event(EventType.ARTIFACT_CREATED))
+        await bus.publish(_make_event(EventType.WORK_PRODUCT_CREATED))
         await bus.publish(_make_event(EventType.AGENT_TASK_COMPLETED))
         assert len(spy.received) == 1
         assert spy.received[0].type == EventType.AGENT_TASK_COMPLETED
@@ -268,14 +268,14 @@ class TestEventBus:
     @pytest.mark.asyncio
     async def test_event_log(self, bus: EventBus) -> None:
         for _ in range(5):
-            await bus.publish(_make_event(EventType.ARTIFACT_CREATED))
+            await bus.publish(_make_event(EventType.WORK_PRODUCT_CREATED))
         for _ in range(3):
             await bus.publish(_make_event(EventType.SESSION_STARTED))
 
         all_events = bus.get_event_log()
         assert len(all_events) == 8
 
-        artifact_events = bus.get_event_log(event_type=EventType.ARTIFACT_CREATED)
+        artifact_events = bus.get_event_log(event_type=EventType.WORK_PRODUCT_CREATED)
         assert len(artifact_events) == 5
 
     @pytest.mark.asyncio
@@ -889,7 +889,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={"key": "val"},
         )
 
@@ -925,7 +925,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
         )
 
@@ -945,7 +945,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
         )
 
@@ -963,7 +963,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
         )
 
@@ -981,7 +981,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
         )
 
@@ -1004,7 +1004,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
         )
 
@@ -1022,7 +1022,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
         )
 
@@ -1039,7 +1039,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={},
             source_branch="feat/test",
         )
@@ -1082,7 +1082,7 @@ class TestIterationController:
             agent=agent,
             agent_code="MECH",
             task_type="validate",
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             parameters={"original": True},
         )
 

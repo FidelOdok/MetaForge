@@ -2,7 +2,7 @@
 
 Usage::
 
-    python -m cli.forge_cli.main run validate_stress --artifact <uuid> --params '{"load": 500}'
+    python -m cli.forge_cli.main run validate_stress --work_product <uuid> --params '{"load": 500}'
     python -m cli.forge_cli.main status <session-id>
     python -m cli.forge_cli.main twin query <node-id>
     python -m cli.forge_cli.main twin list --domain mechanical --type cad_model
@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     # -- run ---------------------------------------------------------------
     run_parser = subparsers.add_parser("run", help="Invoke a skill via the gateway")
     run_parser.add_argument("skill_name", help="Name of the skill to invoke")
-    run_parser.add_argument("--artifact", required=True, help="UUID of the target artifact")
+    run_parser.add_argument("--work_product", required=True, help="UUID of the target work_product")
     run_parser.add_argument(
         "--params",
         default="{}",
@@ -71,9 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     twin_query = twin_sub.add_parser("query", help="Query a single twin node")
     twin_query.add_argument("node_id", help="Node UUID")
 
-    twin_list = twin_sub.add_parser("list", help="List twin artifacts")
+    twin_list = twin_sub.add_parser("list", help="List twin work_products")
     twin_list.add_argument("--domain", default=None, help="Filter by domain")
-    twin_list.add_argument("--type", default=None, dest="artifact_type", help="Filter by type")
+    twin_list.add_argument("--type", default=None, dest="work_product_type", help="Filter by type")
 
     # -- proposals ---------------------------------------------------------
     subparsers.add_parser("proposals", help="List pending change proposals")
@@ -116,7 +116,7 @@ def handle_run(args: argparse.Namespace, client: ForgeClient) -> Any:
     params = _parse_params(args.params)
     return client.run_skill(
         skill_name=args.skill_name,
-        artifact_id=args.artifact,
+        work_product_id=args.work_product,
         parameters=params,
         session_id=args.session_id,
     )
@@ -132,7 +132,7 @@ def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
     if args.twin_command == "query":
         return client.twin_query(args.node_id)
     if args.twin_command == "list":
-        return client.twin_list(domain=args.domain, artifact_type=args.artifact_type)
+        return client.twin_list(domain=args.domain, work_product_type=args.work_product_type)
     print("Error: specify a twin subcommand (query or list)", file=sys.stderr)
     sys.exit(1)
 

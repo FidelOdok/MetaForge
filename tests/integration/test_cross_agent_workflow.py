@@ -64,8 +64,8 @@ class TestSequentialCrossAgent:
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
         spy: SpySubscriber,
-        mech_artifact,
-        ee_artifact,
+        mech_work_product,
+        ee_work_product,
     ):
         mech_agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
         ee_agent = ElectronicsAgent(twin=twin, mcp=mcp_with_tools)
@@ -78,7 +78,7 @@ class TestSequentialCrossAgent:
                     agent_code="MECH",
                     task_type="validate_stress",
                     parameters={
-                        "artifact_id": str(mech_artifact.id),
+                        "work_product_id": str(mech_work_product.id),
                         "mesh_file_path": "cad/bracket.inp",
                     },
                 ),
@@ -88,7 +88,7 @@ class TestSequentialCrossAgent:
                     task_type="run_erc",
                     depends_on=["stress"],
                     parameters={
-                        "artifact_id": str(ee_artifact.id),
+                        "work_product_id": str(ee_work_product.id),
                         "schematic_file": "eda/kicad/main.kicad_sch",
                     },
                 ),
@@ -126,8 +126,8 @@ class TestParallelCrossAgent:
         mcp_with_tools: InMemoryMcpBridge,
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
-        mech_artifact,
-        ee_artifact,
+        mech_work_product,
+        ee_work_product,
     ):
         mech_agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
         ee_agent = ElectronicsAgent(twin=twin, mcp=mcp_with_tools)
@@ -140,7 +140,7 @@ class TestParallelCrossAgent:
                     agent_code="MECH",
                     task_type="validate_stress",
                     parameters={
-                        "artifact_id": str(mech_artifact.id),
+                        "work_product_id": str(mech_work_product.id),
                         "mesh_file_path": "cad/bracket.inp",
                     },
                 ),
@@ -149,7 +149,7 @@ class TestParallelCrossAgent:
                     agent_code="EE",
                     task_type="run_erc",
                     parameters={
-                        "artifact_id": str(ee_artifact.id),
+                        "work_product_id": str(ee_work_product.id),
                         "schematic_file": "eda/kicad/main.kicad_sch",
                     },
                 ),
@@ -242,35 +242,35 @@ class TestSharedTwinState:
         self,
         twin: InMemoryTwinAPI,
         mcp_with_tools: InMemoryMcpBridge,
-        mech_artifact,
+        mech_work_product,
     ):
         mech_agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
         ee_agent = ElectronicsAgent(twin=twin, mcp=mcp_with_tools)
 
-        # Both should be able to read the same mechanical artifact
+        # Both should be able to read the same mechanical work_product
         from domain_agents.electronics.agent import TaskRequest as EETR
         from domain_agents.mechanical.agent import TaskRequest as MechTR
 
         mech_result = await mech_agent.run_task(
             MechTR(
                 task_type="validate_stress",
-                artifact_id=mech_artifact.id,
+                work_product_id=mech_work_product.id,
                 parameters={"mesh_file_path": "cad/bracket.inp"},
             )
         )
 
-        # EE agent reading a mechanical artifact — it exists, so no "not found"
+        # EE agent reading a mechanical work_product — it exists, so no "not found"
         ee_result = await ee_agent.run_task(
             EETR(
                 task_type="run_erc",
-                artifact_id=mech_artifact.id,
+                work_product_id=mech_work_product.id,
                 parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
             )
         )
 
         assert mech_result.success is True
-        # EE agent can read it (artifact exists), but the ERC itself may use it differently
-        assert mech_result.artifact_id == ee_result.artifact_id
+        # EE agent can read it (work_product exists), but the ERC itself may use it differently
+        assert mech_result.work_product_id == ee_result.work_product_id
 
 
 class TestMixedSuccessFailure:

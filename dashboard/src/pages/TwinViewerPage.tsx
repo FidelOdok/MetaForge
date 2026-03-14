@@ -18,7 +18,7 @@ import type { TwinNode } from '../types/twin';
 import type { PartInfo } from '../types/viewer';
 
 const TYPE_ICONS: Record<TwinNode['type'], string> = {
-  artifact: '\uD83D\uDCC4',
+  work_product: '\uD83D\uDCC4',
   constraint: '\uD83D\uDD12',
   relationship: '\uD83D\uDD17',
   version: '\uD83C\uDFF7\uFE0F',
@@ -90,7 +90,7 @@ function GraphView() {
     return (
       <EmptyState
         title="Empty twin"
-        description="Digital Twin nodes will appear here when artifacts are created."
+        description="Digital Twin nodes will appear here when work_products are created."
       />
     );
   }

@@ -78,7 +78,7 @@ class ApprovalWorkflow:
         agent_code: str,
         description: str,
         diff: dict[str, Any],
-        artifacts: list[UUID],
+        work_products: list[UUID],
         *,
         session_id: UUID | None = None,
         requires_approval: bool = True,
@@ -92,7 +92,7 @@ class ApprovalWorkflow:
             agent_code=agent_code,
             description=description,
             diff=diff,
-            artifacts_affected=artifacts,
+            work_products_affected=work_products,
             requires_approval=requires_approval,
             session_id=session_id or uuid4(),
         )

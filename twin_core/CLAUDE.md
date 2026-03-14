@@ -1,6 +1,6 @@
 # twin_core
 
-Digital Twin core -- the single source of design truth. Provides the artifact graph, constraint engine, gate engine, versioning, validation, knowledge store, and standards mapping (AAS, SysML).
+Digital Twin core -- the single source of design truth. Provides the Digital Thread (work product graph), constraint engine, gate engine, versioning, validation, knowledge store, and standards mapping (AAS, SysML).
 
 ## Layer & Dependencies
 
@@ -13,11 +13,11 @@ Digital Twin core -- the single source of design truth. Provides the artifact gr
 - `api.py` -- `TwinAPI` facade and `InMemoryTwinAPI` for testing
 - `graph_engine.py` -- Core in-memory graph CRUD and traversal
 - `neo4j_graph_engine.py` -- Neo4j-backed graph engine implementation
-- `models/` -- Pydantic models: `Artifact`, `Constraint`, `Relationship`, `Version`, `BomItem`, `Component`, `DesignElement`, `DeviceInstance`
+- `models/` -- Pydantic models: `WorkProduct`, `Constraint`, `Relationship`, `Version`, `BomItem`, `Component`, `DesignElement`, `DeviceInstance`
 - `constraint_engine/` -- Cross-domain constraint validation, YAML rule loading, resolver
 - `gate_engine/` -- Design review gate evaluation and scoring
-- `validation_engine/` -- Schema validation for artifact types (JSON Schema based)
-- `versioning/` -- Branch, merge, diff operations on the artifact graph
+- `validation_engine/` -- Schema validation for work product types (JSON Schema based)
+- `versioning/` -- Branch, merge, diff operations on the Digital Thread
 - `knowledge/` -- Embedding service and knowledge store
 - `aas/` -- Asset Administration Shell export (AASX packaging)
 - `sysml/` -- SysML v2 mapping and serialization

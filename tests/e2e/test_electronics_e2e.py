@@ -21,8 +21,8 @@ from skill_registry.mcp_client_bridge import McpClientBridge
 from skill_registry.skill_base import SkillContext
 from tool_registry.tools.kicad.adapter import KicadServer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Realistic KiCad tool results for a drone flight controller schematic
@@ -197,11 +197,11 @@ async def _setup_kicad_mcp_stack(
     return client, bridge, server
 
 
-def _make_schematic_artifact() -> Artifact:
-    """Create a realistic drone flight controller schematic artifact."""
-    return Artifact(
+def _make_schematic_artifact() -> WorkProduct:
+    """Create a realistic drone flight controller schematic work_product."""
+    return WorkProduct(
         name="drone-fc-schematic",
-        type=ArtifactType.SCHEMATIC,
+        type=WorkProductType.SCHEMATIC,
         domain="electronics",
         file_path="eda/kicad/drone_fc.kicad_sch",
         content_hash="sha256:ee1122334455",
@@ -230,8 +230,8 @@ class TestElectronicsAgentE2E:
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_kicad_mcp_stack()
 
-        artifact = _make_schematic_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_schematic_artifact()
+        created = await twin.create_work_product(work_product)
 
         agent = ElectronicsAgent(twin=twin, mcp=bridge)
 
@@ -241,7 +241,7 @@ class TestElectronicsAgentE2E:
             "bridge": bridge,
             "server": server,
             "agent": agent,
-            "artifact": created,
+            "work_product": created,
         }
 
     async def test_erc_passes_clean_schematic(self, stack):
@@ -250,7 +250,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_erc",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "schematic_file": "eda/kicad/drone_fc.kicad_sch",
                 },
@@ -271,14 +271,14 @@ class TestElectronicsAgentE2E:
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_kicad_mcp_stack(erc_result=ERC_WITH_VIOLATIONS)
 
-        artifact = _make_schematic_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_schematic_artifact()
+        created = await twin.create_work_product(work_product)
         agent = ElectronicsAgent(twin=twin, mcp=bridge)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_erc",
-                artifact_id=created.id,
+                work_product_id=created.id,
                 parameters={
                     "schematic_file": "eda/kicad/drone_fc.kicad_sch",
                 },
@@ -296,7 +296,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_drc",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "pcb_file": "eda/kicad/drone_fc.kicad_pcb",
                 },
@@ -313,14 +313,14 @@ class TestElectronicsAgentE2E:
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_kicad_mcp_stack(drc_result=DRC_WITH_VIOLATIONS)
 
-        artifact = _make_schematic_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_schematic_artifact()
+        created = await twin.create_work_product(work_product)
         agent = ElectronicsAgent(twin=twin, mcp=bridge)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_drc",
-                artifact_id=created.id,
+                work_product_id=created.id,
                 parameters={"pcb_file": "eda/kicad/drone_fc.kicad_pcb"},
             )
         )
@@ -334,7 +334,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="check_power_budget",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "components": [
                         {"ref": "U1", "power_mw": 120},
@@ -353,7 +353,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="full_validation",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "schematic_file": "eda/kicad/drone_fc.kicad_sch",
                     "pcb_file": "eda/kicad/drone_fc.kicad_pcb",
@@ -374,7 +374,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="full_validation",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={},
             )
         )
@@ -383,12 +383,12 @@ class TestElectronicsAgentE2E:
         assert any("No validation checks" in e for e in result.errors)
 
     async def test_artifact_not_found(self, stack):
-        """Agent returns error when artifact doesn't exist in Twin."""
+        """Agent returns error when work_product doesn't exist in Twin."""
         s = stack
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_erc",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"schematic_file": "x.kicad_sch"},
             )
         )
@@ -402,7 +402,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="analyze_power_integrity",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
             )
         )
 
@@ -415,7 +415,7 @@ class TestElectronicsAgentE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_erc",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={},
             )
         )
@@ -438,8 +438,8 @@ class TestRunErcSkillE2E:
         twin = InMemoryTwinAPI.create()
         client, bridge, server = await _setup_kicad_mcp_stack()
 
-        artifact = _make_schematic_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_schematic_artifact()
+        created = await twin.create_work_product(work_product)
 
         import structlog
 
@@ -456,7 +456,7 @@ class TestRunErcSkillE2E:
             "twin": twin,
             "server": server,
             "handler": handler,
-            "artifact": created,
+            "work_product": created,
         }
 
     async def test_skill_execute_clean(self, skill_stack):
@@ -464,7 +464,7 @@ class TestRunErcSkillE2E:
         s = skill_stack
         output = await s["handler"].execute(
             RunErcInput(
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 schematic_file="eda/kicad/drone_fc.kicad_sch",
             )
         )
@@ -472,14 +472,14 @@ class TestRunErcSkillE2E:
         assert output.passed is True
         assert output.total_violations == 0
         assert output.total_errors == 0
-        assert output.artifact_id == s["artifact"].id
+        assert output.work_product_id == s["work_product"].id
 
     async def test_skill_run_pipeline(self, skill_stack):
         """Full skill pipeline (validate → preconditions → execute → wrap)."""
         s = skill_stack
         skill_result = await s["handler"].run(
             RunErcInput(
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 schematic_file="eda/kicad/drone_fc.kicad_sch",
             )
         )
@@ -490,11 +490,11 @@ class TestRunErcSkillE2E:
         assert skill_result.errors == []
 
     async def test_skill_precondition_missing_artifact(self, skill_stack):
-        """Skill fails preconditions when artifact not in Twin."""
+        """Skill fails preconditions when work_product not in Twin."""
         s = skill_stack
         skill_result = await s["handler"].run(
             RunErcInput(
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 schematic_file="missing.kicad_sch",
             )
         )
@@ -568,28 +568,28 @@ class TestElectronicsTwinIntegrationE2E:
     """Verify Digital Twin operations work within the electronics E2E pipeline."""
 
     async def test_artifact_lifecycle_erc(self):
-        """Create schematic artifact, run ERC, update Twin with results."""
+        """Create schematic work_product, run ERC, update Twin with results."""
         twin = InMemoryTwinAPI.create()
         _client, bridge, _server = await _setup_kicad_mcp_stack()
 
-        # 1. Create artifact in Twin
-        artifact = _make_schematic_artifact()
-        created = await twin.create_artifact(artifact)
-        assert await twin.get_artifact(created.id) is not None
+        # 1. Create work_product in Twin
+        work_product = _make_schematic_artifact()
+        created = await twin.create_work_product(work_product)
+        assert await twin.get_work_product(created.id) is not None
 
         # 2. Run ERC through agent
         agent = ElectronicsAgent(twin=twin, mcp=bridge)
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_erc",
-                artifact_id=created.id,
+                work_product_id=created.id,
                 parameters={"schematic_file": "eda/kicad/drone_fc.kicad_sch"},
             )
         )
         assert result.success is True
 
-        # 3. Update artifact with ERC results
-        updated = await twin.update_artifact(
+        # 3. Update work_product with ERC results
+        updated = await twin.update_work_product(
             created.id,
             {
                 "metadata": {
@@ -610,8 +610,8 @@ class TestElectronicsTwinIntegrationE2E:
         twin = InMemoryTwinAPI.create()
         _client, bridge, _server = await _setup_kicad_mcp_stack()
 
-        artifact = _make_schematic_artifact()
-        created = await twin.create_artifact(artifact)
+        work_product = _make_schematic_artifact()
+        created = await twin.create_work_product(work_product)
 
         await twin.create_branch("main")
         await twin.commit("main", "Add drone FC schematic", "engineer")
@@ -621,7 +621,7 @@ class TestElectronicsTwinIntegrationE2E:
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_erc",
-                artifact_id=created.id,
+                work_product_id=created.id,
                 parameters={"schematic_file": "eda/kicad/drone_fc.kicad_sch"},
             )
         )

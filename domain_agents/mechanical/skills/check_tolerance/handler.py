@@ -27,14 +27,14 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
     output_type = CheckToleranceOutput
 
     async def validate_preconditions(self, input_data: CheckToleranceInput) -> list[str]:
-        """Check that the artifact exists in the Twin."""
+        """Check that the work_product exists in the Twin."""
         errors: list[str] = []
 
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         return errors
 
@@ -42,7 +42,7 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
         """Analyze tolerances against manufacturing process capabilities."""
         self.logger.info(
             "Running tolerance check",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             process=input_data.manufacturing_process.process_type,
             num_tolerances=len(input_data.tolerances),
         )
@@ -204,7 +204,7 @@ class CheckToleranceHandler(SkillBase[CheckToleranceInput, CheckToleranceOutput]
         )
 
         return CheckToleranceOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             process_type=process.process_type,
             total_dimensions_checked=len(results),
             passed=num_passed,

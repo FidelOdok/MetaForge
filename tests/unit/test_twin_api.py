@@ -6,12 +6,12 @@ import pytest
 
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models import (
-    Artifact,
-    ArtifactType,
     Component,
     Constraint,
     ConstraintSeverity,
     EdgeType,
+    WorkProduct,
+    WorkProductType,
 )
 
 
@@ -20,10 +20,10 @@ def api():
     return InMemoryTwinAPI.create()
 
 
-def _make_artifact(name: str = "test", domain: str = "mechanical") -> Artifact:
-    return Artifact(
+def _make_work_product(name: str = "test", domain: str = "mechanical") -> WorkProduct:
+    return WorkProduct(
         name=name,
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain=domain,
         file_path=f"models/{name}.step",
         content_hash="hash123",
@@ -46,71 +46,71 @@ def _make_constraint(
     )
 
 
-# --- Artifact operations ---
+# --- WorkProduct operations ---
 
 
 class TestArtifactOperations:
-    async def test_create_and_get_artifact(self, api):
-        a = _make_artifact()
-        created = await api.create_artifact(a)
+    async def test_create_and_get_work_product(self, api):
+        a = _make_work_product()
+        created = await api.create_work_product(a)
         assert created.id == a.id
         assert created.name == "test"
 
-        fetched = await api.get_artifact(a.id)
+        fetched = await api.get_work_product(a.id)
         assert fetched is not None
         assert fetched.id == a.id
 
-    async def test_update_artifact(self, api):
-        a = _make_artifact()
-        await api.create_artifact(a)
+    async def test_update_work_product(self, api):
+        a = _make_work_product()
+        await api.create_work_product(a)
 
-        updated = await api.update_artifact(a.id, {"name": "updated"})
+        updated = await api.update_work_product(a.id, {"name": "updated"})
         assert updated.name == "updated"
 
-        fetched = await api.get_artifact(a.id)
+        fetched = await api.get_work_product(a.id)
         assert fetched is not None
         assert fetched.name == "updated"
 
-    async def test_delete_artifact(self, api):
-        a = _make_artifact()
-        await api.create_artifact(a)
+    async def test_delete_work_product(self, api):
+        a = _make_work_product()
+        await api.create_work_product(a)
 
-        result = await api.delete_artifact(a.id)
+        result = await api.delete_work_product(a.id)
         assert result is True
 
-        fetched = await api.get_artifact(a.id)
+        fetched = await api.get_work_product(a.id)
         assert fetched is None
 
-    async def test_list_artifacts_filtered_by_domain(self, api):
-        a = _make_artifact("mech", domain="mechanical")
-        b = _make_artifact("elec", domain="electronics")
-        await api.create_artifact(a)
-        await api.create_artifact(b)
+    async def test_list_work_products_filtered_by_domain(self, api):
+        a = _make_work_product("mech", domain="mechanical")
+        b = _make_work_product("elec", domain="electronics")
+        await api.create_work_product(a)
+        await api.create_work_product(b)
 
-        results = await api.list_artifacts(domain="electronics")
+        results = await api.list_work_products(domain="electronics")
         assert len(results) == 1
         assert results[0].id == b.id
 
-    async def test_list_artifacts_filtered_by_type(self, api):
-        a = _make_artifact("a")
-        b = Artifact(
+    async def test_list_work_products_filtered_by_type(self, api):
+        a = _make_work_product("a")
+        b = WorkProduct(
             name="schematic",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="eda/main.kicad_sch",
             content_hash="hash456",
             format="kicad",
             created_by="human",
         )
-        await api.create_artifact(a)
-        await api.create_artifact(b)
+        await api.create_work_product(a)
+        await api.create_work_product(b)
 
-        results = await api.list_artifacts(artifact_type=ArtifactType.SCHEMATIC)
+        results = await api.list_work_products(work_product_type=WorkProductType.SCHEMATIC)
         assert len(results) == 1
         assert results[0].id == b.id
 
-    async def test_get_artifact_not_found_returns_none(self, api):
-        result = await api.get_artifact(uuid4())
+    async def test_get_work_product_not_found_returns_none(self, api):
+        result = await api.get_work_product(uuid4())
         assert result is None
 
 
@@ -128,12 +128,12 @@ class TestConstraintOperations:
         assert fetched.name == "test_constraint"
 
     async def test_evaluate_constraints_all_pass(self, api):
-        # Create artifact and constraint that passes
-        a = _make_artifact()
-        await api.create_artifact(a)
+        # Create work_product and constraint that passes
+        a = _make_work_product()
+        await api.create_work_product(a)
 
         c = _make_constraint(expression="True")
-        # Use the constraint engine directly to bind constraint to artifact
+        # Use the constraint engine directly to bind constraint to work_product
         await api._constraints.add_constraint(c, [a.id])
 
         result = await api.evaluate_constraints()
@@ -141,8 +141,8 @@ class TestConstraintOperations:
         assert result.evaluated_count == 1
 
     async def test_evaluate_constraints_with_violation(self, api):
-        a = _make_artifact()
-        await api.create_artifact(a)
+        a = _make_work_product()
+        await api.create_work_product(a)
 
         c = _make_constraint(expression="False")
         await api._constraints.add_constraint(c, [a.id])
@@ -186,10 +186,10 @@ class TestComponentOperations:
 
 class TestRelationshipOperations:
     async def test_add_and_get_edges(self, api):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        await api.create_artifact(a)
-        await api.create_artifact(b)
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        await api.create_work_product(a)
+        await api.create_work_product(b)
 
         edge = await api.add_edge(a.id, b.id, EdgeType.DEPENDS_ON)
         assert edge.source_id == a.id
@@ -200,10 +200,10 @@ class TestRelationshipOperations:
         assert edges[0].target_id == b.id
 
     async def test_remove_edge(self, api):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        await api.create_artifact(a)
-        await api.create_artifact(b)
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        await api.create_work_product(a)
+        await api.create_work_product(b)
 
         await api.add_edge(a.id, b.id, EdgeType.DEPENDS_ON)
         result = await api.remove_edge(a.id, b.id, EdgeType.DEPENDS_ON)
@@ -218,10 +218,10 @@ class TestRelationshipOperations:
 
 class TestQueryOperations:
     async def test_get_subgraph(self, api):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        await api.create_artifact(a)
-        await api.create_artifact(b)
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        await api.create_work_product(a)
+        await api.create_work_product(b)
 
         await api.add_edge(a.id, b.id, EdgeType.DEPENDS_ON)
 
@@ -242,8 +242,8 @@ class TestVersioningOperations:
     async def test_create_branch(self, api):
         # Initialize main with a commit first
         await api._version.create_branch("main")
-        a = _make_artifact()
-        await api.create_artifact(a)
+        a = _make_work_product()
+        await api.create_work_product(a)
         await api._version.commit("main", "init", [a.id], "test")
 
         branch = await api.create_branch("feature")
@@ -251,8 +251,8 @@ class TestVersioningOperations:
 
     async def test_commit_and_log(self, api):
         await api._version.create_branch("main")
-        a = _make_artifact()
-        await api.create_artifact(a)
+        a = _make_work_product()
+        await api.create_work_product(a)
         await api._version.commit("main", "init", [a.id], "test")
 
         version = await api.commit("main", "second commit", "tester")
@@ -265,13 +265,13 @@ class TestVersioningOperations:
 
     async def test_merge_branches(self, api):
         await api._version.create_branch("main")
-        a = _make_artifact()
-        await api.create_artifact(a)
+        a = _make_work_product()
+        await api.create_work_product(a)
         await api._version.commit("main", "init", [a.id], "test")
 
         await api.create_branch("feature")
-        b = _make_artifact("b")
-        await api.create_artifact(b)
+        b = _make_work_product("b")
+        await api.create_work_product(b)
         await api._version.commit("feature", "add b", [b.id], "test")
 
         merge_version = await api.merge("feature", "main", "merge feature", "tester")
@@ -280,13 +280,13 @@ class TestVersioningOperations:
 
     async def test_diff_branches(self, api):
         await api._version.create_branch("main")
-        a = _make_artifact("a")
-        await api.create_artifact(a)
+        a = _make_work_product("a")
+        await api.create_work_product(a)
         await api._version.commit("main", "init", [a.id], "test")
 
         await api.create_branch("feature")
-        b = _make_artifact("b")
-        await api.create_artifact(b)
+        b = _make_work_product("b")
+        await api.create_work_product(b)
         await api._version.commit("feature", "add b", [b.id], "test")
 
         diff_result = await api.diff("main", "feature")

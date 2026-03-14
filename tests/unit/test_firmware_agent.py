@@ -20,8 +20,8 @@ from skill_registry.mcp_bridge import InMemoryMcpBridge
 @pytest.fixture
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
-    # Default: artifact exists
-    twin.get_artifact.return_value = MagicMock(
+    # Default: work_product exists
+    twin.get_work_product.return_value = MagicMock(
         id=uuid4(), name="drone-fc-firmware", domain="firmware"
     )
     return twin
@@ -67,7 +67,7 @@ class TestFirmwareAgent:
     async def test_unsupported_task_type_fails(self, agent: FirmwareAgent):
         request = TaskRequest(
             task_type="do_magic",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -76,11 +76,11 @@ class TestFirmwareAgent:
         assert "do_magic" in result.errors[0]
 
     async def test_missing_artifact(self, agent: FirmwareAgent, mock_twin: AsyncMock):
-        """Missing artifact should produce an error."""
-        mock_twin.get_artifact.return_value = None
+        """Missing work_product should produce an error."""
+        mock_twin.get_work_product.return_value = None
         request = TaskRequest(
             task_type="generate_hal",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"mcu_family": "STM32F4", "peripherals": ["GPIO"]},
         )
         result = await agent.run_task(request)
@@ -97,10 +97,10 @@ class TestGenerateHal:
 
     async def test_hal_generation_succeeds(self, agent: FirmwareAgent):
         """HAL generation with valid MCU and peripherals should succeed."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="generate_hal",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "mcu_family": "STM32F4",
                 "peripherals": ["GPIO", "SPI", "I2C"],
@@ -110,7 +110,7 @@ class TestGenerateHal:
 
         assert result.success is True
         assert result.task_type == "generate_hal"
-        assert result.artifact_id == artifact_id
+        assert result.work_product_id == work_product_id
         assert len(result.skill_results) == 1
         assert result.skill_results[0]["skill"] == "generate_hal"
         # 3 peripherals x 2 files each = 6 files
@@ -121,7 +121,7 @@ class TestGenerateHal:
         """HAL should fail when mcu_family is missing."""
         request = TaskRequest(
             task_type="generate_hal",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"peripherals": ["GPIO"]},
         )
         result = await agent.run_task(request)
@@ -133,7 +133,7 @@ class TestGenerateHal:
         """HAL should fail when peripherals is missing."""
         request = TaskRequest(
             task_type="generate_hal",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"mcu_family": "STM32F4"},
         )
         result = await agent.run_task(request)
@@ -145,7 +145,7 @@ class TestGenerateHal:
         """HAL should produce pin mappings per peripheral."""
         request = TaskRequest(
             task_type="generate_hal",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "mcu_family": "ESP32",
                 "peripherals": ["SPI", "UART"],
@@ -167,10 +167,10 @@ class TestScaffoldDriver:
 
     async def test_driver_scaffold_succeeds(self, agent: FirmwareAgent):
         """Driver scaffolding with valid parameters should succeed."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="scaffold_driver",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "peripheral_type": "accelerometer",
                 "interface": "spi",
@@ -191,7 +191,7 @@ class TestScaffoldDriver:
         """Driver should fail when peripheral_type is missing."""
         request = TaskRequest(
             task_type="scaffold_driver",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"driver_name": "bmi088"},
         )
         result = await agent.run_task(request)
@@ -203,7 +203,7 @@ class TestScaffoldDriver:
         """Driver should fail when driver_name is missing."""
         request = TaskRequest(
             task_type="scaffold_driver",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"peripheral_type": "accelerometer"},
         )
         result = await agent.run_task(request)
@@ -220,10 +220,10 @@ class TestConfigureRtos:
 
     async def test_rtos_config_succeeds(self, agent: FirmwareAgent):
         """RTOS configuration with valid parameters should succeed."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="configure_rtos",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "rtos_name": "FreeRTOS",
                 "task_definitions": [
@@ -248,7 +248,7 @@ class TestConfigureRtos:
         """RTOS should fail when rtos_name is missing."""
         request = TaskRequest(
             task_type="configure_rtos",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "task_definitions": [{"name": "task1", "priority": 1}],
             },
@@ -262,7 +262,7 @@ class TestConfigureRtos:
         """RTOS should fail when task_definitions is missing."""
         request = TaskRequest(
             task_type="configure_rtos",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"rtos_name": "FreeRTOS"},
         )
         result = await agent.run_task(request)
@@ -279,10 +279,10 @@ class TestFullBuild:
 
     async def test_full_build_runs_all_steps(self, agent: FirmwareAgent):
         """Full build should run HAL + driver + RTOS and aggregate results."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="full_build",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "mcu_family": "STM32F4",
                 "peripherals": ["GPIO", "SPI"],
@@ -297,7 +297,7 @@ class TestFullBuild:
         result = await agent.run_task(request)
 
         assert result.task_type == "full_build"
-        assert result.artifact_id == artifact_id
+        assert result.work_product_id == work_product_id
         assert result.success is True
         assert len(result.skill_results) == 3
         skills_run = {r["skill"] for r in result.skill_results}
@@ -307,7 +307,7 @@ class TestFullBuild:
         """Full build should only run steps for which parameters are provided."""
         request = TaskRequest(
             task_type="full_build",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "mcu_family": "STM32F4",
                 "peripherals": ["GPIO"],
@@ -324,7 +324,7 @@ class TestFullBuild:
         """Full build with no parameters should error."""
         request = TaskRequest(
             task_type="full_build",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -339,23 +339,23 @@ class TestTaskRequest:
     """Tests for the TaskRequest Pydantic model."""
 
     def test_task_request_defaults(self):
-        artifact_id = uuid4()
-        req = TaskRequest(task_type="generate_hal", artifact_id=artifact_id)
+        work_product_id = uuid4()
+        req = TaskRequest(task_type="generate_hal", work_product_id=work_product_id)
         assert req.branch == "main"
         assert req.parameters == {}
 
     def test_task_request_with_parameters(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         params = {"mcu_family": "STM32F4", "peripherals": ["GPIO"]}
         req = TaskRequest(
             task_type="generate_hal",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters=params,
             branch="feature-1",
         )
         assert req.branch == "feature-1"
         assert req.parameters == params
-        assert req.artifact_id == artifact_id
+        assert req.work_product_id == work_product_id
 
 
 # --- TaskResult model ---
@@ -365,10 +365,10 @@ class TestTaskResult:
     """Tests for the TaskResult Pydantic model."""
 
     def test_task_result_defaults(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="generate_hal",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=True,
         )
         assert res.skill_results == []
@@ -376,10 +376,10 @@ class TestTaskResult:
         assert res.warnings == []
 
     def test_task_result_with_data(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="generate_hal",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=False,
             errors=["Something failed"],
             warnings=["Unsupported peripheral"],
@@ -401,14 +401,14 @@ class TestFirmwareResult:
         result = FirmwareResult()
         assert result.overall_passed is True
         assert result.generated_files == []
-        assert result.artifacts == []
+        assert result.work_products == []
         assert result.analysis == {}
 
     def test_firmware_result_with_data(self):
         result = FirmwareResult(
             overall_passed=True,
             generated_files=["hal_gpio.h", "hal_gpio.c"],
-            artifacts=[{"type": "hal", "mcu": "STM32F4"}],
+            work_products=[{"type": "hal", "mcu": "STM32F4"}],
             tool_calls=[{"tool": "generate_hal", "result": "success"}],
         )
         assert result.overall_passed is True
@@ -429,7 +429,7 @@ class TestFirmwareHardcodedFallback:
 
             request = TaskRequest(
                 task_type="generate_hal",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={
                     "mcu_family": "STM32F4",
                     "peripherals": ["GPIO", "SPI"],
@@ -450,7 +450,7 @@ class TestFirmwareHardcodedFallback:
 
             request = TaskRequest(
                 task_type="unsupported_task",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
             )
             result = await agent.run_task(request)
 

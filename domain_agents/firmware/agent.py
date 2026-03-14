@@ -70,7 +70,7 @@ class TaskRequest(BaseModel):
     """A request for the firmware agent to perform a task."""
 
     task_type: str  # "generate_hal", "scaffold_driver", "configure_rtos", "full_build"
-    artifact_id: UUID
+    work_product_id: UUID
     parameters: dict[str, Any] = {}
     branch: str = "main"
 
@@ -79,7 +79,7 @@ class TaskResult(BaseModel):
     """Result of a firmware agent task."""
 
     task_type: str
-    artifact_id: UUID
+    work_product_id: UUID
     success: bool
     skill_results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -112,7 +112,7 @@ and tick_rate_hz.
 
 Given a user request, determine which tools to call and in what order. \
 For a full firmware build, generate HAL first, then scaffold drivers, \
-then configure RTOS. Provide a clear assessment of generated artifacts.
+then configure RTOS. Provide a clear assessment of generated work_products.
 """
 
 
@@ -164,7 +164,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = GenerateHalInput(
-            artifact_id=str(UUID("00000000-0000-0000-0000-000000000000")),
+            work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             mcu_family=mcu_family,
             peripherals=peripherals,
             output_dir=output_dir,
@@ -210,7 +210,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = ScaffoldDriverInput(
-            artifact_id=str(UUID("00000000-0000-0000-0000-000000000000")),
+            work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             peripheral_type=peripheral_type,
             interface=interface,
             driver_name=driver_name,
@@ -258,7 +258,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = ConfigureRtosInput(
-            artifact_id=str(UUID("00000000-0000-0000-0000-000000000000")),
+            work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             rtos_name=rtos_name,
             task_definitions=task_definitions,
             heap_size_kb=heap_size_kb,
@@ -307,7 +307,7 @@ class FirmwareAgent:
         agent = FirmwareAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(TaskRequest(
             task_type="generate_hal",
-            artifact_id=artifact.id,
+            work_product_id=work_product.id,
             parameters={"mcu_family": "STM32F4", "peripherals": ["GPIO", "SPI"]},
         ))
     """
@@ -339,7 +339,7 @@ class FirmwareAgent:
             self.logger.info(
                 "Running task",
                 task_type=request.task_type,
-                artifact_id=str(request.artifact_id),
+                work_product_id=str(request.work_product_id),
             )
 
             # Try PydanticAI path if LLM is available
@@ -365,14 +365,18 @@ class FirmwareAgent:
         if agent is None:
             raise RuntimeError("PydanticAI agent could not be created")
 
-        # Verify artifact exists first
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists first
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         deps = AgentDependencies(
@@ -398,7 +402,7 @@ class FirmwareAgent:
 
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=firmware_result.overall_passed,
             skill_results=firmware_result.tool_calls
             if firmware_result.tool_calls
@@ -410,7 +414,7 @@ class FirmwareAgent:
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."]
+        parts = [f"Perform a '{request.task_type}' task on work_product {request.work_product_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -422,7 +426,7 @@ class FirmwareAgent:
         if request.task_type not in self.SUPPORTED_TASKS:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     f"Unsupported task type: {request.task_type}. "
@@ -430,14 +434,18 @@ class FirmwareAgent:
                 ],
             )
 
-        # Verify artifact exists
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         # Route to handler
@@ -462,7 +470,7 @@ class FirmwareAgent:
         if not mcu_family:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: mcu_family"],
             )
@@ -471,7 +479,7 @@ class FirmwareAgent:
         if not peripherals:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: peripherals"],
             )
@@ -484,7 +492,7 @@ class FirmwareAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = GenerateHalInput(
-            artifact_id=str(request.artifact_id),
+            work_product_id=str(request.work_product_id),
             mcu_family=mcu_family,
             peripherals=peripherals,
             output_dir=request.parameters.get("output_dir", "firmware/hal"),
@@ -496,7 +504,7 @@ class FirmwareAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -504,7 +512,7 @@ class FirmwareAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=True,
             skill_results=[
                 {
@@ -522,7 +530,7 @@ class FirmwareAgent:
         if not peripheral_type:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: peripheral_type"],
             )
@@ -531,7 +539,7 @@ class FirmwareAgent:
         if not driver_name:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: driver_name"],
             )
@@ -544,7 +552,7 @@ class FirmwareAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = ScaffoldDriverInput(
-            artifact_id=str(request.artifact_id),
+            work_product_id=str(request.work_product_id),
             peripheral_type=peripheral_type,
             interface=request.parameters.get("interface", "spi"),
             driver_name=driver_name,
@@ -556,7 +564,7 @@ class FirmwareAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -564,7 +572,7 @@ class FirmwareAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=True,
             skill_results=[
                 {
@@ -582,7 +590,7 @@ class FirmwareAgent:
         if not rtos_name:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: rtos_name"],
             )
@@ -591,7 +599,7 @@ class FirmwareAgent:
         if not task_definitions:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: task_definitions"],
             )
@@ -604,7 +612,7 @@ class FirmwareAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = ConfigureRtosInput(
-            artifact_id=str(request.artifact_id),
+            work_product_id=str(request.work_product_id),
             rtos_name=rtos_name,
             task_definitions=task_definitions,
             heap_size_kb=request.parameters.get("heap_size_kb", 64),
@@ -617,7 +625,7 @@ class FirmwareAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -625,7 +633,7 @@ class FirmwareAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=True,
             skill_results=[
                 {
@@ -678,7 +686,7 @@ class FirmwareAgent:
         if steps_run == 0:
             return TaskResult(
                 task_type="full_build",
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     "No build steps could be run. "
@@ -691,7 +699,7 @@ class FirmwareAgent:
 
         return TaskResult(
             task_type="full_build",
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=overall_success,
             skill_results=all_results,
             errors=all_errors,

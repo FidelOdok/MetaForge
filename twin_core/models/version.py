@@ -1,4 +1,4 @@
-"""Version node — a point-in-time snapshot of the artifact graph."""
+"""Version node — a point-in-time snapshot of the work_product graph."""
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -21,13 +21,13 @@ class Version(NodeBase):
     snapshot_hash: str
     author: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    artifact_ids: list[UUID] = Field(default_factory=list)
+    work_product_ids: list[UUID] = Field(default_factory=list)
 
 
-class ArtifactChange(BaseModel):
-    """A single artifact change between two versions."""
+class WorkProductChange(BaseModel):
+    """A single work_product change between two versions."""
 
-    artifact_id: UUID
+    work_product_id: UUID
     change_type: str  # "added", "modified", "deleted"
     old_content_hash: str | None = None
     new_content_hash: str | None = None
@@ -38,6 +38,6 @@ class VersionDiff(BaseModel):
 
     version_a: UUID
     version_b: UUID
-    changes: list[ArtifactChange]
+    changes: list[WorkProductChange]
     constraints_added: list[UUID] = Field(default_factory=list)
     constraints_removed: list[UUID] = Field(default_factory=list)

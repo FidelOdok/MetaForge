@@ -230,7 +230,7 @@ class TestEventBusWiring:
 
         event = Event(
             id="e1",
-            type=EventType.ARTIFACT_CREATED,
+            type=EventType.WORK_PRODUCT_CREATED,
             timestamp="2025-01-01T00:00:00Z",
             source="test",
             data={},
@@ -246,7 +246,7 @@ class TestEventBusWiring:
         bus = EventBus()
         event = Event(
             id="e2",
-            type=EventType.ARTIFACT_CREATED,
+            type=EventType.WORK_PRODUCT_CREATED,
             timestamp="2025-01-01T00:00:00Z",
             source="test",
             data={},
@@ -264,22 +264,22 @@ class TestGraphEngineWiring:
 
     async def test_add_node_records_metric(self):
         from twin_core.graph_engine import InMemoryGraphEngine
-        from twin_core.models.artifact import Artifact
-        from twin_core.models.enums import ArtifactType
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
 
         collector = MagicMock(spec=MetricsCollector)
         engine = InMemoryGraphEngine(collector=collector)
 
-        artifact = Artifact(
+        work_product = WorkProduct(
             name="test-part",
             domain="mechanical",
-            type=ArtifactType.CAD_MODEL,
+            type=WorkProductType.CAD_MODEL,
             file_path="/tmp/test.step",
             content_hash="abc123",
             format="STEP",
             created_by="test",
         )
-        await engine.add_node(artifact)
+        await engine.add_node(work_product)
 
         collector.record_neo4j_query.assert_called()
         args = collector.record_neo4j_query.call_args
@@ -288,20 +288,20 @@ class TestGraphEngineWiring:
 
     async def test_no_collector_works(self):
         from twin_core.graph_engine import InMemoryGraphEngine
-        from twin_core.models.artifact import Artifact
-        from twin_core.models.enums import ArtifactType
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
 
         engine = InMemoryGraphEngine()
-        artifact = Artifact(
+        work_product = WorkProduct(
             name="test-part",
             domain="mechanical",
-            type=ArtifactType.CAD_MODEL,
+            type=WorkProductType.CAD_MODEL,
             file_path="/tmp/test.step",
             content_hash="abc123",
             format="STEP",
             created_by="test",
         )
-        await engine.add_node(artifact)  # Should not raise
+        await engine.add_node(work_product)  # Should not raise
 
 
 # ---------------------------------------------------------------------------

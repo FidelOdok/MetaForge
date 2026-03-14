@@ -35,7 +35,7 @@ def mock_context() -> SkillContext:
 @pytest.fixture()
 def sample_input() -> RunDrcInput:
     return RunDrcInput(
-        artifact_id=str(uuid4()),
+        work_product_id=str(uuid4()),
         pcb_file="eda/kicad/main.kicad_pcb",
         severity_filter="all",
     )
@@ -65,7 +65,7 @@ def _make_drc_response(
 class TestDrcSchemas:
     def test_valid_input(self) -> None:
         inp = RunDrcInput(
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             pcb_file="eda/kicad/test.kicad_pcb",
             severity_filter="all",
         )
@@ -74,7 +74,7 @@ class TestDrcSchemas:
 
     def test_input_default_severity_filter(self) -> None:
         inp = RunDrcInput(
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             pcb_file="eda/kicad/test.kicad_pcb",
         )
         assert inp.severity_filter == "all"
@@ -82,7 +82,7 @@ class TestDrcSchemas:
     def test_input_requires_pcb_file(self) -> None:
         with pytest.raises(ValidationError):
             RunDrcInput(
-                artifact_id=str(uuid4()),
+                work_product_id=str(uuid4()),
                 pcb_file="",
             )
 
@@ -113,7 +113,7 @@ class TestDrcSchemas:
     def test_output_model(self) -> None:
         aid = str(uuid4())
         output = RunDrcOutput(
-            artifact_id=aid,
+            work_product_id=aid,
             pcb_file="eda/kicad/main.kicad_pcb",
             violations=[],
             total_violations=0,
@@ -128,7 +128,7 @@ class TestDrcSchemas:
     def test_output_non_negative_counts(self) -> None:
         with pytest.raises(ValidationError):
             RunDrcOutput(
-                artifact_id=str(uuid4()),
+                work_product_id=str(uuid4()),
                 pcb_file="test.kicad_pcb",
                 total_violations=-1,
                 total_errors=0,
@@ -147,7 +147,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """DRC with no violations should pass."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc", _make_drc_response(violations=[], passed=True)
@@ -167,7 +167,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """DRC with error-severity violations should fail."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -197,7 +197,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """DRC with only warnings (no errors) should pass."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -229,7 +229,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """DRC with both errors and warnings should fail (errors present)."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -253,11 +253,11 @@ class TestRunDrcHandler:
     async def test_severity_filter_errors_only(self, mock_context: SkillContext) -> None:
         """Severity filter 'error' should exclude warnings."""
         inp = RunDrcInput(
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             pcb_file="eda/kicad/main.kicad_pcb",
             severity_filter="error",
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -280,11 +280,11 @@ class TestRunDrcHandler:
     async def test_severity_filter_warnings_only(self, mock_context: SkillContext) -> None:
         """Severity filter 'warning' should exclude errors."""
         inp = RunDrcInput(
-            artifact_id=str(uuid4()),
+            work_product_id=str(uuid4()),
             pcb_file="eda/kicad/main.kicad_pcb",
             severity_filter="warning",
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -308,7 +308,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Violation fields should be correctly parsed from raw data."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -341,7 +341,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Missing optional violation fields should get default values."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -366,7 +366,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Output should include the PCB file path."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response("kicad.run_drc", _make_drc_response())
 
@@ -375,24 +375,24 @@ class TestRunDrcHandler:
 
         assert output.pcb_file == "eda/kicad/main.kicad_pcb"
 
-    async def test_artifact_id_in_output(
+    async def test_work_product_id_in_output(
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
-        """Output should include the artifact ID."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        """Output should include the work_product ID."""
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response("kicad.run_drc", _make_drc_response())
 
         handler = RunDrcHandler(mock_context)
         output = await handler.execute(sample_input)
 
-        assert output.artifact_id == sample_input.artifact_id
+        assert output.work_product_id == sample_input.work_product_id
 
     async def test_summary_no_violations(
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Summary for zero violations should say 'No violations found'."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response("kicad.run_drc", _make_drc_response())
 
@@ -405,7 +405,7 @@ class TestRunDrcHandler:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Summary with violations should mention counts."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",
@@ -433,8 +433,8 @@ class TestPreconditions:
     async def test_precondition_missing_artifact(
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
-        """Missing artifact should fail preconditions."""
-        mock_context.twin.get_artifact.return_value = None
+        """Missing work_product should fail preconditions."""
+        mock_context.twin.get_work_product.return_value = None
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
 
         handler = RunDrcHandler(mock_context)
@@ -447,7 +447,7 @@ class TestPreconditions:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Unavailable kicad.run_drc tool should fail preconditions."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         # Don't register the tool => not available
 
         handler = RunDrcHandler(mock_context)
@@ -459,8 +459,8 @@ class TestPreconditions:
     async def test_precondition_both_missing(
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
-        """Both missing artifact and tool should produce two errors."""
-        mock_context.twin.get_artifact.return_value = None
+        """Both missing work_product and tool should produce two errors."""
+        mock_context.twin.get_work_product.return_value = None
         # Don't register the tool
 
         handler = RunDrcHandler(mock_context)
@@ -472,7 +472,7 @@ class TestPreconditions:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """All preconditions met should return empty errors."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
 
         handler = RunDrcHandler(mock_context)
@@ -491,7 +491,7 @@ class TestSkillRunPipeline:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """Full run() pipeline should return SkillResult with success=True."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response("kicad.run_drc", _make_drc_response())
 
@@ -509,7 +509,7 @@ class TestSkillRunPipeline:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """run() should return failure when preconditions are not met."""
-        mock_context.twin.get_artifact.return_value = None
+        mock_context.twin.get_work_product.return_value = None
         # Don't register the tool
 
         handler = RunDrcHandler(mock_context)
@@ -523,7 +523,7 @@ class TestSkillRunPipeline:
         self, mock_context: SkillContext, sample_input: RunDrcInput
     ) -> None:
         """run() with violations should succeed (SkillResult) but output.passed may be False."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("kicad.run_drc", "drc_validation")
         mock_context.mcp.register_tool_response(
             "kicad.run_drc",

@@ -269,7 +269,7 @@ class DriftReconciler:
 
         event = Event(
             id=str(uuid.uuid4()),
-            type=EventType.ARTIFACT_UPDATED,
+            type=EventType.WORK_PRODUCT_UPDATED,
             timestamp=datetime.now(UTC).isoformat(),
             source="assistant.reconciler",
             data={

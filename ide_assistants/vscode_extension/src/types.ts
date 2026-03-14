@@ -9,7 +9,7 @@
 // Digital Twin types
 // ---------------------------------------------------------------------------
 
-/** A node in the Digital Twin graph (artifact, constraint, or component). */
+/** A node in the Digital Twin graph (work_product, constraint, or component). */
 export interface TwinNode {
   id: string;
   type: TwinNodeType;
@@ -19,7 +19,7 @@ export interface TwinNode {
 }
 
 export type TwinNodeType =
-  | "artifact"
+  | "work_product"
   | "constraint"
   | "component"
   | "relationship";

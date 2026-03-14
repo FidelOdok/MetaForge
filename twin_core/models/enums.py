@@ -6,7 +6,7 @@ from enum import StrEnum
 class NodeType(StrEnum):
     """Discriminator for graph node types."""
 
-    ARTIFACT = "artifact"
+    WORK_PRODUCT = "work_product"
     CONSTRAINT = "constraint"
     VERSION = "version"
     COMPONENT = "component"
@@ -17,8 +17,8 @@ class NodeType(StrEnum):
     DESIGN_ELEMENT = "design_element"
 
 
-class ArtifactType(StrEnum):
-    """Types of design artifacts tracked in the Digital Twin."""
+class WorkProductType(StrEnum):
+    """Types of design work products tracked in the Digital Twin."""
 
     SCHEMATIC = "schematic"
     PCB_LAYOUT = "pcb_layout"

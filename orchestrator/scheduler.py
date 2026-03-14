@@ -69,7 +69,7 @@ class ScheduledStep(BaseModel):
     step_id: str
     agent_code: str
     task_type: str
-    artifact_id: str | None = None
+    work_product_id: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     branch: str = "main"
     priority: SchedulerPriority = SchedulerPriority.NORMAL
@@ -445,9 +445,9 @@ def _build_task_request(step: ScheduledStep) -> Any:
     """
     from domain_agents.mechanical.agent import TaskRequest
 
-    artifact_id = step.artifact_id or step.parameters.get("artifact_id")
-    if artifact_id is None:
-        # Return raw dict if no artifact_id — agent decides how to handle
+    work_product_id = step.work_product_id or step.parameters.get("work_product_id")
+    if work_product_id is None:
+        # Return raw dict if no work_product_id — agent decides how to handle
         return {
             "task_type": step.task_type,
             "parameters": step.parameters,
@@ -455,7 +455,9 @@ def _build_task_request(step: ScheduledStep) -> Any:
         }
     return TaskRequest(
         task_type=step.task_type,
-        artifact_id=UUID(artifact_id) if isinstance(artifact_id, str) else artifact_id,
+        work_product_id=UUID(work_product_id)
+        if isinstance(work_product_id, str)
+        else work_product_id,
         parameters=step.parameters,
         branch=step.branch,
     )

@@ -20,20 +20,20 @@ class ScaffoldDriverHandler(SkillBase[ScaffoldDriverInput, ScaffoldDriverOutput]
     output_type = ScaffoldDriverOutput
 
     async def validate_preconditions(self, input_data: ScaffoldDriverInput) -> list[str]:
-        """Check that the artifact exists in the Twin."""
+        """Check that the work_product exists in the Twin."""
         errors: list[str] = []
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
         return errors
 
     async def execute(self, input_data: ScaffoldDriverInput) -> ScaffoldDriverOutput:
         """Generate driver scaffold files."""
         self.logger.info(
             "Scaffolding driver",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             peripheral_type=input_data.peripheral_type,
             interface=input_data.interface,
             driver_name=input_data.driver_name,
@@ -61,7 +61,7 @@ class ScaffoldDriverHandler(SkillBase[ScaffoldDriverInput, ScaffoldDriverOutput]
         }
 
         return ScaffoldDriverOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             driver_files=driver_files,
             interface_type=input_data.interface,
             register_map=register_map,

@@ -22,20 +22,20 @@ class GenerateHalHandler(SkillBase[GenerateHalInput, GenerateHalOutput]):
     output_type = GenerateHalOutput
 
     async def validate_preconditions(self, input_data: GenerateHalInput) -> list[str]:
-        """Check that the artifact exists in the Twin."""
+        """Check that the work_product exists in the Twin."""
         errors: list[str] = []
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
         return errors
 
     async def execute(self, input_data: GenerateHalInput) -> GenerateHalOutput:
         """Generate HAL source files for the specified MCU and peripherals."""
         self.logger.info(
             "Generating HAL",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             mcu_family=input_data.mcu_family,
             peripherals=input_data.peripherals,
         )
@@ -69,7 +69,7 @@ class GenerateHalHandler(SkillBase[GenerateHalInput, GenerateHalOutput]):
             pin_mappings[peripheral_upper] = f"{input_data.mcu_family}_DEFAULT"
 
         return GenerateHalOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             generated_files=generated_files,
             pin_mappings=pin_mappings,
             hal_version="0.1.0",

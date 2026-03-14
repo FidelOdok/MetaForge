@@ -14,8 +14,8 @@ import pytest
 from domain_agents.simulation.agent import SimulationAgent, TaskRequest
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Realistic simulation results
@@ -90,11 +90,11 @@ def _make_mcp_bridge(
     return mcp
 
 
-def _make_circuit_artifact() -> Artifact:
-    """Create a realistic circuit design artifact."""
-    return Artifact(
+def _make_circuit_artifact() -> WorkProduct:
+    """Create a realistic circuit design work_product."""
+    return WorkProduct(
         name="drone-fc-power-supply",
-        type=ArtifactType.SCHEMATIC,
+        type=WorkProductType.SCHEMATIC,
         domain="electronics",
         file_path="sim/power_supply.cir",
         content_hash="sha256:sim112233",
@@ -108,11 +108,11 @@ def _make_circuit_artifact() -> Artifact:
     )
 
 
-def _make_mech_artifact() -> Artifact:
-    """Create a mechanical design artifact for FEA/CFD."""
-    return Artifact(
+def _make_mech_work_product() -> WorkProduct:
+    """Create a mechanical design work_product for FEA/CFD."""
+    return WorkProduct(
         name="motor-mount-bracket",
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain="mechanical",
         file_path="models/motor_mount_bracket.step",
         content_hash="sha256:mech112233",
@@ -137,9 +137,9 @@ class TestSpiceSimulationE2E:
     async def stack(self):
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_circuit_artifact())
+        work_product = await twin.create_work_product(_make_circuit_artifact())
         agent = SimulationAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "mcp": mcp, "agent": agent, "artifact": artifact}
+        return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": work_product}
 
     async def test_spice_dc_converges(self, stack):
         """SPICE DC analysis converges with correct results."""
@@ -147,7 +147,7 @@ class TestSpiceSimulationE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_spice",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
                     "analysis_type": "dc",
@@ -166,13 +166,13 @@ class TestSpiceSimulationE2E:
         """SPICE simulation returns failure when it doesn't converge."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge(spice_result=SPICE_NON_CONVERGENT)
-        artifact = await twin.create_artifact(_make_circuit_artifact())
+        work_product = await twin.create_work_product(_make_circuit_artifact())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_spice",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
                     "analysis_type": "transient",
@@ -189,7 +189,7 @@ class TestSpiceSimulationE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_spice",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={},
             )
         )
@@ -210,9 +210,9 @@ class TestFeaSimulationE2E:
     async def stack(self):
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "mcp": mcp, "agent": agent, "artifact": artifact}
+        return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": work_product}
 
     async def test_fea_static_passes(self, stack):
         """FEA static analysis passes with safety factor > 1."""
@@ -220,7 +220,7 @@ class TestFeaSimulationE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_fea",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "mesh_file": "models/motor_mount_bracket.inp",
                     "load_cases": [{"name": "hover_3g", "force_n": 30, "direction": "z"}],
@@ -238,13 +238,13 @@ class TestFeaSimulationE2E:
         """FEA fails when safety factor is below 1.0."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge(fea_result=FEA_UNSAFE_RESULT)
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_fea",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "mesh_file": "models/motor_mount_bracket.inp",
                     "analysis_type": "static",
@@ -261,7 +261,7 @@ class TestFeaSimulationE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_fea",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={},
             )
         )
@@ -282,9 +282,9 @@ class TestCfdSimulationE2E:
     async def stack(self):
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
-        return {"twin": twin, "mcp": mcp, "agent": agent, "artifact": artifact}
+        return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": work_product}
 
     async def test_cfd_converges(self, stack):
         """CFD simulation converges with residual below threshold."""
@@ -292,7 +292,7 @@ class TestCfdSimulationE2E:
         result = await s["agent"].run_task(
             TaskRequest(
                 task_type="run_cfd",
-                artifact_id=s["artifact"].id,
+                work_product_id=s["work_product"].id,
                 parameters={
                     "geometry_file": "models/motor_mount_bracket.step",
                     "fluid_properties": {"density_kg_m3": 1.225, "viscosity_pa_s": 1.8e-5},
@@ -310,13 +310,13 @@ class TestCfdSimulationE2E:
         """CFD fails when convergence residual exceeds threshold."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge(cfd_result=CFD_NOT_CONVERGED)
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_cfd",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "geometry_file": "models/motor_mount_bracket.step",
                 },
@@ -339,13 +339,13 @@ class TestFullSimulationE2E:
         """Full simulation runs SPICE + FEA + CFD and aggregates results."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="full_simulation",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
                     "mesh_file": "models/motor_mount_bracket.inp",
@@ -365,13 +365,13 @@ class TestFullSimulationE2E:
         """Full simulation fails when no simulation parameters are provided."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="full_simulation",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={},
             )
         )
@@ -383,13 +383,13 @@ class TestFullSimulationE2E:
         """Full simulation reports failure if any sub-simulation fails."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge(fea_result=FEA_UNSAFE_RESULT)
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="full_simulation",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
                     "mesh_file": "models/motor_mount_bracket.inp",
@@ -410,7 +410,7 @@ class TestSimulationAgentCommonE2E:
     """Common agent behaviour tests."""
 
     async def test_artifact_not_found(self):
-        """Agent returns error when artifact doesn't exist."""
+        """Agent returns error when work_product doesn't exist."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
         agent = SimulationAgent(twin=twin, mcp=mcp)
@@ -418,7 +418,7 @@ class TestSimulationAgentCommonE2E:
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_spice",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"netlist_path": "x.cir"},
             )
         )
@@ -430,13 +430,13 @@ class TestSimulationAgentCommonE2E:
         """Agent rejects unknown task types."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_monte_carlo",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
             )
         )
 
@@ -444,26 +444,26 @@ class TestSimulationAgentCommonE2E:
         assert any("Unsupported" in e for e in result.errors)
 
     async def test_twin_update_after_simulation(self):
-        """Verify Twin artifact can be updated with simulation results."""
+        """Verify Twin work_product can be updated with simulation results."""
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge()
-        artifact = await twin.create_artifact(_make_mech_artifact())
+        work_product = await twin.create_work_product(_make_mech_work_product())
         agent = SimulationAgent(twin=twin, mcp=mcp)
 
         result = await agent.run_task(
             TaskRequest(
                 task_type="run_fea",
-                artifact_id=artifact.id,
+                work_product_id=work_product.id,
                 parameters={"mesh_file": "models/motor_mount_bracket.inp"},
             )
         )
         assert result.success is True
 
-        updated = await twin.update_artifact(
-            artifact.id,
+        updated = await twin.update_work_product(
+            work_product.id,
             {
                 "metadata": {
-                    **artifact.metadata,
+                    **work_product.metadata,
                     "fea_results": result.skill_results[0],
                 },
             },

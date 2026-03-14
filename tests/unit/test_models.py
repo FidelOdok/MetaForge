@@ -7,9 +7,6 @@ from pydantic import ValidationError
 
 from twin_core.models import (
     AgentNode,
-    Artifact,
-    ArtifactChange,
-    ArtifactType,
     BOMItem,
     Component,
     ComponentLifecycle,
@@ -28,16 +25,19 @@ from twin_core.models import (
     UsesComponentEdge,
     Version,
     VersionDiff,
+    WorkProduct,
+    WorkProductChange,
+    WorkProductType,
 )
 
-# --- Artifact ---
+# --- WorkProduct ---
 
 
 class TestArtifact:
     def test_create_with_defaults(self):
-        a = Artifact(
+        a = WorkProduct(
             name="main_schematic",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="eda/kicad/main.kicad_sch",
             content_hash="abc123",
@@ -45,23 +45,23 @@ class TestArtifact:
             created_by="human",
         )
         assert isinstance(a.id, UUID)
-        assert a.node_type == NodeType.ARTIFACT
+        assert a.node_type == NodeType.WORK_PRODUCT
         assert a.name == "main_schematic"
         assert a.metadata == {}
         assert a.created_at is not None
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
-            Artifact(
+            WorkProduct(
                 name="test",
-                type=ArtifactType.BOM,
+                type=WorkProductType.BOM,
                 domain="electronics",
                 # missing file_path, content_hash, format, created_by
             )
 
-    def test_invalid_artifact_type(self):
+    def test_invalid_work_product_type(self):
         with pytest.raises(ValidationError):
-            Artifact(
+            WorkProduct(
                 name="test",
                 type="not_a_real_type",
                 domain="electronics",
@@ -72,9 +72,9 @@ class TestArtifact:
             )
 
     def test_serialization_roundtrip(self):
-        a = Artifact(
+        a = WorkProduct(
             name="bom",
-            type=ArtifactType.BOM,
+            type=WorkProductType.BOM,
             domain="electronics",
             file_path="bom/bom.csv",
             content_hash="def456",
@@ -83,7 +83,7 @@ class TestArtifact:
             metadata={"total_cost": 42.5},
         )
         data = a.model_dump()
-        restored = Artifact.model_validate(data)
+        restored = WorkProduct.model_validate(data)
         assert restored.id == a.id
         assert restored.metadata == {"total_cost": 42.5}
 
@@ -95,7 +95,7 @@ class TestConstraint:
     def test_create_with_defaults(self):
         c = Constraint(
             name="max_voltage_3v3",
-            expression="ctx.artifact('power_budget').metadata.get('max_voltage', 0) <= 3.3",
+            expression="ctx.work_product('power_budget').metadata.get('max_voltage', 0) <= 3.3",
             severity=ConstraintSeverity.ERROR,
             domain="electronics",
             source="user",
@@ -128,7 +128,7 @@ class TestVersion:
         )
         assert v.node_type == NodeType.VERSION
         assert v.parent_id is None
-        assert v.artifact_ids == []
+        assert v.work_product_ids == []
 
     def test_with_parent(self):
         parent_id = uuid4()
@@ -149,8 +149,8 @@ class TestVersionDiff:
             version_a=uuid4(),
             version_b=uuid4(),
             changes=[
-                ArtifactChange(
-                    artifact_id=a_id,
+                WorkProductChange(
+                    work_product_id=a_id,
                     change_type="modified",
                     old_content_hash="old",
                     new_content_hash="new",
@@ -158,7 +158,7 @@ class TestVersionDiff:
             ],
         )
         assert len(diff.changes) == 1
-        assert diff.changes[0].artifact_id == a_id
+        assert diff.changes[0].work_product_id == a_id
 
 
 # --- Component ---

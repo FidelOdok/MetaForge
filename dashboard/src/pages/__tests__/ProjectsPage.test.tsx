@@ -26,7 +26,7 @@ describe('ProjectsPage', () => {
   it('renders project list', () => {
     mockUseProjects.mockReturnValue({
       data: [
-        { id: '1', name: 'Test Project', description: 'Desc', status: 'active', artifacts: [], agentCount: 2, lastUpdated: new Date().toISOString(), createdAt: new Date().toISOString() },
+        { id: '1', name: 'Test Project', description: 'Desc', status: 'active', work_products: [], agentCount: 2, lastUpdated: new Date().toISOString(), createdAt: new Date().toISOString() },
       ],
       isLoading: false,
     } as unknown as ReturnType<typeof useProjects>);

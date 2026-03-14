@@ -103,18 +103,18 @@ function StepTimeline({ steps }: { steps: Record<string, StepInfo> }) {
 function ResultSection({ data }: { data: RunStatusResponse }) {
   if (data.status !== 'completed') return null;
 
-  // Collect artifact URLs from step results
-  const artifacts: { name: string; url: string }[] = [];
+  // Collect work_product URLs from step results
+  const work_products: { name: string; url: string }[] = [];
   for (const [, step] of Object.entries(data.steps as Record<string, StepInfo>)) {
     const result = step.result ?? {};
-    if (typeof result.artifact_url === 'string') {
-      artifacts.push({
-        name: (result.artifact_name as string) ?? 'Download artifact',
-        url: result.artifact_url,
+    if (typeof result.deliverable_url === 'string') {
+      work_products.push({
+        name: (result.deliverable_name as string) ?? 'Download deliverable',
+        url: result.deliverable_url,
       });
     }
     if (typeof result.download_url === 'string') {
-      artifacts.push({
+      work_products.push({
         name: (result.file_name as string) ?? 'Download file',
         url: result.download_url,
       });
@@ -134,22 +134,22 @@ function ResultSection({ data }: { data: RunStatusResponse }) {
         </span>
       </div>
 
-      {artifacts.length > 0 ? (
+      {work_products.length > 0 ? (
         <div className="space-y-2">
-          {artifacts.map((artifact, idx) => (
+          {work_products.map((work_product, idx) => (
             <a
               key={idx}
-              href={artifact.url}
+              href={work_product.url}
               download
               className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40"
             >
-              ↓ {artifact.name}
+              ↓ {work_product.name}
             </a>
           ))}
         </div>
       ) : (
         <p className="text-sm text-zinc-500">
-          No downloadable artifacts were produced by this run.
+          No downloadable work_products were produced by this run.
         </p>
       )}
     </Card>
@@ -236,7 +236,7 @@ export function DesignAssistantPage() {
               htmlFor="prompt-input"
               className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
             >
-              Target artifact ID or description
+              Target work_product ID or description
             </label>
             <input
               id="prompt-input"

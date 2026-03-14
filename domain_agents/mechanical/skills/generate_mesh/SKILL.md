@@ -4,7 +4,7 @@ Generate finite element mesh from CAD geometry using FreeCAD.
 
 ## What it does
 
-1. Takes a CAD model artifact ID and meshing parameters as input
+1. Takes a CAD model work_product ID and meshing parameters as input
 2. Validates the input file extension and algorithm choice
 3. Invokes the FreeCAD meshing tool via MCP to generate a finite element mesh
 4. Evaluates mesh quality metrics against user-defined thresholds
@@ -16,7 +16,7 @@ Generate finite element mesh from CAD geometry using FreeCAD.
 
 ## Input
 
-- `artifact_id` -- ID of the CAD model artifact in the Digital Twin
+- `work_product_id` -- ID of the CAD model work_product in the Digital Twin
 - `cad_file` -- Path to the input CAD file (.step, .stp, .stl, .brep)
 - `element_size` -- Target element size in mm (default: 1.0)
 - `algorithm` -- Meshing algorithm: netgen, gmsh, or mefisto (default: netgen)

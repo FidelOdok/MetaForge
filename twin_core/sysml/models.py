@@ -55,7 +55,7 @@ class Package(SysMLElement):
 class PartUsage(SysMLElement):
     """SysML v2 PartUsage — a usage of a part definition.
 
-    Maps to MetaForge Artifact nodes of physical types (CAD_MODEL, SCHEMATIC,
+    Maps to MetaForge WorkProduct nodes of physical types (CAD_MODEL, SCHEMATIC,
     PCB_LAYOUT, BOM, etc.) and to Component nodes.
     """
 
@@ -69,8 +69,8 @@ class PartUsage(SysMLElement):
 class RequirementUsage(SysMLElement):
     """SysML v2 RequirementUsage — a usage of a requirement definition.
 
-    Maps to MetaForge Artifact nodes with type PRD, DOCUMENTATION, or
-    TEST_PLAN where the artifact captures a requirement.
+    Maps to MetaForge WorkProduct nodes with type PRD, DOCUMENTATION, or
+    TEST_PLAN where the work_product captures a requirement.
     """
 
     element_type: SysMLElementType = Field(

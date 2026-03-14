@@ -1,4 +1,4 @@
-"""Constraint discovery — resolve which constraints apply to a set of artifacts."""
+"""Constraint discovery — resolve which constraints apply to a set of work_products."""
 
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ if TYPE_CHECKING:
 
 async def resolve_constraints(
     graph: GraphEngine,
-    artifact_ids: list[UUID],
+    work_product_ids: list[UUID],
 ) -> list[Constraint]:
     """Two-phase constraint resolution.
 
-    1. Follow outgoing CONSTRAINED_BY edges from each artifact to find direct constraints.
+    1. Follow outgoing CONSTRAINED_BY edges from each work_product to find direct constraints.
     2. Include all ``cross_domain=True`` constraints from the graph.
     3. Deduplicate by constraint ID.
     """
     seen: dict[UUID, Constraint] = {}
 
     # Phase 1: direct constraints via CONSTRAINED_BY edges
-    for artifact_id in artifact_ids:
+    for work_product_id in work_product_ids:
         edges = await graph.get_edges(
-            artifact_id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+            work_product_id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
         )
         for edge in edges:
             if edge.target_id not in seen:
@@ -44,11 +44,11 @@ async def resolve_constraints(
     return list(seen.values())
 
 
-async def find_constrained_artifacts(
+async def find_constrained_work_products(
     graph: GraphEngine,
     constraint_id: UUID,
 ) -> list[UUID]:
-    """Reverse lookup: find which artifacts a constraint applies to.
+    """Reverse lookup: find which work_products a constraint applies to.
 
     Follows incoming CONSTRAINED_BY edges to the constraint node.
     """

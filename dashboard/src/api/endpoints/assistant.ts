@@ -34,7 +34,7 @@ export interface Proposal {
   agent_code: string;
   description: string;
   diff: Record<string, unknown>;
-  artifacts_affected: string[];
+  work_products_affected: string[];
   status: string;
   session_id: string;
   created_at: string;

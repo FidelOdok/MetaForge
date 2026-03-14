@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class ConflictDetail(BaseModel):
     """Description of a single merge conflict."""
 
-    artifact_id: UUID
+    work_product_id: UUID
     conflict_type: str  # "content" or "structural"
     source_hash: str | None = None
     target_hash: str | None = None
@@ -19,8 +19,8 @@ class MergeConflict(Exception):
 
     def __init__(self, conflicts: list[ConflictDetail]) -> None:
         self.conflicts = conflicts
-        ids = ", ".join(str(c.artifact_id)[:8] for c in conflicts)
-        super().__init__(f"Merge conflicts on artifacts: {ids}")
+        ids = ", ".join(str(c.work_product_id)[:8] for c in conflicts)
+        super().__init__(f"Merge conflicts on work_products: {ids}")
 
 
 def detect_conflicts(
@@ -31,8 +31,8 @@ def detect_conflicts(
     """Detect conflicts between source and target relative to their common ancestor.
 
     Conflict rules:
-    - **Content conflict**: both sides modified the same artifact with different hashes.
-    - **Structural conflict**: one side deleted an artifact the other side modified.
+    - **Content conflict**: both sides modified the same work_product with different hashes.
+    - **Structural conflict**: one side deleted an work_product the other side modified.
 
     Returns:
         List of ConflictDetail (empty if merge is clean).
@@ -60,7 +60,7 @@ def detect_conflicts(
             # One side deleted, other modified (or added differently)
             conflicts.append(
                 ConflictDetail(
-                    artifact_id=aid,
+                    work_product_id=aid,
                     conflict_type="structural",
                     source_hash=src_hash,
                     target_hash=tgt_hash,
@@ -70,7 +70,7 @@ def detect_conflicts(
             # Both modified with different hashes
             conflicts.append(
                 ConflictDetail(
-                    artifact_id=aid,
+                    work_product_id=aid,
                     conflict_type="content",
                     source_hash=src_hash,
                     target_hash=tgt_hash,
@@ -95,10 +95,10 @@ def perform_merge(
         target: Snapshot at the target branch HEAD.
 
     Returns:
-        Merged snapshot (artifact_id → content_hash).
+        Merged snapshot (work_product_id → content_hash).
 
     Raises:
-        MergeConflict: If any artifacts have conflicting changes.
+        MergeConflict: If any work_products have conflicting changes.
     """
     conflicts = detect_conflicts(ancestor, source, target)
     if conflicts:

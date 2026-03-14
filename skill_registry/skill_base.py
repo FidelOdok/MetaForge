@@ -33,7 +33,7 @@ class SkillContext:
     """Dependency-injected context for skill execution.
 
     Provides access to:
-    - Digital Twin API (read/write artifacts, constraints)
+    - Digital Twin API (read/write work_products, constraints)
     - MCP Bridge (invoke external tools)
     - Structured logger (with trace correlation)
     """

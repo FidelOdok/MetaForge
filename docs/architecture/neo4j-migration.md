@@ -60,7 +60,7 @@ These are created with `IF NOT EXISTS` so they are idempotent across restarts.
 
 Every node gets the `:Node` label plus a type-specific label derived from `node_type`:
 
-- `:Node:Artifact`
+- `:Node:WorkProduct`
 - `:Node:Constraint`
 - `:Node:Component`
 - `:Node:Agent`

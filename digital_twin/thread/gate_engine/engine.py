@@ -81,7 +81,7 @@ _EVT_DEFINITION = GateDefinition(
         GateCriterion(
             type=GateCriterionType.DESIGN_REVIEW,
             name="Design Review",
-            description="Percentage of artifacts with review approval",
+            description="Percentage of work_products with review approval",
             weight=0.10,
             threshold=30.0,
             required=False,
@@ -128,7 +128,7 @@ _DVT_DEFINITION = GateDefinition(
         GateCriterion(
             type=GateCriterionType.DESIGN_REVIEW,
             name="Design Review",
-            description="Percentage of artifacts with review approval",
+            description="Percentage of work_products with review approval",
             weight=0.10,
             threshold=50.0,
             required=False,
@@ -175,7 +175,7 @@ _PVT_DEFINITION = GateDefinition(
         GateCriterion(
             type=GateCriterionType.DESIGN_REVIEW,
             name="Design Review",
-            description="Percentage of artifacts with review approval",
+            description="Percentage of work_products with review approval",
             weight=0.15,
             threshold=80.0,
             required=True,

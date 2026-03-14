@@ -23,14 +23,14 @@ class RunFeaHandler(SkillBase[RunFeaInput, RunFeaOutput]):
     output_type = RunFeaOutput
 
     async def validate_preconditions(self, input_data: RunFeaInput) -> list[str]:
-        """Check that the artifact exists and CalculiX tool is available."""
+        """Check that the work_product exists and CalculiX tool is available."""
         errors: list[str] = []
 
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         if not await self.context.mcp.is_available("calculix.run_fea"):
             errors.append("CalculiX FEA tool is not available")
@@ -41,7 +41,7 @@ class RunFeaHandler(SkillBase[RunFeaInput, RunFeaOutput]):
         """Run FEA via CalculiX MCP tool and return structured results."""
         self.logger.info(
             "Running FEA",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             mesh_file=input_data.mesh_file,
             analysis_type=input_data.analysis_type,
             material=input_data.material,
@@ -66,7 +66,7 @@ class RunFeaHandler(SkillBase[RunFeaInput, RunFeaOutput]):
         )
 
         return RunFeaOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             max_stress_mpa=float(fea_result.get("max_stress_mpa", 0.0)),
             max_displacement_mm=float(fea_result.get("max_displacement_mm", 0.0)),
             safety_factor=float(fea_result.get("safety_factor", 0.0)),

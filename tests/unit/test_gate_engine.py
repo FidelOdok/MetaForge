@@ -32,26 +32,26 @@ from twin_core.constraint_engine.models import (
 )
 from twin_core.constraint_engine.validator import InMemoryConstraintEngine
 from twin_core.graph_engine import InMemoryGraphEngine
-from twin_core.models.artifact import Artifact
 from twin_core.models.component import Component
-from twin_core.models.enums import ArtifactType, ConstraintSeverity, EdgeType
+from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_artifact(
+def _make_work_product(
     name: str = "test-art",
-    art_type: ArtifactType = ArtifactType.CAD_MODEL,
+    art_type: WorkProductType = WorkProductType.CAD_MODEL,
     domain: str = "mechanical",
     metadata: dict | None = None,
-) -> Artifact:
-    return Artifact(
+) -> WorkProduct:
+    return WorkProduct(
         name=name,
         type=art_type,
         domain=domain,
-        file_path=f"artifacts/{name}",
+        file_path=f"work_products/{name}",
         content_hash="hash123",
         format="step",
         created_by="test",
@@ -229,17 +229,17 @@ class TestRequirementCoverage:
         assert score == 100.0
 
     async def test_requirements_with_evidence(self, twin: InMemoryTwinAPI):
-        # Create 5 PRD artifacts (requirements)
+        # Create 5 PRD work_products (requirements)
         reqs = []
         for i in range(5):
-            art = _make_artifact(f"req-{i}", art_type=ArtifactType.PRD)
-            await twin.create_artifact(art)
+            art = _make_work_product(f"req-{i}", art_type=WorkProductType.PRD)
+            await twin.create_work_product(art)
             reqs.append(art)
 
-        # Create test evidence artifacts and link 4 of 5
+        # Create test evidence work_products and link 4 of 5
         for i in range(4):
-            evidence = _make_artifact(f"evidence-{i}", art_type=ArtifactType.TEST_RESULT)
-            await twin.create_artifact(evidence)
+            evidence = _make_work_product(f"evidence-{i}", art_type=WorkProductType.TEST_RESULT)
+            await twin.create_work_product(evidence)
             await twin.add_edge(
                 reqs[i].id,
                 evidence.id,
@@ -304,13 +304,13 @@ class TestTestEvidence:
         # Create 4 test plans, 3 with results
         plans = []
         for i in range(4):
-            tp = _make_artifact(f"test-plan-{i}", art_type=ArtifactType.TEST_PLAN)
-            await twin.create_artifact(tp)
+            tp = _make_work_product(f"test-plan-{i}", art_type=WorkProductType.TEST_PLAN)
+            await twin.create_work_product(tp)
             plans.append(tp)
 
         for i in range(3):
-            tr = _make_artifact(f"test-result-{i}", art_type=ArtifactType.TEST_RESULT)
-            await twin.create_artifact(tr)
+            tr = _make_work_product(f"test-result-{i}", art_type=WorkProductType.TEST_RESULT)
+            await twin.create_work_product(tr)
             await twin.add_edge(
                 plans[i].id,
                 tr.id,
@@ -358,7 +358,7 @@ class TestEvaluateReadiness:
                     GateCriterion(
                         type=GateCriterionType.DESIGN_REVIEW,
                         name="Design Review",
-                        description="All artifacts reviewed",
+                        description="All work_products reviewed",
                         weight=1.0,
                         threshold=90.0,
                         required=True,
@@ -368,9 +368,9 @@ class TestEvaluateReadiness:
         }
         engine = GateEngine(twin, constraint_engine, event_bus, gate_definitions=custom_def)
 
-        # Add an artifact without review approval -> score = 0%
-        art = _make_artifact("unreviewed")
-        await twin.create_artifact(art)
+        # Add an work_product without review approval -> score = 0%
+        art = _make_work_product("unreviewed")
+        await twin.create_work_product(art)
 
         readiness = await engine.evaluate_readiness(GateStage.EVT, "main")
         assert readiness.overall_score == pytest.approx(0.0)
@@ -409,9 +409,9 @@ class TestGateTransitionBlocking:
         }
         engine = GateEngine(twin, constraint_engine, event_bus, gate_definitions=custom_def)
 
-        # Add unreviewed artifact
-        art = _make_artifact("part-a")
-        await twin.create_artifact(art)
+        # Add unreviewed work_product
+        art = _make_work_product("part-a")
+        await twin.create_work_product(art)
 
         transition = await engine.request_transition(GateStage.EVT, "main", "engineer1")
         assert transition.status == GateTransitionStatus.PENDING
@@ -443,9 +443,9 @@ class TestGateTransitionBlocking:
         }
         engine = GateEngine(twin, constraint_engine, event_bus, gate_definitions=custom_def)
 
-        # Add reviewed artifact
-        art = _make_artifact("reviewed-part", metadata={"review_status": "approved"})
-        await twin.create_artifact(art)
+        # Add reviewed work_product
+        art = _make_work_product("reviewed-part", metadata={"review_status": "approved"})
+        await twin.create_work_product(art)
 
         transition = await engine.request_transition(GateStage.EVT, "main", "engineer1")
         assert transition.readiness_score.ready is True

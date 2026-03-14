@@ -46,8 +46,8 @@ def _drc_response(violations: list[dict] | None = None) -> dict:
 @pytest.fixture
 def mock_twin() -> AsyncMock:
     twin = AsyncMock()
-    # Default: artifact exists
-    twin.get_artifact.return_value = MagicMock(
+    # Default: work_product exists
+    twin.get_work_product.return_value = MagicMock(
         id=uuid4(), name="drone-fc-pcb", domain="electronics"
     )
     return twin
@@ -100,7 +100,7 @@ class TestElectronicsAgent:
     async def test_unsupported_task_type_fails(self, agent: ElectronicsAgent):
         request = TaskRequest(
             task_type="do_magic",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -109,11 +109,11 @@ class TestElectronicsAgent:
         assert "do_magic" in result.errors[0]
 
     async def test_missing_artifact(self, agent: ElectronicsAgent, mock_twin: AsyncMock):
-        """Missing artifact should produce an error."""
-        mock_twin.get_artifact.return_value = None
+        """Missing work_product should produce an error."""
+        mock_twin.get_work_product.return_value = None
         request = TaskRequest(
             task_type="run_erc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
         )
         result = await agent.run_task(request)
@@ -132,7 +132,7 @@ class TestRunErc:
         """ERC with no violations should succeed through the agent."""
         request = TaskRequest(
             task_type="run_erc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
         )
         result = await agent.run_task(request)
@@ -157,7 +157,7 @@ class TestRunErc:
         agent = ElectronicsAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_erc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
         )
         result = await agent.run_task(request)
@@ -181,7 +181,7 @@ class TestRunErc:
         agent = ElectronicsAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_erc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
         )
         result = await agent.run_task(request)
@@ -194,7 +194,7 @@ class TestRunErc:
         """ERC should fail when schematic_file parameter is missing."""
         request = TaskRequest(
             task_type="run_erc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -212,7 +212,7 @@ class TestRunDrc:
         """DRC with no violations should succeed through the agent."""
         request = TaskRequest(
             task_type="run_drc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"pcb_file": "eda/kicad/main.kicad_pcb"},
         )
         result = await agent.run_task(request)
@@ -237,7 +237,7 @@ class TestRunDrc:
         agent = ElectronicsAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_drc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"pcb_file": "eda/kicad/main.kicad_pcb"},
         )
         result = await agent.run_task(request)
@@ -261,7 +261,7 @@ class TestRunDrc:
         agent = ElectronicsAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_drc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={"pcb_file": "eda/kicad/main.kicad_pcb"},
         )
         result = await agent.run_task(request)
@@ -274,7 +274,7 @@ class TestRunDrc:
         """DRC should fail when pcb_file parameter is missing."""
         request = TaskRequest(
             task_type="run_drc",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -292,7 +292,7 @@ class TestCheckPowerBudget:
         """Power budget check should return a not-yet-implemented stub error."""
         request = TaskRequest(
             task_type="check_power_budget",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "components": [
                     {"name": "MCU", "power_mw": 150.0},
@@ -315,7 +315,7 @@ class TestCheckPowerBudget:
         """Power budget check should fail when components parameter is missing."""
         request = TaskRequest(
             task_type="check_power_budget",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -331,10 +331,10 @@ class TestFullValidation:
 
     async def test_full_validation_runs_all_checks(self, agent: ElectronicsAgent):
         """Full validation should run ERC + DRC + power budget and aggregate results."""
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         request = TaskRequest(
             task_type="full_validation",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "schematic_file": "eda/kicad/main.kicad_sch",
                 "pcb_file": "eda/kicad/main.kicad_pcb",
@@ -347,7 +347,7 @@ class TestFullValidation:
         result = await agent.run_task(request)
 
         assert result.task_type == "full_validation"
-        assert result.artifact_id == artifact_id
+        assert result.work_product_id == work_product_id
         # ERC and DRC pass (clean responses), but power budget is not yet implemented
         assert result.success is False
         # Should have results from all three checks
@@ -359,7 +359,7 @@ class TestFullValidation:
         """Full validation with only ERC + DRC (no power budget) should pass."""
         request = TaskRequest(
             task_type="full_validation",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "schematic_file": "eda/kicad/main.kicad_sch",
                 "pcb_file": "eda/kicad/main.kicad_pcb",
@@ -377,7 +377,7 @@ class TestFullValidation:
         """Full validation should only run checks for which parameters are provided."""
         request = TaskRequest(
             task_type="full_validation",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             parameters={
                 "schematic_file": "eda/kicad/main.kicad_sch",
                 # No pcb_file or components
@@ -394,7 +394,7 @@ class TestFullValidation:
         """Full validation with no parameters should error."""
         request = TaskRequest(
             task_type="full_validation",
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
         )
         result = await agent.run_task(request)
 
@@ -409,23 +409,23 @@ class TestTaskRequest:
     """Tests for the TaskRequest Pydantic model."""
 
     def test_task_request_defaults(self):
-        artifact_id = uuid4()
-        req = TaskRequest(task_type="run_erc", artifact_id=artifact_id)
+        work_product_id = uuid4()
+        req = TaskRequest(task_type="run_erc", work_product_id=work_product_id)
         assert req.branch == "main"
         assert req.parameters == {}
 
     def test_task_request_with_parameters(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         params = {"schematic_file": "eda/kicad/main.kicad_sch"}
         req = TaskRequest(
             task_type="run_erc",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters=params,
             branch="feature-1",
         )
         assert req.branch == "feature-1"
         assert req.parameters == params
-        assert req.artifact_id == artifact_id
+        assert req.work_product_id == work_product_id
 
 
 # --- TaskResult model ---
@@ -435,10 +435,10 @@ class TestTaskResult:
     """Tests for the TaskResult Pydantic model."""
 
     def test_task_result_defaults(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="run_erc",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=True,
         )
         assert res.skill_results == []
@@ -446,10 +446,10 @@ class TestTaskResult:
         assert res.warnings == []
 
     def test_task_result_with_data(self):
-        artifact_id = uuid4()
+        work_product_id = uuid4()
         res = TaskResult(
             task_type="run_erc",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             success=False,
             errors=["Something failed"],
             warnings=["Check schematic version"],
@@ -472,7 +472,7 @@ class TestElectronicsResult:
         assert result.overall_passed is True
         assert result.total_erc_errors == 0
         assert result.total_drc_errors == 0
-        assert result.artifacts == []
+        assert result.work_products == []
         assert result.analysis == {}
 
     def test_electronics_result_with_data(self):
@@ -501,7 +501,7 @@ class TestElectronicsHardcodedFallback:
 
             request = TaskRequest(
                 task_type="run_erc",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
             )
             result = await agent.run_task(request)
@@ -519,7 +519,7 @@ class TestElectronicsHardcodedFallback:
 
             request = TaskRequest(
                 task_type="unsupported_task",
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
             )
             result = await agent.run_task(request)
 

@@ -72,7 +72,7 @@ class TaskRequest(BaseModel):
     """A request for the electronics agent to perform a task."""
 
     task_type: str  # "run_erc", "run_drc", "check_power_budget", "full_validation"
-    artifact_id: UUID
+    work_product_id: UUID
     parameters: dict[str, Any] = {}
     branch: str = "main"
 
@@ -81,7 +81,7 @@ class TaskResult(BaseModel):
     """Result of an electronics agent task."""
 
     task_type: str
-    artifact_id: UUID
+    work_product_id: UUID
     success: bool
     skill_results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -164,7 +164,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = RunErcInput(
-            artifact_id=UUID("00000000-0000-0000-0000-000000000000"),
+            work_product_id=UUID("00000000-0000-0000-0000-000000000000"),
             schematic_file=schematic_file,
             severity_filter=severity_filter,
         )
@@ -209,7 +209,7 @@ def _get_or_create_pydantic_agent() -> Any:
         )
 
         skill_input = RunDrcInput(
-            artifact_id=UUID("00000000-0000-0000-0000-000000000000"),
+            work_product_id=UUID("00000000-0000-0000-0000-000000000000"),
             pcb_file=pcb_file,
             severity_filter=severity_filter,
         )
@@ -278,7 +278,7 @@ class ElectronicsAgent:
         agent = ElectronicsAgent(twin=twin, mcp=mcp)
         result = await agent.run_task(TaskRequest(
             task_type="run_erc",
-            artifact_id=artifact.id,
+            work_product_id=work_product.id,
             parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
         ))
     """
@@ -310,7 +310,7 @@ class ElectronicsAgent:
             self.logger.info(
                 "Running task",
                 task_type=request.task_type,
-                artifact_id=str(request.artifact_id),
+                work_product_id=str(request.work_product_id),
             )
 
             # Try PydanticAI path if LLM is available
@@ -336,14 +336,18 @@ class ElectronicsAgent:
         if agent is None:
             raise RuntimeError("PydanticAI agent could not be created")
 
-        # Verify artifact exists first
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists first
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         deps = AgentDependencies(
@@ -369,7 +373,7 @@ class ElectronicsAgent:
 
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=electronics_result.overall_passed,
             skill_results=electronics_result.tool_calls
             if electronics_result.tool_calls
@@ -381,7 +385,7 @@ class ElectronicsAgent:
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [f"Perform a '{request.task_type}' task on artifact {request.artifact_id}."]
+        parts = [f"Perform a '{request.task_type}' task on work_product {request.work_product_id}."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -393,7 +397,7 @@ class ElectronicsAgent:
         if request.task_type not in self.SUPPORTED_TASKS:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     f"Unsupported task type: {request.task_type}. "
@@ -401,14 +405,18 @@ class ElectronicsAgent:
                 ],
             )
 
-        # Verify artifact exists
-        artifact = await self.twin.get_artifact(request.artifact_id, branch=request.branch)
-        if artifact is None:
+        # Verify work_product exists
+        work_product = await self.twin.get_work_product(
+            request.work_product_id, branch=request.branch
+        )
+        if work_product is None:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
-                errors=[f"Artifact {request.artifact_id} not found on branch '{request.branch}'"],
+                errors=[
+                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
+                ],
             )
 
         # Route to handler
@@ -433,7 +441,7 @@ class ElectronicsAgent:
         if not schematic_file:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: schematic_file"],
             )
@@ -442,7 +450,7 @@ class ElectronicsAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = RunErcInput(
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             schematic_file=schematic_file,
             severity_filter=request.parameters.get("severity_filter", "all"),
         )
@@ -453,7 +461,7 @@ class ElectronicsAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -461,7 +469,7 @@ class ElectronicsAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=output.passed,
             skill_results=[
                 {
@@ -483,7 +491,7 @@ class ElectronicsAgent:
         if not pcb_file:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: pcb_file"],
             )
@@ -492,7 +500,7 @@ class ElectronicsAgent:
 
         ctx = self._create_skill_context(request.branch)
         skill_input = RunDrcInput(
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             pcb_file=pcb_file,
             severity_filter=request.parameters.get("severity_filter", "all"),
         )
@@ -503,7 +511,7 @@ class ElectronicsAgent:
         if not result.success:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=result.errors,
             )
@@ -511,7 +519,7 @@ class ElectronicsAgent:
         output = result.data
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=output.passed,
             skill_results=[
                 {
@@ -533,7 +541,7 @@ class ElectronicsAgent:
         if not components:
             return TaskResult(
                 task_type=request.task_type,
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=["Missing required parameter: components"],
             )
@@ -542,7 +550,7 @@ class ElectronicsAgent:
 
         return TaskResult(
             task_type=request.task_type,
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=False,
             errors=["check_power_budget skill is not yet implemented"],
             skill_results=[
@@ -596,7 +604,7 @@ class ElectronicsAgent:
         if checks_run == 0:
             return TaskResult(
                 task_type="full_validation",
-                artifact_id=request.artifact_id,
+                work_product_id=request.work_product_id,
                 success=False,
                 errors=[
                     "No validation checks could be run. "
@@ -606,7 +614,7 @@ class ElectronicsAgent:
 
         return TaskResult(
             task_type="full_validation",
-            artifact_id=request.artifact_id,
+            work_product_id=request.work_product_id,
             success=overall_success,
             skill_results=all_results,
             errors=all_errors,

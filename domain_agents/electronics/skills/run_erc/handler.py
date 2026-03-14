@@ -21,15 +21,15 @@ class RunErcHandler(SkillBase[RunErcInput, RunErcOutput]):
     output_type = RunErcOutput
 
     async def validate_preconditions(self, input_data: RunErcInput) -> list[str]:
-        """Check that the artifact exists and kicad.run_erc is available."""
+        """Check that the work_product exists and kicad.run_erc is available."""
         errors: list[str] = []
 
-        # Check artifact exists in the Twin
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        # Check work_product exists in the Twin
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         # Check KiCad ERC tool is available
         if not await self.context.mcp.is_available("kicad.run_erc"):
@@ -41,7 +41,7 @@ class RunErcHandler(SkillBase[RunErcInput, RunErcOutput]):
         """Run ERC via KiCad MCP tool and return structured results."""
         self.logger.info(
             "Running ERC",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             schematic_file=input_data.schematic_file,
             severity_filter=input_data.severity_filter,
         )
@@ -78,7 +78,7 @@ class RunErcHandler(SkillBase[RunErcInput, RunErcOutput]):
         )
 
         return RunErcOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             schematic_file=input_data.schematic_file,
             violations=violations,
             total_violations=total_violations,

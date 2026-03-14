@@ -22,8 +22,8 @@ NodeId = UUID
 VersionId = UUID
 """Unique identifier for a version snapshot."""
 
-ArtifactId = UUID
-"""Unique identifier for a design artifact."""
+WorkProductId = UUID
+"""Unique identifier for a design work_product."""
 
 ConstraintId = UUID
 """Unique identifier for a constraint."""
@@ -38,7 +38,7 @@ Timestamp = datetime
 """ISO 8601 timestamp used across events and models."""
 
 __all__ = [
-    "ArtifactId",
+    "WorkProductId",
     "ComponentId",
     "ConstraintId",
     "NodeId",

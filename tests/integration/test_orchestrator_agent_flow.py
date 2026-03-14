@@ -24,7 +24,7 @@ from orchestrator.workflow_dag import (
     WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
-from tests.conftest import MECH_ARTIFACT_ID, SpySubscriber
+from tests.conftest import MECH_WORK_PRODUCT_ID, SpySubscriber
 from tests.integration.conftest import MockAgent
 from twin_core.api import InMemoryTwinAPI
 
@@ -47,7 +47,7 @@ async def _run_single_step(
     workflow_engine: InMemoryWorkflowEngine,
     agent_code: str = "MECH",
     task_type: str = "validate_stress",
-    artifact_id: str | None = None,
+    work_product_id: str | None = None,
     parameters: dict[str, Any] | None = None,
 ) -> str:
     """Register a single-step workflow, start a run, schedule, and wait."""
@@ -62,7 +62,7 @@ async def _run_single_step(
             step_id="s1",
             agent_code=agent_code,
             task_type=task_type,
-            artifact_id=artifact_id or str(MECH_ARTIFACT_ID),
+            work_product_id=work_product_id or str(MECH_WORK_PRODUCT_ID),
             parameters=parameters or {},
         )
     )
@@ -93,7 +93,7 @@ class TestSingleStepMechAgent:
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
         spy: SpySubscriber,
-        mech_artifact,
+        mech_work_product,
     ):
         agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
         scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
@@ -118,7 +118,7 @@ class TestSingleStepMechAgent:
         mcp_with_tools: InMemoryMcpBridge,
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
-        mech_artifact,
+        mech_work_product,
     ):
         agent = MechanicalAgent(twin=twin, mcp=mcp_with_tools)
         scheduler = InMemoryScheduler(workflow_engine=workflow_engine, event_bus=event_bus)
@@ -147,13 +147,13 @@ class TestSingleStepEEAgent:
         mcp_with_tools: InMemoryMcpBridge,
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
-        ee_artifact,
+        ee_work_product,
     ):
         """EE agent is dispatched, runs, and returns a structured result.
 
-        NOTE: The skill handler re-looks up the artifact by string ID (not UUID),
+        NOTE: The skill handler re-looks up the work_product by string ID (not UUID),
         which fails the precondition check in InMemoryTwinAPI. This is a known
-        gap — skill handlers pass string artifact_ids while TwinAPI expects UUIDs.
+        gap — skill handlers pass string work_product_ids while TwinAPI expects UUIDs.
         The agent still returns a structured TaskResult (success=False with the
         skill-layer error), and the scheduler records it as COMPLETED (the agent
         itself didn't raise an exception).
@@ -169,7 +169,7 @@ class TestSingleStepEEAgent:
             workflow_engine,
             agent_code="EE",
             task_type="run_erc",
-            artifact_id=str(ee_artifact.id),
+            work_product_id=str(ee_work_product.id),
             parameters={"schematic_file": "eda/kicad/main.kicad_sch"},
         )
 
@@ -179,7 +179,7 @@ class TestSingleStepEEAgent:
         assert sr.status == StepStatus.COMPLETED
         assert sr.task_result.get("task_type") == "run_erc"
         # Result is a structured TaskResult (even though skill precondition failed)
-        assert "artifact_id" in sr.task_result
+        assert "work_product_id" in sr.task_result
 
 
 class TestEventLifecycle:
@@ -224,7 +224,7 @@ class TestEventLifecycle:
 class TestSchedulerTaskRequest:
     """Verify scheduler builds correct TaskRequest for agents."""
 
-    async def test_task_request_includes_artifact_id(
+    async def test_task_request_includes_work_product_id(
         self,
         workflow_engine: InMemoryWorkflowEngine,
         event_bus: EventBus,
@@ -237,8 +237,8 @@ class TestSchedulerTaskRequest:
 
         assert len(mock.calls) == 1
         req = mock.calls[0]
-        # _build_task_request returns a TaskRequest with artifact_id
-        assert hasattr(req, "artifact_id") or "artifact_id" in str(req)
+        # _build_task_request returns a TaskRequest with work_product_id
+        assert hasattr(req, "work_product_id") or "work_product_id" in str(req)
 
     async def test_agent_not_registered_marks_step_failed(
         self,

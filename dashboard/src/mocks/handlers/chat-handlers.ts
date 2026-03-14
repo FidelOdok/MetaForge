@@ -53,7 +53,7 @@ const agentResponses: Record<string, string[]> = {
     'Version diff generated. The change affects 2 geometry parameters and 1 material property. No interface changes detected.',
   ],
   session: [
-    'Analysis session results are ready. Processing took 42 seconds. Full report attached to the artifact node.',
+    'Analysis session results are ready. Processing took 42 seconds. Full report attached to the work_product node.',
     'Mesh quality check passed. All elements have aspect ratio < 5:1. Proceeding with solver run.',
     'Simulation converged after 847 iterations. Maximum residual: 2.3e-6. Results are within the acceptance tolerance.',
   ],

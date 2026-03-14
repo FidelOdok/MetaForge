@@ -27,25 +27,25 @@ from tests.conftest import SpySubscriber
 from twin_core.api import InMemoryTwinAPI
 from twin_core.constraint_engine.validator import InMemoryConstraintEngine
 from twin_core.graph_engine import InMemoryGraphEngine
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_artifact(
+def _make_work_product(
     name: str = "test-art",
-    art_type: ArtifactType = ArtifactType.CAD_MODEL,
+    art_type: WorkProductType = WorkProductType.CAD_MODEL,
     domain: str = "mechanical",
     metadata: dict | None = None,
-) -> Artifact:
-    return Artifact(
+) -> WorkProduct:
+    return WorkProduct(
         name=name,
         type=art_type,
         domain=domain,
-        file_path=f"artifacts/{name}",
+        file_path=f"work_products/{name}",
         content_hash="hash123",
         format="step",
         created_by="test",
@@ -88,7 +88,7 @@ def _easy_gate_defs() -> dict[GateStage, GateDefinition]:
 
 
 def _hard_gate_defs() -> dict[GateStage, GateDefinition]:
-    """Gate definitions with high thresholds so unreviewed artifacts fail."""
+    """Gate definitions with high thresholds so unreviewed work_products fail."""
     return {
         GateStage.EVT: GateDefinition(
             stage=GateStage.EVT,
@@ -187,9 +187,9 @@ class TestTransitionBlockedWithoutApproval:
         twin: InMemoryTwinAPI,
     ):
         """Transition request is immediately rejected when readiness fails."""
-        # Add unreviewed artifact so design review score = 0%
-        art = _make_artifact("unreviewed-part")
-        await twin.create_artifact(art)
+        # Add unreviewed work_product so design review score = 0%
+        art = _make_work_product("unreviewed-part")
+        await twin.create_work_product(art)
 
         result = await strict_service.request_transition(
             project_id="proj-1",

@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-MetaForge is a **local-first control plane** that turns human intent into reviewable, manufacturable hardware artifacts. It orchestrates specialist AI agents — one per engineering discipline — that interface with real engineering tools (KiCad, FreeCAD, CalculiX, SPICE) to produce schematics, BOMs, PCB layouts, firmware scaffolds, manufacturing files, and test plans.
+MetaForge is a **local-first control plane** that turns human intent into reviewable, manufacturable hardware work_products. It orchestrates specialist AI agents — one per engineering discipline — that interface with real engineering tools (KiCad, FreeCAD, CalculiX, SPICE) to produce schematics, BOMs, PCB layouts, firmware scaffolds, manufacturing files, and test plans.
 
 ### Prime Rule
 
@@ -20,7 +20,7 @@ These five rules are non-negotiable across all phases:
 2. **Digital Twin owns all state** — agents read from and propose changes to the Twin; they do not maintain their own state.
 3. **Human-in-the-loop** — read-only by default; explicit approval is required for any write operation.
 4. **Skills are the atomic unit** — every agent capability is a deterministic, schema-validated, independently testable skill.
-5. **Git-native** — every artifact is versioned, diffable, and reviewable. No opaque blobs.
+5. **Git-native** — every work_product is versioned, diffable, and reviewable. No opaque blobs.
 
 ---
 
@@ -36,7 +36,7 @@ These five rules are non-negotiable across all phases:
 | LLM Providers | `openai` + `anthropic` SDKs | Unified abstraction layer |
 | Validation | Pydantic v2 | All schemas, configs, messages |
 | Workflow Engine | Temporal (Python SDK) | Durable execution, retries, sagas |
-| Graph Database | Neo4j | Digital Twin artifact graph |
+| Graph Database | Neo4j | Digital Twin work_product graph |
 | Event Bus | Apache Kafka | Design change events, audit log |
 | Observability | OpenTelemetry + structlog | Traces, metrics, structured logs |
 | Monitoring | Prometheus + Grafana | Dashboards, alerts |
@@ -79,7 +79,7 @@ The agent framework decision (ADR-001) selects **PydanticAI** for structured LLM
 │  KiCad · FreeCAD · CalculiX · SPICE             │
 ├─────────────────────────────────────────────────┤
 │  Layer 0: Digital Twin (Neo4j)                  │
-│  Artifact Graph · Versioning · Constraints      │
+│  WorkProduct Graph · Versioning · Constraints      │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -314,12 +314,12 @@ Tool adapters wrap engineering tools in MCP-compatible servers. Each adapter run
 
 **See**: [`docs/twin_schema.md`](twin_schema.md)
 
-The Digital Twin is the single source of design truth — a versioned artifact graph stored in Neo4j.
+The Digital Twin is the single source of design truth — a versioned work_product graph stored in Neo4j.
 
 | Property | Details |
 |----------|---------|
 | Storage | Neo4j graph database |
-| Nodes | Artifact, Constraint, Version, Component, Agent |
+| Nodes | WorkProduct, Constraint, Version, Component, Agent |
 | Edges | DEPENDS_ON, IMPLEMENTS, VALIDATES, CONTAINS, etc. |
 | Versioning | Git-like branching model for the graph |
 | Constraints | Cross-domain constraint engine with rule evaluation |
@@ -348,15 +348,15 @@ sequenceDiagram
     CLI->>GW: POST /api/v1/workflows
     GW->>O: Start workflow
     O->>A: Schedule mechanical agent
-    A->>TW: Read current artifact state
-    TW-->>A: Artifact graph subgraph
+    A->>TW: Read current work_product state
+    TW-->>A: WorkProduct graph subgraph
     A->>S: Invoke validate_stress skill
     S->>MCP: tool/call (calculix.run_fea)
     MCP->>T: Execute in container
     T-->>MCP: tool/result (stress data)
     MCP-->>S: Parsed result
     S-->>A: Validated output (Pydantic)
-    A->>TW: Propose artifact update
+    A->>TW: Propose work_product update
     TW-->>A: Proposal staged in branch
     A->>K: Emit design_change event
     O-->>GW: Workflow result
@@ -399,7 +399,7 @@ The core iteration loop used in Autonomous Mode:
 └──────────────────────────────────────────────┘
 ```
 
-1. **Propose**: Agent generates or modifies artifacts using skills.
+1. **Propose**: Agent generates or modifies work_products using skills.
 2. **Validate**: Constraint engine checks all cross-domain rules against the proposed state.
 3. **Refine**: If constraints fail, the agent receives violation details and iterates. Max iterations are configurable (default: 5).
 4. **Gate Check**: Once constraints pass, the proposal is presented for human review (in Autonomous Mode) or auto-committed (if pre-approved).
@@ -453,7 +453,7 @@ MetaForge/
 │   └── scheduler.py            # Agent execution queuing
 │
 ├── twin_core/                  # Layer 0: Digital Twin (Neo4j)
-│   ├── models/                 # Pydantic models (Artifact, Constraint, etc.)
+│   ├── models/                 # Pydantic models (WorkProduct, Constraint, etc.)
 │   ├── graph_engine.py         # Neo4j CRUD + traversal
 │   ├── versioning/             # Branch, merge, diff operations
 │   ├── constraint_engine/      # Cross-domain constraint validation
@@ -552,9 +552,9 @@ All tool adapters run in Docker containers with strict isolation:
 
 | Operation | Default | Override |
 |-----------|---------|----------|
-| Read artifacts | Allowed | — |
+| Read work_products | Allowed | — |
 | Run validation | Allowed | — |
-| Modify artifacts | Blocked | Requires explicit approval |
+| Modify work_products | Blocked | Requires explicit approval |
 | Commit to Twin | Blocked | Requires explicit approval |
 | Execute tools | Allowed (sandboxed) | — |
 
@@ -577,12 +577,12 @@ MetaForge is local-first:
 | **Orchestrator** | Temporal-based coordination engine — the "brain" that manages workflow DAGs |
 | **Domain Agent** | PydanticAI agent for one engineering discipline (1:1 ratio) |
 | **Skill** | Atomic unit of domain expertise — deterministic, schema-validated, independently testable |
-| **Digital Twin** | Neo4j artifact graph — single source of design truth |
+| **Digital Twin** | Neo4j work_product graph — single source of design truth |
 | **MCP** | Model Context Protocol — JSON-RPC 2.0 wire protocol for tool access |
 | **Tool Adapter** | Docker-containerized wrapper that exposes an engineering tool via MCP |
-| **Artifact** | Any design output: schematic, BOM, PCB layout, firmware source, test plan, etc. |
-| **Constraint** | A rule that must be satisfied across artifacts (e.g., voltage rail ≤ 3.3V) |
-| **Twin Branch** | A named snapshot of the artifact graph for isolated changes (like a Git branch) |
+| **WorkProduct** | Any design output: schematic, BOM, PCB layout, firmware source, test plan, etc. |
+| **Constraint** | A rule that must be satisfied across work_products (e.g., voltage rail ≤ 3.3V) |
+| **Twin Branch** | A named snapshot of the work_product graph for isolated changes (like a Git branch) |
 | **Gate Checkpoint** | A point in a workflow where human approval is required before proceeding |
 | **PRD** | Product Requirements Document — the human intent that drives a design session |
 | **Assistant Mode** | Human-driven design with post-edit validation (default mode) |

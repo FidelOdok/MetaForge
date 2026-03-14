@@ -36,7 +36,7 @@ def mock_context() -> SkillContext:
 @pytest.fixture()
 def sample_input() -> ValidateStressInput:
     return ValidateStressInput(
-        artifact_id=uuid4(),
+        work_product_id=uuid4(),
         mesh_file_path="/project/mesh/bracket.inp",
         load_case="static_load_1",
         constraints=[
@@ -57,7 +57,7 @@ def sample_input() -> ValidateStressInput:
 class TestStressSchemas:
     def test_valid_input(self) -> None:
         inp = ValidateStressInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             mesh_file_path="/mesh/test.inp",
             load_case="load_1",
             constraints=[
@@ -74,7 +74,7 @@ class TestStressSchemas:
     def test_input_requires_constraints(self) -> None:
         with pytest.raises(ValidationError):
             ValidateStressInput(
-                artifact_id=uuid4(),
+                work_product_id=uuid4(),
                 mesh_file_path="/mesh/test.inp",
                 load_case="load_1",
                 constraints=[],
@@ -91,7 +91,7 @@ class TestStressSchemas:
     def test_output_model(self) -> None:
         aid = uuid4()
         output = ValidateStressOutput(
-            artifact_id=aid,
+            work_product_id=aid,
             overall_passed=True,
             results=[
                 StressResult(
@@ -106,7 +106,7 @@ class TestStressSchemas:
             critical_region="body",
         )
         assert output.overall_passed is True
-        assert output.artifact_id == aid
+        assert output.work_product_id == aid
         assert len(output.results) == 1
         assert output.solver_time_seconds == 0.0
         assert output.mesh_elements == 0
@@ -122,7 +122,7 @@ class TestValidateStressHandler:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """Stress below allowable should pass."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -145,7 +145,7 @@ class TestValidateStressHandler:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """Stress above allowable should fail."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         # allowable = 250.0 / 1.5 = 166.67, so 200.0 > 166.67 -> fail
         mock_context.mcp.register_tool_response(
@@ -168,7 +168,7 @@ class TestValidateStressHandler:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """Multiple regions should each get a result entry."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -194,7 +194,7 @@ class TestValidateStressHandler:
     async def test_multiple_constraints(self, mock_context: SkillContext) -> None:
         """Multiple constraints should produce results for each constraint x region."""
         inp = ValidateStressInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             mesh_file_path="/mesh/part.inp",
             load_case="load_2",
             constraints=[
@@ -210,7 +210,7 @@ class TestValidateStressHandler:
                 ),
             ],
         )
-        mock_context.twin.get_artifact.return_value = {"id": str(inp.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(inp.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -231,7 +231,7 @@ class TestValidateStressHandler:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """The critical region should be the one with the highest stress."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -256,7 +256,7 @@ class TestValidateStressHandler:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """Solver time and mesh element count should be captured from FEA result."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -283,8 +283,8 @@ class TestPreconditions:
     async def test_precondition_missing_artifact(
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
-        """Missing artifact should fail preconditions."""
-        mock_context.twin.get_artifact.return_value = None
+        """Missing work_product should fail preconditions."""
+        mock_context.twin.get_work_product.return_value = None
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
 
         handler = ValidateStressHandler(mock_context)
@@ -297,7 +297,7 @@ class TestPreconditions:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """Unavailable CalculiX tool should fail preconditions."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         # Don't register the tool => not available
 
         handler = ValidateStressHandler(mock_context)
@@ -310,7 +310,7 @@ class TestPreconditions:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """All preconditions met should return empty errors."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
 
         handler = ValidateStressHandler(mock_context)
@@ -329,7 +329,7 @@ class TestSkillRunPipeline:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """Full run() pipeline should return SkillResult with success=True."""
-        mock_context.twin.get_artifact.return_value = {"id": str(sample_input.artifact_id)}
+        mock_context.twin.get_work_product.return_value = {"id": str(sample_input.work_product_id)}
         mock_context.mcp.register_tool("calculix.run_fea", "stress_analysis")
         mock_context.mcp.register_tool_response(
             "calculix.run_fea",
@@ -354,7 +354,7 @@ class TestSkillRunPipeline:
         self, mock_context: SkillContext, sample_input: ValidateStressInput
     ) -> None:
         """run() should return failure when preconditions are not met."""
-        mock_context.twin.get_artifact.return_value = None
+        mock_context.twin.get_work_product.return_value = None
         # Don't register calculix tool either
 
         handler = ValidateStressHandler(mock_context)

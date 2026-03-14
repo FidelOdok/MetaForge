@@ -64,7 +64,9 @@ class ApprovalRequest(BaseModel):
     approval_id: str = Field(description="Unique approval request identifier")
     description: str = Field(description="What needs approval")
     required_role: str = Field(default="reviewer", description="Role required to approve")
-    artifact_ids: list[str] = Field(default_factory=list, description="Artifact IDs under review")
+    work_product_ids: list[str] = Field(
+        default_factory=list, description="WorkProduct IDs under review"
+    )
     run_id: str = Field(description="Parent workflow run ID")
     step_id: str = Field(description="Parent workflow step ID")
     requested_at: str = Field(

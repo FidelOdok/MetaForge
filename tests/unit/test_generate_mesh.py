@@ -65,7 +65,7 @@ def mock_context() -> SkillContext:
 @pytest.fixture()
 def sample_input() -> GenerateMeshInput:
     return GenerateMeshInput(
-        artifact_id=uuid4(),
+        work_product_id=uuid4(),
         cad_file="/project/cad/bracket.step",
         element_size=1.0,
         algorithm="netgen",
@@ -88,7 +88,7 @@ class TestMeshModels:
 
     def test_generate_mesh_input_defaults(self) -> None:
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/path/to/model.step",
         )
         assert inp.element_size == 1.0
@@ -100,7 +100,7 @@ class TestMeshModels:
 
     def test_generate_mesh_input_custom(self) -> None:
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/path/to/model.stl",
             element_size=0.5,
             algorithm="gmsh",
@@ -118,7 +118,7 @@ class TestMeshModels:
 
     def test_generate_mesh_output_model(self) -> None:
         output = GenerateMeshOutput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             mesh_file="/tmp/mesh.inp",
             num_nodes=1000,
             num_elements=5000,
@@ -140,7 +140,7 @@ class TestMeshModels:
     def test_invalid_algorithm_not_blocked_by_schema(self) -> None:
         """Schema doesn't validate algorithm enum -- handler does that."""
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/path/to/model.step",
             algorithm="invalid_algo",
         )
@@ -157,7 +157,7 @@ class TestGenerateMeshHandler:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """Successful mesh generation with good quality."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -175,7 +175,7 @@ class TestGenerateMeshHandler:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """Mesh with quality within thresholds should be acceptable."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -192,7 +192,7 @@ class TestGenerateMeshHandler:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """Mesh with quality outside thresholds should be unacceptable."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", BAD_QUALITY_MESH_RESPONSE)
 
@@ -209,11 +209,11 @@ class TestGenerateMeshHandler:
     async def test_generate_mesh_with_custom_element_size(self, mock_context: SkillContext) -> None:
         """Custom element size is passed through to the output."""
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/project/cad/bracket.step",
             element_size=0.25,
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -225,11 +225,11 @@ class TestGenerateMeshHandler:
     async def test_generate_mesh_with_gmsh_algorithm(self, mock_context: SkillContext) -> None:
         """Gmsh algorithm should be accepted and passed through."""
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/project/cad/bracket.step",
             algorithm="gmsh",
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -241,10 +241,10 @@ class TestGenerateMeshHandler:
     async def test_generate_mesh_missing_cad_file(self, mock_context: SkillContext) -> None:
         """Missing CAD file extension should raise ValueError."""
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/project/cad/bracket.iges",
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -255,11 +255,11 @@ class TestGenerateMeshHandler:
     async def test_generate_mesh_unsupported_format(self, mock_context: SkillContext) -> None:
         """Unsupported output format should raise ValueError."""
         inp = GenerateMeshInput(
-            artifact_id=uuid4(),
+            work_product_id=uuid4(),
             cad_file="/project/cad/bracket.step",
             output_format="vtk",
         )
-        mock_context.twin.get_artifact.return_value = {"id": inp.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": inp.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -271,7 +271,7 @@ class TestGenerateMeshHandler:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """MCP tool invocation should fail when tool is registered but no response exists."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         # Register tool as available so precondition passes, but don't register
         # a response so invoke() raises McpToolError
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
@@ -291,8 +291,8 @@ class TestGenerateMeshPreconditions:
     async def test_precondition_tool_available(
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
-        """Preconditions should pass when artifact exists and tool is available."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        """Preconditions should pass when work_product exists and tool is available."""
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
 
         handler = GenerateMeshHandler(mock_context)
@@ -304,7 +304,7 @@ class TestGenerateMeshPreconditions:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """Preconditions should fail when FreeCAD tool is not available."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         # Don't register the tool => not available
 
         handler = GenerateMeshHandler(mock_context)
@@ -316,8 +316,8 @@ class TestGenerateMeshPreconditions:
     async def test_precondition_artifact_missing(
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
-        """Preconditions should fail when artifact is not found."""
-        mock_context.twin.get_artifact.return_value = None
+        """Preconditions should fail when work_product is not found."""
+        mock_context.twin.get_work_product.return_value = None
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
 
         handler = GenerateMeshHandler(mock_context)
@@ -337,7 +337,7 @@ class TestGenerateMeshPipeline:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """Full run() pipeline should return SkillResult with success=True."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
@@ -355,7 +355,7 @@ class TestGenerateMeshPipeline:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """run() should return failure when preconditions are not met."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         # Don't register tool => precondition fails
 
         handler = GenerateMeshHandler(mock_context)
@@ -369,7 +369,7 @@ class TestGenerateMeshPipeline:
         self, mock_context: SkillContext, sample_input: GenerateMeshInput
     ) -> None:
         """run() should succeed but report quality issues."""
-        mock_context.twin.get_artifact.return_value = {"id": sample_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": sample_input.work_product_id}
         mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mock_context.mcp.register_tool_response("freecad.generate_mesh", BAD_QUALITY_MESH_RESPONSE)
 
@@ -394,14 +394,14 @@ class TestGenerateMeshWithAgent:
         mcp = InMemoryMcpBridge()
         agent = MechanicalAgent(twin=twin, mcp=mcp)
 
-        artifact_id = uuid4()
-        twin.get_artifact.return_value = {"id": str(artifact_id)}
+        work_product_id = uuid4()
+        twin.get_work_product.return_value = {"id": str(work_product_id)}
         mcp.register_tool("freecad.generate_mesh", "mesh_generation")
         mcp.register_tool_response("freecad.generate_mesh", GOOD_MESH_RESPONSE)
 
         request = TaskRequest(
             task_type="generate_mesh",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={
                 "cad_file": "/project/cad/bracket.step",
                 "element_size": 1.0,
@@ -426,12 +426,12 @@ class TestGenerateMeshWithAgent:
         mcp = InMemoryMcpBridge()
         agent = MechanicalAgent(twin=twin, mcp=mcp)
 
-        artifact_id = uuid4()
-        twin.get_artifact.return_value = {"id": str(artifact_id)}
+        work_product_id = uuid4()
+        twin.get_work_product.return_value = {"id": str(work_product_id)}
 
         request = TaskRequest(
             task_type="generate_mesh",
-            artifact_id=artifact_id,
+            work_product_id=work_product_id,
             parameters={},
         )
 

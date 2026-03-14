@@ -27,8 +27,8 @@ from orchestrator.workflow_dag import (
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.artifact import Artifact
-from twin_core.models.enums import ArtifactType
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Realistic tool mock data
@@ -138,11 +138,11 @@ async def gateway_stack():
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(transport=transport, base_url="http://test")
 
-    # Create a test artifact in the Twin
-    artifact = await twin.create_artifact(
-        Artifact(
+    # Create a test work_product in the Twin
+    work_product = await twin.create_work_product(
+        WorkProduct(
             name="drone-fc-assembly",
-            type=ArtifactType.CAD_MODEL,
+            type=WorkProductType.CAD_MODEL,
             domain="mechanical",
             file_path="models/drone_fc.step",
             content_hash="sha256:gw1234",
@@ -159,7 +159,7 @@ async def gateway_stack():
         "mcp": mcp,
         "engine": engine,
         "scheduler": scheduler,
-        "artifact": artifact,
+        "work_product": work_product,
     }
 
     await scheduler.stop()
@@ -207,7 +207,7 @@ class TestAssistantRequestE2E:
             "/v1/assistant/request",
             json={
                 "action": "validate_stress",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
                 "parameters": {
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -230,7 +230,7 @@ class TestAssistantRequestE2E:
             "/v1/assistant/request",
             json={
                 "action": "run_erc",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
                 "parameters": {
                     "schematic_file": "eda/kicad/main.kicad_sch",
                 },
@@ -248,7 +248,7 @@ class TestAssistantRequestE2E:
             "/v1/assistant/request",
             json={
                 "action": "analyze_vibration",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
             },
         )
 
@@ -273,7 +273,7 @@ class TestRunStatusPollingE2E:
             "/v1/assistant/request",
             json={
                 "action": "run_erc",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
                 "parameters": {"schematic_file": "eda/kicad/main.kicad_sch"},
             },
         )
@@ -343,7 +343,7 @@ class TestFullRoundTripE2E:
             "/v1/assistant/request",
             json={
                 "action": "validate_stress",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
                 "parameters": {
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -380,7 +380,7 @@ class TestFullRoundTripE2E:
             "/v1/assistant/request",
             json={
                 "action": "full_validation",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
                 "parameters": {
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -425,7 +425,7 @@ class TestFullRoundTripE2E:
             "/v1/assistant/request",
             json={
                 "action": "generate_cad",
-                "target_id": str(s["artifact"].id),
+                "target_id": str(s["work_product"].id),
                 "parameters": {
                     "shape_type": "bracket",
                     "dimensions": {"width": 50.0, "height": 30.0, "thickness": 5.0},

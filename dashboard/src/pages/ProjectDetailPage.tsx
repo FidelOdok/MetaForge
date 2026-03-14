@@ -45,9 +45,9 @@ export function ProjectDetailPage() {
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Card>
           <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-            {project.artifacts.length}
+            {project.work_products.length}
           </div>
-          <div className="text-xs text-zinc-500">Artifacts</div>
+          <div className="text-xs text-zinc-500">Work Products</div>
         </Card>
         <Card>
           <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
@@ -64,22 +64,22 @@ export function ProjectDetailPage() {
       </div>
 
       <h3 className="mb-3 text-lg font-medium text-zinc-900 dark:text-zinc-100">
-        Artifacts
+        Work Products
       </h3>
 
-      {project.artifacts.length === 0 ? (
-        <EmptyState title="No artifacts" description="Run an agent to create artifacts." />
+      {project.work_products.length === 0 ? (
+        <EmptyState title="No work products" description="Run an agent to create work products." />
       ) : (
         <div className="space-y-2">
-          {project.artifacts.map((artifact) => (
-            <Card key={artifact.id} className="flex items-center justify-between py-3">
+          {project.work_products.map((work_product) => (
+            <Card key={work_product.id} className="flex items-center justify-between py-3">
               <div>
                 <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                  {artifact.name}
+                  {work_product.name}
                 </span>
-                <span className="ml-2 text-xs text-zinc-400">{artifact.type}</span>
+                <span className="ml-2 text-xs text-zinc-400">{work_product.type}</span>
               </div>
-              <StatusBadge status={artifact.status} />
+              <StatusBadge status={work_product.status} />
             </Card>
           ))}
         </div>

@@ -23,14 +23,14 @@ class RunSpiceHandler(SkillBase[RunSpiceInput, RunSpiceOutput]):
     output_type = RunSpiceOutput
 
     async def validate_preconditions(self, input_data: RunSpiceInput) -> list[str]:
-        """Check that the artifact exists and SPICE tool is available."""
+        """Check that the work_product exists and SPICE tool is available."""
         errors: list[str] = []
 
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         if not await self.context.mcp.is_available("spice.run_simulation"):
             errors.append("SPICE simulation tool is not available")
@@ -41,7 +41,7 @@ class RunSpiceHandler(SkillBase[RunSpiceInput, RunSpiceOutput]):
         """Run SPICE simulation via MCP tool and return structured results."""
         self.logger.info(
             "Running SPICE simulation",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             netlist_path=input_data.netlist_path,
             analysis_type=input_data.analysis_type,
         )
@@ -64,7 +64,7 @@ class RunSpiceHandler(SkillBase[RunSpiceInput, RunSpiceOutput]):
         )
 
         return RunSpiceOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             results=sim_result.get("results", {}),
             waveforms=sim_result.get("waveforms", []),
             convergence=sim_result.get("convergence", False),

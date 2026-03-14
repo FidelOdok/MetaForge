@@ -32,7 +32,7 @@ class EvidenceStatus(StrEnum):
 
 
 class EvidenceType(StrEnum):
-    """Types of compliance evidence artifacts."""
+    """Types of compliance evidence work_products."""
 
     TEST_REPORT = "TEST_REPORT"
     DECLARATION = "DECLARATION"
@@ -53,8 +53,8 @@ class ChecklistItem(BaseModel):
     evidence_status: EvidenceStatus = Field(
         default=EvidenceStatus.MISSING, description="Current evidence status"
     )
-    evidence_artifact_id: UUID | None = Field(
-        default=None, description="UUID of linked evidence artifact"
+    evidence_work_product_id: UUID | None = Field(
+        default=None, description="UUID of linked evidence work_product"
     )
     notes: str = Field(default="", description="Free-form notes")
 
@@ -86,7 +86,9 @@ class ComplianceEvidence(BaseModel):
     )
     title: str = Field(..., description="Short title for the evidence")
     description: str = Field(default="", description="Longer description")
-    artifact_id: UUID | None = Field(default=None, description="UUID of the stored artifact")
+    work_product_id: UUID | None = Field(
+        default=None, description="UUID of the stored work_product"
+    )
     uploaded_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="Upload timestamp",

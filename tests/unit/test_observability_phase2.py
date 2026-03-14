@@ -297,17 +297,17 @@ class TestMetricsCollectorDatastore:
         return c
 
     def test_record_neo4j_query_calls_counter(self, collector: MetricsCollector) -> None:
-        collector.record_neo4j_query("read", "Artifact", "success", 0.012)
+        collector.record_neo4j_query("read", "WorkProduct", "success", 0.012)
         counter = collector._instruments[MetricsRegistry.NEO4J_QUERY_TOTAL.name]
         counter.add.assert_called_once_with(
             1, attributes={"operation": "read", "status": "success"}
         )
 
     def test_record_neo4j_query_calls_histogram(self, collector: MetricsCollector) -> None:
-        collector.record_neo4j_query("read", "Artifact", "success", 0.012)
+        collector.record_neo4j_query("read", "WorkProduct", "success", 0.012)
         hist = collector._instruments[MetricsRegistry.NEO4J_QUERY_DURATION.name]
         hist.record.assert_called_once_with(
-            0.012, attributes={"operation": "read", "node_type": "Artifact"}
+            0.012, attributes={"operation": "read", "node_type": "WorkProduct"}
         )
 
     def test_set_neo4j_connections(self, collector: MetricsCollector) -> None:
@@ -341,7 +341,7 @@ class TestMetricsCollectorDatastore:
 
     def test_noop_record_neo4j_query(self) -> None:
         collector = MetricsCollector()
-        collector.record_neo4j_query("read", "Artifact", "success", 0.01)  # no raise
+        collector.record_neo4j_query("read", "WorkProduct", "success", 0.01)  # no raise
 
     def test_noop_set_neo4j_connections(self) -> None:
         collector = MetricsCollector()
@@ -405,7 +405,7 @@ class TestMetricsCollectorConstraint:
 
     def test_noop_record_oscillation_detected(self) -> None:
         collector = MetricsCollector()
-        collector.record_oscillation_detected("Artifact")
+        collector.record_oscillation_detected("WorkProduct")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

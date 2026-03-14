@@ -74,7 +74,7 @@ Each E2E file exercises a complete vertical — from the agent entry point throu
 | TestMechanicalAgentE2E | 5 | Agent → MCP → CalculiX → Twin (stress pass/fail, full validation, errors) |
 | TestValidateStressSkillE2E | 4 | Skill handler directly (execute, pipeline, preconditions) |
 | TestMcpProtocolE2E | 5 | LoopbackTransport → McpClient → McpClientBridge (discovery, invocation, capabilities) |
-| TestTwinIntegrationE2E | 2 | Artifact lifecycle + branched analysis |
+| TestTwinIntegrationE2E | 2 | WorkProduct lifecycle + branched analysis |
 | TestCheckTolerancesE2E | 5 | Tolerance checking: pass/fail/marginal/missing params/stack-up |
 | TestGenerateMeshE2E | 5 | Mesh generation: good/bad quality/missing file/unsupported ext/algorithm variants |
 
@@ -85,7 +85,7 @@ Each E2E file exercises a complete vertical — from the agent entry point throu
 | TestElectronicsAgentE2E | 10 | Agent → MCP → KiCad (ERC/DRC pass/fail, full validation, errors) |
 | TestRunErcSkillE2E | 3 | Skill handler directly (execute, pipeline, preconditions) |
 | TestKicadMcpProtocolE2E | 4 | Full KiCad MCP stack (discovery, invocation, capabilities, health) |
-| TestElectronicsTwinIntegrationE2E | 2 | Artifact lifecycle + branched ERC analysis |
+| TestElectronicsTwinIntegrationE2E | 2 | WorkProduct lifecycle + branched ERC analysis |
 
 ### Simulation Agent (`test_simulation_e2e.py` — 14 tests)
 
@@ -95,7 +95,7 @@ Each E2E file exercises a complete vertical — from the agent entry point throu
 | TestFeaSimulationE2E | 3 | FEA safe/unsafe/missing mesh |
 | TestCfdSimulationE2E | 2 | CFD converge/not converge |
 | TestFullSimulationE2E | 3 | All three solvers combined, partial failure, no params |
-| TestSimulationAgentCommonE2E | 3 | Artifact not found, unsupported task, Twin update |
+| TestSimulationAgentCommonE2E | 3 | WorkProduct not found, unsupported task, Twin update |
 
 ### Firmware Agent (`test_firmware_e2e.py` — 18 tests)
 
@@ -105,7 +105,7 @@ Each E2E file exercises a complete vertical — from the agent entry point throu
 | TestScaffoldDriverE2E | 4 | Driver scaffolding: SPI/I2C/missing params |
 | TestConfigureRtosE2E | 3 | RTOS config: FreeRTOS/missing params |
 | TestFullBuildE2E | 3 | Full build: all steps/HAL only/no params |
-| TestFirmwareAgentCommonE2E | 3 | Artifact not found, unsupported task, Twin update |
+| TestFirmwareAgentCommonE2E | 3 | WorkProduct not found, unsupported task, Twin update |
 
 ### Orchestrator (`test_orchestrator_e2e.py` — 10 tests)
 
@@ -155,12 +155,12 @@ E2E tests stub **only external solver binaries** — all internal interfaces are
 - Test files: `test_{module}_e2e.py` for E2E, `test_{module}.py` for unit
 - Test classes: `Test{Feature}E2E` for E2E, `Test{Feature}` for unit
 - Test methods: `test_{scenario}` — descriptive, no abbreviations
-- Fixtures: `stack` (returns dict with twin/agent/artifact/mcp), `gateway_stack` for HTTP tests
+- Fixtures: `stack` (returns dict with twin/agent/work_product/mcp), `gateway_stack` for HTTP tests
 
 ### Patterns
 
 1. **Arrange-Act-Assert** in every test
-2. **Fixtures return dicts** (not tuples) for readability: `s["agent"]`, `s["artifact"]`
+2. **Fixtures return dicts** (not tuples) for readability: `s["agent"]`, `s["work_product"]`
 3. **Each E2E test is self-contained** — creates its own Twin, MCP bridge, and agent
 4. **Deep-copy shared workflow definitions** in gateway tests to prevent cross-test mutation
 5. **Assert both success and structure** — check `result.success`, `result.task_type`, `result.skill_results` shape
@@ -169,8 +169,8 @@ E2E tests stub **only external solver binaries** — all internal interfaces are
 
 1. **Happy path**: Correct input → successful result with expected output shape
 2. **Failure path**: Bad input / missing params → `success=False` with meaningful error messages
-3. **Edge cases**: Unsupported task types, missing artifacts, non-convergent solvers
-4. **Twin integration**: Artifact can be updated with results after agent execution
+3. **Edge cases**: Unsupported task types, missing work_products, non-convergent solvers
+4. **Twin integration**: WorkProduct can be updated with results after agent execution
 5. **MCP protocol** (where applicable): Tool discovery, capability filtering, health checks
 
 ## Running Tests

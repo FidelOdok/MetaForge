@@ -23,14 +23,14 @@ class RunCfdHandler(SkillBase[RunCfdInput, RunCfdOutput]):
     output_type = RunCfdOutput
 
     async def validate_preconditions(self, input_data: RunCfdInput) -> list[str]:
-        """Check that the artifact exists and CFD tool is available."""
+        """Check that the work_product exists and CFD tool is available."""
         errors: list[str] = []
 
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         if not await self.context.mcp.is_available("calculix.run_thermal"):
             errors.append("CalculiX thermal/CFD tool is not available")
@@ -41,7 +41,7 @@ class RunCfdHandler(SkillBase[RunCfdInput, RunCfdOutput]):
         """Run CFD via CalculiX MCP tool and return structured results."""
         self.logger.info(
             "Running CFD",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             geometry_file=input_data.geometry_file,
             mesh_resolution=input_data.mesh_resolution,
         )
@@ -65,7 +65,7 @@ class RunCfdHandler(SkillBase[RunCfdInput, RunCfdOutput]):
         )
 
         return RunCfdOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             max_velocity_ms=float(cfd_result.get("max_velocity_ms", 0.0)),
             pressure_drop_pa=float(cfd_result.get("pressure_drop_pa", 0.0)),
             max_temperature_c=float(cfd_result.get("max_temperature_c", 0.0)),

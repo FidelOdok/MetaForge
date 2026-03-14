@@ -42,7 +42,7 @@ def cnc_process() -> ManufacturingProcess:
 @pytest.fixture()
 def passing_input(cnc_process: ManufacturingProcess) -> CheckToleranceInput:
     return CheckToleranceInput(
-        artifact_id="artifact-123",
+        work_product_id="work_product-123",
         tolerances=[
             ToleranceSpec(
                 dimension_id="D1",
@@ -60,7 +60,7 @@ class TestSkillInline:
     async def test_handler_executes(
         self, mock_context: SkillContext, passing_input: CheckToleranceInput
     ) -> None:
-        mock_context.twin.get_artifact.return_value = {"id": passing_input.artifact_id}
+        mock_context.twin.get_work_product.return_value = {"id": passing_input.work_product_id}
         handler = CheckToleranceHandler(mock_context)
         output = await handler.execute(passing_input)
         assert output.overall_status == "pass"

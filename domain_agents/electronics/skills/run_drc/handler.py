@@ -21,15 +21,15 @@ class RunDrcHandler(SkillBase[RunDrcInput, RunDrcOutput]):
     output_type = RunDrcOutput
 
     async def validate_preconditions(self, input_data: RunDrcInput) -> list[str]:
-        """Check that the artifact exists and kicad.run_drc is available."""
+        """Check that the work_product exists and kicad.run_drc is available."""
         errors: list[str] = []
 
-        # Check artifact exists in the Twin
-        artifact = await self.context.twin.get_artifact(
-            input_data.artifact_id, branch=self.context.branch
+        # Check work_product exists in the Twin
+        work_product = await self.context.twin.get_work_product(
+            input_data.work_product_id, branch=self.context.branch
         )
-        if artifact is None:
-            errors.append(f"Artifact {input_data.artifact_id} not found in Twin")
+        if work_product is None:
+            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         # Check KiCad DRC tool is available
         if not await self.context.mcp.is_available("kicad.run_drc"):
@@ -41,7 +41,7 @@ class RunDrcHandler(SkillBase[RunDrcInput, RunDrcOutput]):
         """Run DRC via KiCad MCP tool and return structured results."""
         self.logger.info(
             "Running DRC",
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             pcb_file=input_data.pcb_file,
             severity_filter=input_data.severity_filter,
         )
@@ -78,7 +78,7 @@ class RunDrcHandler(SkillBase[RunDrcInput, RunDrcOutput]):
         )
 
         return RunDrcOutput(
-            artifact_id=input_data.artifact_id,
+            work_product_id=input_data.work_product_id,
             pcb_file=input_data.pcb_file,
             violations=violations,
             total_violations=total_violations,

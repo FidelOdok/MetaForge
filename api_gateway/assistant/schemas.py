@@ -59,14 +59,14 @@ class AssistantRequest(BaseModel):
     """Body for ``POST /api/v1/assistant/request``.
 
     An IDE assistant submits a request to invoke an agent on a specific
-    design artifact.
+    design work_product.
     """
 
     action: str = Field(
         min_length=1,
         description="Agent action to perform (e.g. 'validate_stress', 'run_drc')",
     )
-    target_id: UUID = Field(description="UUID of the target artifact in the Digital Twin")
+    target_id: UUID = Field(description="UUID of the target work_product in the Digital Twin")
     parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Action-specific parameters",
@@ -132,9 +132,9 @@ class DesignChangeProposal(BaseModel):
         default_factory=dict,
         description="Structured diff of the proposed changes",
     )
-    artifacts_affected: list[UUID] = Field(
+    work_products_affected: list[UUID] = Field(
         default_factory=list,
-        description="UUIDs of Digital Twin artifacts affected by this change",
+        description="UUIDs of Digital Twin work_products affected by this change",
     )
     requires_approval: bool = Field(
         default=True,

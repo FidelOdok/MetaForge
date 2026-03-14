@@ -17,7 +17,7 @@ from twin_core.constraint_engine.models import (
     ConstraintViolation,
 )
 from twin_core.constraint_engine.resolver import (
-    find_constrained_artifacts,
+    find_constrained_work_products,
     resolve_constraints,
 )
 from twin_core.graph_engine import GraphEngine
@@ -63,8 +63,8 @@ class ConstraintEngine(ABC):
     """Abstract interface for constraint evaluation against the Digital Twin graph."""
 
     @abstractmethod
-    async def evaluate(self, artifact_ids: list[UUID]) -> ConstraintEvaluationResult:
-        """Evaluate constraints relevant to the given artifacts.
+    async def evaluate(self, work_product_ids: list[UUID]) -> ConstraintEvaluationResult:
+        """Evaluate constraints relevant to the given work_products.
 
         Returns a result indicating whether all ERROR-severity constraints pass.
         """
@@ -76,8 +76,10 @@ class ConstraintEngine(ABC):
         ...
 
     @abstractmethod
-    async def add_constraint(self, constraint: Constraint, artifact_ids: list[UUID]) -> Constraint:
-        """Register a constraint and create CONSTRAINED_BY edges to the given artifacts."""
+    async def add_constraint(
+        self, constraint: Constraint, work_product_ids: list[UUID]
+    ) -> Constraint:
+        """Register a constraint and create CONSTRAINED_BY edges to the given work_products."""
         ...
 
     @abstractmethod
@@ -102,10 +104,10 @@ class InMemoryConstraintEngine(ConstraintEngine):
         self._graph = graph
         self._collector: MetricsCollector | None = collector
 
-    async def evaluate(self, artifact_ids: list[UUID]) -> ConstraintEvaluationResult:
+    async def evaluate(self, work_product_ids: list[UUID]) -> ConstraintEvaluationResult:
         start = time.monotonic()
 
-        constraints = await resolve_constraints(self._graph, artifact_ids)
+        constraints = await resolve_constraints(self._graph, work_product_ids)
         if not constraints:
             elapsed = (time.monotonic() - start) * 1000
             return ConstraintEvaluationResult(passed=True, evaluated_count=0, duration_ms=elapsed)
@@ -130,7 +132,7 @@ class InMemoryConstraintEngine(ConstraintEngine):
                 await self._update_constraint_status(constraint.id, ConstraintStatus.PASS, now)
             else:
                 # Expression returned False — it's a failure
-                artifact_ids_for_constraint = await find_constrained_artifacts(
+                work_product_ids_for_constraint = await find_constrained_work_products(
                     self._graph, constraint.id
                 )
                 violation = ConstraintViolation(
@@ -138,7 +140,7 @@ class InMemoryConstraintEngine(ConstraintEngine):
                     constraint_name=constraint.name,
                     severity=constraint.severity,
                     message=message or constraint.message,
-                    artifact_ids=artifact_ids_for_constraint,
+                    work_product_ids=work_product_ids_for_constraint,
                     expression=constraint.expression,
                     evaluated_at=now,
                 )
@@ -167,28 +169,30 @@ class InMemoryConstraintEngine(ConstraintEngine):
         )
 
     async def evaluate_all(self) -> ConstraintEvaluationResult:
-        all_artifacts = await self._graph.list_nodes(node_type=NodeType.ARTIFACT)
-        artifact_ids = [a.id for a in all_artifacts]
-        return await self.evaluate(artifact_ids)
+        all_work_products = await self._graph.list_nodes(node_type=NodeType.WORK_PRODUCT)
+        work_product_ids = [a.id for a in all_work_products]
+        return await self.evaluate(work_product_ids)
 
-    async def add_constraint(self, constraint: Constraint, artifact_ids: list[UUID]) -> Constraint:
+    async def add_constraint(
+        self, constraint: Constraint, work_product_ids: list[UUID]
+    ) -> Constraint:
         # Verify constraint doesn't already exist
         existing = await self._graph.get_node(constraint.id)
         if existing is not None:
             raise ValueError(f"Constraint with ID {constraint.id} already exists")
 
-        # Verify all target artifacts exist
-        for aid in artifact_ids:
+        # Verify all target work_products exist
+        for aid in work_product_ids:
             node = await self._graph.get_node(aid)
             if node is None:
-                raise ValueError(f"Artifact {aid} does not exist")
+                raise ValueError(f"WorkProduct {aid} does not exist")
 
         # Add the constraint node
         await self._graph.add_node(constraint)
 
-        # Create CONSTRAINED_BY edges from each artifact to the constraint
+        # Create CONSTRAINED_BY edges from each work_product to the constraint
         scope = "global" if constraint.cross_domain else "local"
-        for aid in artifact_ids:
+        for aid in work_product_ids:
             edge = ConstrainedByEdge(
                 source_id=aid,
                 target_id=constraint.id,

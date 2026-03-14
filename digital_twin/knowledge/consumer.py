@@ -1,6 +1,6 @@
-"""Knowledge consumer — subscribes to event bus and indexes artifacts.
+"""Knowledge consumer — subscribes to event bus and indexes work_products.
 
-Listens for ARTIFACT_CREATED and ARTIFACT_UPDATED events, extracts
+Listens for WORK_PRODUCT_CREATED and WORK_PRODUCT_UPDATED events, extracts
 textual content, embeds it, and stores the result in the knowledge store.
 """
 
@@ -19,8 +19,8 @@ from orchestrator.event_bus.subscribers import EventSubscriber
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.consumer")
 
-# Maps artifact type strings to KnowledgeType for auto-classification.
-_ARTIFACT_TYPE_MAP: dict[str, KnowledgeType] = {
+# Maps work_product type strings to KnowledgeType for auto-classification.
+_WORK_PRODUCT_TYPE_MAP: dict[str, KnowledgeType] = {
     "design_decision": KnowledgeType.DESIGN_DECISION,
     "component": KnowledgeType.COMPONENT,
     "constraint": KnowledgeType.CONSTRAINT,
@@ -30,7 +30,7 @@ _ARTIFACT_TYPE_MAP: dict[str, KnowledgeType] = {
 
 
 class KnowledgeConsumer(EventSubscriber):
-    """Event bus subscriber that indexes artifact events into the knowledge store."""
+    """Event bus subscriber that indexes work_product events into the knowledge store."""
 
     def __init__(
         self,
@@ -46,10 +46,10 @@ class KnowledgeConsumer(EventSubscriber):
 
     @property
     def event_types(self) -> set[EventType] | None:
-        return {EventType.ARTIFACT_CREATED, EventType.ARTIFACT_UPDATED}
+        return {EventType.WORK_PRODUCT_CREATED, EventType.WORK_PRODUCT_UPDATED}
 
     async def on_event(self, event: Event) -> None:
-        """Handle an artifact event by extracting, embedding, and storing content."""
+        """Handle an work_product event by extracting, embedding, and storing content."""
         with tracer.start_as_current_span("knowledge_consumer.on_event") as span:
             span.set_attribute("event.type", str(event.type))
             span.set_attribute("event.id", event.id)
@@ -66,7 +66,7 @@ class KnowledgeConsumer(EventSubscriber):
                 knowledge_type = self._classify(event.data)
                 embedding = await self._embedding.embed(content)
 
-                source_id = event.data.get("artifact_id")
+                source_id = event.data.get("work_product_id")
                 entry = KnowledgeEntry(
                     content=content,
                     embedding=embedding,
@@ -76,7 +76,7 @@ class KnowledgeConsumer(EventSubscriber):
                         "event_type": str(event.type),
                         "source": event.source,
                     },
-                    source_artifact_id=source_id,
+                    source_work_product_id=source_id,
                 )
                 await self._store.store(entry)
 
@@ -117,7 +117,7 @@ class KnowledgeConsumer(EventSubscriber):
                     embedding=emb,
                     knowledge_type=knowledge_type,
                     metadata=item.get("metadata", {}),
-                    source_artifact_id=item.get("source_artifact_id"),
+                    source_work_product_id=item.get("source_work_product_id"),
                 )
                 await self._store.store(entry)
                 ingested += 1
@@ -147,5 +147,5 @@ class KnowledgeConsumer(EventSubscriber):
     @staticmethod
     def _classify(data: dict[str, Any]) -> KnowledgeType:
         """Classify knowledge type from event data."""
-        artifact_type = data.get("artifact_type", "")
-        return _ARTIFACT_TYPE_MAP.get(artifact_type, KnowledgeType.SESSION)
+        work_product_type = data.get("work_product_type", "")
+        return _WORK_PRODUCT_TYPE_MAP.get(work_product_type, KnowledgeType.SESSION)

@@ -28,12 +28,12 @@ class TestListProjects:
         assert "IoT Sensor Hub" in names
         assert "Power Supply Module" in names
 
-    def test_project_has_artifacts(self, client: TestClient) -> None:
+    def test_project_has_work_products(self, client: TestClient) -> None:
         resp = client.get("/v1/projects")
         body = resp.json()
         drone = next(p for p in body["projects"] if p["id"] == "proj-001")
-        assert len(drone["artifacts"]) == 3
-        assert drone["artifacts"][0]["name"] == "Main Schematic"
+        assert len(drone["work_products"]) == 3
+        assert drone["work_products"][0]["name"] == "Main Schematic"
 
 
 class TestGetProject:

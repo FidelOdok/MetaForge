@@ -6,8 +6,6 @@ import pytest
 
 from twin_core.graph_engine import InMemoryGraphEngine
 from twin_core.models import (
-    Artifact,
-    ArtifactType,
     Component,
     Constraint,
     ConstraintSeverity,
@@ -15,6 +13,8 @@ from twin_core.models import (
     EdgeBase,
     EdgeType,
     NodeType,
+    WorkProduct,
+    WorkProductType,
 )
 
 
@@ -23,10 +23,10 @@ def engine():
     return InMemoryGraphEngine()
 
 
-def _make_artifact(name: str = "test", domain: str = "mechanical") -> Artifact:
-    return Artifact(
+def _make_work_product(name: str = "test", domain: str = "mechanical") -> WorkProduct:
+    return WorkProduct(
         name=name,
-        type=ArtifactType.CAD_MODEL,
+        type=WorkProductType.CAD_MODEL,
         domain=domain,
         file_path=f"models/{name}.step",
         content_hash="hash123",
@@ -50,7 +50,7 @@ def _make_constraint(name: str = "test_constraint", domain: str = "mechanical") 
 
 class TestNodeCRUD:
     async def test_add_and_get_node(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         result = await engine.add_node(a)
         assert result.id == a.id
 
@@ -59,7 +59,7 @@ class TestNodeCRUD:
         assert fetched.name == "test"
 
     async def test_add_duplicate_id_raises(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         await engine.add_node(a)
         with pytest.raises(ValueError, match="already exists"):
             await engine.add_node(a)
@@ -68,7 +68,7 @@ class TestNodeCRUD:
         assert await engine.get_node(uuid4()) is None
 
     async def test_update_node(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         await engine.add_node(a)
 
         updated = await engine.update_node(a.id, {"name": "updated_name"})
@@ -78,7 +78,7 @@ class TestNodeCRUD:
         assert fetched.name == "updated_name"
 
     async def test_update_bumps_updated_at(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         await engine.add_node(a)
         original_updated = a.updated_at
 
@@ -90,7 +90,7 @@ class TestNodeCRUD:
             await engine.update_node(uuid4(), {"name": "x"})
 
     async def test_delete_node(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         await engine.add_node(a)
         assert await engine.delete_node(a.id) is True
         assert await engine.get_node(a.id) is None
@@ -99,8 +99,8 @@ class TestNodeCRUD:
         assert await engine.delete_node(uuid4()) is False
 
     async def test_delete_removes_connected_edges(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -113,7 +113,7 @@ class TestNodeCRUD:
         assert len(edges) == 0
 
     async def test_add_different_node_types(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         c = _make_constraint()
         comp = Component(part_number="STM32F407", manufacturer="ST")
 
@@ -121,7 +121,7 @@ class TestNodeCRUD:
         await engine.add_node(c)
         await engine.add_node(comp)
 
-        assert (await engine.get_node(a.id)).node_type == NodeType.ARTIFACT
+        assert (await engine.get_node(a.id)).node_type == NodeType.WORK_PRODUCT
         assert (await engine.get_node(c.id)).node_type == NodeType.CONSTRAINT
         assert (await engine.get_node(comp.id)).node_type == NodeType.COMPONENT
 
@@ -131,25 +131,25 @@ class TestNodeCRUD:
 
 class TestListNodes:
     async def test_list_all(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
         assert len(await engine.list_nodes()) == 2
 
     async def test_filter_by_node_type(self, engine):
-        a = _make_artifact()
+        a = _make_work_product()
         c = _make_constraint()
         await engine.add_node(a)
         await engine.add_node(c)
 
-        artifacts = await engine.list_nodes(node_type=NodeType.ARTIFACT)
-        assert len(artifacts) == 1
-        assert artifacts[0].id == a.id
+        work_products = await engine.list_nodes(node_type=NodeType.WORK_PRODUCT)
+        assert len(work_products) == 1
+        assert work_products[0].id == a.id
 
     async def test_filter_by_domain(self, engine):
-        a = _make_artifact("a", domain="mechanical")
-        b = _make_artifact("b", domain="electronics")
+        a = _make_work_product("a", domain="mechanical")
+        b = _make_work_product("b", domain="electronics")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -158,13 +158,13 @@ class TestListNodes:
         assert results[0].id == b.id
 
     async def test_filter_by_type_and_domain(self, engine):
-        a = _make_artifact("a", domain="mechanical")
+        a = _make_work_product("a", domain="mechanical")
         c = _make_constraint("c", domain="mechanical")
         await engine.add_node(a)
         await engine.add_node(c)
 
         results = await engine.list_nodes(
-            node_type=NodeType.ARTIFACT, filters={"domain": "mechanical"}
+            node_type=NodeType.WORK_PRODUCT, filters={"domain": "mechanical"}
         )
         assert len(results) == 1
         assert results[0].id == a.id
@@ -178,8 +178,8 @@ class TestListNodes:
 
 class TestEdgeCRUD:
     async def test_add_and_get_edge(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -192,8 +192,8 @@ class TestEdgeCRUD:
         assert outgoing[0].target_id == b.id
 
     async def test_get_incoming_edges(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -205,9 +205,9 @@ class TestEdgeCRUD:
         assert incoming[0].source_id == a.id
 
     async def test_get_both_directions(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        c = _make_artifact("c")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        c = _make_work_product("c")
         await engine.add_node(a)
         await engine.add_node(b)
         await engine.add_node(c)
@@ -223,8 +223,8 @@ class TestEdgeCRUD:
         assert len(both) == 2
 
     async def test_filter_by_edge_type(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -241,7 +241,7 @@ class TestEdgeCRUD:
         assert len(deps_only) == 1
 
     async def test_add_edge_missing_source(self, engine):
-        b = _make_artifact("b")
+        b = _make_work_product("b")
         await engine.add_node(b)
         with pytest.raises(ValueError, match="Source node"):
             await engine.add_edge(
@@ -249,7 +249,7 @@ class TestEdgeCRUD:
             )
 
     async def test_add_edge_missing_target(self, engine):
-        a = _make_artifact("a")
+        a = _make_work_product("a")
         await engine.add_node(a)
         with pytest.raises(ValueError, match="Target node"):
             await engine.add_edge(
@@ -257,8 +257,8 @@ class TestEdgeCRUD:
             )
 
     async def test_remove_edge(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -272,8 +272,8 @@ class TestEdgeCRUD:
         assert await engine.remove_edge(uuid4(), uuid4(), EdgeType.DEPENDS_ON) is False
 
     async def test_typed_edge(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -297,9 +297,9 @@ class TestEdgeCRUD:
 
 class TestGetNeighbors:
     async def test_outgoing_neighbors(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        c = _make_artifact("c")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        c = _make_work_product("c")
         await engine.add_node(a)
         await engine.add_node(b)
         await engine.add_node(c)
@@ -316,8 +316,8 @@ class TestGetNeighbors:
         assert c.id in neighbor_ids
 
     async def test_incoming_neighbors(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -330,9 +330,9 @@ class TestGetNeighbors:
         assert neighbors[0].id == a.id
 
     async def test_filter_by_edge_type(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        c = _make_artifact("c")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        c = _make_work_product("c")
         await engine.add_node(a)
         await engine.add_node(b)
         await engine.add_node(c)
@@ -349,7 +349,7 @@ class TestGetNeighbors:
 
 class TestGetSubgraph:
     async def test_single_node(self, engine):
-        a = _make_artifact("a")
+        a = _make_work_product("a")
         await engine.add_node(a)
 
         sg = await engine.get_subgraph(a.id, depth=2)
@@ -360,10 +360,10 @@ class TestGetSubgraph:
     async def test_depth_limiting(self, engine):
         # a -> b -> c -> d
         a, b, c, d = (
-            _make_artifact("a"),
-            _make_artifact("b"),
-            _make_artifact("c"),
-            _make_artifact("d"),
+            _make_work_product("a"),
+            _make_work_product("b"),
+            _make_work_product("c"),
+            _make_work_product("d"),
         )
         for node in [a, b, c, d]:
             await engine.add_node(node)
@@ -386,9 +386,9 @@ class TestGetSubgraph:
         assert d.id not in node_ids  # depth=2 means 2 hops: a->b->c
 
     async def test_edge_type_filter(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
-        c = _make_artifact("c")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        c = _make_work_product("c")
         await engine.add_node(a)
         await engine.add_node(b)
         await engine.add_node(c)
@@ -411,7 +411,7 @@ class TestGetSubgraph:
 class TestTraverse:
     async def test_linear_chain(self, engine):
         # a -> b -> c
-        a, b, c = _make_artifact("a"), _make_artifact("b"), _make_artifact("c")
+        a, b, c = _make_work_product("a"), _make_work_product("b"), _make_work_product("c")
         for node in [a, b, c]:
             await engine.add_node(node)
 
@@ -428,7 +428,7 @@ class TestTraverse:
 
     async def test_branching_paths(self, engine):
         # a -> b, a -> c
-        a, b, c = _make_artifact("a"), _make_artifact("b"), _make_artifact("c")
+        a, b, c = _make_work_product("a"), _make_work_product("b"), _make_work_product("c")
         for node in [a, b, c]:
             await engine.add_node(node)
 
@@ -448,10 +448,10 @@ class TestTraverse:
     async def test_max_depth_cutoff(self, engine):
         # a -> b -> c -> d, max_depth=1
         a, b, c, d = (
-            _make_artifact("a"),
-            _make_artifact("b"),
-            _make_artifact("c"),
-            _make_artifact("d"),
+            _make_work_product("a"),
+            _make_work_product("b"),
+            _make_work_product("c"),
+            _make_work_product("d"),
         )
         for node in [a, b, c, d]:
             await engine.add_node(node)
@@ -471,8 +471,8 @@ class TestTraverse:
         assert paths[0] == [a.id, b.id]
 
     async def test_no_matching_edges(self, engine):
-        a = _make_artifact("a")
-        b = _make_artifact("b")
+        a = _make_work_product("a")
+        b = _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 
@@ -484,7 +484,7 @@ class TestTraverse:
 
     async def test_cycle_avoidance(self, engine):
         # a -> b -> a (cycle)
-        a, b = _make_artifact("a"), _make_artifact("b")
+        a, b = _make_work_product("a"), _make_work_product("b")
         await engine.add_node(a)
         await engine.add_node(b)
 

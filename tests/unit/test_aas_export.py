@@ -34,17 +34,17 @@ from twin_core.aas.models import (
 )
 from twin_core.aas.packager import AASXPackager
 from twin_core.graph_engine import InMemoryGraphEngine
-from twin_core.models.artifact import Artifact
 from twin_core.models.base import EdgeBase
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import (
-    ArtifactType,
     ComponentLifecycle,
     ConstraintSeverity,
     ConstraintStatus,
     EdgeType,
+    WorkProductType,
 )
+from twin_core.models.work_product import WorkProduct
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -52,10 +52,10 @@ from twin_core.models.enums import (
 
 
 @pytest.fixture
-def sample_artifact() -> Artifact:
-    return Artifact(
+def sample_artifact() -> WorkProduct:
+    return WorkProduct(
         name="Main Schematic",
-        type=ArtifactType.SCHEMATIC,
+        type=WorkProductType.SCHEMATIC,
         domain="electronics",
         file_path="eda/kicad/main.kicad_sch",
         content_hash="abc123",
@@ -65,10 +65,10 @@ def sample_artifact() -> Artifact:
 
 
 @pytest.fixture
-def sample_doc_artifact() -> Artifact:
-    return Artifact(
+def sample_doc_artifact() -> WorkProduct:
+    return WorkProduct(
         name="Assembly Guide",
-        type=ArtifactType.DOCUMENTATION,
+        type=WorkProductType.DOCUMENTATION,
         domain="manufacturing",
         file_path="docs/assembly_guide.pdf",
         content_hash="doc456",
@@ -246,7 +246,7 @@ class TestAASMapper:
         self,
         asset_id: str,
         asset_name: str,
-        sample_artifact: Artifact,
+        sample_artifact: WorkProduct,
     ) -> None:
         from twin_core.models.relationship import SubGraph
 
@@ -335,7 +335,7 @@ class TestAASMapper:
         self,
         asset_id: str,
         asset_name: str,
-        sample_doc_artifact: Artifact,
+        sample_doc_artifact: WorkProduct,
     ) -> None:
         from twin_core.models.relationship import SubGraph
 
@@ -362,10 +362,10 @@ class TestAASMapper:
         self,
         asset_id: str,
         asset_name: str,
-        sample_artifact: Artifact,
+        sample_artifact: WorkProduct,
         sample_component: Component,
         sample_constraint: Constraint,
-        sample_doc_artifact: Artifact,
+        sample_doc_artifact: WorkProduct,
     ) -> None:
         from twin_core.models.relationship import SubGraph
 
@@ -548,16 +548,16 @@ class TestAASExporterRoundTrip:
 
     @pytest.mark.asyncio
     async def test_export_single_artifact(self, graph: InMemoryGraphEngine) -> None:
-        artifact = Artifact(
+        work_product = WorkProduct(
             name="PCB Layout",
-            type=ArtifactType.PCB_LAYOUT,
+            type=WorkProductType.PCB_LAYOUT,
             domain="electronics",
             file_path="eda/kicad/main.kicad_pcb",
             content_hash="pcb789",
             format="kicad_pcb",
             created_by="test",
         )
-        await graph.add_node(artifact)
+        await graph.add_node(work_product)
 
         exporter = AASExporter(
             graph=graph,
@@ -565,7 +565,7 @@ class TestAASExporterRoundTrip:
             asset_name="TestProduct",
         )
 
-        data = await exporter.export_to_bytes(root_id=artifact.id, depth=1)
+        data = await exporter.export_to_bytes(root_id=work_product.id, depth=1)
 
         # Verify it's a valid AASX
         with zipfile.ZipFile(BytesIO(data), "r") as zf:
@@ -578,10 +578,10 @@ class TestAASExporterRoundTrip:
 
     @pytest.mark.asyncio
     async def test_export_with_components_and_constraints(self, graph: InMemoryGraphEngine) -> None:
-        # Create root artifact
-        root = Artifact(
+        # Create root work_product
+        root = WorkProduct(
             name="Main Schematic",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="eda/main.kicad_sch",
             content_hash="sch001",
@@ -655,16 +655,16 @@ class TestAASExporterRoundTrip:
 
     @pytest.mark.asyncio
     async def test_export_environment_without_packaging(self, graph: InMemoryGraphEngine) -> None:
-        artifact = Artifact(
+        work_product = WorkProduct(
             name="Firmware",
-            type=ArtifactType.FIRMWARE_SOURCE,
+            type=WorkProductType.FIRMWARE_SOURCE,
             domain="firmware",
             file_path="firmware/src/main.c",
             content_hash="fw001",
             format="c",
             created_by="test",
         )
-        await graph.add_node(artifact)
+        await graph.add_node(work_product)
 
         exporter = AASExporter(
             graph=graph,
@@ -672,7 +672,7 @@ class TestAASExporterRoundTrip:
             asset_name="FWTest",
         )
 
-        env = await exporter.export_environment(root_id=artifact.id, depth=1)
+        env = await exporter.export_environment(root_id=work_product.id, depth=1)
 
         assert isinstance(env, AASEnvironment)
         assert len(env.asset_administration_shells) == 1
@@ -680,16 +680,16 @@ class TestAASExporterRoundTrip:
 
     @pytest.mark.asyncio
     async def test_export_preserves_semantic_ids(self, graph: InMemoryGraphEngine) -> None:
-        artifact = Artifact(
+        work_product = WorkProduct(
             name="Test",
-            type=ArtifactType.BOM,
+            type=WorkProductType.BOM,
             domain="supply-chain",
             file_path="bom/bom.csv",
             content_hash="bom001",
             format="csv",
             created_by="test",
         )
-        await graph.add_node(artifact)
+        await graph.add_node(work_product)
 
         exporter = AASExporter(
             graph=graph,
@@ -697,7 +697,7 @@ class TestAASExporterRoundTrip:
             asset_name="SemTest",
         )
 
-        env = await exporter.export_environment(root_id=artifact.id, depth=1)
+        env = await exporter.export_environment(root_id=work_product.id, depth=1)
 
         # All submodels should have semantic IDs set
         for sm in env.submodels:
@@ -707,9 +707,9 @@ class TestAASExporterRoundTrip:
 
     @pytest.mark.asyncio
     async def test_export_multiple_components(self, graph: InMemoryGraphEngine) -> None:
-        root = Artifact(
-            name="BOM Artifact",
-            type=ArtifactType.BOM,
+        root = WorkProduct(
+            name="BOM WorkProduct",
+            type=WorkProductType.BOM,
             domain="supply-chain",
             file_path="bom/main.csv",
             content_hash="bom999",
@@ -760,9 +760,9 @@ class TestAASExporterRoundTrip:
     @pytest.mark.asyncio
     async def test_aasx_zip_is_valid_and_complete(self, graph: InMemoryGraphEngine) -> None:
         """Verify the full OPC structure of the exported AASX."""
-        root = Artifact(
+        root = WorkProduct(
             name="Complete Test",
-            type=ArtifactType.SCHEMATIC,
+            type=WorkProductType.SCHEMATIC,
             domain="electronics",
             file_path="test.kicad_sch",
             content_hash="full001",
