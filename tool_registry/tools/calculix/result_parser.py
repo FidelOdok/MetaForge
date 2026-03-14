@@ -22,9 +22,9 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
 
     The .frd format is a fixed-width text format. Key sections:
     - ``2C`` header lines define the result block (STRESS, DISP, etc.)
+    - ``100C`` lines define block labels and component names
     - ``-1`` lines contain node data
     - ``-3`` lines mark end of a node data block
-    - ``100C`` lines define component names
 
     Args:
         frd_path: Path to the .frd file.
@@ -58,7 +58,10 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
         stress_data = _extract_stress(lines)
         displacement_data = _extract_displacement(lines)
 
-        node_count = max(len(stress_data.get("nodes", {})), len(displacement_data.get("nodes", {})))
+        node_count = max(
+            len(stress_data.get("nodes", {})),
+            len(displacement_data.get("nodes", {})),
+        )
         span.set_attribute("calculix.node_count", node_count)
 
         result: dict[str, Any] = {
@@ -86,10 +89,11 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
 def _extract_stress(lines: list[str]) -> dict[str, Any]:
     """Extract von Mises stress data from .frd lines.
 
-    In .frd format, stress blocks are identified by a ``2C`` header line
-    containing ``STRESS``. Each node's stress is on a ``-1`` line with
+    In .frd format, stress blocks are identified by a ``100C`` header line
+    containing ``STRESS``. Subsequent ``100C`` lines (e.g. column headers)
+    are part of the same block. Each node's stress is on a ``-1`` line with
     6 components (SXX, SYY, SZZ, SXY, SXZ, SYZ). Von Mises is computed
-    from these components.
+    from these components. The block ends at a ``-3`` line.
 
     Returns:
         Dict with keys: nodes (dict[node_id, von_mises]), max, min, avg.
@@ -98,17 +102,29 @@ def _extract_stress(lines: list[str]) -> dict[str, Any]:
     in_stress_block = False
 
     for line in lines:
-        # Detect stress result block header
-        if line.strip().startswith("100C") and "STRESS" in line.upper():
+        stripped = line.strip()
+
+        # Detect stress result block header (e.g. "100CL  101STRESS")
+        if stripped.startswith("100C") and "STRESS" in line.upper():
             in_stress_block = True
             continue
 
-        # Another 100C or 2C header ends the current block
-        if in_stress_block and (line.strip().startswith("100C") or line.strip().startswith("2C")):
-            # Check if this is a new different block
-            if "STRESS" not in line.upper():
-                in_stress_block = False
-                continue
+        # 100C lines within the block are column headers -- skip them
+        if in_stress_block and stripped.startswith("100C"):
+            continue
+
+        # A new 2C header means a new result block -- exit stress block
+        if in_stress_block and stripped.startswith("2C"):
+            in_stress_block = False
+            # Check if this new block is also STRESS (unlikely but safe)
+            if "STRESS" in line.upper():
+                in_stress_block = True
+            continue
+
+        # End of data block
+        if in_stress_block and stripped.startswith("-3"):
+            in_stress_block = False
+            continue
 
         # Node data lines start with " -1"
         if in_stress_block and line.startswith(" -1"):
@@ -121,10 +137,6 @@ def _extract_stress(lines: list[str]) -> dict[str, Any]:
                 von_mises = _compute_von_mises(sxx, syy, szz, sxy, sxz, syz)
                 nodes[node_id] = round(von_mises, 4)
 
-        # End of data block
-        if in_stress_block and line.strip().startswith("-3"):
-            in_stress_block = False
-
     return _build_stats(nodes, "von_mises_mpa")
 
 
@@ -132,7 +144,9 @@ def _extract_displacement(lines: list[str]) -> dict[str, Any]:
     """Extract displacement data from .frd lines.
 
     Displacement blocks are identified by ``DISP`` in a ``100C`` header.
+    Subsequent ``100C`` lines are column headers within the same block.
     Each node has 3 components (DX, DY, DZ). Magnitude is sqrt(dx^2+dy^2+dz^2).
+    The block ends at a ``-3`` line.
 
     Returns:
         Dict with keys: nodes (dict[node_id, magnitude]), max, min, avg.
@@ -141,14 +155,24 @@ def _extract_displacement(lines: list[str]) -> dict[str, Any]:
     in_disp_block = False
 
     for line in lines:
-        if line.strip().startswith("100C") and "DISP" in line.upper():
+        stripped = line.strip()
+
+        if stripped.startswith("100C") and "DISP" in line.upper():
             in_disp_block = True
             continue
 
-        if in_disp_block and (line.strip().startswith("100C") or line.strip().startswith("2C")):
-            if "DISP" not in line.upper():
-                in_disp_block = False
-                continue
+        if in_disp_block and stripped.startswith("100C"):
+            continue
+
+        if in_disp_block and stripped.startswith("2C"):
+            in_disp_block = False
+            if "DISP" in line.upper():
+                in_disp_block = True
+            continue
+
+        if in_disp_block and stripped.startswith("-3"):
+            in_disp_block = False
+            continue
 
         if in_disp_block and line.startswith(" -1"):
             values = _parse_node_data_line(line)
@@ -157,9 +181,6 @@ def _extract_displacement(lines: list[str]) -> dict[str, Any]:
                 dx, dy, dz = values[1], values[2], values[3]
                 magnitude = (dx**2 + dy**2 + dz**2) ** 0.5
                 nodes[node_id] = round(magnitude, 6)
-
-        if in_disp_block and line.strip().startswith("-3"):
-            in_disp_block = False
 
     return _build_stats(nodes, "magnitude_mm")
 

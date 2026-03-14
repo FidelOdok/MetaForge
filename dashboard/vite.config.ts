@@ -12,11 +12,14 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/api/, ''),
       },
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      '/ws': {
+        target: (process.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws'),
+        ws: true,
+      },
     },
   },
 });

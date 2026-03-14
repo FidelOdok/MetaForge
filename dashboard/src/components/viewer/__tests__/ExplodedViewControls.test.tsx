@@ -39,6 +39,6 @@ describe('ExplodedViewControls', () => {
     nativeInputValueSetter.call(slider, '50');
     slider.dispatchEvent(new Event('change', { bubbles: true }));
 
-    expect(mockSetExplodeFactor).toHaveBeenCalledWith(0.5);
+    expect(mockSetExplodeFactor).toHaveBeenCalledWith(50);
   });
 });

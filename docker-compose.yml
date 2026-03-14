@@ -64,13 +64,33 @@ services:
       - metaforge
     restart: unless-stopped
 
-  # ── MetaForge Dashboard ──────────────────────────────────────────
+  # ── MetaForge Dashboard (production — static nginx build) ────────
   dashboard:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
+    profiles: ["prod"]
     ports:
       - "${DASHBOARD_PORT:-3000}:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── MetaForge Dashboard (dev — Vite HMR, no rebuild needed) ────
+  dashboard-dev:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    volumes:
+      - ./dashboard:/app
+      - dashboard-node-modules:/app/node_modules
+    environment:
+      - VITE_API_URL=http://gateway:8000
     depends_on:
       gateway:
         condition: service_healthy
@@ -250,6 +270,37 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── CalculiX Adapter (FEA stress/displacement analysis) ─────────
+  calculix-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/calculix/Dockerfile
+    image: metaforge/calculix-adapter:latest
+    ports:
+      - "${CALCULIX_PORT:-8200}:8200"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - CALCULIX_WORK_DIR=/workspace
+      - CCX_BINARY=ccx
+      - MCP_PORT=8200
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── FreeCAD Adapter (CAD export, meshing, boolean ops) ──────────
   freecad-adapter:
     build:
@@ -375,6 +426,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  dashboard-node-modules:
   postgres-data:
   neo4j-data:
   neo4j-logs:
