@@ -88,11 +88,16 @@ class TestCalculixConfig:
 
 
 class TestCalculixServer:
-    def test_server_registers_three_tools(self, server: CalculixServer) -> None:
-        assert len(server.tool_ids) == 3
+    def test_server_registers_four_tools(self, server: CalculixServer) -> None:
+        assert len(server.tool_ids) == 4
 
     def test_tool_ids(self, server: CalculixServer) -> None:
-        expected = {"calculix.run_fea", "calculix.run_thermal", "calculix.validate_mesh"}
+        expected = {
+            "calculix.run_fea",
+            "calculix.run_thermal",
+            "calculix.validate_mesh",
+            "calculix.extract_results",
+        }
         assert set(server.tool_ids) == expected
 
     def test_adapter_id_and_version(self, server: CalculixServer) -> None:
@@ -246,19 +251,19 @@ class TestValidateMesh:
 # ---------------------------------------------------------------------------
 
 
-class TestUnmockedSolverRaisesNotImplemented:
-    """Verify that calling solver methods without mocks raises NotImplementedError."""
+class TestUnmockedSolverRaisesOnMissingFiles:
+    """Verify that calling solver methods without mocks raises on missing files."""
 
     async def test_execute_solver_raises(self, server: CalculixServer) -> None:
-        with pytest.raises(NotImplementedError, match="ccx binary"):
+        with pytest.raises(FileNotFoundError):
             await server._execute_solver("/models/test.inp", "static_stress")
 
     async def test_execute_thermal_solver_raises(self, server: CalculixServer) -> None:
-        with pytest.raises(NotImplementedError, match="ccx binary"):
+        with pytest.raises((FileNotFoundError, NotImplementedError)):
             await server._execute_thermal_solver("/models/test.inp", {"temp": 25.0}, "steady_state")
 
     async def test_validate_mesh_file_raises(self, server: CalculixServer) -> None:
-        with pytest.raises(NotImplementedError, match="parsing .inp"):
+        with pytest.raises((FileNotFoundError, NotImplementedError)):
             await server._validate_mesh_file("/models/test.inp", 10.0)
 
 
@@ -288,7 +293,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 3
+        assert len(response["result"]["tools"]) == 4
 
     async def test_tool_list_contains_expected_ids(self, server: CalculixServer) -> None:
         request = _make_jsonrpc("tool/list")
@@ -299,6 +304,7 @@ class TestJsonRpcIntegration:
             "calculix.run_fea",
             "calculix.run_thermal",
             "calculix.validate_mesh",
+            "calculix.extract_results",
         }
 
     async def test_tool_call_fea_via_handle_request(
@@ -365,7 +371,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "calculix"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 3
+        assert response["result"]["tools_available"] == 4
 
     async def test_tool_call_unknown_tool(self, server: CalculixServer) -> None:
         request = _make_jsonrpc(

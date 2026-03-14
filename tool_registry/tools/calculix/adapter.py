@@ -240,9 +240,7 @@ class CalculixServer(McpToolServer):
 
         logger.info("Running thermal analysis", mesh_file=mesh_file, mode=analysis_mode)
 
-        result = await self._execute_thermal_solver(
-            mesh_file, boundary_conditions, analysis_mode
-        )
+        result = await self._execute_thermal_solver(mesh_file, boundary_conditions, analysis_mode)
         return result
 
     async def validate_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -258,9 +256,7 @@ class CalculixServer(McpToolServer):
         result = await self._validate_mesh_file(mesh_file, max_aspect_ratio)
         return result
 
-    async def _execute_solver(
-        self, mesh_file: str, analysis_type: str
-    ) -> dict[str, Any]:
+    async def _execute_solver(self, mesh_file: str, analysis_type: str) -> dict[str, Any]:
         """Execute CalculiX solver via subprocess.
 
         This method is designed to be easily mockable in tests.
@@ -281,11 +277,7 @@ class CalculixServer(McpToolServer):
                 )
 
                 # Parse results from .frd file if available
-                frd_files = [
-                    f
-                    for f in solver_result.get("result_files", [])
-                    if f.endswith(".frd")
-                ]
+                frd_files = [f for f in solver_result.get("result_files", []) if f.endswith(".frd")]
                 if frd_files:
                     parsed = parse_frd_file(frd_files[0])
                     return {
@@ -347,9 +339,7 @@ class CalculixServer(McpToolServer):
                 span.record_exception(exc)
                 raise
 
-    async def _validate_mesh_file(
-        self, mesh_file: str, max_aspect_ratio: float
-    ) -> dict[str, Any]:
+    async def _validate_mesh_file(self, mesh_file: str, max_aspect_ratio: float) -> dict[str, Any]:
         """Validate mesh quality by parsing the .inp file.
 
         Reads the .inp file and computes basic quality metrics.
