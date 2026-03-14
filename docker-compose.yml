@@ -30,7 +30,10 @@ services:
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
     depends_on:
+      postgres:
+        condition: service_healthy
       neo4j:
         condition: service_healthy
       kafka:
@@ -71,6 +74,27 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── PostgreSQL (Gateway persistence — chat, sessions, projects) ──
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-metaforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metaforge}
+      POSTGRES_DB: ${POSTGRES_DB:-metaforge}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-metaforge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks:
       - metaforge
     restart: unless-stopped
@@ -351,6 +375,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres-data:
   neo4j-data:
   neo4j-logs:
   zookeeper-data:

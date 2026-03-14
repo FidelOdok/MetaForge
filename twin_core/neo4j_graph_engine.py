@@ -24,7 +24,7 @@ from twin_core.models.relationship import SubGraph
 try:
     import neo4j
 except ImportError:
-    neo4j = None  # type: ignore[assignment]
+    neo4j = None  # type: ignore[assignment,unused-ignore]
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.neo4j_graph_engine")
@@ -299,7 +299,7 @@ class Neo4jGraphEngine(GraphEngine):
                 )
                 raise Neo4jQueryError(f"Failed to get node: {exc}") from exc
 
-    async def update_node(self, node_id: UUID, updates: dict) -> NodeBase:
+    async def update_node(self, node_id: UUID, updates: dict[str, Any]) -> NodeBase:
         """Update a node's fields. Raises KeyError if node not found."""
         self._assert_connected()
         t0 = time.monotonic()
@@ -396,7 +396,7 @@ class Neo4jGraphEngine(GraphEngine):
     async def list_nodes(
         self,
         node_type: NodeType | None = None,
-        filters: dict | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[NodeBase]:
         """List nodes, optionally filtered by type and field values."""
         self._assert_connected()
@@ -746,7 +746,8 @@ class Neo4jGraphEngine(GraphEngine):
                     result_count=len(records),
                     duration_ms=round((time.monotonic() - t0) * 1000, 2),
                 )
-                return records
+                result_list: list[dict[str, Any]] = records
+                return result_list
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error(

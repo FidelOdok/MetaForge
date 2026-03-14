@@ -49,6 +49,10 @@ from domain_agents.mechanical.skills.generate_mesh.handler import (
 from domain_agents.mechanical.skills.generate_mesh.schema import (
     GenerateMeshInput,
 )
+from domain_agents.mechanical.workflows import (
+    DesignWorkflowParams,
+    MechanicalDesignWorkflow,
+)
 from domain_agents.mechanical.writeback import (
     writeback_cad,
     writeback_mesh,
@@ -56,6 +60,7 @@ from domain_agents.mechanical.writeback import (
     writeback_tolerance,
 )
 from observability.tracing import get_tracer
+from shared.storage import FileStorageService
 from skill_registry.mcp_bridge import McpBridge
 from skill_registry.skill_base import SkillContext
 
@@ -351,6 +356,7 @@ class MechanicalAgent:
         "generate_mesh",
         "generate_cad",
         "full_validation",
+        "design_workflow",
     }
 
     def __init__(
@@ -358,10 +364,12 @@ class MechanicalAgent:
         twin: Any,  # TwinAPI -- avoid circular import at module level
         mcp: McpBridge,
         session_id: UUID | None = None,
+        storage: FileStorageService | None = None,
     ) -> None:
         self.twin = twin
         self.mcp = mcp
         self.session_id = session_id or uuid4()
+        self.storage = storage
         self.logger = logger.bind(agent="mechanical", session_id=str(self.session_id))
 
     async def run_task(self, request: TaskRequest) -> TaskResult:
@@ -502,6 +510,7 @@ class MechanicalAgent:
             "generate_mesh": self._run_generate_mesh,
             "generate_cad": self._run_generate_cad,
             "full_validation": self._run_full_validation,
+            "design_workflow": self._run_design_workflow,
         }
         return handlers[task_type]
 
@@ -835,6 +844,77 @@ class MechanicalAgent:
             skill_results=all_results,
             errors=all_errors,
             warnings=all_warnings,
+        )
+
+    async def _run_design_workflow(self, request: TaskRequest) -> TaskResult:
+        """Run the full mechanical design workflow pipeline.
+
+        Pipeline: generate_cad -> generate_mesh -> validate_stress.
+        Each step writes back to the Twin and saves files to storage.
+        """
+        if self.storage is None:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[
+                    "FileStorageService not configured. "
+                    "Pass storage= to MechanicalAgent constructor."
+                ],
+            )
+
+        # Validate required parameters
+        shape_type = request.parameters.get("shape_type", "")
+        if not shape_type:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=["Missing required parameter: shape_type"],
+            )
+
+        dimensions: dict[str, float] = request.parameters.get("dimensions", {})
+        if not dimensions:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=["Missing required parameter: dimensions"],
+            )
+
+        params = DesignWorkflowParams(
+            work_product_id=request.work_product_id,
+            session_id=self.session_id,
+            branch=request.branch,
+            shape_type=shape_type,
+            dimensions=dimensions,
+            material=request.parameters.get("material", "aluminum_6061"),
+            output_path=request.parameters.get("output_path", ""),
+            element_size=request.parameters.get("element_size", 1.0),
+            mesh_algorithm=request.parameters.get("mesh_algorithm", "netgen"),
+            output_format=request.parameters.get("output_format", "inp"),
+            load_case=request.parameters.get("load_case", "default"),
+            stress_constraints=request.parameters.get("stress_constraints", []),
+        )
+
+        workflow = MechanicalDesignWorkflow(
+            twin=self.twin,
+            mcp=self.mcp,
+            storage=self.storage,
+        )
+
+        wf_result = await workflow.run(params)
+
+        # Convert WorkflowResult -> TaskResult
+        skill_results: list[dict[str, Any]] = [step.model_dump() for step in wf_result.steps]
+
+        return TaskResult(
+            task_type="design_workflow",
+            work_product_id=request.work_product_id,
+            success=wf_result.success,
+            skill_results=skill_results,
+            errors=[err for step in wf_result.steps for err in step.errors],
+            warnings=wf_result.recommendations,
         )
 
     def _create_skill_context(self, branch: str = "main") -> SkillContext:
