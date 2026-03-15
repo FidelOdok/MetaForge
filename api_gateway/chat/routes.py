@@ -189,9 +189,7 @@ async def _invoke_agent(
                 passed = result.get("overall_passed", True)
                 stress = result.get("max_stress_mpa", 0.0)
                 region = result.get("critical_region", "")
-                parts.append(
-                    f"**Analysis {'passed' if passed else 'failed'}.**"
-                )
+                parts.append(f"**Analysis {'passed' if passed else 'failed'}.**")
                 if stress:
                     parts.append(f"Max stress: {stress:.1f} MPa.")
                 if region:
