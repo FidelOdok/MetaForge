@@ -71,7 +71,7 @@ function BomRow({ component }: { component: BomComponent }) {
 }
 
 export function BomPage() {
-  const { data: components, isLoading } = useBom('proj-001');
+  const { data: components, isLoading } = useBom();
 
   if (isLoading) {
     return <div className="text-sm text-zinc-500">Loading BOM...</div>;

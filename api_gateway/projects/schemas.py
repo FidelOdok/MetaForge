@@ -28,6 +28,18 @@ class ProjectResponse(BaseModel):
     created_at: str
 
 
+class CreateProjectRequest(BaseModel):
+    """Body for ``POST /v1/projects``."""
+
+    name: str = Field(min_length=1, max_length=200, description="Project name")
+    description: str = Field(
+        default="",
+        max_length=2000,
+        description="Project description",
+    )
+    status: str = Field(default="draft", description="Initial project status")
+
+
 class ProjectListResponse(BaseModel):
     """List of projects."""
 

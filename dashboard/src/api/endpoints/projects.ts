@@ -61,3 +61,14 @@ export async function getProject(id: string): Promise<Project | undefined> {
     return undefined;
   }
 }
+
+export interface CreateProjectPayload {
+  name: string;
+  description?: string;
+  status?: string;
+}
+
+export async function createProject(payload: CreateProjectPayload): Promise<Project> {
+  const { data } = await apiClient.post<ProjectResponseRaw>('/projects', payload);
+  return mapProject(data);
+}

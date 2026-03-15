@@ -58,8 +58,8 @@ class ApprovalDecisionType(StrEnum):
 class AssistantRequest(BaseModel):
     """Body for ``POST /api/v1/assistant/request``.
 
-    An IDE assistant submits a request to invoke an agent on a specific
-    design work_product.
+    Every request must belong to a project. An IDE assistant submits a
+    request to invoke an agent on a specific design work_product.
     """
 
     action: str = Field(
@@ -67,6 +67,10 @@ class AssistantRequest(BaseModel):
         description="Agent action to perform (e.g. 'validate_stress', 'run_drc')",
     )
     target_id: UUID = Field(description="UUID of the target work_product in the Digital Twin")
+    project_id: str = Field(
+        min_length=1,
+        description="Project this request belongs to",
+    )
     parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Action-specific parameters",

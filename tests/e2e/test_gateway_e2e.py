@@ -208,6 +208,7 @@ class TestAssistantRequestE2E:
             json={
                 "action": "validate_stress",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
                 "parameters": {
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -231,6 +232,7 @@ class TestAssistantRequestE2E:
             json={
                 "action": "run_erc",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
                 "parameters": {
                     "schematic_file": "eda/kicad/main.kicad_sch",
                 },
@@ -249,6 +251,7 @@ class TestAssistantRequestE2E:
             json={
                 "action": "analyze_vibration",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
             },
         )
 
@@ -274,6 +277,7 @@ class TestRunStatusPollingE2E:
             json={
                 "action": "run_erc",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
                 "parameters": {"schematic_file": "eda/kicad/main.kicad_sch"},
             },
         )
@@ -344,6 +348,7 @@ class TestFullRoundTripE2E:
             json={
                 "action": "validate_stress",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
                 "parameters": {
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -381,6 +386,7 @@ class TestFullRoundTripE2E:
             json={
                 "action": "full_validation",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
                 "parameters": {
                     "mesh_file_path": "models/bracket.inp",
                     "load_case": "hover_3g",
@@ -426,6 +432,7 @@ class TestFullRoundTripE2E:
             json={
                 "action": "generate_cad",
                 "target_id": str(s["work_product"].id),
+                "project_id": "proj-001",
                 "parameters": {
                     "shape_type": "bracket",
                     "dimensions": {"width": 50.0, "height": 30.0, "thickness": 5.0},

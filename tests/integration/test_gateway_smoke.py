@@ -43,6 +43,7 @@ class TestAssistantEndpoints:
             json={
                 "action": "validate_stress",
                 "target_id": str(uuid4()),
+                "project_id": "proj-001",
                 "parameters": {"mesh_file_path": "cad/bracket.inp"},
                 "session_id": str(uuid4()),
             },

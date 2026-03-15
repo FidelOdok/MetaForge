@@ -3,6 +3,7 @@ import { render, screen } from '../../test/test-utils';
 
 vi.mock('../../hooks/use-projects', () => ({
   useProjects: vi.fn(),
+  useCreateProject: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
 
 import { ProjectsPage } from '../ProjectsPage';

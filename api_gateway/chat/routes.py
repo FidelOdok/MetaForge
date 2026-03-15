@@ -115,24 +115,6 @@ router = APIRouter(prefix="/v1/chat", tags=["chat"])
 _twin = InMemoryTwinAPI.create()
 _mcp_bridge = InMemoryMcpBridge()
 
-# Register mock MCP responses so the mechanical agent can operate without
-# real tool containers (Phase 1 in-memory testing).
-_mcp_bridge.register_tool_response(
-    "calculix.run_fea",
-    {
-        "max_von_mises": {"bracket_arm": 120.5, "mounting_hole": 85.3},
-        "solver_time": 0.42,
-    },
-)
-_mcp_bridge.register_tool_response(
-    "freecad.mesh",
-    {
-        "mesh_file": "/tmp/mesh_output.inp",
-        "num_nodes": 1024,
-        "num_elements": 2048,
-    },
-)
-
 
 def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
     """Convert a ``ChatMessageRecord`` to a ``MessageResponse``."""

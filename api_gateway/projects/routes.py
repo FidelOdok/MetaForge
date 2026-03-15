@@ -1,19 +1,21 @@
 """Projects REST endpoints for the MetaForge Gateway.
 
 Provides CRUD operations on hardware projects.  Uses an in-memory
-store seeded with demo data that matches the dashboard mock data.
+store that starts empty — projects are created via the API.
 
 Endpoints live under ``/v1/projects``.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, HTTPException
 
 from api_gateway.projects.schemas import (
+    CreateProjectRequest,
     ProjectListResponse,
     ProjectResponse,
     ProjectWorkProductResponse,
@@ -27,95 +29,20 @@ router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
 
 # ---------------------------------------------------------------------------
-# In-memory store (same pattern as ChatStore)
+# In-memory store (starts empty — no seed data)
 # ---------------------------------------------------------------------------
-
-_now = datetime.now(UTC)
 
 
 class InMemoryProjectStore:
-    """Dict-backed project storage seeded with demo projects."""
+    """Dict-backed project storage."""
 
     def __init__(self) -> None:
         self.projects: dict[str, ProjectResponse] = {}
 
     @classmethod
     def create(cls) -> InMemoryProjectStore:
-        store = cls()
-        for proj in _SEED_PROJECTS:
-            store.projects[proj.id] = proj
-        return store
+        return cls()
 
-
-_SEED_PROJECTS: list[ProjectResponse] = [
-    ProjectResponse(
-        id="proj-001",
-        name="Drone Flight Controller",
-        description="STM32-based flight controller with IMU, barometer, and GPS integration.",
-        status="active",
-        agent_count=3,
-        last_updated=(_now - timedelta(hours=2)).isoformat(),
-        created_at=(_now - timedelta(days=7)).isoformat(),
-        work_products=[
-            ProjectWorkProductResponse(
-                id="art-001",
-                name="Main Schematic",
-                type="schematic",
-                status="valid",
-                updated_at=_now.isoformat(),
-            ),
-            ProjectWorkProductResponse(
-                id="art-002",
-                name="PCB Layout",
-                type="pcb",
-                status="warning",
-                updated_at=_now.isoformat(),
-            ),
-            ProjectWorkProductResponse(
-                id="art-003",
-                name="Enclosure CAD",
-                type="cad_model",
-                status="valid",
-                updated_at=_now.isoformat(),
-            ),
-        ],
-    ),
-    ProjectResponse(
-        id="proj-002",
-        name="IoT Sensor Hub",
-        description="ESP32-based sensor aggregation board with LoRa and WiFi connectivity.",
-        status="active",
-        agent_count=2,
-        last_updated=(_now - timedelta(days=1)).isoformat(),
-        created_at=(_now - timedelta(days=14)).isoformat(),
-        work_products=[
-            ProjectWorkProductResponse(
-                id="art-004",
-                name="Sensor Board Schematic",
-                type="schematic",
-                status="valid",
-                updated_at=_now.isoformat(),
-            ),
-            ProjectWorkProductResponse(
-                id="art-005",
-                name="Firmware",
-                type="firmware",
-                status="unknown",
-                updated_at=_now.isoformat(),
-            ),
-        ],
-    ),
-    ProjectResponse(
-        id="proj-003",
-        name="Power Supply Module",
-        description="High-efficiency buck converter module for 5V/3.3V output.",
-        status="draft",
-        agent_count=0,
-        last_updated=(_now - timedelta(days=3)).isoformat(),
-        created_at=(_now - timedelta(days=3)).isoformat(),
-        work_products=[],
-    ),
-]
 
 store = InMemoryProjectStore.create()
 
@@ -143,3 +70,37 @@ def get_project(project_id: str) -> ProjectResponse:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return project
+
+
+@router.post("", response_model=ProjectResponse, status_code=201)
+def create_project(body: CreateProjectRequest) -> ProjectResponse:
+    """Create a new hardware project."""
+    with tracer.start_as_current_span("projects.create") as span:
+        now = datetime.now(UTC).isoformat()
+        project_id = str(uuid4())
+        span.set_attribute("project.id", project_id)
+
+        project = ProjectResponse(
+            id=project_id,
+            name=body.name,
+            description=body.description,
+            status=body.status,
+            work_products=[],
+            agent_count=0,
+            last_updated=now,
+            created_at=now,
+        )
+        store.projects[project_id] = project
+        logger.info("project_created", project_id=project_id, name=body.name)
+        return project
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_project(project_id: str) -> None:
+    """Delete a project by ID."""
+    with tracer.start_as_current_span("projects.delete") as span:
+        span.set_attribute("project.id", project_id)
+        if project_id not in store.projects:
+            raise HTTPException(status_code=404, detail="Project not found")
+        del store.projects[project_id]
+        logger.info("project_deleted", project_id=project_id)

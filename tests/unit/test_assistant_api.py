@@ -58,27 +58,29 @@ class TestAssistantRequestSchema:
         req = AssistantRequest(
             action="validate_stress",
             target_id=uuid4(),
+            project_id="proj-001",
             parameters={"load": 500},
         )
         assert req.action == "validate_stress"
         assert isinstance(req.session_id, UUID)
 
     def test_default_session_id(self) -> None:
-        req = AssistantRequest(action="run_drc", target_id=uuid4())
+        req = AssistantRequest(action="run_drc", target_id=uuid4(), project_id="proj-001")
         assert isinstance(req.session_id, UUID)
 
     def test_default_parameters(self) -> None:
-        req = AssistantRequest(action="run_drc", target_id=uuid4())
+        req = AssistantRequest(action="run_drc", target_id=uuid4(), project_id="proj-001")
         assert req.parameters == {}
 
     def test_empty_action_rejected(self) -> None:
         with pytest.raises(Exception):  # noqa: B017
-            AssistantRequest(action="", target_id=uuid4())
+            AssistantRequest(action="", target_id=uuid4(), project_id="proj-001")
 
     def test_serialization_roundtrip(self) -> None:
         req = AssistantRequest(
             action="check_bom",
             target_id=uuid4(),
+            project_id="proj-001",
             parameters={"strict": True},
         )
         data = req.model_dump()
@@ -419,6 +421,7 @@ class TestSubmitRequest:
             json={
                 "action": "validate_stress",
                 "target_id": str(uuid4()),
+                "project_id": "proj-001",
             },
         )
         assert resp.status_code == 200
@@ -432,6 +435,7 @@ class TestSubmitRequest:
             json={
                 "action": "run_drc",
                 "target_id": str(uuid4()),
+                "project_id": "proj-001",
                 "parameters": {"strict": True},
             },
         )
@@ -444,6 +448,7 @@ class TestSubmitRequest:
             json={
                 "action": "",
                 "target_id": str(uuid4()),
+                "project_id": "proj-001",
             },
         )
         assert resp.status_code == 422
@@ -454,6 +459,7 @@ class TestSubmitRequest:
             json={
                 "action": "run_drc",
                 "target_id": "not-a-uuid",
+                "project_id": "proj-001",
             },
         )
         assert resp.status_code == 422
