@@ -16,8 +16,23 @@ from twin_core.models.work_product import WorkProduct
 from .handler import GenerateCadHandler
 from .schema import GenerateCadInput
 
-FREECAD_CAD_RESULT = {
+CADQUERY_CAD_RESULT = {
     "cad_file": "output/bracket_test.step",
+    "volume_mm3": 12500.0,
+    "surface_area_mm2": 8400.0,
+    "bounding_box": {
+        "min_x": 0.0,
+        "min_y": 0.0,
+        "min_z": 0.0,
+        "max_x": 50.0,
+        "max_y": 30.0,
+        "max_z": 5.0,
+    },
+    "parameters_used": {"width": 50.0, "height": 30.0, "thickness": 5.0},
+}
+
+FREECAD_CAD_RESULT = {
+    "cad_file": "output/bracket_freecad.step",
     "volume_mm3": 12500.0,
     "surface_area_mm2": 8400.0,
     "bounding_box": {
@@ -45,13 +60,24 @@ def _make_work_product() -> WorkProduct:
     )
 
 
-async def _make_ctx_and_handler() -> tuple[SkillContext, GenerateCadHandler, WorkProduct]:
+async def _make_ctx_and_handler(
+    register_cadquery: bool = True,
+    register_freecad: bool = False,
+) -> tuple[SkillContext, GenerateCadHandler, WorkProduct]:
     twin = InMemoryTwinAPI.create()
     mcp = InMemoryMcpBridge()
-    mcp.register_tool(
-        "freecad.create_parametric", capability="cad_generation", name="Create Parametric"
-    )
-    mcp.register_tool_response("freecad.create_parametric", FREECAD_CAD_RESULT)
+
+    if register_cadquery:
+        mcp.register_tool(
+            "cadquery.create_parametric", capability="cad_generation", name="Create Parametric"
+        )
+        mcp.register_tool_response("cadquery.create_parametric", CADQUERY_CAD_RESULT)
+
+    if register_freecad:
+        mcp.register_tool(
+            "freecad.create_parametric", capability="cad_generation", name="Create Parametric"
+        )
+        mcp.register_tool_response("freecad.create_parametric", FREECAD_CAD_RESULT)
 
     work_product = await twin.create_work_product(_make_work_product())
 
@@ -69,8 +95,8 @@ async def _make_ctx_and_handler() -> tuple[SkillContext, GenerateCadHandler, Wor
 class TestGenerateCadHandler:
     """Unit tests for GenerateCadHandler."""
 
-    async def test_execute_bracket(self):
-        """Happy path: generate a bracket shape."""
+    async def test_execute_bracket_cadquery(self):
+        """Happy path: generate a bracket shape with CadQuery backend."""
         _ctx, handler, work_product = await _make_ctx_and_handler()
 
         output = await handler.execute(
@@ -79,6 +105,7 @@ class TestGenerateCadHandler:
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
                 material="aluminum_6061",
+                backend="cadquery",
             )
         )
 
@@ -88,6 +115,81 @@ class TestGenerateCadHandler:
         assert output.shape_type == "bracket"
         assert output.material == "aluminum_6061"
         assert output.bounding_box.max_x == 50.0
+
+    async def test_execute_bracket_freecad(self):
+        """Generate a bracket shape with FreeCAD backend."""
+        _ctx, handler, work_product = await _make_ctx_and_handler(
+            register_cadquery=False, register_freecad=True
+        )
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                backend="freecad",
+            )
+        )
+
+        assert output.cad_file == "output/bracket_freecad.step"
+
+    async def test_fallback_to_freecad_when_cadquery_unavailable(self):
+        """Falls back to FreeCAD when CadQuery is not available."""
+        _ctx, handler, work_product = await _make_ctx_and_handler(
+            register_cadquery=False, register_freecad=True
+        )
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                backend="cadquery",  # Requested cadquery but only freecad is available
+            )
+        )
+
+        assert output.cad_file == "output/bracket_freecad.step"
+
+    async def test_fallback_to_cadquery_when_freecad_unavailable(self):
+        """Falls back to CadQuery when FreeCAD is not available."""
+        _ctx, handler, work_product = await _make_ctx_and_handler(
+            register_cadquery=True, register_freecad=False
+        )
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="plate",
+                dimensions={"width": 100.0, "height": 80.0, "thickness": 2.0},
+                backend="freecad",  # Requested freecad but only cadquery is available
+            )
+        )
+
+        assert output.cad_file == "output/bracket_test.step"
+
+    async def test_no_backend_available_raises(self):
+        """Raises RuntimeError when no CAD backend is available."""
+        _ctx, handler, work_product = await _make_ctx_and_handler(
+            register_cadquery=False, register_freecad=False
+        )
+
+        with pytest.raises(RuntimeError, match="No CAD backend available"):
+            await handler.execute(
+                GenerateCadInput(
+                    work_product_id=work_product.id,
+                    shape_type="bracket",
+                    dimensions={"width": 50.0},
+                )
+            )
+
+    async def test_default_backend_is_cadquery(self):
+        """Default backend is cadquery."""
+        inp = GenerateCadInput(
+            work_product_id=uuid4(),
+            shape_type="bracket",
+            dimensions={"width": 50.0},
+        )
+        assert inp.backend == "cadquery"
 
     async def test_execute_plate(self):
         """Generate a plate shape."""
@@ -130,11 +232,10 @@ class TestGenerateCadHandler:
         )
         assert any("not found" in e for e in errors)
 
-    async def test_preconditions_missing_tool(self):
-        """Precondition check fails when MCP tool is unavailable."""
+    async def test_preconditions_no_backend(self):
+        """Precondition check fails when no MCP tool is available."""
         twin = InMemoryTwinAPI.create()
         mcp = InMemoryMcpBridge()
-        # Don't register the tool
         work_product = await twin.create_work_product(_make_work_product())
 
         ctx = SkillContext(
@@ -153,7 +254,7 @@ class TestGenerateCadHandler:
                 dimensions={"width": 50.0},
             )
         )
-        assert any("not available" in e for e in errors)
+        assert any("No CAD backend" in e for e in errors)
 
     async def test_run_pipeline(self):
         """Full skill pipeline (preconditions -> execute -> wrap)."""

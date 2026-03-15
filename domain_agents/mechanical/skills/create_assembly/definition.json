@@ -1,0 +1,21 @@
+{
+  "name": "create_assembly",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Create multi-part CAD assemblies with positioning and mating constraints using CadQuery",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "cadquery.create_assembly",
+      "capability": "cad_assembly",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.CreateAssemblyInput",
+  "output_schema": "schema.CreateAssemblyOutput",
+  "timeout_seconds": 600,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["cad", "cadquery", "assembly", "multi-part"]
+}

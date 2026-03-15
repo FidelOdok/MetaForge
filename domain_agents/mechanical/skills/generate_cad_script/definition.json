@@ -1,0 +1,21 @@
+{
+  "name": "generate_cad_script",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Generate and execute CadQuery Python scripts from natural language descriptions to produce 3D CAD models",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "cadquery.execute_script",
+      "capability": "cad_scripting",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.GenerateCadScriptInput",
+  "output_schema": "schema.GenerateCadScriptOutput",
+  "timeout_seconds": 300,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["cad", "cadquery", "scripting", "generation", "llm"]
+}

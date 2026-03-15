@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -43,6 +43,10 @@ class GenerateCadInput(BaseModel):
     constraints: dict[str, float] = Field(
         default_factory=dict,
         description="Optional constraints (max_mass_kg, min_wall_thickness_mm)",
+    )
+    backend: Literal["cadquery", "freecad"] = Field(
+        default="cadquery",
+        description="CAD backend to use. CadQuery is lighter and recommended; FreeCAD as fallback.",
     )
 
 
