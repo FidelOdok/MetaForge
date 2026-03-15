@@ -33,10 +33,14 @@ LABEL org.opencontainers.image.source="https://github.com/MetaForge-HA/MetaForge
 WORKDIR /app
 
 # Runtime dependencies for OpenCascade (pulled in by CadQuery wheels)
+# libxrender1, libxmu6, libxi6 are needed by OCP even in headless mode
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
+        libxrender1 \
+        libxmu6 \
+        libxi6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from deps stage

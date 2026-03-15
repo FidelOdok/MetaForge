@@ -301,6 +301,34 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── CadQuery Adapter (Pythonic CAD generation, scripting) ───────
+  cadquery-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/cadquery/Dockerfile
+    image: metaforge/cadquery-adapter:latest
+    stdin_open: true
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - CADQUERY_WORK_DIR=/workspace
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import cadquery; print(cadquery.__version__)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── FreeCAD Adapter (CAD export, meshing, boolean ops) ──────────
   freecad-adapter:
     build:
