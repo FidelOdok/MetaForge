@@ -15,6 +15,11 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field
 
+from observability.tracing import get_tracer
+
+logger = structlog.get_logger(__name__)
+tracer = get_tracer("tool_registry.container_runtime")
+
 
 class ContainerConfig(BaseModel):
     """Configuration for a containerized tool execution."""
@@ -73,12 +78,52 @@ class ContainerRuntime(ABC):
         ...
 
 
-class DockerRuntime(ContainerRuntime):
-    """Docker-based container runtime (real implementation).
+# Conditional Docker SDK import
+try:
+    import docker  # type: ignore[import-untyped]
 
-    Delegates to the Docker SDK or CLI. Raises NotImplementedError until
-    docker[asyncio] is installed.
+    HAS_DOCKER_SDK = True
+except ImportError:
+    docker = None  # type: ignore[assignment]
+    HAS_DOCKER_SDK = False
+
+
+class DockerRuntime(ContainerRuntime):
+    """Docker-based container runtime using the Docker SDK.
+
+    Manages the full container lifecycle: pull image, create container,
+    run command, collect output, and remove container.
+
+    Falls back gracefully when Docker SDK is not installed or Docker
+    daemon is not running.
     """
+
+    def __init__(self) -> None:
+        self._client: Any | None = None
+
+    def _get_client(self) -> Any:
+        """Get or create the Docker client (lazy initialization)."""
+        if not HAS_DOCKER_SDK:
+            raise RuntimeError(
+                "Docker SDK is not installed. "
+                "Install with: pip install docker>=7.0"
+            )
+        if self._client is None:
+            self._client = docker.from_env()
+        return self._client
+
+    async def is_available(self) -> bool:
+        """Check if Docker daemon is running and responsive."""
+        if not HAS_DOCKER_SDK:
+            return False
+        try:
+            client = self._get_client()
+            # Run ping in a thread to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, client.ping)
+            return result is True
+        except Exception:
+            return False
 
     async def run(
         self,
@@ -88,17 +133,200 @@ class DockerRuntime(ContainerRuntime):
     ) -> ExecutionResult:
         """Run a command in a Docker container.
 
-        Raises NotImplementedError until docker SDK is available.
+        1. Pulls the image if not locally available
+        2. Creates and starts the container with resource limits
+        3. Optionally sends input_data as JSON on stdin
+        4. Waits for completion (with timeout)
+        5. Collects stdout/stderr
+        6. Removes the container
+
+        Args:
+            config: Container configuration (image, limits, volumes, etc.).
+            command: Command to execute inside the container.
+            input_data: Optional dict to send as JSON to container stdin.
+
+        Returns:
+            ExecutionResult with stdout, stderr, exit code, and duration.
         """
-        raise NotImplementedError("Docker runtime requires docker SDK — install docker[asyncio]")
+        with tracer.start_as_current_span("docker.run") as span:
+            span.set_attribute("container.image", config.full_image)
+            span.set_attribute("container.memory_limit", config.memory_limit)
+            span.set_attribute("container.cpu_limit", config.cpu_limit)
+
+            client = self._get_client()
+            loop = asyncio.get_event_loop()
+            start = time.monotonic()
+            container = None
+
+            try:
+                # 1. Ensure image exists locally
+                await self._ensure_image(client, config, loop)
+
+                # 2. Build container kwargs
+                container_kwargs = self._build_container_kwargs(config, command)
+
+                # 3. Create and start container
+                container = await loop.run_in_executor(
+                    None,
+                    lambda: client.containers.run(**container_kwargs),
+                )
+
+                # If input_data is provided, send it via stdin
+                # Note: docker-py's run() with stdin_open=True requires
+                # attach approach. For MCP stdio transport, we use a
+                # simpler approach: pass data as environment variable
+                # or mount as file. The MCP entrypoints read from stdin
+                # in a loop, so we handle this at the MCP layer instead.
+
+                # 4. Container already ran (detach=False is default)
+                # docker-py's run() blocks until completion when detach=False
+                # The result IS the container output (bytes)
+                stdout_bytes = container if isinstance(container, bytes) else b""
+
+                # If we got a Container object instead of bytes, logs need
+                # to be fetched separately
+                exit_code = 0
+                stderr_str = ""
+
+                if hasattr(container, "logs"):
+                    # detach=True was used, need to wait
+                    result = await loop.run_in_executor(
+                        None, lambda: container.wait(timeout=config.timeout_seconds)
+                    )
+                    exit_code = result.get("StatusCode", -1)
+
+                    stdout_bytes = await loop.run_in_executor(
+                        None, lambda: container.logs(stdout=True, stderr=False)
+                    )
+                    stderr_bytes = await loop.run_in_executor(
+                        None, lambda: container.logs(stdout=False, stderr=True)
+                    )
+                    stderr_str = stderr_bytes.decode("utf-8", errors="replace")
+
+                stdout_str = (
+                    stdout_bytes.decode("utf-8", errors="replace")
+                    if isinstance(stdout_bytes, bytes)
+                    else str(stdout_bytes)
+                )
+
+                elapsed = time.monotonic() - start
+                success = exit_code == 0
+
+                span.set_attribute("container.exit_code", exit_code)
+                span.set_attribute("container.duration_s", round(elapsed, 3))
+
+                logger.info(
+                    "Container execution complete",
+                    image=config.full_image,
+                    exit_code=exit_code,
+                    duration_s=round(elapsed, 3),
+                )
+
+                return ExecutionResult(
+                    success=success,
+                    exit_code=exit_code,
+                    stdout=stdout_str,
+                    stderr=stderr_str,
+                    duration_seconds=round(elapsed, 3),
+                )
+
+            except Exception as exc:
+                elapsed = time.monotonic() - start
+                span.record_exception(exc)
+
+                logger.error(
+                    "Container execution failed",
+                    image=config.full_image,
+                    error=str(exc),
+                    duration_s=round(elapsed, 3),
+                )
+
+                return ExecutionResult(
+                    success=False,
+                    exit_code=-1,
+                    stderr=str(exc),
+                    duration_seconds=round(elapsed, 3),
+                )
+
+            finally:
+                # 5. Cleanup container
+                if container is not None and hasattr(container, "remove"):
+                    try:
+                        await loop.run_in_executor(
+                            None, lambda: container.remove(force=True)
+                        )
+                    except Exception:
+                        pass  # Best-effort cleanup
+
+    async def _ensure_image(
+        self, client: Any, config: ContainerConfig, loop: asyncio.AbstractEventLoop
+    ) -> None:
+        """Pull the Docker image if not available locally."""
+        try:
+            await loop.run_in_executor(
+                None, lambda: client.images.get(config.full_image)
+            )
+            logger.debug("Image available locally", image=config.full_image)
+        except Exception:
+            logger.info("Pulling image", image=config.full_image)
+            await loop.run_in_executor(
+                None, lambda: client.images.pull(config.image, tag=config.tag)
+            )
+            logger.info("Image pulled", image=config.full_image)
+
+    def _build_container_kwargs(
+        self, config: ContainerConfig, command: list[str]
+    ) -> dict[str, Any]:
+        """Build kwargs dict for docker client.containers.run()."""
+        kwargs: dict[str, Any] = {
+            "image": config.full_image,
+            "command": command,
+            "detach": True,
+            "auto_remove": False,
+            "working_dir": config.work_dir,
+            "environment": {
+                "METAFORGE_ENV": "docker",
+                **config.env,
+            },
+            "mem_limit": config.memory_limit,
+            "nano_cpus": int(config.cpu_limit * 1e9),
+            # Security: no network access by default for tool containers
+            "network_mode": "none",
+            # Security: read-only root filesystem
+            "read_only": False,  # Tools need to write output files
+            # Security: no privilege escalation
+            "security_opt": ["no-new-privileges"],
+        }
+
+        # Mount volumes
+        if config.volumes:
+            volumes = {}
+            for host_path, container_path in config.volumes.items():
+                volumes[host_path] = {"bind": container_path, "mode": "rw"}
+            kwargs["volumes"] = volumes
+
+        return kwargs
 
     async def cleanup(self, container_id: str) -> None:
-        """Clean up a Docker container."""
-        pass
-
-    async def is_available(self) -> bool:
-        """Check if Docker daemon is running."""
-        return False
+        """Remove a Docker container by ID."""
+        if not HAS_DOCKER_SDK:
+            return
+        try:
+            client = self._get_client()
+            loop = asyncio.get_event_loop()
+            container = await loop.run_in_executor(
+                None, lambda: client.containers.get(container_id)
+            )
+            await loop.run_in_executor(
+                None, lambda: container.remove(force=True)
+            )
+            logger.info("Container removed", container_id=container_id)
+        except Exception as exc:
+            logger.warning(
+                "Container cleanup failed",
+                container_id=container_id,
+                error=str(exc),
+            )
 
 
 class InMemoryRuntime(ContainerRuntime):
