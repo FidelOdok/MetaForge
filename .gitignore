@@ -81,3 +81,13 @@ dashboard/dist/
 
 # Pytest temp dirs
 pytest-of-*/
+
+# Playwright
+dashboard/playwright-report/
+dashboard/test-results/
+
+# Screenshots (test/debug artifacts)
+*.png
+
+# Playwright MCP logs
+.playwright-mcp/

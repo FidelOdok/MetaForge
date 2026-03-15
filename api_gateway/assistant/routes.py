@@ -54,6 +54,7 @@ async def submit_request(body: AssistantRequest, request: Request) -> AssistantR
         action=body.action,
         target_id=str(body.target_id),
         session_id=str(body.session_id),
+        project_id=body.project_id,
     )
 
     # Resolve orchestrator components from app.state
@@ -70,6 +71,7 @@ async def submit_request(body: AssistantRequest, request: Request) -> AssistantR
                 "action": body.action,
                 "target_id": str(body.target_id),
                 "session_id": str(body.session_id),
+                "project_id": body.project_id,
             },
         )
 
@@ -105,6 +107,7 @@ async def submit_request(body: AssistantRequest, request: Request) -> AssistantR
             "action": body.action,
             "target_id": str(body.target_id),
             "session_id": str(body.session_id),
+            "project_id": body.project_id,
         },
     )
 
@@ -119,6 +122,7 @@ async def submit_request(body: AssistantRequest, request: Request) -> AssistantR
             "action": body.action,
             "target_id": str(body.target_id),
             "session_id": str(body.session_id),
+            "project_id": body.project_id,
         },
     )
 

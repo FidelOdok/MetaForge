@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useSubmitRequest, useRunStatus } from '../hooks/use-assistant';
+import { useProjects } from '../hooks/use-projects';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -159,8 +160,10 @@ function ResultSection({ data }: { data: RunStatusResponse }) {
 export function DesignAssistantPage() {
   const [prompt, setPrompt] = useState('');
   const [action, setAction] = useState<string>(ACTIONS[0].value);
+  const [projectId, setProjectId] = useState<string>('');
   const [runId, setRunId] = useState<string | undefined>(undefined);
 
+  const { data: projects } = useProjects();
   const submitRequest = useSubmitRequest();
   const { data: runStatus } = useRunStatus(runId);
 
@@ -169,12 +172,13 @@ export function DesignAssistantPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || !projectId) return;
 
     submitRequest.mutate(
       {
         action,
         target_id: prompt.trim(),
+        project_id: projectId,
         parameters: { prompt: prompt.trim() },
       },
       {
@@ -209,6 +213,29 @@ export function DesignAssistantPage() {
       {/* --- Prompt form --- */}
       <Card className="mb-6 space-y-4">
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label
+              htmlFor="project-select"
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Project
+            </label>
+            <select
+              id="project-select"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              disabled={!!runId}
+              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+            >
+              <option value="">Select a project...</option>
+              {projects?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label
               htmlFor="action-select"
@@ -254,7 +281,7 @@ export function DesignAssistantPage() {
               type="submit"
               variant="primary"
               disabled={
-                !prompt.trim() || submitRequest.isPending || !!runId
+                !prompt.trim() || !projectId || submitRequest.isPending || !!runId
               }
             >
               {submitRequest.isPending ? 'Submitting...' : 'Submit request'}

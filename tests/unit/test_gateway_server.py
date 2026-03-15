@@ -154,6 +154,7 @@ class TestAssistantEndpoints:
             json={
                 "action": "validate_stress",
                 "target_id": "00000000-0000-0000-0000-000000000001",
+                "project_id": "proj-001",
                 "session_id": "00000000-0000-0000-0000-000000000002",
                 "parameters": {"mesh_file_path": "mesh/bracket.inp"},
             },
@@ -169,6 +170,7 @@ class TestAssistantEndpoints:
             json={
                 "action": "nonexistent_action",
                 "target_id": "00000000-0000-0000-0000-000000000001",
+                "project_id": "proj-001",
             },
         )
         assert response.status_code == 400
@@ -184,6 +186,7 @@ class TestAssistantEndpoints:
             json={
                 "action": "run_erc",
                 "target_id": "00000000-0000-0000-0000-000000000001",
+                "project_id": "proj-001",
                 "parameters": {"schematic_file": "eda/main.kicad_sch"},
             },
         )
@@ -209,6 +212,7 @@ class TestAssistantEndpoints:
             json={
                 "action": "validate_stress",
                 "target_id": "00000000-0000-0000-0000-000000000001",
+                "project_id": "proj-001",
             },
         )
         assert response.status_code == 200
