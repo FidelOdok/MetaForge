@@ -126,6 +126,16 @@ def init_mcp_bridge(bridge: McpBridge) -> None:
     logger.info("mcp_bridge_initialized", bridge_type=type(bridge).__name__)
 
 
+def init_twin(twin: object) -> None:
+    """Replace the default InMemoryTwinAPI with the orchestrator's twin.
+
+    Called by the API Gateway lifespan so chat routes share state with agents.
+    """
+    global _twin  # noqa: PLW0603
+    _twin = twin  # type: ignore[assignment]
+    logger.info("twin_initialized", twin_type=type(twin).__name__)
+
+
 def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
     """Convert a ``ChatMessageRecord`` to a ``MessageResponse``."""
     return MessageResponse(

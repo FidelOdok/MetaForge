@@ -831,6 +831,7 @@ class MechanicalAgent:
             material=request.parameters.get("material", "aluminum_6061"),
             output_path=request.parameters.get("output_path", ""),
             constraints=request.parameters.get("constraints", {}),
+            backend=request.parameters.get("backend", "cadquery"),
         )
 
         handler = GenerateCadHandler(ctx)

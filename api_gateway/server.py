@@ -163,10 +163,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         tools=len(tool_registry.list_tools()),
     )
 
-    # Wire the real bridge into chat routes
-    from api_gateway.chat.routes import init_mcp_bridge
+    # Wire the real bridge and twin into chat routes
+    from api_gateway.chat.routes import init_mcp_bridge, init_twin
 
     init_mcp_bridge(registry_bridge)
+    init_twin(twin)
 
     event_bus = create_default_bus(workflow_engine, collector=_collector)
 
