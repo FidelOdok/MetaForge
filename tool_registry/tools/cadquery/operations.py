@@ -478,7 +478,12 @@ class CadqueryOperations:
             # Build sandboxed namespace
             import functools
 
-            safe_builtins = {k: getattr(__builtins__ if isinstance(__builtins__, dict) else type(__builtins__), k, None) or __builtins__[k] if isinstance(__builtins__, dict) else getattr(__builtins__, k) for k in _SAFE_BUILTINS if (isinstance(__builtins__, dict) and k in __builtins__) or (not isinstance(__builtins__, dict) and hasattr(__builtins__, k))}
+            import builtins as _builtins_module
+
+            safe_builtins: dict[str, Any] = {}
+            for k in _SAFE_BUILTINS:
+                if hasattr(_builtins_module, k):
+                    safe_builtins[k] = getattr(_builtins_module, k)
 
             namespace: dict[str, Any] = {
                 "__builtins__": safe_builtins,

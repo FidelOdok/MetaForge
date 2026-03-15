@@ -54,6 +54,9 @@ knowledge = [
     "pgvector>=0.2",
     "sentence-transformers>=2.0",
 ]
+cadquery = [
+    "cadquery>=2.4.0",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

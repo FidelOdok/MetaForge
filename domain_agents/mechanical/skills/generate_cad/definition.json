@@ -1,15 +1,20 @@
 {
   "name": "generate_cad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "domain": "mechanical",
   "agent": "mechanical",
-  "description": "Generate parametric CAD geometry from shape type and dimensions using FreeCAD",
-  "phase": 2,
+  "description": "Generate parametric CAD geometry from shape type and dimensions using CadQuery or FreeCAD",
+  "phase": 1,
   "tools_required": [
+    {
+      "tool_id": "cadquery.create_parametric",
+      "capability": "cad_generation",
+      "required": false
+    },
     {
       "tool_id": "freecad.create_parametric",
       "capability": "cad_generation",
-      "required": true
+      "required": false
     }
   ],
   "input_schema": "schema.GenerateCadInput",
@@ -17,5 +22,5 @@
   "timeout_seconds": 300,
   "retries": 1,
   "idempotent": true,
-  "tags": ["cad", "generation", "parametric", "freecad"]
+  "tags": ["cad", "generation", "parametric", "cadquery", "freecad"]
 }

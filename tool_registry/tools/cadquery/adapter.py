@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -450,7 +449,9 @@ class CadqueryServer(McpToolServer):
 
         from tool_registry.tools.cadquery.operations import CadqueryOperations
 
-        ops = CadqueryOperations(work_dir=self.config.work_dir, timeout=self.config.max_operation_time)
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir, timeout=self.config.max_operation_time,
+        )
         return ops.boolean_operation(input_file_a, input_file_b, operation, output_path)
 
     async def get_properties(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -467,7 +468,9 @@ class CadqueryServer(McpToolServer):
 
         from tool_registry.tools.cadquery.operations import CadqueryOperations
 
-        ops = CadqueryOperations(work_dir=self.config.work_dir, timeout=self.config.max_operation_time)
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir, timeout=self.config.max_operation_time,
+        )
         return ops.get_properties(input_file, properties)
 
     async def export_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -491,7 +494,9 @@ class CadqueryServer(McpToolServer):
 
         from tool_registry.tools.cadquery.operations import CadqueryOperations
 
-        ops = CadqueryOperations(work_dir=self.config.work_dir, timeout=self.config.max_operation_time)
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir, timeout=self.config.max_operation_time,
+        )
         return ops.export_geometry(input_file, output_format, output_path)
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -534,7 +539,9 @@ class CadqueryServer(McpToolServer):
 
         from tool_registry.tools.cadquery.operations import CadqueryOperations
 
-        ops = CadqueryOperations(work_dir=self.config.work_dir, timeout=self.config.max_operation_time)
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir, timeout=self.config.max_operation_time,
+        )
         return ops.create_assembly(parts, constraints, output_path)
 
     async def generate_enclosure(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -555,7 +562,9 @@ class CadqueryServer(McpToolServer):
 
         from tool_registry.tools.cadquery.operations import CadqueryOperations
 
-        ops = CadqueryOperations(work_dir=self.config.work_dir, timeout=self.config.max_operation_time)
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir, timeout=self.config.max_operation_time,
+        )
         return ops.generate_enclosure(
             pcb_length=pcb_length,
             pcb_width=pcb_width,
