@@ -57,6 +57,9 @@ knowledge = [
 cadquery = [
     "cadquery>=2.4.0",
 ]
+docker = [
+    "docker>=7.0",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
