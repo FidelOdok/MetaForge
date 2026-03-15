@@ -40,6 +40,7 @@ from orchestrator.workflow_dag import (
     WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
+from tool_registry.bootstrap import bootstrap_tool_registry
 from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
@@ -139,6 +140,16 @@ async def _init_orchestrator(app: FastAPI) -> None:
     workflow_engine = InMemoryWorkflowEngine.create()
     twin = InMemoryTwinAPI.create_with_collector(_collector)
     mcp = InMemoryMcpBridge()
+
+    # Bootstrap tool adapters into the registry
+    tool_registry = await bootstrap_tool_registry()
+    app.state.tool_registry = tool_registry
+    logger.info(
+        "tool_registry_bootstrapped",
+        adapters=len(tool_registry.list_adapters()),
+        tools=len(tool_registry.list_tools()),
+    )
+
     event_bus = create_default_bus(workflow_engine, collector=_collector)
 
     # Register all workflow definitions
