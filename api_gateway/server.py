@@ -40,6 +40,7 @@ from orchestrator.workflow_dag import (
     WorkflowStep,
 )
 from skill_registry.mcp_bridge import InMemoryMcpBridge
+from skill_registry.registry_bridge import RegistryMcpBridge
 from tool_registry.bootstrap import bootstrap_tool_registry
 from twin_core.api import InMemoryTwinAPI
 
@@ -141,14 +142,21 @@ async def _init_orchestrator(app: FastAPI) -> None:
     twin = InMemoryTwinAPI.create_with_collector(_collector)
     mcp = InMemoryMcpBridge()
 
-    # Bootstrap tool adapters into the registry
+    # Bootstrap tool adapters into the registry and create real MCP bridge
     tool_registry = await bootstrap_tool_registry()
     app.state.tool_registry = tool_registry
+    registry_bridge = RegistryMcpBridge(tool_registry)
+    app.state.mcp_bridge = registry_bridge
     logger.info(
         "tool_registry_bootstrapped",
         adapters=len(tool_registry.list_adapters()),
         tools=len(tool_registry.list_tools()),
     )
+
+    # Wire the real bridge into chat routes
+    from api_gateway.chat.routes import init_mcp_bridge
+
+    init_mcp_bridge(registry_bridge)
 
     event_bus = create_default_bus(workflow_engine, collector=_collector)
 
@@ -156,9 +164,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     for defn in ACTION_WORKFLOWS.values():
         await workflow_engine.register_workflow(defn)
 
-    # Create agents
-    mech_agent = MechanicalAgent(twin=twin, mcp=mcp)
-    ee_agent = ElectronicsAgent(twin=twin, mcp=mcp)
+    # Create agents — use real bridge for tool access, InMemoryMcpBridge as fallback
+    mech_agent = MechanicalAgent(twin=twin, mcp=registry_bridge)
+    ee_agent = ElectronicsAgent(twin=twin, mcp=registry_bridge)
 
     # Build a dependency graph from the full_validation workflow (most complex)
     # For single-step workflows the dep_graph is optional

@@ -43,7 +43,7 @@ from domain_agents.mechanical.pydantic_ai_agent import (
     run_agent,
 )
 from observability.tracing import get_tracer
-from skill_registry.mcp_bridge import InMemoryMcpBridge
+from skill_registry.mcp_bridge import InMemoryMcpBridge, McpBridge
 from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
@@ -113,7 +113,17 @@ router = APIRouter(prefix="/v1/chat", tags=["chat"])
 # ---------------------------------------------------------------------------
 
 _twin = InMemoryTwinAPI.create()
-_mcp_bridge = InMemoryMcpBridge()
+_mcp_bridge: McpBridge = InMemoryMcpBridge()
+
+
+def init_mcp_bridge(bridge: McpBridge) -> None:
+    """Replace the default InMemoryMcpBridge with a real bridge.
+
+    Called by the API Gateway lifespan after bootstrapping the tool registry.
+    """
+    global _mcp_bridge  # noqa: PLW0603
+    _mcp_bridge = bridge
+    logger.info("mcp_bridge_initialized", bridge_type=type(bridge).__name__)
 
 
 def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
