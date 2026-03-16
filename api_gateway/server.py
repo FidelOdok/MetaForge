@@ -163,6 +163,88 @@ async def _init_database() -> None:
         logger.warning("pg_init_failed", error=str(exc))
 
 
+async def _init_knowledge_store(app: FastAPI) -> None:
+    """Initialize knowledge store and embedding service on app.state.
+
+    Uses PgVector when ``DATABASE_URL`` is set and asyncpg + pgvector are
+    available.  Falls back to InMemoryKnowledgeStore otherwise.
+    """
+    from digital_twin.knowledge.store import InMemoryKnowledgeStore
+
+    knowledge_store = None
+    pgvector_active = False
+
+    # Try PgVector if DATABASE_URL is set
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        try:
+            from digital_twin.knowledge.store import PgVectorKnowledgeStore
+
+            # Convert SQLAlchemy DSN to asyncpg DSN
+            dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+            pg_store = PgVectorKnowledgeStore(dsn=dsn)
+            await pg_store.initialize()
+            knowledge_store = pg_store
+            pgvector_active = True
+            logger.info("knowledge_store_pgvector_initialized")
+        except Exception as exc:
+            logger.warning("knowledge_store_pgvector_failed", error=str(exc))
+
+    if knowledge_store is None:
+        knowledge_store = InMemoryKnowledgeStore()
+        logger.info("knowledge_store_in_memory_initialized")
+
+    app.state.knowledge_store = knowledge_store
+
+    # Initialize embedding service (local fallback)
+    try:
+        from digital_twin.knowledge.embedding_service import create_embedding_service
+
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key:
+            embedding_svc = create_embedding_service("openai", api_key=openai_key)
+            logger.info("embedding_service_openai_initialized")
+        else:
+            embedding_svc = create_embedding_service("local")
+            logger.info("embedding_service_local_initialized")
+        app.state.embedding_service = embedding_svc
+    except Exception as exc:
+        logger.warning("embedding_service_init_failed", error=str(exc))
+        app.state.embedding_service = None
+
+    # Register pgvector health check
+    if pgvector_active:
+        from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
+
+        _pg_store = knowledge_store
+
+        async def _pgvector_health() -> ComponentHealth:
+            import time as _time
+
+            t0 = _time.monotonic()
+            try:
+                # Simple connectivity check — list with limit 0
+                await _pg_store.list(limit=1)
+                latency = round((_time.monotonic() - t0) * 1000, 2)
+                return ComponentHealth(
+                    name="pgvector",
+                    status=DependencyStatus.HEALTHY,
+                    latency_ms=latency,
+                    message="Connected",
+                )
+            except Exception as exc:
+                latency = round((_time.monotonic() - t0) * 1000, 2)
+                return ComponentHealth(
+                    name="pgvector",
+                    status=DependencyStatus.UNHEALTHY,
+                    latency_ms=latency,
+                    message=str(exc),
+                )
+
+        get_health_checker().register_check("pgvector", _pgvector_health)
+        logger.info("pgvector_health_check_registered")
+
+
 async def _init_orchestrator(app: FastAPI) -> None:
     """Wire up orchestrator subsystems and store on app.state."""
     # Skip if test-injected components are already present
@@ -254,6 +336,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     app.state.event_bus = event_bus
     app.state.action_workflows = ACTION_WORKFLOWS
 
+    # Initialize knowledge store and embedding service
+    await _init_knowledge_store(app)
+
     # Register Neo4j health check if using Neo4j backend
     _graph_engine = twin._graph  # noqa: SLF001
     if hasattr(_graph_engine, "health_check"):
@@ -328,6 +413,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("gateway_stopping")
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
+    # Close PgVector knowledge store if active
+    if hasattr(app.state, "knowledge_store") and hasattr(app.state.knowledge_store, "close"):
+        try:
+            await app.state.knowledge_store.close()
+            logger.info("pgvector_store_closed")
+        except Exception:
+            pass
     # Close Neo4j connection if active
     if hasattr(app.state, "twin"):
         graph = app.state.twin._graph  # noqa: SLF001
