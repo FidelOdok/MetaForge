@@ -88,9 +88,7 @@ class ChatBackend(ABC):
     async def message_count(self, thread_id: str) -> int: ...
 
     @abstractmethod
-    async def update_thread_timestamp(
-        self, thread_id: str, timestamp: datetime
-    ) -> None: ...
+    async def update_thread_timestamp(self, thread_id: str, timestamp: datetime) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +218,7 @@ class InMemoryChatBackend(ChatBackend):
     async def message_count(self, thread_id: str) -> int:
         return len(self.messages.get(thread_id, []))
 
-    async def update_thread_timestamp(
-        self, thread_id: str, timestamp: datetime
-    ) -> None:
+    async def update_thread_timestamp(self, thread_id: str, timestamp: datetime) -> None:
         thread = self.threads.get(thread_id)
         if thread is not None:
             thread.last_message_at = timestamp
@@ -342,9 +338,7 @@ class PgChatBackend(ChatBackend):
                 graph_ref_type=graph_ref_type,
                 graph_ref_label=graph_ref_label,
             )
-            await self._repo.update_thread_timestamp(
-                session, thread_id, msg.created_at
-            )
+            await self._repo.update_thread_timestamp(session, thread_id, msg.created_at)
             return msg
 
     async def message_count(self, thread_id: str) -> int:
@@ -353,9 +347,7 @@ class PgChatBackend(ChatBackend):
         async with get_session() as session:
             return await self._repo.message_count(session, thread_id)
 
-    async def update_thread_timestamp(
-        self, thread_id: str, timestamp: datetime
-    ) -> None:
+    async def update_thread_timestamp(self, thread_id: str, timestamp: datetime) -> None:
         from api_gateway.db.engine import get_session
 
         async with get_session() as session:

@@ -197,9 +197,7 @@ async def bootstrap_tool_registry(
                 try:
                     client = await _create_remote_adapter(adapter_id, remote_url)
                     version = spec.get("version", "0.1.0")
-                    await registry.register_remote_adapter(
-                        adapter_id, version, client
-                    )
+                    await registry.register_remote_adapter(adapter_id, version, client)
                     registered.append(adapter_id)
                     logger.info(
                         "Registered remote adapter",
