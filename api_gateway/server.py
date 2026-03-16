@@ -150,7 +150,16 @@ async def _init_orchestrator(app: FastAPI) -> None:
 
     _collector = getattr(app.state, "collector", None)
     workflow_engine = InMemoryWorkflowEngine.create()
-    twin = InMemoryTwinAPI.create_with_collector(_collector)
+
+    # Select Twin backend from environment (Neo4j if NEO4J_URI is set)
+    try:
+        twin = await InMemoryTwinAPI.create_from_env(collector=_collector)
+    except Exception as exc:
+        logger.warning(
+            "neo4j_fallback_to_in_memory",
+            error=str(exc),
+        )
+        twin = InMemoryTwinAPI.create_with_collector(_collector)
     mcp = InMemoryMcpBridge()
 
     # Bootstrap tool adapters into the registry and create real MCP bridge
@@ -208,6 +217,36 @@ async def _init_orchestrator(app: FastAPI) -> None:
     app.state.event_bus = event_bus
     app.state.action_workflows = ACTION_WORKFLOWS
 
+    # Register Neo4j health check if using Neo4j backend
+    _graph_engine = twin._graph  # noqa: SLF001
+    if hasattr(_graph_engine, "health_check"):
+        from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
+
+        async def _neo4j_health() -> ComponentHealth:
+            import time as _time
+
+            t0 = _time.monotonic()
+            try:
+                healthy = await _graph_engine.health_check()
+                latency = round((_time.monotonic() - t0) * 1000, 2)
+                return ComponentHealth(
+                    name="neo4j",
+                    status=DependencyStatus.HEALTHY if healthy else DependencyStatus.UNHEALTHY,
+                    latency_ms=latency,
+                    message="Connected" if healthy else "Connection lost",
+                )
+            except Exception as exc:
+                latency = round((_time.monotonic() - t0) * 1000, 2)
+                return ComponentHealth(
+                    name="neo4j",
+                    status=DependencyStatus.UNHEALTHY,
+                    latency_ms=latency,
+                    message=str(exc),
+                )
+
+        get_health_checker().register_check("neo4j", _neo4j_health)
+        logger.info("neo4j_health_check_registered")
+
     logger.info(
         "orchestrator_initialized",
         workflows=list(ACTION_WORKFLOWS.keys()),
@@ -252,6 +291,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("gateway_stopping")
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
+    # Close Neo4j connection if active
+    if hasattr(app.state, "twin"):
+        graph = app.state.twin._graph  # noqa: SLF001
+        if hasattr(graph, "close"):
+            await graph.close()
+            logger.info("neo4j_connection_closed")
     shutdown_observability(_otel_state)
 
 

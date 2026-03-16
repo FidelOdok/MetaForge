@@ -179,33 +179,54 @@ class InMemoryTwinAPI(TwinAPI):
         return cls(graph=graph, version=version, constraints=constraints)
 
     @classmethod
-    async def create_from_env(cls) -> InMemoryTwinAPI:
+    async def create_from_env(
+        cls, collector: MetricsCollector | None = None
+    ) -> InMemoryTwinAPI:
         """Factory that selects the graph backend from environment variables.
 
-        Reads ``METAFORGE_GRAPH_BACKEND`` (default: ``"memory"``).
-        When set to ``"neo4j"``, also reads:
-        - ``METAFORGE_NEO4J_URI`` (default: ``bolt://localhost:7687``)
-        - ``METAFORGE_NEO4J_USER`` (default: ``neo4j``)
-        - ``METAFORGE_NEO4J_PASSWORD`` (default: ``password``)
+        Automatically detects Neo4j when ``NEO4J_URI`` is set (as configured
+        in docker-compose.yml).  Falls back to ``METAFORGE_GRAPH_BACKEND``
+        / ``METAFORGE_NEO4J_*`` for explicit override.
+
+        Environment variables (checked in order):
+        - ``NEO4J_URI`` / ``METAFORGE_NEO4J_URI`` (default: ``bolt://localhost:7687``)
+        - ``NEO4J_USER`` / ``METAFORGE_NEO4J_USER`` (default: ``neo4j``)
+        - ``NEO4J_PASSWORD`` / ``METAFORGE_NEO4J_PASSWORD`` (default: ``password``)
+        - ``METAFORGE_GRAPH_BACKEND`` — set to ``"neo4j"`` to force Neo4j even
+          without ``NEO4J_URI``.
         """
+        import structlog
+
+        _logger = structlog.get_logger(__name__)
+
+        neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get("METAFORGE_NEO4J_URI")
         backend = os.environ.get("METAFORGE_GRAPH_BACKEND", "memory").lower()
-        if backend == "neo4j":
+
+        use_neo4j = neo4j_uri is not None or backend == "neo4j"
+
+        if use_neo4j:
             from twin_core.neo4j_graph_engine import Neo4jGraphEngine
 
-            uri = os.environ.get("METAFORGE_NEO4J_URI", "bolt://localhost:7687")
-            user = os.environ.get("METAFORGE_NEO4J_USER", "neo4j")
-            password = os.environ.get("METAFORGE_NEO4J_PASSWORD", "password")
+            uri = neo4j_uri or "bolt://localhost:7687"
+            user = os.environ.get("NEO4J_USER") or os.environ.get(
+                "METAFORGE_NEO4J_USER", "neo4j"
+            )
+            password = os.environ.get("NEO4J_PASSWORD") or os.environ.get(
+                "METAFORGE_NEO4J_PASSWORD", "password"
+            )
             graph: GraphEngine = Neo4jGraphEngine(
                 uri=uri,
                 user=user,
                 password=password,
             )
             await graph.connect()  # type: ignore[attr-defined]
+            _logger.info("twin_api_neo4j_connected", uri=uri)
         else:
-            graph = InMemoryGraphEngine()
+            graph = InMemoryGraphEngine(collector=collector)
+            _logger.info("twin_api_using_in_memory_backend")
 
         version = InMemoryVersionEngine(graph)
-        constraints = InMemoryConstraintEngine(graph)
+        constraints = InMemoryConstraintEngine(graph, collector=collector)
         return cls(graph=graph, version=version, constraints=constraints)
 
     # --- Artifacts ---
@@ -322,9 +343,11 @@ class InMemoryTwinAPI(TwinAPI):
     async def query_cypher(
         self, query: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
+        if hasattr(self._graph, "query_cypher"):
+            return await self._graph.query_cypher(query, params)  # type: ignore[attr-defined]
         raise NotImplementedError(
-            "Cypher queries require the Neo4j backend (planned for v0.2+). "
-            "Use get_subgraph() or list_work_products() for in-memory queries."
+            "Cypher queries require the Neo4j backend. "
+            "Set NEO4J_URI to enable, or use get_subgraph() / list_work_products()."
         )
 
     # --- Versioning ---
