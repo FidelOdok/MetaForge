@@ -22,6 +22,8 @@ RUN micromamba install -y -n base -c conda-forge \
         pythonocc-core=7.7.2 \
         trimesh \
         numpy \
+        scipy \
+        networkx \
         pygltflib && \
     micromamba clean -afy
 

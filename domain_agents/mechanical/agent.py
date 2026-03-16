@@ -858,14 +858,22 @@ class MechanicalAgent:
         }
 
         # Writeback: create a new CAD_MODEL WorkProduct
+        # Extract project_id from the source WorkProduct metadata (if present)
+        src_wp = await self.twin.get_work_product(request.work_product_id, branch=request.branch)
+        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
         try:
             wb = await writeback_cad(
                 self.twin,
                 self.session_id,
                 request.branch,
                 skill_result_dict,
+                project_id=pid,
             )
             skill_result_dict["work_product_id"] = str(wb.id)
+            if pid:
+                from api_gateway.projects.routes import link_work_product_to_project
+
+                link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
         except Exception as exc:
             self.logger.warning("writeback_cad_failed", error=str(exc))
 
@@ -918,14 +926,21 @@ class MechanicalAgent:
         }
 
         # Writeback: create a new CAD_MODEL WorkProduct
+        src_wp = await self.twin.get_work_product(request.work_product_id, branch=request.branch)
+        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
         try:
             wb = await writeback_cad(
                 self.twin,
                 self.session_id,
                 request.branch,
                 skill_result_dict,
+                project_id=pid,
             )
             skill_result_dict["work_product_id"] = str(wb.id)
+            if pid:
+                from api_gateway.projects.routes import link_work_product_to_project
+
+                link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
         except Exception as exc:
             self.logger.warning("writeback_cad_script_failed", error=str(exc))
 

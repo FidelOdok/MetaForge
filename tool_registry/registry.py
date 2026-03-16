@@ -88,6 +88,58 @@ class ToolRegistry:
 
         return adapter_info
 
+    async def register_remote_adapter(
+        self, adapter_id: str, version: str, client: McpClient
+    ) -> AdapterInfo:
+        """Register a remote adapter that is already connected via an HttpTransport.
+
+        Unlike ``register_adapter`` which creates a local LoopbackTransport,
+        this method expects the caller to have already connected the client
+        (e.g. via ``HttpTransport``).  It fetches the tool list through the
+        MCP ``tool/list`` JSON-RPC call and registers the returned manifests.
+
+        No ``_servers`` entry is created because the adapter runs remotely.
+        """
+        # Fetch tool manifests via the connected client's tool/list RPC
+        client_manifests = await client.list_tools(adapter_id)
+
+        # Mirror the manifests into the registry's internal tool map and
+        # onto the client so that call routing works.
+        handler_manifests: list[ToolManifest] = []
+        for cm in client_manifests:
+            hm = ToolManifest(
+                tool_id=cm.tool_id,
+                adapter_id=cm.adapter_id,
+                name=cm.name,
+                description=cm.description,
+                capability=cm.capability,
+                input_schema=cm.input_schema,
+                output_schema=cm.output_schema,
+                phase=cm.phase,
+            )
+            handler_manifests.append(hm)
+            self._tools[cm.tool_id] = hm
+
+        adapter_info = AdapterInfo(
+            adapter_id=adapter_id,
+            version=version,
+            status=AdapterStatus.CONNECTED,
+            tools=handler_manifests,
+        )
+
+        self._adapters[adapter_id] = adapter_info
+        self._clients[adapter_id] = client
+        # No _servers entry for remote adapters
+
+        logger.info(
+            "Registered remote adapter",
+            adapter_id=adapter_id,
+            version=version,
+            tool_count=len(handler_manifests),
+        )
+
+        return adapter_info
+
     async def unregister_adapter(self, adapter_id: str) -> None:
         """Unregister an adapter and remove all its tools."""
         adapter_info = self._adapters.pop(adapter_id, None)

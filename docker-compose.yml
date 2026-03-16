@@ -30,11 +30,15 @@ services:
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
       - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
       - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
       - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
+    volumes:
+      - adapter-workspace:/workspace:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -317,6 +321,7 @@ services:
     environment:
       - METAFORGE_ENV=docker
       - CADQUERY_WORK_DIR=/workspace
+      - CADQUERY_HTTP_PORT=8101
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     deploy:
       resources:
@@ -324,11 +329,11 @@ services:
           memory: 2G
           cpus: '2'
     healthcheck:
-      test: ["CMD", "python3", "-c", "import cadquery; print(cadquery.__version__)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
     networks:
       - metaforge
     restart: unless-stopped

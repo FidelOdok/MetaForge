@@ -58,11 +58,12 @@ class TestAgentRouter:
         agent = default_router.get_agent("approval", twin=twin, mcp_bridge=mcp)
         assert agent is None
 
-    def test_project_scope_returns_none(
+    def test_project_scope_returns_mechanical_agent(
         self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge
     ) -> None:
         agent = default_router.get_agent("project", twin=twin, mcp_bridge=mcp)
-        assert agent is None
+        assert agent is not None
+        assert type(agent).__name__ == "MechanicalAgent"
 
     def test_register_custom_agent_factory(
         self, twin: InMemoryTwinAPI, mcp: InMemoryMcpBridge

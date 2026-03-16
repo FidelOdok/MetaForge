@@ -8,6 +8,9 @@ Adapter registration is config-driven via environment variables:
   (default: all known adapters)
 - METAFORGE_ADAPTER_{ID}_ENABLED: per-adapter toggle
   (e.g., METAFORGE_ADAPTER_CADQUERY_ENABLED=false)
+- METAFORGE_ADAPTER_{ID}_URL: when set, connects to a remote adapter
+  container via HTTP instead of creating a local server
+  (e.g., METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8100)
 """
 
 from __future__ import annotations
@@ -17,6 +20,8 @@ from typing import Any
 
 import structlog
 
+from mcp_core.client import McpClient
+from mcp_core.transports import HttpTransport
 from observability.tracing import get_tracer
 from tool_registry.registry import ToolRegistry
 
@@ -83,6 +88,57 @@ def _import_class(module_path: str, class_name: str) -> type | None:
         return None
 
 
+def _get_remote_url(adapter_id: str) -> str | None:
+    """Return the remote adapter URL from env, or None if not set."""
+    env_key = f"METAFORGE_ADAPTER_{adapter_id.upper()}_URL"
+    return os.environ.get(env_key) or None
+
+
+async def _create_remote_adapter(adapter_id: str, url: str) -> McpClient:
+    """Connect to a remote adapter container via HttpTransport.
+
+    Returns a connected McpClient whose manifests have been populated by a
+    ``tool/list`` JSON-RPC call through the transport.
+    """
+    transport = HttpTransport(url)
+    client = McpClient()
+    await client.connect(adapter_id, transport)
+
+    # Issue a tool/list call so the client discovers available tools.
+    # The McpClient.list_tools() method returns manifests that were
+    # registered via the server's response; we trigger the RPC here.
+    import json
+
+    request = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tool/list",
+            "params": {},
+        }
+    )
+    response_text = await transport.send(request)
+    response = json.loads(response_text)
+
+    # Register each manifest on the client so call routing works
+    from mcp_core.schemas import ToolManifest as ClientToolManifest
+
+    for tool_data in response.get("result", {}).get("tools", []):
+        manifest = ClientToolManifest(
+            tool_id=tool_data["tool_id"],
+            adapter_id=tool_data.get("adapter_id", adapter_id),
+            name=tool_data["name"],
+            description=tool_data.get("description", ""),
+            capability=tool_data.get("capability", ""),
+            input_schema=tool_data.get("input_schema", {}),
+            output_schema=tool_data.get("output_schema", {}),
+            phase=tool_data.get("phase", 1),
+        )
+        client.register_manifest(manifest)
+
+    return client
+
+
 def _create_adapter(adapter_id: str, spec: dict[str, str]) -> Any | None:
     """Instantiate an adapter server with its default config.
 
@@ -135,6 +191,33 @@ async def bootstrap_tool_registry(
                 skipped.append(adapter_id)
                 continue
 
+            # Check for remote adapter URL first (Docker / container mode)
+            remote_url = _get_remote_url(adapter_id)
+            if remote_url is not None:
+                try:
+                    client = await _create_remote_adapter(adapter_id, remote_url)
+                    version = spec.get("version", "0.1.0")
+                    await registry.register_remote_adapter(
+                        adapter_id, version, client
+                    )
+                    registered.append(adapter_id)
+                    logger.info(
+                        "Registered remote adapter",
+                        adapter_id=adapter_id,
+                        url=remote_url,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Remote adapter registration failed",
+                        adapter_id=adapter_id,
+                        url=remote_url,
+                        error=str(exc),
+                    )
+                    span.record_exception(exc)
+                    failed.append(adapter_id)
+                continue
+
+            # Fall back to local adapter creation (in-process mode)
             server = _create_adapter(adapter_id, spec)
             if server is None:
                 logger.warning(

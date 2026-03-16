@@ -149,7 +149,8 @@ def _build_default_router() -> AgentRouter:
     router.register("session", MechanicalAgent)
     router.register("bom-entry", MechanicalAgent)
     router.register("digital-twin-node", MechanicalAgent)
-    # "approval" and "project" are intentionally unmapped (future phases)
+    router.register("project", MechanicalAgent)
+    # "approval" is intentionally unmapped (future phases)
     return router
 
 

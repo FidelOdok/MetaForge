@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
-import { Upload, Box, GitBranch, ChevronDown } from 'lucide-react';
+import { Upload, Box, GitBranch, ChevronDown, Eye } from 'lucide-react';
 import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
@@ -14,8 +15,9 @@ import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls'
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
+import { getNodeModel } from '../api/endpoints/twin';
 import type { TwinNode } from '../types/twin';
-import type { PartInfo } from '../types/viewer';
+import type { ModelManifest, PartInfo } from '../types/viewer';
 
 const TYPE_ICONS: Record<TwinNode['type'], string> = {
   work_product: '\uD83D\uDCC4',
@@ -30,6 +32,39 @@ function NodeDetail({ node }: { node: TwinNode }) {
     entityId: node.id,
     label: node.name,
   });
+  const loadModel = useViewerStore((s) => s.loadModel);
+  const setViewMode = useViewerStore((s) => s.setViewMode);
+  const [loading3d, setLoading3d] = useState(false);
+
+  const isCAD = node.properties.wp_type === 'cad_model';
+
+  const handleView3D = useCallback(async () => {
+    setLoading3d(true);
+    try {
+      const result = await getNodeModel(node.id);
+      const manifest: ModelManifest = {
+        parts: result.metadata.parts.map((p) => ({
+          name: p.name,
+          meshName: p.meshName ?? p.name,
+          children: (p.children ?? []) as ModelManifest['parts'],
+          boundingBox: p.boundingBox as { min: number[]; max: number[] } | undefined,
+        })),
+        meshToNodeMap: {},
+        materials: result.metadata.materials ?? [],
+        stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
+      };
+      // Prepend /api so the URL goes through the Vite dev proxy
+      const glbUrl = result.glb_url.startsWith('/v1/')
+        ? `/api${result.glb_url}`
+        : result.glb_url;
+      loadModel(glbUrl, manifest);
+      setViewMode('3d');
+    } catch (err) {
+      console.error('Failed to load 3D model:', err);
+    } finally {
+      setLoading3d(false);
+    }
+  }, [node.id, loadModel, setViewMode]);
 
   return (
     <div className="space-y-4">
@@ -45,6 +80,17 @@ function NodeDetail({ node }: { node: TwinNode }) {
           {node.domain} &middot; {node.type} &middot; Updated {formatRelativeTime(node.updatedAt)}
         </div>
       </div>
+
+      {isCAD && (
+        <Button
+          variant="primary"
+          onClick={handleView3D}
+          disabled={loading3d}
+        >
+          <Eye size={14} className="mr-1.5" />
+          {loading3d ? 'Converting...' : 'View 3D Model'}
+        </Button>
+      )}
 
       <Card>
         <h4 className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">

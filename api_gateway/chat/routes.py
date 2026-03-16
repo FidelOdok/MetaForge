@@ -37,6 +37,7 @@ from api_gateway.chat.schemas import (
     ThreadSummaryResponse,
 )
 from api_gateway.chat.streaming import stream_manager, stream_thread
+from api_gateway.projects.routes import store as project_store
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
@@ -188,11 +189,21 @@ async def _invoke_agent(
         now = datetime.now(UTC)
 
         try:
+            project_id = ""
+            work_product_id = ""
+            if thread.scope_kind == "project" and thread.scope_entity_id:
+                project = project_store.projects.get(thread.scope_entity_id)
+                if project and project.work_products:
+                    project_id = thread.scope_entity_id
+                    work_product_id = project.work_products[0].id
+
             deps = MechanicalAgentDeps(
                 twin=_twin,
                 mcp_bridge=_mcp_bridge,
                 session_id=str(uuid4()),
                 branch="main",
+                project_id=project_id,
+                work_product_id=work_product_id,
             )
 
             llm_model = get_llm_model()

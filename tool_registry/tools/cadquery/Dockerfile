@@ -70,7 +70,9 @@ ENV CADQUERY_WORK_DIR=/workspace
 
 WORKDIR /workspace
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python3 -c "import cadquery; print(cadquery.__version__)" || exit 1
+EXPOSE 8101
 
-ENTRYPOINT ["python", "/app/entrypoint.py"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')" || exit 1
+
+CMD ["python", "/app/entrypoint.py"]

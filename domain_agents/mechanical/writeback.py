@@ -25,6 +25,7 @@ async def writeback_cad(
     session_id: UUID,
     branch: str,
     skill_output: dict[str, Any],
+    project_id: str = "",
 ) -> WorkProduct:
     """Create a CAD_MODEL work product from generate_cad skill output.
 
@@ -42,6 +43,20 @@ async def writeback_cad(
         span.set_attribute("branch", branch)
 
         now = datetime.now(UTC)
+        metadata: dict[str, Any] = {
+            "session_id": str(session_id),
+            "skill": "generate_cad",
+            "shape_type": skill_output.get("shape_type", ""),
+            "volume_mm3": skill_output.get("volume_mm3", 0.0),
+            "surface_area_mm2": skill_output.get("surface_area_mm2", 0.0),
+            "bounding_box": skill_output.get("bounding_box", {}),
+            "parameters_used": skill_output.get("parameters_used", {}),
+            "material": skill_output.get("material", ""),
+            "timestamp": now.isoformat(),
+        }
+        if project_id:
+            metadata["project_id"] = project_id
+
         wp = WorkProduct(
             id=uuid4(),
             name=f"cad_{skill_output.get('shape_type', 'unknown')}",
@@ -50,17 +65,7 @@ async def writeback_cad(
             file_path=skill_output.get("cad_file", ""),
             content_hash="",
             format="step",
-            metadata={
-                "session_id": str(session_id),
-                "skill": "generate_cad",
-                "shape_type": skill_output.get("shape_type", ""),
-                "volume_mm3": skill_output.get("volume_mm3", 0.0),
-                "surface_area_mm2": skill_output.get("surface_area_mm2", 0.0),
-                "bounding_box": skill_output.get("bounding_box", {}),
-                "parameters_used": skill_output.get("parameters_used", {}),
-                "material": skill_output.get("material", ""),
-                "timestamp": now.isoformat(),
-            },
+            metadata=metadata,
             created_at=now,
             updated_at=now,
             created_by=f"mechanical-agent:{session_id}",
@@ -83,6 +88,7 @@ async def writeback_mesh(
     session_id: UUID,
     branch: str,
     skill_output: dict[str, Any],
+    project_id: str = "",
 ) -> WorkProduct:
     """Create a SIMULATION_RESULT work product from generate_mesh skill output.
 
@@ -100,6 +106,21 @@ async def writeback_mesh(
         span.set_attribute("branch", branch)
 
         now = datetime.now(UTC)
+        metadata: dict[str, Any] = {
+            "session_id": str(session_id),
+            "skill": "generate_mesh",
+            "num_nodes": skill_output.get("num_nodes", 0),
+            "num_elements": skill_output.get("num_elements", 0),
+            "element_types": skill_output.get("element_types", []),
+            "quality_acceptable": skill_output.get("quality_acceptable", False),
+            "quality_issues": skill_output.get("quality_issues", []),
+            "algorithm_used": skill_output.get("algorithm_used", ""),
+            "element_size_used": skill_output.get("element_size_used", 0.0),
+            "timestamp": now.isoformat(),
+        }
+        if project_id:
+            metadata["project_id"] = project_id
+
         wp = WorkProduct(
             id=uuid4(),
             name=f"mesh_{skill_output.get('algorithm_used', 'unknown')}",
@@ -110,18 +131,7 @@ async def writeback_mesh(
             format=skill_output.get("mesh_file", "").rsplit(".", maxsplit=1)[-1]
             if skill_output.get("mesh_file", "")
             else "inp",
-            metadata={
-                "session_id": str(session_id),
-                "skill": "generate_mesh",
-                "num_nodes": skill_output.get("num_nodes", 0),
-                "num_elements": skill_output.get("num_elements", 0),
-                "element_types": skill_output.get("element_types", []),
-                "quality_acceptable": skill_output.get("quality_acceptable", False),
-                "quality_issues": skill_output.get("quality_issues", []),
-                "algorithm_used": skill_output.get("algorithm_used", ""),
-                "element_size_used": skill_output.get("element_size_used", 0.0),
-                "timestamp": now.isoformat(),
-            },
+            metadata=metadata,
             created_at=now,
             updated_at=now,
             created_by=f"mechanical-agent:{session_id}",

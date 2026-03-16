@@ -378,3 +378,160 @@ class TestAgentCadGenerationE2E:
 
         assert result.success is False
         assert any("backend" in e.lower() or "available" in e.lower() for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# Project-scoped E2E tests
+# ---------------------------------------------------------------------------
+
+
+class TestProjectScopedCadGeneration:
+    """E2E tests verifying project → WorkProduct → CAD generation linkage."""
+
+    async def test_project_scoped_generate_cad(
+        self,
+        twin: InMemoryTwinAPI,
+        mcp_with_cadquery_responses: InMemoryMcpBridge,
+    ):
+        """Create a project-linked WP, run CAD generation, verify project linkage."""
+        from api_gateway.projects.routes import store as project_store
+        from api_gateway.projects.schemas import (
+            ProjectResponse,
+            ProjectWorkProductResponse,
+        )
+
+        # Simulate project creation: seed a WP with project_id in metadata
+        project_id = "test-project-001"
+        seed_wp = WorkProduct(
+            name="Test Project - CAD Model",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path="",
+            content_hash="",
+            format="step",
+            created_by="project-setup",
+            metadata={"project_id": project_id},
+        )
+        created_wp = await twin.create_work_product(seed_wp)
+
+        # Register project in the store
+        project_store.projects[project_id] = ProjectResponse(
+            id=project_id,
+            name="Test Project",
+            description="E2E test project",
+            status="draft",
+            work_products=[
+                ProjectWorkProductResponse(
+                    id=str(created_wp.id),
+                    name=created_wp.name,
+                    type="CAD_MODEL",
+                    status="created",
+                    updated_at="2026-01-01T00:00:00",
+                )
+            ],
+            agent_count=0,
+            last_updated="2026-01-01T00:00:00",
+            created_at="2026-01-01T00:00:00",
+        )
+
+        # Run CAD generation against the project-linked WP
+        agent = MechanicalAgent(twin=twin, mcp=mcp_with_cadquery_responses)
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="generate_cad",
+                work_product_id=created_wp.id,
+                parameters={
+                    "shape_type": "bracket",
+                    "dimensions": {"length": 50.0, "width": 30.0, "thickness": 5.0},
+                    "material": "aluminum_6061",
+                },
+            )
+        )
+
+        assert result.success is True
+        assert result.skill_results[0]["skill"] == "generate_cad"
+
+        # Verify writeback WP has project_id in metadata
+        wb_id = result.skill_results[0].get("work_product_id")
+        assert wb_id is not None
+        from uuid import UUID as _UUID
+
+        wb_wp = await twin.get_work_product(_UUID(wb_id))
+        assert wb_wp is not None
+        assert wb_wp.metadata.get("project_id") == project_id
+
+        # Verify the new WP was linked back to the project
+        project = project_store.projects[project_id]
+        wp_ids = [wp.id for wp in project.work_products]
+        assert wb_id in wp_ids
+
+        # Cleanup
+        del project_store.projects[project_id]
+
+    async def test_project_scoped_generate_cad_script(
+        self,
+        twin: InMemoryTwinAPI,
+        mcp_with_cadquery_responses: InMemoryMcpBridge,
+    ):
+        """CAD script generation with project-linked WP writes back correctly."""
+        from api_gateway.projects.routes import store as project_store
+        from api_gateway.projects.schemas import (
+            ProjectResponse,
+            ProjectWorkProductResponse,
+        )
+
+        project_id = "test-project-002"
+        seed_wp = WorkProduct(
+            name="Script Project - CAD Model",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path="",
+            content_hash="",
+            format="step",
+            created_by="project-setup",
+            metadata={"project_id": project_id},
+        )
+        created_wp = await twin.create_work_product(seed_wp)
+
+        project_store.projects[project_id] = ProjectResponse(
+            id=project_id,
+            name="Script Project",
+            description="",
+            status="draft",
+            work_products=[
+                ProjectWorkProductResponse(
+                    id=str(created_wp.id),
+                    name=created_wp.name,
+                    type="CAD_MODEL",
+                    status="created",
+                    updated_at="2026-01-01T00:00:00",
+                )
+            ],
+            agent_count=0,
+            last_updated="2026-01-01T00:00:00",
+            created_at="2026-01-01T00:00:00",
+        )
+
+        agent = MechanicalAgent(twin=twin, mcp=mcp_with_cadquery_responses)
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="generate_cad_script",
+                work_product_id=created_wp.id,
+                parameters={
+                    "description": "A bracket 50x30x20mm",
+                    "material": "aluminum_6061",
+                },
+            )
+        )
+
+        assert result.success is True
+        wb_id = result.skill_results[0].get("work_product_id")
+        assert wb_id is not None
+        from uuid import UUID as _UUID
+
+        wb_wp = await twin.get_work_product(_UUID(wb_id))
+        assert wb_wp is not None
+        assert wb_wp.metadata.get("project_id") == project_id
+
+        # Cleanup
+        del project_store.projects[project_id]

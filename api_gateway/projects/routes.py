@@ -18,11 +18,57 @@ from api_gateway.projects.schemas import (
     CreateProjectRequest,
     ProjectListResponse,
     ProjectResponse,
+    ProjectWorkProductResponse,
 )
 from observability.tracing import get_tracer
+from twin_core.api import InMemoryTwinAPI
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.projects")
+
+# ---------------------------------------------------------------------------
+# Twin integration (initialised by server lifespan)
+# ---------------------------------------------------------------------------
+
+_twin: InMemoryTwinAPI = InMemoryTwinAPI.create()
+
+
+def init_twin(twin: object) -> None:
+    """Replace the default InMemoryTwinAPI with the orchestrator's twin."""
+    global _twin  # noqa: PLW0603
+    _twin = twin  # type: ignore[assignment]
+    logger.info("projects_twin_initialized", twin_type=type(twin).__name__)
+
+
+def link_work_product_to_project(
+    project_id: str,
+    wp_id: str,
+    wp_name: str,
+    wp_type: str,
+) -> None:
+    """Add a WorkProduct reference to an existing project's work_products list."""
+    project = store.projects.get(project_id)
+    if project is None:
+        return
+    now = datetime.now(UTC).isoformat()
+    project.work_products.append(
+        ProjectWorkProductResponse(
+            id=wp_id,
+            name=wp_name,
+            type=wp_type,
+            status="created",
+            updated_at=now,
+        )
+    )
+    project.last_updated = now
+    logger.info(
+        "work_product_linked_to_project",
+        project_id=project_id,
+        work_product_id=wp_id,
+    )
+
 
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
@@ -72,8 +118,8 @@ def get_project(project_id: str) -> ProjectResponse:
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
-def create_project(body: CreateProjectRequest) -> ProjectResponse:
-    """Create a new hardware project."""
+async def create_project(body: CreateProjectRequest) -> ProjectResponse:
+    """Create a new hardware project and seed an initial WorkProduct."""
     with tracer.start_as_current_span("projects.create") as span:
         now = datetime.now(UTC).isoformat()
         project_id = str(uuid4())
@@ -89,8 +135,40 @@ def create_project(body: CreateProjectRequest) -> ProjectResponse:
             last_updated=now,
             created_at=now,
         )
+
+        # Seed an initial CAD_MODEL WorkProduct in the Twin
+        seed_wp = WorkProduct(
+            name=f"{body.name} - CAD Model",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path="",
+            content_hash="",
+            format="step",
+            created_by="project-setup",
+            metadata={"project_id": project_id},
+        )
+        created_wp = await _twin.create_work_product(seed_wp)
+        project.work_products.append(
+            ProjectWorkProductResponse(
+                id=str(created_wp.id),
+                name=created_wp.name,
+                type=(
+                    created_wp.type.value
+                    if hasattr(created_wp.type, "value")
+                    else str(created_wp.type)
+                ),
+                status="created",
+                updated_at=now,
+            )
+        )
+
         store.projects[project_id] = project
-        logger.info("project_created", project_id=project_id, name=body.name)
+        logger.info(
+            "project_created",
+            project_id=project_id,
+            name=body.name,
+            seed_wp_id=str(created_wp.id),
+        )
         return project
 
 

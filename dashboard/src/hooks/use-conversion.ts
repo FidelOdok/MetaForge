@@ -26,7 +26,10 @@ export function useUploadAndConvert() {
         materials: result.metadata.materials,
         stats: result.metadata.stats,
       };
-      loadModel(result.glb_url, manifest);
+      const glbUrl = result.glb_url.startsWith('/v1/')
+        ? `/api${result.glb_url}`
+        : result.glb_url;
+      loadModel(glbUrl, manifest);
     },
   });
 }

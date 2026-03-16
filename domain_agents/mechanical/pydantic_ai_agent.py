@@ -67,6 +67,8 @@ class MechanicalAgentDeps:
     mcp_bridge: McpBridge
     session_id: str = ""
     branch: str = "main"
+    project_id: str = ""
+    work_product_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +254,9 @@ def create_mechanical_agent(
                 branch=ctx.deps.branch,
             )
 
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else UUID(int=0)
             skill_input = GenerateMeshInput(
-                work_product_id=UUID(int=0),
+                work_product_id=_wp_id,
                 cad_file=cad_file,
                 element_size=element_size,
                 algorithm=algorithm,
@@ -306,8 +309,9 @@ def create_mechanical_agent(
             tol_specs = [ToleranceSpec.model_validate(t) for t in tolerances]
             process = ManufacturingProcess.model_validate(manufacturing_process)
 
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else UUID(int=0)
             skill_input = CheckToleranceInput(
-                work_product_id=UUID(int=0),
+                work_product_id=_wp_id,
                 tolerances=tol_specs,
                 manufacturing_process=process,
                 material=material,
@@ -358,8 +362,9 @@ def create_mechanical_agent(
                 branch=ctx.deps.branch,
             )
 
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else UUID(int=0)
             skill_input = GenerateCadInput(
-                work_product_id=UUID(int=0),
+                work_product_id=_wp_id,
                 shape_type=shape_type,
                 dimensions=dimensions,
                 material=material,

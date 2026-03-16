@@ -27,7 +27,7 @@ class GenerateCadInput(BaseModel):
         ...,
         description="Parametric shape type: bracket, plate, enclosure, cylinder",
     )
-    dimensions: dict[str, float] = Field(
+    dimensions: dict[str, Any] = Field(
         ...,
         min_length=1,
         description="Shape-specific dimensions in mm (e.g., width, height, thickness)",

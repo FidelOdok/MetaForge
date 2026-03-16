@@ -1,8 +1,31 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { execSync } from 'node:child_process';
+import dns from 'node:dns';
 import path from 'path';
 
+// Force IPv4-first resolution so http-proxy doesn't fail with ECONNREFUSED
+// when Docker DNS and Node 20's Happy Eyeballs interact badly.
+dns.setDefaultResultOrder('ipv4first');
+
+// Resolve VITE_API_URL at startup; fallback to localhost for local dev.
+// When running in Docker, resolve the hostname to an IPv4 address to avoid
+// http-proxy ECONNREFUSED issues with Node 20's autoSelectFamily.
+let apiTarget = process.env.VITE_API_URL || 'http://localhost:8000';
+try {
+  const targetUrl = new URL(apiTarget);
+  if (targetUrl.hostname !== 'localhost' && targetUrl.hostname !== '127.0.0.1') {
+    const ip = execSync(`getent hosts ${targetUrl.hostname} | awk '{print $1}'`, {
+      encoding: 'utf-8',
+    }).trim();
+    if (ip) {
+      apiTarget = `${targetUrl.protocol}//${ip}:${targetUrl.port}`;
+    }
+  }
+} catch {
+  /* keep original target */
+}
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -12,12 +35,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://localhost:8000',
+        target: apiTarget,
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/api/, ''),
       },
       '/ws': {
-        target: (process.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws'),
+        target: apiTarget.replace('http', 'ws'),
         ws: true,
       },
     },

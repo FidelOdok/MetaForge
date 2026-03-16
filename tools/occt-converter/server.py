@@ -58,9 +58,10 @@ def _parse_multipart(headers: dict, body: bytes) -> tuple[bytes, str]:
         # Extract filename
         filename = "upload.step"
         for segment in part_headers.split(";"):
-            segment = segment.strip()
+            segment = segment.strip().split("\r\n")[0].split("\n")[0]
             if segment.startswith("filename="):
-                filename = segment.split("=", 1)[1].strip('"')
+                raw = segment.split("=", 1)[1].strip().strip('"')
+                filename = raw.split('"')[0]  # stop at closing quote
                 break
 
         return part_body, filename

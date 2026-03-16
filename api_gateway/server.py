@@ -23,6 +23,7 @@ from api_gateway.health import health_router
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.projects.routes import router as projects_router
 from api_gateway.sessions.routes import router as sessions_router
+from api_gateway.twin.routes import router as twin_router
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from observability.bootstrap import init_observability, shutdown_observability
@@ -163,11 +164,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         tools=len(tool_registry.list_tools()),
     )
 
-    # Wire the real bridge and twin into chat routes
+    # Wire the real bridge and twin into chat routes and projects routes
     from api_gateway.chat.routes import init_mcp_bridge, init_twin
+    from api_gateway.projects.routes import init_twin as init_projects_twin
+    from api_gateway.twin.routes import init_twin as init_twin_viewer
 
     init_mcp_bridge(registry_bridge)
     init_twin(twin)
+    init_projects_twin(twin)
+    init_twin_viewer(twin)
 
     event_bus = create_default_bus(workflow_engine, collector=_collector)
 
@@ -307,6 +312,7 @@ def create_app(
     app.include_router(sessions_router)
     app.include_router(projects_router)
     app.include_router(compliance_router)
+    app.include_router(twin_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:
@@ -331,6 +337,7 @@ def create_app(
             "projects",
             "knowledge",
             "compliance",
+            "twin",
         ],
     )
 
