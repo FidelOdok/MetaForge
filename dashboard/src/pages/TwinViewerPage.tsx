@@ -17,7 +17,7 @@ import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel } from '../api/endpoints/twin';
 import type { TwinNode } from '../types/twin';
-import type { ModelManifest, PartInfo } from '../types/viewer';
+import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 
 const TYPE_ICONS: Record<TwinNode['type'], string> = {
   work_product: '\uD83D\uDCC4',
@@ -47,7 +47,7 @@ function NodeDetail({ node }: { node: TwinNode }) {
           name: p.name,
           meshName: p.meshName ?? p.name,
           children: (p.children ?? []) as ModelManifest['parts'],
-          boundingBox: p.boundingBox as { min: number[]; max: number[] } | undefined,
+          boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
         })),
         meshToNodeMap: {},
         materials: result.metadata.materials ?? [],
