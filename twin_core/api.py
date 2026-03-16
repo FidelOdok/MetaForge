@@ -179,9 +179,7 @@ class InMemoryTwinAPI(TwinAPI):
         return cls(graph=graph, version=version, constraints=constraints)
 
     @classmethod
-    async def create_from_env(
-        cls, collector: MetricsCollector | None = None
-    ) -> InMemoryTwinAPI:
+    async def create_from_env(cls, collector: MetricsCollector | None = None) -> InMemoryTwinAPI:
         """Factory that selects the graph backend from environment variables.
 
         Automatically detects Neo4j when ``NEO4J_URI`` is set (as configured
@@ -208,9 +206,7 @@ class InMemoryTwinAPI(TwinAPI):
             from twin_core.neo4j_graph_engine import Neo4jGraphEngine
 
             uri = neo4j_uri or "bolt://localhost:7687"
-            user = os.environ.get("NEO4J_USER") or os.environ.get(
-                "METAFORGE_NEO4J_USER", "neo4j"
-            )
+            user = os.environ.get("NEO4J_USER") or os.environ.get("METAFORGE_NEO4J_USER", "neo4j")
             password = os.environ.get("NEO4J_PASSWORD") or os.environ.get(
                 "METAFORGE_NEO4J_PASSWORD", "password"
             )
