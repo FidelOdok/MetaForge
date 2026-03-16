@@ -873,7 +873,7 @@ class MechanicalAgent:
             if pid:
                 from api_gateway.projects.routes import link_work_product_to_project
 
-                link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
+                await link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
         except Exception as exc:
             self.logger.warning("writeback_cad_failed", error=str(exc))
 
@@ -940,7 +940,7 @@ class MechanicalAgent:
             if pid:
                 from api_gateway.projects.routes import link_work_product_to_project
 
-                link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
+                await link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
         except Exception as exc:
             self.logger.warning("writeback_cad_script_failed", error=str(exc))
 

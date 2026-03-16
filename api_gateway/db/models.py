@@ -1,7 +1,8 @@
-"""SQLAlchemy async ORM models for chat persistence.
+"""SQLAlchemy async ORM models for gateway persistence.
 
-These mirror the Pydantic records in ``api_gateway.chat.models`` but use
-SQLAlchemy's ``DeclarativeBase`` so rows can be persisted to PostgreSQL.
+Covers chat (channels, threads, messages) and projects (projects,
+project→work-product links).  Uses SQLAlchemy's ``DeclarativeBase``
+so rows can be persisted to PostgreSQL.
 
 The module is importable only when ``sqlalchemy`` is installed.  Callers
 should guard with ``api_gateway.db.HAS_SQLALCHEMY`` before importing.
@@ -12,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -81,6 +82,52 @@ class ChatMessageRow(Base):
         server_default=func.now(),
         default=lambda: datetime.now(UTC),
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+# ── Project tables ──────────────────────────────────────────────────
+
+
+class ProjectRow(Base):
+    """``projects`` table."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="draft")
+    agent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        default=lambda: datetime.now(UTC),
+    )
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+class ProjectWorkProductRow(Base):
+    """``project_work_products`` table — links projects to their work products."""
+
+    __tablename__ = "project_work_products"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    work_product_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="created")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

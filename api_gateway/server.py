@@ -200,14 +200,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Initialize PostgreSQL schema if DATABASE_URL is set
     await _init_database()
 
-    # Initialize chat backend (PG or in-memory)
+    # Initialize chat and project backends (PG or in-memory)
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
+    from api_gateway.projects.backend import create_project_backend
+    from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
     from api_gateway.twin.routes import init_twin as init_twin_viewer
 
     chat_backend = await create_backend()
     init_chat_backend(chat_backend)
+
+    project_backend = await create_project_backend()
+    init_project_backend(project_backend)
 
     # Wire the real bridge and twin into chat routes and projects routes
     init_mcp_bridge(registry_bridge)
