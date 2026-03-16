@@ -139,6 +139,30 @@ ACTION_WORKFLOWS: dict[str, WorkflowDefinition] = {
 }
 
 
+async def _init_database() -> None:
+    """Create PostgreSQL tables if DATABASE_URL is set and SQLAlchemy is available."""
+    try:
+        from api_gateway.db import HAS_SQLALCHEMY
+        from api_gateway.db.engine import get_engine
+
+        if not HAS_SQLALCHEMY:
+            logger.debug("pg_init_skipped", reason="sqlalchemy not installed")
+            return
+
+        engine = get_engine()
+        if engine is None:
+            logger.debug("pg_init_skipped", reason="DATABASE_URL not set")
+            return
+
+        from api_gateway.db.models import Base
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("pg_tables_created")
+    except Exception as exc:
+        logger.warning("pg_init_failed", error=str(exc))
+
+
 async def _init_orchestrator(app: FastAPI) -> None:
     """Wire up orchestrator subsystems and store on app.state."""
     # Skip if test-injected components are already present
@@ -173,11 +197,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
         tools=len(tool_registry.list_tools()),
     )
 
-    # Wire the real bridge and twin into chat routes and projects routes
-    from api_gateway.chat.routes import init_mcp_bridge, init_twin
+    # Initialize PostgreSQL schema if DATABASE_URL is set
+    await _init_database()
+
+    # Initialize chat backend (PG or in-memory)
+    from api_gateway.chat.backend import create_backend
+    from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
     from api_gateway.projects.routes import init_twin as init_projects_twin
     from api_gateway.twin.routes import init_twin as init_twin_viewer
 
+    chat_backend = await create_backend()
+    init_chat_backend(chat_backend)
+
+    # Wire the real bridge and twin into chat routes and projects routes
     init_mcp_bridge(registry_bridge)
     init_twin(twin)
     init_projects_twin(twin)
@@ -297,6 +329,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if hasattr(graph, "close"):
             await graph.close()
             logger.info("neo4j_connection_closed")
+    # Dispose PostgreSQL engine
+    try:
+        from api_gateway.db.engine import dispose_engine
+
+        await dispose_engine()
+    except Exception:
+        pass
     shutdown_observability(_otel_state)
 
 

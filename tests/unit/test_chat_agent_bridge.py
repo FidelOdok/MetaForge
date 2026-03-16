@@ -18,8 +18,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api_gateway.chat.routes import ChatStore, router
-from api_gateway.chat.routes import store as _module_store
+from api_gateway.chat.backend import InMemoryChatBackend
+from api_gateway.chat.routes import init_chat_backend, router
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -28,12 +28,9 @@ from api_gateway.chat.routes import store as _module_store
 
 @pytest.fixture(autouse=True)
 def _reset_store() -> None:
-    """Reset the module-level store before every test."""
-    fresh = ChatStore.create()
-    _module_store.channels.clear()
-    _module_store.channels.update(fresh.channels)
-    _module_store.threads.clear()
-    _module_store.messages.clear()
+    """Reset the module-level backend before every test."""
+    fresh = InMemoryChatBackend.create()
+    init_chat_backend(fresh)
 
 
 @pytest.fixture()

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from api_gateway.chat.routes import ChatStore
+from api_gateway.chat.backend import InMemoryChatBackend as ChatStore
 from twin_core.api import InMemoryTwinAPI
 
 # ---------------------------------------------------------------------------
