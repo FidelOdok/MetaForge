@@ -1,8 +1,8 @@
 """Unit tests for chat REST endpoints (MET-82).
 
 Uses FastAPI's TestClient to exercise every endpoint under
-``/v1/chat``.  The in-memory ``ChatStore`` is reset between tests
-so they remain independent.
+``/v1/chat``.  The in-memory ``InMemoryChatBackend`` is reset between
+tests so they remain independent.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api_gateway.chat.routes import ChatStore, router
-from api_gateway.chat.routes import store as _module_store
+from api_gateway.chat.backend import InMemoryChatBackend
+from api_gateway.chat.routes import init_chat_backend, router
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -21,12 +21,9 @@ from api_gateway.chat.routes import store as _module_store
 
 @pytest.fixture(autouse=True)
 def _reset_store() -> None:
-    """Reset the module-level store before every test so tests are isolated."""
-    fresh = ChatStore.create()
-    _module_store.channels.clear()
-    _module_store.channels.update(fresh.channels)
-    _module_store.threads.clear()
-    _module_store.messages.clear()
+    """Reset the module-level backend before every test so tests are isolated."""
+    fresh = InMemoryChatBackend.create()
+    init_chat_backend(fresh)
 
 
 @pytest.fixture()
@@ -80,6 +77,15 @@ def _send_message(
     )
     assert resp.status_code == 201
     return resp.json()
+
+
+def _get_backend() -> InMemoryChatBackend:
+    """Return the current module-level backend (must be InMemoryChatBackend)."""
+    from api_gateway.chat import routes
+
+    backend = routes._backend
+    assert isinstance(backend, InMemoryChatBackend)
+    return backend
 
 
 # ===================================================================
@@ -245,14 +251,16 @@ class TestListThreads:
 
     def test_archived_excluded_by_default(self, client: TestClient) -> None:
         created = _create_thread(client)
-        # Manually archive the thread via the store
-        _module_store.threads[created["id"]].archived = True
+        # Manually archive the thread via the backend
+        backend = _get_backend()
+        backend.threads[created["id"]].archived = True
         resp = client.get("/v1/chat/threads")
         assert resp.json()["total"] == 0
 
     def test_include_archived(self, client: TestClient) -> None:
         created = _create_thread(client)
-        _module_store.threads[created["id"]].archived = True
+        backend = _get_backend()
+        backend.threads[created["id"]].archived = True
         resp = client.get("/v1/chat/threads?include_archived=true")
         assert resp.json()["total"] == 1
 

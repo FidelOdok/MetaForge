@@ -1,8 +1,8 @@
 """Chat REST endpoints for the MetaForge Gateway.
 
 Provides CRUD operations on chat channels, threads, and messages.
-All state is held in an in-memory ``ChatStore`` for now; production
-will swap in a PostgreSQL-backed implementation.
+Storage is delegated to a ``ChatBackend`` — either PostgreSQL (when
+``DATABASE_URL`` is set) or an in-memory fallback.
 
 When a user message is posted, the handler routes it to the appropriate
 domain agent (if an LLM is configured) and appends the agent's response
@@ -21,8 +21,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from api_gateway.chat.agent_router import default_router
+from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
 from api_gateway.chat.models import (
-    ChatChannelRecord,
     ChatMessageRecord,
     ChatThreadRecord,
 )
@@ -51,63 +51,26 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.chat.routes")
 
 # ---------------------------------------------------------------------------
-# In-memory store
+# Module-level backend & router
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CHANNELS: list[dict[str, str]] = [
-    {"name": "Session Chat", "scope_kind": "session"},
-    {"name": "Approval Chat", "scope_kind": "approval"},
-    {"name": "BOM Discussion", "scope_kind": "bom-entry"},
-    {"name": "Digital Twin", "scope_kind": "digital-twin-node"},
-    {"name": "Project Chat", "scope_kind": "project"},
-]
-
-
-class ChatStore:
-    """Dict-backed chat storage (channels, threads, messages).
-
-    This is intentionally simple -- production code will use PostgreSQL
-    via SQLAlchemy / asyncpg.
-    """
-
-    def __init__(self) -> None:
-        self.channels: dict[str, ChatChannelRecord] = {}
-        self.threads: dict[str, ChatThreadRecord] = {}
-        self.messages: dict[str, list[ChatMessageRecord]] = {}
-
-    @classmethod
-    def create(cls) -> ChatStore:
-        """Return a new store pre-populated with the default channels."""
-        store = cls()
-        for ch in _DEFAULT_CHANNELS:
-            channel = ChatChannelRecord(
-                id=str(uuid4()),
-                name=ch["name"],
-                scope_kind=ch["scope_kind"],
-            )
-            store.channels[channel.id] = channel
-        return store
-
-    # -- helpers ----------------------------------------------------------
-
-    def channel_for_scope(self, scope_kind: str) -> ChatChannelRecord | None:
-        """Return the first channel matching *scope_kind*, or ``None``."""
-        for ch in self.channels.values():
-            if ch.scope_kind == scope_kind:
-                return ch
-        return None
-
-    def message_count(self, thread_id: str) -> int:
-        return len(self.messages.get(thread_id, []))
-
-
-# ---------------------------------------------------------------------------
-# Module-level store & router
-# ---------------------------------------------------------------------------
-
-store = ChatStore.create()
+_backend: ChatBackend = InMemoryChatBackend.create()
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
+
+
+def init_chat_backend(backend: ChatBackend) -> None:
+    """Replace the default in-memory backend with a production backend.
+
+    Called by the API Gateway lifespan after determining the storage backend.
+    """
+    global _backend  # noqa: PLW0603
+    _backend = backend
+    logger.info("chat_backend_initialized", backend_type=type(backend).__name__)
+
+
+# Legacy alias — kept for backward compatibility with tests that import `store`
+store = _backend
 
 # ---------------------------------------------------------------------------
 # Module-level singletons for agent invocation
@@ -274,8 +237,9 @@ async def _invoke_agent(
 
 
 @router.get("/channels", response_model=ChannelListResponse)
-def list_channels() -> ChannelListResponse:
+async def list_channels() -> ChannelListResponse:
     """Return all available chat channels."""
+    channels_list = await _backend.list_channels()
     channels = [
         ChannelResponse(
             id=ch.id,
@@ -283,7 +247,7 @@ def list_channels() -> ChannelListResponse:
             scope_kind=ch.scope_kind,
             created_at=ch.created_at,
         )
-        for ch in store.channels.values()
+        for ch in channels_list
     ]
     return ChannelListResponse(channels=channels)
 
@@ -294,7 +258,7 @@ def list_channels() -> ChannelListResponse:
 
 
 @router.get("/threads", response_model=ThreadListResponse)
-def list_threads(
+async def list_threads(
     channel_id: str | None = Query(default=None, description="Filter by channel ID"),
     scope_kind: str | None = Query(default=None, description="Filter by scope kind"),
     entity_id: str | None = Query(default=None, description="Filter by scope entity ID"),
@@ -303,26 +267,14 @@ def list_threads(
     per_page: int = Query(default=20, ge=1, le=100, description="Results per page"),
 ) -> ThreadListResponse:
     """List threads with optional filtering and pagination."""
-    threads = list(store.threads.values())
-
-    # -- filtering --------------------------------------------------------
-    if not include_archived:
-        threads = [t for t in threads if not t.archived]
-    if channel_id is not None:
-        threads = [t for t in threads if t.channel_id == channel_id]
-    if scope_kind is not None:
-        threads = [t for t in threads if t.scope_kind == scope_kind]
-    if entity_id is not None:
-        threads = [t for t in threads if t.scope_entity_id == entity_id]
-
-    # -- sort by last_message_at descending -------------------------------
-    threads.sort(key=lambda t: t.last_message_at, reverse=True)
-
-    total = len(threads)
-
-    # -- pagination -------------------------------------------------------
-    start = (page - 1) * per_page
-    page_threads = threads[start : start + per_page]
+    page_threads, total = await _backend.list_threads(
+        channel_id=channel_id,
+        scope_kind=scope_kind,
+        entity_id=entity_id,
+        include_archived=include_archived,
+        page=page,
+        per_page=per_page,
+    )
 
     summaries = [
         ThreadSummaryResponse(
@@ -334,7 +286,7 @@ def list_threads(
             archived=t.archived,
             created_at=t.created_at,
             last_message_at=t.last_message_at,
-            message_count=store.message_count(t.id),
+            message_count=await _backend.message_count(t.id),
         )
         for t in page_threads
     ]
@@ -348,13 +300,13 @@ def list_threads(
 
 
 @router.get("/threads/{thread_id}", response_model=ThreadResponse)
-def get_thread(thread_id: str) -> ThreadResponse:
+async def get_thread(thread_id: str) -> ThreadResponse:
     """Return a single thread with all its messages."""
-    thread = store.threads.get(thread_id)
+    thread = await _backend.get_thread(thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    msgs = store.messages.get(thread_id, [])
+    msgs = await _backend.get_messages(thread_id)
     return ThreadResponse(
         id=thread.id,
         channel_id=thread.channel_id,
@@ -364,80 +316,40 @@ def get_thread(thread_id: str) -> ThreadResponse:
         archived=thread.archived,
         created_at=thread.created_at,
         last_message_at=thread.last_message_at,
-        messages=[
-            MessageResponse(
-                id=m.id,
-                thread_id=m.thread_id,
-                actor_id=m.actor_id,
-                actor_kind=m.actor_kind,
-                content=m.content,
-                status=m.status,
-                graph_ref_node=m.graph_ref_node,
-                graph_ref_type=m.graph_ref_type,
-                graph_ref_label=m.graph_ref_label,
-                created_at=m.created_at,
-                updated_at=m.updated_at,
-            )
-            for m in msgs
-        ],
+        messages=[_make_message_response(m) for m in msgs],
     )
 
 
 @router.post("/threads", response_model=ThreadResponse, status_code=201)
-def create_thread(body: CreateThreadRequest) -> ThreadResponse:
+async def create_thread(body: CreateThreadRequest) -> ThreadResponse:
     """Create a new thread, optionally with an initial message."""
-    # Resolve channel by scope_kind
-    channel = store.channel_for_scope(body.scope_kind)
+    channel = await _backend.channel_for_scope(body.scope_kind)
     if channel is None:
         raise HTTPException(
             status_code=400,
             detail=f"No channel found for scope_kind={body.scope_kind!r}",
         )
 
-    now = datetime.now(UTC)
-    thread_id = str(uuid4())
-    title = body.title or f"Thread {thread_id[:8]}"
+    thread_id_short = str(uuid4())[:8]
+    title = body.title or f"Thread {thread_id_short}"
 
-    thread = ChatThreadRecord(
-        id=thread_id,
+    thread = await _backend.create_thread(
         channel_id=channel.id,
         scope_kind=body.scope_kind,
         scope_entity_id=body.scope_entity_id,
         title=title,
-        created_at=now,
-        last_message_at=now,
     )
-    store.threads[thread_id] = thread
-    store.messages[thread_id] = []
 
     messages: list[MessageResponse] = []
 
     if body.initial_message:
-        msg = ChatMessageRecord(
-            id=str(uuid4()),
-            thread_id=thread_id,
+        msg = await _backend.add_message(
+            thread_id=thread.id,
             actor_id="system",
             actor_kind="system",
             content=body.initial_message,
-            created_at=now,
-            updated_at=now,
         )
-        store.messages[thread_id].append(msg)
-        messages.append(
-            MessageResponse(
-                id=msg.id,
-                thread_id=msg.thread_id,
-                actor_id=msg.actor_id,
-                actor_kind=msg.actor_kind,
-                content=msg.content,
-                status=msg.status,
-                graph_ref_node=msg.graph_ref_node,
-                graph_ref_type=msg.graph_ref_type,
-                graph_ref_label=msg.graph_ref_label,
-                created_at=msg.created_at,
-                updated_at=msg.updated_at,
-            )
-        )
+        messages.append(_make_message_response(msg))
 
     return ThreadResponse(
         id=thread.id,
@@ -469,13 +381,11 @@ async def send_message(thread_id: str, body: SendMessageRequest) -> MessageRespo
     appropriate domain agent (when an LLM is configured).  The agent's
     response is inserted into the thread automatically.
     """
-    thread = store.threads.get(thread_id)
+    thread = await _backend.get_thread(thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    now = datetime.now(UTC)
-    msg = ChatMessageRecord(
-        id=str(uuid4()),
+    msg = await _backend.add_message(
         thread_id=thread_id,
         actor_id=body.actor_id,
         actor_kind=body.actor_kind,
@@ -483,20 +393,19 @@ async def send_message(thread_id: str, body: SendMessageRequest) -> MessageRespo
         graph_ref_node=body.graph_ref_node,
         graph_ref_type=body.graph_ref_type,
         graph_ref_label=body.graph_ref_label,
-        created_at=now,
-        updated_at=now,
     )
-    store.messages.setdefault(thread_id, []).append(msg)
-
-    # Update thread timestamp
-    thread.last_message_at = now
 
     # --- Agent invocation (async) ----------------------------------------
     if body.actor_kind == "user":
         agent_msg = await _invoke_agent(thread, body.content)
         if agent_msg is not None:
-            store.messages[thread_id].append(agent_msg)
-            thread.last_message_at = agent_msg.created_at
+            await _backend.add_message(
+                thread_id=thread_id,
+                actor_id=agent_msg.actor_id,
+                actor_kind=agent_msg.actor_kind,
+                content=agent_msg.content,
+                status=agent_msg.status,
+            )
 
     return _make_message_response(msg)
 
@@ -520,7 +429,7 @@ async def stream_thread_events(thread_id: str) -> StreamingResponse:
     The connection stays open until the client disconnects or the server
     closes the stream.
     """
-    thread = store.threads.get(thread_id)
+    thread = await _backend.get_thread(thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
