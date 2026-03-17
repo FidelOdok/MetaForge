@@ -105,7 +105,7 @@ class TaskRequest(BaseModel):
     """A request for the mechanical agent to perform a task."""
 
     task_type: str  # "validate_stress", "check_tolerances", "generate_mesh", "full_validation"
-    work_product_id: UUID
+    work_product_id: UUID | None = None
     parameters: dict[str, Any] = {}
     branch: str = "main"
 
@@ -114,7 +114,7 @@ class TaskResult(BaseModel):
     """Result of a mechanical agent task."""
 
     task_type: str
-    work_product_id: UUID
+    work_product_id: UUID | None = None
     success: bool
     skill_results: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -539,19 +539,22 @@ class MechanicalAgent:
                 ],
             )
 
-        # Verify work_product exists
-        work_product = await self.twin.get_work_product(
-            request.work_product_id, branch=request.branch
-        )
-        if work_product is None:
-            return TaskResult(
-                task_type=request.task_type,
-                work_product_id=request.work_product_id,
-                success=False,
-                errors=[
-                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
-                ],
+        # Verify work_product exists (skip for generative actions without one)
+        if request.work_product_id is not None:
+            work_product = await self.twin.get_work_product(
+                request.work_product_id, branch=request.branch
             )
+            if work_product is None:
+                wp = request.work_product_id
+                return TaskResult(
+                    task_type=request.task_type,
+                    work_product_id=wp,
+                    success=False,
+                    errors=[
+                        f"WorkProduct {wp} not found "
+                        f"on branch '{request.branch}'"
+                    ],
+                )
 
         # Route to handler
         handler = self._get_handler(request.task_type)

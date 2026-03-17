@@ -439,25 +439,22 @@ class InMemoryScheduler(Scheduler):
 
 
 def _build_task_request(step: ScheduledStep) -> Any:
-    """Build a TaskRequest-like object for the agent.
+    """Build a TaskRequest for the agent.
 
-    Returns a plain dict so it works with any agent implementation.
+    Always returns a proper TaskRequest instance so agents can rely on
+    dot-notation attribute access. work_product_id is None for generative
+    actions (e.g. generate_cad without an existing work product).
     """
     from domain_agents.mechanical.agent import TaskRequest
 
     work_product_id = step.work_product_id or step.parameters.get("work_product_id")
-    if work_product_id is None:
-        # Return raw dict if no work_product_id — agent decides how to handle
-        return {
-            "task_type": step.task_type,
-            "parameters": step.parameters,
-            "branch": step.branch,
-        }
+    wp_uuid: UUID | None = None
+    if work_product_id is not None:
+        wp_uuid = UUID(work_product_id) if isinstance(work_product_id, str) else work_product_id
+
     return TaskRequest(
         task_type=step.task_type,
-        work_product_id=UUID(work_product_id)
-        if isinstance(work_product_id, str)
-        else work_product_id,
+        work_product_id=wp_uuid,
         parameters=step.parameters,
         branch=step.branch,
     )
