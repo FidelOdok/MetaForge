@@ -1,0 +1,34 @@
+# Dev override — auto-merged by Docker Compose.
+#
+# Mounts local source into the gateway container so code changes
+# take effect immediately via uvicorn --reload. No rebuild needed.
+#
+# Usage:
+#   docker compose up gateway dashboard-dev   # Gateway + Vite HMR dashboard
+#   docker compose up                         # Same — override is auto-applied
+#
+# To run WITHOUT the override (production-like):
+#   docker compose -f docker-compose.yml up
+
+services:
+  gateway:
+    command: >
+      uvicorn api_gateway.server:app
+      --host 0.0.0.0 --port 8000 --reload
+      --reload-dir /app/api_gateway
+      --reload-dir /app/orchestrator
+      --reload-dir /app/twin_core
+      --reload-dir /app/shared
+    volumes:
+      - ./api_gateway:/app/api_gateway
+      - ./orchestrator:/app/orchestrator
+      - ./twin_core:/app/twin_core
+      - ./digital_twin:/app/digital_twin
+      - ./shared:/app/shared
+      - ./skill_registry:/app/skill_registry
+      - ./mcp_core:/app/mcp_core
+      - ./tool_registry:/app/tool_registry
+      - ./domain_agents:/app/domain_agents
+      - ./observability:/app/observability
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - adapter-workspace:/workspace:ro
