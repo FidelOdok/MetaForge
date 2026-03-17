@@ -1,7 +1,7 @@
 # Dev override — auto-merged by Docker Compose.
 #
-# Mounts local source into the gateway container so code changes
-# take effect immediately via uvicorn --reload. No rebuild needed.
+# Mounts local source into containers so code changes take effect
+# instantly via hot-reload. No rebuild needed.
 #
 # Usage:
 #   docker compose up gateway dashboard-dev   # Gateway + Vite HMR dashboard
@@ -19,6 +19,8 @@ services:
       --reload-dir /app/orchestrator
       --reload-dir /app/twin_core
       --reload-dir /app/shared
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
     volumes:
       - ./api_gateway:/app/api_gateway
       - ./orchestrator:/app/orchestrator
@@ -32,3 +34,22 @@ services:
       - ./observability:/app/observability
       - ./pyproject.toml:/app/pyproject.toml:ro
       - adapter-workspace:/workspace:ro
+
+  dashboard-dev:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    volumes:
+      - ./dashboard:/app
+      - dashboard-node-modules:/app/node_modules
+    environment:
+      - VITE_API_URL=http://gateway:8000
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
