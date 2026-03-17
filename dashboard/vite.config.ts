@@ -33,6 +33,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    watch: {
+      // Enable polling for WSL2 — inotify events don't cross the
+      // Windows ↔ Linux filesystem boundary, so Vite's default
+      // watcher never fires. Polling every 1s is a reliable fallback.
+      usePolling: !!process.env.CHOKIDAR_USEPOLLING,
+      interval: 1000,
+    },
     proxy: {
       '/api': {
         target: apiTarget,
