@@ -446,8 +446,17 @@ class MechanicalAgent:
                 work_product_id=str(request.work_product_id),
             )
 
-            # Try PydanticAI path if LLM is available
-            if is_llm_available() and request.task_type in self.SUPPORTED_TASKS:
+            # Generative tasks use the hardcoded dispatch path directly
+            # because the LLM path doesn't reliably call tools for
+            # generation actions and doesn't perform Twin writeback.
+            _GENERATIVE_TASKS = {"generate_cad", "generate_cad_script"}
+
+            # Try PydanticAI path if LLM is available (non-generative only)
+            if (
+                is_llm_available()
+                and request.task_type in self.SUPPORTED_TASKS
+                and request.task_type not in _GENERATIVE_TASKS
+            ):
                 try:
                     result = await self._run_with_llm(request)
                     span.set_attribute("agent.mode", "llm")
@@ -469,19 +478,22 @@ class MechanicalAgent:
         if agent is None:
             raise RuntimeError("PydanticAI agent could not be created")
 
-        # Verify work_product exists first
-        work_product = await self.twin.get_work_product(
-            request.work_product_id, branch=request.branch
-        )
-        if work_product is None:
-            return TaskResult(
-                task_type=request.task_type,
-                work_product_id=request.work_product_id,
-                success=False,
-                errors=[
-                    f"WorkProduct {request.work_product_id} not found on branch '{request.branch}'"
-                ],
+        # Verify work_product exists (skip for generative actions without one)
+        if request.work_product_id is not None:
+            work_product = await self.twin.get_work_product(
+                request.work_product_id, branch=request.branch
             )
+            if work_product is None:
+                wp = request.work_product_id
+                return TaskResult(
+                    task_type=request.task_type,
+                    work_product_id=wp,
+                    success=False,
+                    errors=[
+                        f"WorkProduct {wp} not found "
+                        f"on branch '{request.branch}'"
+                    ],
+                )
 
         deps = AgentDependencies(
             twin=self.twin,
@@ -505,13 +517,51 @@ class MechanicalAgent:
 
         mechanical_result: MechanicalResult = result.output
 
+        skill_results = (
+            mechanical_result.tool_calls
+            if mechanical_result.tool_calls
+            else [mechanical_result.analysis]
+        )
+
+        # Writeback for CAD generation tasks from the LLM path
+        wp_id = request.work_product_id
+        if (
+            mechanical_result.overall_passed
+            and request.task_type in ("generate_cad", "generate_cad_script")
+        ):
+            # Find a skill result with cad_file to write back
+            for sr in skill_results:
+                if isinstance(sr, dict) and sr.get("cad_file"):
+                    pid = request.parameters.get("project_id", "")
+                    try:
+                        wb = await writeback_cad(
+                            self.twin,
+                            self.session_id,
+                            request.branch,
+                            sr,
+                            project_id=pid,
+                        )
+                        sr["work_product_id"] = str(wb.id)
+                        wp_id = wb.id
+                        if pid:
+                            from api_gateway.projects.routes import (
+                                link_work_product_to_project,
+                            )
+
+                            await link_work_product_to_project(
+                                pid, str(wb.id), wb.name, wb.type.value
+                            )
+                    except Exception as exc:
+                        self.logger.warning(
+                            "writeback_cad_llm_failed", error=str(exc)
+                        )
+                    break
+
         return TaskResult(
             task_type=request.task_type,
-            work_product_id=request.work_product_id,
+            work_product_id=wp_id,
             success=mechanical_result.overall_passed,
-            skill_results=mechanical_result.tool_calls
-            if mechanical_result.tool_calls
-            else [mechanical_result.analysis],
+            skill_results=skill_results,
             warnings=(
                 mechanical_result.recommendations if not mechanical_result.overall_passed else []
             ),
@@ -519,7 +569,13 @@ class MechanicalAgent:
 
     def _build_prompt(self, request: TaskRequest) -> str:
         """Build a natural language prompt from a structured TaskRequest."""
-        parts = [f"Perform a '{request.task_type}' task on work_product {request.work_product_id}."]
+        if request.work_product_id is not None:
+            wp = request.work_product_id
+            parts = [f"Perform a '{request.task_type}' task on work_product {wp}."]
+        else:
+            # Generative action — use the prompt/description from parameters
+            desc = request.parameters.get("prompt") or request.parameters.get("description", "")
+            parts = [f"Perform a '{request.task_type}' task: {desc}".rstrip(": ") + "."]
         if request.parameters:
             parts.append(f"Parameters: {request.parameters}")
         return " ".join(parts)
@@ -556,8 +612,17 @@ class MechanicalAgent:
                     ],
                 )
 
-        # Route to handler
-        handler = self._get_handler(request.task_type)
+        # Route to handler. For generate_cad with a prompt/description
+        # but no shape_type, use the script-based generation path which
+        # takes a natural language description.
+        task = request.task_type
+        if task == "generate_cad" and not request.parameters.get("shape_type"):
+            desc = request.parameters.get("prompt") or request.parameters.get("description")
+            if desc:
+                task = "generate_cad_script"
+                request.parameters["description"] = desc
+
+        handler = self._get_handler(task)
         return await handler(request)
 
     def _get_handler(
@@ -861,9 +926,14 @@ class MechanicalAgent:
         }
 
         # Writeback: create a new CAD_MODEL WorkProduct
-        # Extract project_id from the source WorkProduct metadata (if present)
-        src_wp = await self.twin.get_work_product(request.work_product_id, branch=request.branch)
-        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
+        # Get project_id from request parameters or source WorkProduct metadata
+        pid = request.parameters.get("project_id", "")
+        if not pid and request.work_product_id is not None:
+            src_wp = await self.twin.get_work_product(
+                request.work_product_id, branch=request.branch
+            )
+            if src_wp:
+                pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "")
         try:
             wb = await writeback_cad(
                 self.twin,
@@ -929,8 +999,14 @@ class MechanicalAgent:
         }
 
         # Writeback: create a new CAD_MODEL WorkProduct
-        src_wp = await self.twin.get_work_product(request.work_product_id, branch=request.branch)
-        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
+        # Get project_id from source work product or from request parameters
+        pid = request.parameters.get("project_id", "")
+        if not pid and request.work_product_id is not None:
+            src_wp = await self.twin.get_work_product(
+                request.work_product_id, branch=request.branch
+            )
+            if src_wp:
+                pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "")
         try:
             wb = await writeback_cad(
                 self.twin,

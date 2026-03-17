@@ -86,13 +86,15 @@ async def submit_request(body: AssistantRequest, request: Request) -> AssistantR
             f"Available: {', '.join(sorted(action_workflows.keys()))}",
         )
 
-    # Inject work_product_id, prompt, and parameters into each step
+    # Inject work_product_id, prompt, project_id, and parameters into each step
     for step in defn.steps:
         extra = {**body.parameters}
         if body.target_id:
             extra["work_product_id"] = str(body.target_id)
         if body.prompt:
             extra["prompt"] = body.prompt
+        if body.project_id:
+            extra["project_id"] = body.project_id
         step.parameters = {**step.parameters, **extra}
 
     # Build dependency graph for this specific workflow

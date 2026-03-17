@@ -22,7 +22,9 @@ class BoundingBox(BaseModel):
 class GenerateCadScriptInput(BaseModel):
     """Input for the generate_cad_script skill."""
 
-    work_product_id: UUID = Field(..., description="Twin work_product ID for the CAD model")
+    work_product_id: UUID | None = Field(
+        default=None, description="Twin work_product ID (optional for new generation)"
+    )
     description: str = Field(
         ...,
         min_length=1,

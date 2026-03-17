@@ -66,11 +66,15 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
         """Check that the work_product exists and at least one CAD tool is available."""
         errors: list[str] = []
 
-        work_product = await self.context.twin.get_work_product(
-            input_data.work_product_id, branch=self.context.branch
-        )
-        if work_product is None:
-            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
+        # Work product lookup is optional for generative actions
+        if input_data.work_product_id is not None:
+            work_product = await self.context.twin.get_work_product(
+                input_data.work_product_id, branch=self.context.branch
+            )
+            if work_product is None:
+                errors.append(
+                    f"WorkProduct {input_data.work_product_id} not found in Twin"
+                )
 
         # Check that at least one backend is available
         cadquery_ok = await self.context.mcp.is_available("cadquery.create_parametric")

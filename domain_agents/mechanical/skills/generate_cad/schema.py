@@ -22,7 +22,9 @@ class BoundingBox(BaseModel):
 class GenerateCadInput(BaseModel):
     """Input for the generate_cad skill."""
 
-    work_product_id: UUID = Field(..., description="Twin work_product ID for the CAD model")
+    work_product_id: UUID | None = Field(
+        default=None, description="Twin work_product ID (optional for new generation)"
+    )
     shape_type: str = Field(
         ...,
         description="Parametric shape type: bracket, plate, enclosure, cylinder",
@@ -53,7 +55,9 @@ class GenerateCadInput(BaseModel):
 class GenerateCadOutput(BaseModel):
     """Output from the generate_cad skill."""
 
-    work_product_id: UUID = Field(..., description="Twin work_product ID")
+    work_product_id: UUID | None = Field(
+        default=None, description="Twin work_product ID (None for new generation)"
+    )
     cad_file: str = Field(..., description="Path to generated STEP file")
     shape_type: str = Field(..., description="Shape type that was generated")
     volume_mm3: float = Field(..., ge=0, description="Volume in cubic millimeters")
