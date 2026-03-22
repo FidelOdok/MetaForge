@@ -7,16 +7,28 @@ Endpoints live under ``/v1/twin``.
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from api_gateway.convert.service import ConversionService
+from api_gateway.twin.import_schemas import ImportWorkProductResponse
+from api_gateway.twin.import_service import (
+    ALLOWED_EXTENSIONS,
+    MAX_FILE_SIZE,
+    ImportService,
+    get_extension,
+    infer_domain,
+    infer_wp_type,
+)
 from api_gateway.twin.schemas import TwinNodeListResponse, TwinNodeResponse
 from observability.tracing import get_tracer
+from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI
+from twin_core.models.enums import WorkProductType
 from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
@@ -165,3 +177,139 @@ async def get_node_model(
             cached=result.get("cached", False),
         )
         return result
+
+
+# ---------------------------------------------------------------------------
+# Import endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/import", response_model=ImportWorkProductResponse, status_code=201)
+async def import_work_product(
+    file: UploadFile = File(..., description="Design file to import"),
+    project_id: str | None = Form(None, description="Project to link to"),
+    domain: str | None = Form(None, description="Domain (mechanical, electronics)"),
+    wp_type: str | None = Form(None, description="Work product type"),
+    description: str = Form("", description="Work product description"),
+) -> ImportWorkProductResponse:
+    """Upload a design file and register it as a work product in the Twin.
+
+    Accepts STEP, IGES, KiCad (.kicad_sch, .kicad_pcb), and FreeCAD
+    (.FCStd) files. Metadata is extracted automatically based on file type.
+    """
+    with tracer.start_as_current_span("twin.import_work_product") as span:
+        filename = file.filename or "unknown"
+        ext = get_extension(filename)
+        span.set_attribute("import.filename", filename)
+        span.set_attribute("import.extension", ext)
+
+        # Validate extension
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported file type '{ext}'. "
+                    f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+                ),
+            )
+
+        # Read and validate content
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large ({len(content)} bytes). Max: {MAX_FILE_SIZE}",
+            )
+
+        # Resolve domain and type
+        resolved_domain = domain or infer_domain(ext)
+        if wp_type is not None:
+            try:
+                resolved_type = WorkProductType(wp_type)
+            except ValueError:
+                valid = [t.value for t in WorkProductType]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid wp_type '{wp_type}'. Valid: {valid}",
+                )
+        else:
+            resolved_type = infer_wp_type(ext)
+
+        # Extract metadata
+        import_service = ImportService()
+        metadata = await import_service.extract_metadata(content, filename)
+
+        # Store file
+        content_hash = default_storage.content_hash(content)
+        session_id = f"import-{uuid4()}"
+        stored_path = default_storage.save(session_id, filename, content)
+
+        # Build name from description or filename
+        name = description.strip()[:60] if description.strip() else Path(filename).stem
+
+        # Create WorkProduct
+        now = datetime.now(UTC)
+        wp = WorkProduct(
+            id=uuid4(),
+            name=name,
+            type=resolved_type,
+            domain=resolved_domain,
+            file_path=stored_path,
+            content_hash=content_hash,
+            format=ext.lstrip("."),
+            metadata={
+                "imported": True,
+                "original_filename": filename,
+                "session_id": session_id,
+                "timestamp": now.isoformat(),
+                **metadata,
+            },
+            created_at=now,
+            updated_at=now,
+            created_by="import-api",
+        )
+
+        created_wp = await _twin.create_work_product(wp)
+
+        # Link to project if requested
+        if project_id:
+            try:
+                from api_gateway.projects.routes import link_work_product_to_project
+
+                await link_work_product_to_project(
+                    project_id,
+                    str(created_wp.id),
+                    created_wp.name,
+                    created_wp.type.value,
+                )
+            except Exception as exc:
+                span.record_exception(exc)
+                logger.warning(
+                    "import_project_link_failed",
+                    project_id=project_id,
+                    error=str(exc),
+                )
+
+        logger.info(
+            "work_product_imported",
+            wp_id=str(created_wp.id),
+            filename=filename,
+            domain=resolved_domain,
+            wp_type=resolved_type.value,
+            project_id=project_id,
+        )
+
+        return ImportWorkProductResponse(
+            id=str(created_wp.id),
+            name=created_wp.name,
+            domain=resolved_domain,
+            wp_type=resolved_type.value,
+            file_path=stored_path,
+            content_hash=content_hash,
+            format=ext.lstrip("."),
+            metadata=metadata,
+            project_id=project_id,
+            created_at=now.isoformat(),
+        )
