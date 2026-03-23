@@ -15,6 +15,15 @@ import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from api_gateway.convert.service import ConversionService
+from api_gateway.twin.file_link import (
+    FileLink,
+    FileLinkCreateRequest,
+    FileLinkResponse,
+    _file_hash,
+    check_sync_status,
+    link_store,
+    sync_linked_file,
+)
 from api_gateway.twin.import_schemas import ImportWorkProductResponse
 from api_gateway.twin.import_service import (
     ALLOWED_EXTENSIONS,
@@ -313,3 +322,123 @@ async def import_work_product(
             project_id=project_id,
             created_at=now.isoformat(),
         )
+
+
+# ---------------------------------------------------------------------------
+# File link endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/nodes/{node_id}/link",
+    response_model=FileLinkResponse,
+    status_code=201,
+)
+async def create_file_link(
+    node_id: str,
+    body: FileLinkCreateRequest,
+) -> FileLinkResponse:
+    """Link a work product to an external source file.
+
+    The source file must exist on the gateway's filesystem. Once linked,
+    you can call ``POST /sync`` to re-import changes, or enable ``watch``
+    for automatic detection.
+    """
+    with tracer.start_as_current_span("twin.create_file_link") as span:
+        span.set_attribute("twin.node_id", node_id)
+        span.set_attribute("link.source_path", body.source_path)
+
+        # Validate work product exists
+        try:
+            uid = UUID(node_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid node ID format")
+        wp = await _twin.get_work_product(uid)
+        if wp is None:
+            raise HTTPException(status_code=404, detail="Work product not found")
+
+        # Validate source file exists
+        source = Path(body.source_path)
+        if not source.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source file not found: {body.source_path}",
+            )
+        if not source.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source path is not a file: {body.source_path}",
+            )
+
+        now = datetime.now(UTC)
+        source_hash = _file_hash(body.source_path)
+
+        link = FileLink(
+            work_product_id=node_id,
+            source_path=body.source_path,
+            tool=body.tool,
+            watch=body.watch,
+            source_hash=source_hash,
+            sync_status="synced",
+            last_synced_at=now.isoformat(),
+            created_at=now.isoformat(),
+        )
+        link_store.create(link)
+
+        logger.info(
+            "file_link_created",
+            wp_id=node_id,
+            source_path=body.source_path,
+            tool=body.tool,
+        )
+
+        return FileLinkResponse(**link.model_dump())
+
+
+@router.get("/nodes/{node_id}/link", response_model=FileLinkResponse)
+async def get_file_link(node_id: str) -> FileLinkResponse:
+    """Get the file link for a work product, with live sync status."""
+    link = link_store.get(node_id)
+    if link is None:
+        raise HTTPException(status_code=404, detail="No file link for this work product")
+
+    # Check live status
+    link.sync_status = check_sync_status(link)
+    link_store.update(node_id, sync_status=link.sync_status)
+
+    return FileLinkResponse(**link.model_dump())
+
+
+@router.delete("/nodes/{node_id}/link", status_code=204)
+async def delete_file_link(node_id: str) -> None:
+    """Remove the file link for a work product."""
+    if not link_store.delete(node_id):
+        raise HTTPException(status_code=404, detail="No file link for this work product")
+    logger.info("file_link_deleted", wp_id=node_id)
+
+
+@router.get("/links", response_model=list[FileLinkResponse])
+async def list_file_links() -> list[FileLinkResponse]:
+    """List all file links with live sync status."""
+    links = link_store.list_all()
+    results = []
+    for link in links:
+        link.sync_status = check_sync_status(link)
+        link_store.update(link.work_product_id, sync_status=link.sync_status)
+        results.append(FileLinkResponse(**link.model_dump()))
+    return results
+
+
+@router.post("/nodes/{node_id}/sync")
+async def sync_file_link(node_id: str) -> dict:
+    """Manually trigger a sync for a linked work product.
+
+    Re-reads the source file, extracts metadata, and updates the Twin
+    node if the file has changed.
+    """
+    link = link_store.get(node_id)
+    if link is None:
+        raise HTTPException(status_code=404, detail="No file link for this work product")
+
+    result = await sync_linked_file(link, _twin)
+    return result
