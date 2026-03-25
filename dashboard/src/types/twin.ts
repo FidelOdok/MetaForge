@@ -17,3 +17,16 @@ export interface TwinRelationship {
   type: string;
   label: string;
 }
+
+export interface ImportWorkProductResponse {
+  id: string;
+  name: string;
+  domain: string;
+  wp_type: string;
+  file_path: string;
+  content_hash: string;
+  format: string;
+  metadata: Record<string, unknown>;
+  project_id: string | null;
+  created_at: string;
+}

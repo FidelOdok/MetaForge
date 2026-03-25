@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useProject } from '../hooks/use-projects';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -6,10 +8,12 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Skeleton } from '../components/ui/Skeleton';
 import { formatRelativeTime } from '../utils/format-time';
+import { ImportZone } from '../components/ImportZone';
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: project, isLoading, isError, refetch } = useProject(id);
+  const [importOpen, setImportOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -143,6 +147,27 @@ export function ProjectDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Import File section */}
+      <div className="mt-6">
+        <button
+          type="button"
+          onClick={() => setImportOpen((prev) => !prev)}
+          className="flex items-center gap-1.5 text-sm font-medium text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
+        >
+          {importOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          Import File
+        </button>
+
+        {importOpen && (
+          <Card className="mt-3">
+            <ImportZone
+              projectId={project.id}
+              onSuccess={() => void refetch()}
+            />
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

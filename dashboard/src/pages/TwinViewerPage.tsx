@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, Box, GitBranch, ChevronDown, Eye, Loader2 } from 'lucide-react';
+import { Upload, Box, GitBranch, ChevronDown, Eye, Loader2, FileInput, X } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -19,6 +19,7 @@ import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel } from '../api/endpoints/twin';
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
+import { ImportZone } from '../components/ImportZone';
 
 const TYPE_ICONS: Record<TwinNode['type'], string> = {
   work_product: '\uD83D\uDCC4',
@@ -265,7 +266,7 @@ function ConversionProgressIndicator({ phase }: { phase: ConversionPhase }) {
   );
 }
 
-function ViewerToolbar() {
+function ViewerToolbar({ onToggleImport, importOpen }: { onToggleImport: () => void; importOpen: boolean }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadAndConvert();
   const viewMode = useViewerStore((s) => s.viewMode);
@@ -314,6 +315,20 @@ function ViewerToolbar() {
 
   return (
     <div className="flex items-center gap-3">
+      {/* Import toggle */}
+      <button
+        type="button"
+        onClick={onToggleImport}
+        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+          importOpen
+            ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+            : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'
+        }`}
+      >
+        <FileInput size={14} />
+        Import
+      </button>
+
       {/* View mode toggle */}
       <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700">
         <button
@@ -406,6 +421,7 @@ export function TwinViewerPage() {
   const selectPart = useViewerStore((s) => s.selectPart);
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const { data: nodes } = useTwinNodes();
+  const [importOpen, setImportOpen] = useState(false);
 
   const handlePartClick = useCallback(
     (part: PartInfo) => {
@@ -426,8 +442,31 @@ export function TwinViewerPage() {
           </h2>
           <p className="text-sm text-zinc-500">{items.length} nodes in the design graph</p>
         </div>
-        <ViewerToolbar />
+        <ViewerToolbar
+          onToggleImport={() => setImportOpen((prev) => !prev)}
+          importOpen={importOpen}
+        />
       </div>
+
+      {/* Import panel — slides in below the header when open */}
+      {importOpen && (
+        <div className="border-b border-zinc-200 bg-white px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Import Work Product
+            </span>
+            <button
+              type="button"
+              aria-label="Close import panel"
+              onClick={() => setImportOpen(false)}
+              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <ImportZone onSuccess={() => setImportOpen(false)} />
+        </div>
+      )}
 
       {/* Content */}
       {viewMode === 'graph' ? (

@@ -1,4 +1,4 @@
-import type { TwinNode, TwinRelationship } from '../../types/twin';
+import type { TwinNode, TwinRelationship, ImportWorkProductResponse } from '../../types/twin';
 import apiClient from '../client';
 
 const MOCK_RELATIONSHIPS: TwinRelationship[] = [
@@ -71,5 +71,21 @@ export interface NodeModelResult {
 
 export async function getNodeModel(nodeId: string, quality = 'standard'): Promise<NodeModelResult> {
   const { data } = await apiClient.get<NodeModelResult>(`/twin/nodes/${nodeId}/model?quality=${quality}`);
+  return data;
+}
+
+export async function importWorkProduct(
+  formData: FormData,
+  onUploadProgress?: (pct: number) => void,
+): Promise<ImportWorkProductResponse> {
+  const { data } = await apiClient.post<ImportWorkProductResponse>('/twin/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onUploadProgress
+      ? (evt) => {
+          const pct = evt.total ? Math.round((evt.loaded * 100) / evt.total) : 0;
+          onUploadProgress(pct);
+        }
+      : undefined,
+  });
   return data;
 }
