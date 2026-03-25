@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import { Upload, Box, GitBranch, ChevronDown, Eye } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { Upload, Box, GitBranch, ChevronDown, Eye, Loader2 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -209,6 +209,62 @@ function GraphView() {
   );
 }
 
+type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
+
+const PHASE_LABELS: Record<ConversionPhase, string> = {
+  idle: 'Upload STEP',
+  uploading: 'Uploading...',
+  converting: 'Converting...',
+  loading: 'Loading model...',
+};
+
+function ConversionProgressIndicator({ phase }: { phase: ConversionPhase }) {
+  const steps: { key: ConversionPhase; label: string }[] = [
+    { key: 'uploading', label: 'Upload' },
+    { key: 'converting', label: 'Convert' },
+    { key: 'loading', label: 'Load' },
+  ];
+  const activeIdx = steps.findIndex((s) => s.key === phase);
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {steps.map((step, idx) => {
+        const isActive = idx === activeIdx;
+        const isDone = idx < activeIdx;
+        return (
+          <div key={step.key} className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
+              <div
+                className={`h-1.5 w-1.5 rounded-full transition-colors ${
+                  isActive
+                    ? 'bg-blue-500'
+                    : isDone
+                    ? 'bg-green-500'
+                    : 'bg-zinc-300 dark:bg-zinc-600'
+                }`}
+              />
+              <span
+                className={`text-xs ${
+                  isActive
+                    ? 'font-medium text-blue-600 dark:text-blue-400'
+                    : isDone
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-zinc-400'
+                }`}
+              >
+                {step.label}
+              </span>
+            </div>
+            {idx < steps.length - 1 && (
+              <div className="h-px w-3 bg-zinc-200 dark:bg-zinc-600" />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ViewerToolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadAndConvert();
@@ -217,12 +273,36 @@ function ViewerToolbar() {
   const loadModel = useViewerStore((s) => s.loadModel);
   const glbUrl = useViewerStore((s) => s.glbUrl);
   const [quality, setQuality] = useState('standard');
+  const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
+
+  // Advance through phases as the mutation progresses
+  useEffect(() => {
+    if (!uploadMutation.isPending) {
+      // Brief "loading" phase after success before resetting
+      if (uploadMutation.isSuccess && conversionPhase === 'converting') {
+        setConversionPhase('loading');
+        const t = setTimeout(() => setConversionPhase('idle'), 800);
+        return () => clearTimeout(t);
+      }
+      if (!uploadMutation.isSuccess) {
+        setConversionPhase('idle');
+      }
+    }
+  }, [uploadMutation.isPending, uploadMutation.isSuccess, conversionPhase]);
 
   const handleUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-        uploadMutation.mutate({ file, quality });
+        setConversionPhase('uploading');
+        // Simulate phase progression: uploading → converting mid-flight
+        const t = setTimeout(() => setConversionPhase('converting'), 1200);
+        uploadMutation.mutate(
+          { file, quality },
+          {
+            onSettled: () => clearTimeout(t),
+          },
+        );
       }
     },
     [uploadMutation, quality],
@@ -278,16 +358,23 @@ function ViewerToolbar() {
             <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
           </div>
 
-          {/* Upload button */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadMutation.isPending}
-            className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            <Upload size={14} />
-            {uploadMutation.isPending ? 'Converting...' : 'Upload STEP'}
-          </button>
+          {/* Upload button / progress indicator */}
+          {conversionPhase !== 'idle' ? (
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-1.5 dark:border-zinc-700">
+              <Loader2 size={13} className="animate-spin text-blue-500" />
+              <ConversionProgressIndicator phase={conversionPhase} />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadMutation.isPending}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <Upload size={14} />
+              {PHASE_LABELS.idle}
+            </button>
+          )}
           <input
             ref={fileInputRef}
             type="file"
