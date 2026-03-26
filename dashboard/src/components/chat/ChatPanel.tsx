@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { type ChatThread, type ChatMessage } from '@/types/chat';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { ChatComposer } from './ChatComposer';
+
+// ---------------------------------------------------------------------------
+// KC color tokens
+// ---------------------------------------------------------------------------
+
+const KC = {
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  border: 'rgba(65,72,90,0.2)',
+};
 
 // ---------------------------------------------------------------------------
 // Props
@@ -26,47 +36,6 @@ interface ChatPanelProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build a human-readable breadcrumb line from the thread scope. */
-function buildBreadcrumb(thread: ChatThread): string {
-  const { kind, entityId, label } = thread.scope;
-  const display = label ?? entityId;
-
-  switch (kind) {
-    case 'session':
-      return `Session: ${display}`;
-    case 'digital-twin-node':
-      return `Node: ${display}`;
-    case 'approval':
-      return `Approval: ${display}`;
-    case 'bom-entry':
-      return `Component: ${display}`;
-    case 'project':
-      return `Project: ${display}`;
-    default:
-      return display;
-  }
-}
-
-/** Return a friendly empty-state prompt tailored to the thread's scope. */
-function emptyStatePrompt(thread: ChatThread): string {
-  switch (thread.scope.kind) {
-    case 'session':
-      return 'Ask the agent about this session…';
-    case 'digital-twin-node':
-      return 'Ask about this component…';
-    case 'approval':
-      return 'Ask about this design change…';
-    case 'bom-entry':
-      return 'Ask about this part…';
-    default:
-      return 'Start a conversation…';
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -86,75 +55,78 @@ export function ChatPanel({
   onGraphRefClick,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
-  /** Returns true when the scroll container is within 100px of the bottom. */
-  const isNearBottom = useCallback((): boolean => {
-    const el = scrollRef.current;
-    if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-  }, []);
-
-  const scrollToBottom = useCallback((smooth: boolean) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' });
-  }, []);
-
-  // Auto-scroll to bottom when new messages arrive, but only if already near bottom.
-  // If the user has scrolled up, show the scroll-to-bottom button instead.
+  // Auto-scroll to bottom whenever new messages arrive or typing starts
   useEffect(() => {
-    if (isNearBottom()) {
-      scrollToBottom(false);
-      setShowScrollBtn(false);
-    } else {
-      setShowScrollBtn(true);
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
     }
-    // scrollToBottom and isNearBottom are stable callbacks; messages.length / isTyping are the real triggers
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, isTyping]);
 
-  const handleScroll = useCallback(() => {
-    setShowScrollBtn(!isNearBottom());
-  }, [isNearBottom]);
-
   return (
-    <div className="relative flex h-full flex-col">
+    <div style={{ display: 'flex', height: '100%', flexDirection: 'column' }}>
       {/* ---- Header ---- */}
       <div
-        className={`shrink-0 border-b border-zinc-200 dark:border-zinc-700 ${
-          compact ? 'px-3 py-2' : 'px-4 py-3'
-        }`}
+        style={{
+          flexShrink: 0,
+          borderBottom: `1px solid ${KC.border}`,
+          padding: compact ? '8px 12px' : '10px 16px',
+        }}
       >
         <h3
-          className={`font-semibold text-zinc-900 dark:text-zinc-100 ${
-            compact ? 'text-sm' : 'text-base'
-          }`}
+          style={{
+            margin: 0,
+            fontWeight: 500,
+            color: KC.onSurface,
+            fontSize: compact ? '13px' : '14px',
+            fontFamily: 'Inter, sans-serif',
+          }}
         >
           {thread.title}
         </h3>
         {thread.scope.label && (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          <span
+            style={{
+              fontSize: '11px',
+              color: KC.onSurfaceVariant,
+              fontFamily: 'Inter, sans-serif',
+            }}
+          >
             {thread.scope.label}
           </span>
         )}
       </div>
 
-      {/* ---- Context breadcrumb ---- */}
-      <div className="shrink-0 border-b border-zinc-200 px-4 py-1.5 text-xs text-zinc-400 dark:border-zinc-700">
-        {buildBreadcrumb(thread)}
-      </div>
-
       {/* ---- Message list ---- */}
       <div
         ref={scrollRef}
-        onScroll={handleScroll}
-        className={`flex-1 overflow-y-auto ${compact ? 'py-2' : 'py-3'}`}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: compact ? '8px 0' : '12px 0',
+          // Thin scrollbar
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(65,72,90,0.4) transparent',
+        }}
       >
         {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center px-6">
-            <p className="text-center text-sm text-zinc-400 dark:text-zinc-500">
-              {emptyStatePrompt(thread)}
+          <div
+            style={{
+              display: 'flex',
+              height: '100%',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <p
+              style={{
+                fontSize: '13px',
+                color: KC.onSurfaceVariant,
+                fontFamily: 'Inter, sans-serif',
+              }}
+            >
+              No messages yet. Start the conversation.
             </p>
           </div>
         )}
@@ -168,38 +140,11 @@ export function ChatPanel({
         ))}
 
         {isTyping && (
-          <div className="px-4">
+          <div style={{ padding: '0 16px' }}>
             <TypingIndicator agentName={typingAgentName} />
           </div>
         )}
       </div>
-
-      {/* ---- Scroll-to-bottom button ---- */}
-      {showScrollBtn && (
-        <button
-          type="button"
-          aria-label="Scroll to bottom"
-          onClick={() => {
-            scrollToBottom(true);
-            setShowScrollBtn(false);
-          }}
-          className="absolute bottom-20 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-white shadow-md transition-opacity hover:bg-zinc-600 dark:bg-zinc-600 dark:hover:bg-zinc-500"
-        >
-          {/* ChevronDown inline SVG */}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-4 w-4"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
-      )}
 
       {/* ---- Composer ---- */}
       {onSendMessage && (
