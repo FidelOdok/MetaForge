@@ -1,27 +1,37 @@
-import { cva, type VariantProps } from 'class-variance-authority';
 import { clsx } from 'clsx';
 
-const badgeVariants = cva(
-  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-  {
-    variants: {
-      variant: {
-        default: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200',
-        success: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-        warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-        error: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-        info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-      },
-    },
-    defaultVariants: { variant: 'default' },
-  }
-);
+type Variant = 'default' | 'success' | 'warning' | 'error' | 'info';
 
-type BadgeProps = React.HTMLAttributes<HTMLSpanElement> &
-  VariantProps<typeof badgeVariants>;
+const VARIANT_STYLES: Record<Variant, string> = {
+  default: 'text-on-surface-variant',
+  success: 'text-success',
+  warning: 'text-warning',
+  error:   'text-error',
+  info:    'text-tertiary',
+};
 
-export function Badge({ className, variant, ...props }: BadgeProps) {
+const VARIANT_INLINE: Record<Variant, React.CSSProperties> = {
+  default: { background: 'rgba(40,42,48,0.8)',    border: '1px solid rgba(65,72,90,0.3)' },
+  success: { background: 'rgba(61,214,140,0.1)',  border: '1px solid rgba(61,214,140,0.25)' },
+  warning: { background: 'rgba(245,158,11,0.1)',  border: '1px solid rgba(245,158,11,0.25)' },
+  error:   { background: 'rgba(255,180,171,0.1)', border: '1px solid rgba(255,180,171,0.25)' },
+  info:    { background: 'rgba(134,207,255,0.1)', border: '1px solid rgba(134,207,255,0.25)' },
+};
+
+interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+  variant?: Variant;
+}
+
+export function Badge({ className, variant = 'default', style, ...props }: BadgeProps) {
   return (
-    <span className={clsx(badgeVariants({ variant }), className)} {...props} />
+    <span
+      className={clsx(
+        'inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] tracking-wide',
+        VARIANT_STYLES[variant],
+        className
+      )}
+      style={{ ...VARIANT_INLINE[variant], ...style }}
+      {...props}
+    />
   );
 }
