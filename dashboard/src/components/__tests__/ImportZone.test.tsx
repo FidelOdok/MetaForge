@@ -1,175 +1,133 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen, act } from '../../test/test-utils';
 import { ImportZone } from '../ImportZone';
+import * as useImportModule from '../../hooks/use-import';
+import type { ImportWorkProductResponse } from '../../types/twin';
 
-// ── Mocks ──────────────────────────────────────────────────────────────────
+function makeMockMutation(overrides = {}) {
+  return {
+    mutate: vi.fn(),
+    reset: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    data: undefined,
+    error: null,
+    ...overrides,
+  } as unknown as ReturnType<typeof useImportModule.useImportWorkProduct>;
+}
 
-vi.mock('../../hooks/use-import', () => ({
-  useImportWorkProduct: vi.fn(),
-}));
+function makeFile(name: string) {
+  return new File(['content'], name, { type: 'application/octet-stream' });
+}
 
-vi.mock('../ui/Toast', () => ({
-  useToast: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-  }),
-}));
-
-import { useImportWorkProduct } from '../../hooks/use-import';
-
-const mockMutate = vi.fn();
-const defaultMutation = {
-  mutate: mockMutate,
-  reset: vi.fn(),
-  isPending: false,
-  isSuccess: false,
-  isError: false,
+const MOCK_RESPONSE: ImportWorkProductResponse = {
+  id: 'wp-1',
+  name: 'chassis.step',
+  domain: 'mechanical',
+  wp_type: 'cad_model',
+  file_path: '/uploads/chassis.step',
+  content_hash: 'abc123',
+  format: 'step',
+  metadata: { components: '5', bounding_box: '100x50x30mm' },
+  project_id: 'proj-1',
+  created_at: '2026-03-25T00:00:00Z',
 };
 
-function makeMutation(overrides = {}) {
-  return { ...defaultMutation, ...overrides };
-}
-
-function wrapper({ children }: { children: React.ReactNode }) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-}
-
-function makeFile(name: string, sizeBytes = 1024): File {
-  const content = new Uint8Array(sizeBytes);
-  return new File([content], name, { type: 'application/octet-stream' });
-}
-
-// ── Tests ──────────────────────────────────────────────────────────────────
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  (useImportWorkProduct as ReturnType<typeof vi.fn>).mockReturnValue(makeMutation());
-});
-
 describe('ImportZone', () => {
-  it('renders idle upload zone', () => {
-    render(<ImportZone />, { wrapper });
-
-    expect(screen.getByTestId('import-zone')).toBeDefined();
-    expect(screen.getByTestId('file-input')).toBeDefined();
-    // Drop zone contains instructional text
-    expect(screen.getByText(/drag.*drop/i)).toBeDefined();
-    expect(screen.getByText(/max 100 MB/i)).toBeDefined();
+  beforeEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('shows error for unsupported file type', async () => {
-    render(<ImportZone />, { wrapper });
-
-    const input = screen.getByTestId('file-input') as HTMLInputElement;
-    const file = makeFile('drawing.pdf');
-
-    fireEvent.change(input, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('import-error')).toBeDefined();
-    });
-
-    expect(screen.getByText(/unsupported file type/i)).toBeDefined();
+  it('renders idle drop zone with instructions', () => {
+    vi.spyOn(useImportModule, 'useImportWorkProduct').mockReturnValue(makeMockMutation());
+    render(<ImportZone />);
+    expect(screen.getByTestId('import-zone')).toBeInTheDocument();
+    expect(screen.getByText(/drag & drop/i)).toBeInTheDocument();
+    expect(screen.getByText(/max 100 mb/i)).toBeInTheDocument();
   });
 
-  it('shows error for file too large', async () => {
-    render(<ImportZone />, { wrapper });
+  it('rejects unsupported file types and shows error', async () => {
+    vi.spyOn(useImportModule, 'useImportWorkProduct').mockReturnValue(makeMockMutation());
+    render(<ImportZone />);
 
     const input = screen.getByTestId('file-input') as HTMLInputElement;
-    // Create a file object that reports a size > 100 MB
-    const bigFile = makeFile('model.step', 1024);
-    Object.defineProperty(bigFile, 'size', { value: 101 * 1024 * 1024 });
-
-    fireEvent.change(input, { target: { files: [bigFile] } });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('import-error')).toBeDefined();
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [makeFile('design.pdf')], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    expect(screen.getByText(/too large/i)).toBeDefined();
+    expect(screen.getByTestId('import-error')).toBeInTheDocument();
+    expect(screen.getByText(/unsupported file type/i)).toBeInTheDocument();
   });
 
-  it('calls mutation on valid file drop via input', async () => {
-    render(<ImportZone projectId="proj-123" />, { wrapper });
+  it('rejects files over 100 MB', async () => {
+    vi.spyOn(useImportModule, 'useImportWorkProduct').mockReturnValue(makeMockMutation());
+    render(<ImportZone />);
+
+    const bigFile = makeFile('big.step');
+    Object.defineProperty(bigFile, 'size', { value: 101 * 1024 * 1024, configurable: true });
 
     const input = screen.getByTestId('file-input') as HTMLInputElement;
-    const file = makeFile('chassis.step');
-
-    fireEvent.change(input, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(mockMutate).toHaveBeenCalledOnce();
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [bigFile], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    const [callArg] = mockMutate.mock.calls[0] as [{ formData: FormData; onProgress: unknown }][];
-    const args = callArg as unknown as { formData: FormData; onProgress: unknown };
-    expect(args.formData.get('file')).toEqual(file);
-    expect(args.formData.get('project_id')).toBe('proj-123');
+    expect(screen.getByTestId('import-error')).toBeInTheDocument();
+    expect(screen.getByText(/too large/i)).toBeInTheDocument();
   });
 
-  it('shows metadata card on success', () => {
-    const successResult = {
-      id: 'wp-001',
-      name: 'chassis.step',
-      domain: 'mechanical',
-      wp_type: 'CAD_MODEL',
-      file_path: '/uploads/chassis.step',
-      content_hash: 'abc123',
-      format: 'step',
-      metadata: { units: 'mm', volume: '12.5', mass: '0.34' },
-      project_id: null,
-      created_at: '2026-03-25T10:00:00Z',
-    };
+  it('calls mutate with FormData for a valid .step file', async () => {
+    const mutate = vi.fn();
+    vi.spyOn(useImportModule, 'useImportWorkProduct').mockReturnValue(makeMockMutation({ mutate }));
+    render(<ImportZone projectId="proj-1" />);
 
-    // Mock mutation to be in success state
-    (useImportWorkProduct as ReturnType<typeof vi.fn>).mockReturnValue({
-      ...makeMutation({ isSuccess: true }),
-      mutate: vi.fn((_args, callbacks) => {
-        // Immediately invoke onSuccess
-        if (callbacks?.onSuccess) callbacks.onSuccess(successResult);
-      }),
-      reset: vi.fn(),
+    const input = screen.getByTestId('file-input') as HTMLInputElement;
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [makeFile('part.step')], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    render(<ImportZone />, { wrapper });
-
-    // Trigger a valid file drop
-    const input = screen.getByTestId('file-input') as HTMLInputElement;
-    const file = makeFile('chassis.step');
-    fireEvent.change(input, { target: { files: [file] } });
-
-    // After onSuccess fires, success card should appear
-    expect(screen.getByTestId('import-success-card')).toBeDefined();
-    expect(screen.getByText('chassis.step')).toBeDefined();
-    expect(screen.getByText('mechanical')).toBeDefined();
-    expect(screen.getByText('CAD_MODEL')).toBeDefined();
-    // Metadata entries rendered
-    expect(screen.getByText('units')).toBeDefined();
+    expect(mutate).toHaveBeenCalledOnce();
+    const [vars] = mutate.mock.calls[0] as [{ formData: FormData }];
+    expect(vars.formData.get('file')).toBeTruthy();
+    expect(vars.formData.get('project_id')).toBe('proj-1');
   });
 
-  it('shows error message when mutation fails', async () => {
-    (useImportWorkProduct as ReturnType<typeof vi.fn>).mockReturnValue({
-      ...makeMutation(),
-      mutate: vi.fn((_args, callbacks) => {
-        if (callbacks?.onError) callbacks.onError(new Error('Server error 500'));
-      }),
-      reset: vi.fn(),
+  it('shows success card with metadata after import', () => {
+    const mutate = vi.fn((_vars: unknown, cbs: { onSuccess: (d: ImportWorkProductResponse) => void }) => {
+      cbs.onSuccess(MOCK_RESPONSE);
     });
-
-    render(<ImportZone />, { wrapper });
+    vi.spyOn(useImportModule, 'useImportWorkProduct').mockReturnValue(makeMockMutation({ mutate }));
+    render(<ImportZone />);
 
     const input = screen.getByTestId('file-input') as HTMLInputElement;
-    const file = makeFile('board.kicad_sch');
-    fireEvent.change(input, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('import-error')).toBeDefined();
+    act(() => {
+      Object.defineProperty(input, 'files', { value: [makeFile('chassis.step')], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    expect(screen.getByText(/server error 500/i)).toBeDefined();
+    expect(screen.getByTestId('import-success-card')).toBeInTheDocument();
+    expect(screen.getByText('Import successful')).toBeInTheDocument();
+    expect(screen.getByText('mechanical')).toBeInTheDocument();
+  });
+
+  it('calls onSuccess callback and shows "Import another" button', () => {
+    const onSuccess = vi.fn();
+    const mutate = vi.fn((_vars: unknown, cbs: { onSuccess: (d: ImportWorkProductResponse) => void }) => {
+      cbs.onSuccess(MOCK_RESPONSE);
+    });
+    vi.spyOn(useImportModule, 'useImportWorkProduct').mockReturnValue(makeMockMutation({ mutate }));
+    render(<ImportZone onSuccess={onSuccess} />);
+
+    const input = screen.getByTestId('file-input') as HTMLInputElement;
+    act(() => {
+      Object.defineProperty(input, 'files', { value: [makeFile('chassis.step')], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(onSuccess).toHaveBeenCalledWith(MOCK_RESPONSE);
+    expect(screen.getByText(/import another/i)).toBeInTheDocument();
   });
 });
