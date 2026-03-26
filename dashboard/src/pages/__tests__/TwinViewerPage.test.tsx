@@ -70,11 +70,11 @@ const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
 
 describe('TwinViewerPage', () => {
-  it('renders Digital Twin Viewer heading', () => {
+  it('renders Digital Twin heading', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
     mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    expect(screen.getByText('Digital Twin Viewer')).toBeInTheDocument();
+    expect(screen.getByText('Digital Twin')).toBeInTheDocument();
   });
 
   it('shows graph view with empty state by default', () => {
@@ -102,7 +102,8 @@ describe('TwinViewerPage', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
     mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    expect(screen.getByText('3D Model')).toBeInTheDocument();
+    // KC uses short labels: '3D' and 'Graph'
+    expect(screen.getByText('3D')).toBeInTheDocument();
     expect(screen.getByText('Graph')).toBeInTheDocument();
   });
 });

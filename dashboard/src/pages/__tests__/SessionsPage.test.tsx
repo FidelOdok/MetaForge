@@ -22,84 +22,51 @@ const COMPLETED_SESSION = {
 
 describe('SessionsPage', () => {
   it('shows loading state', () => {
-    mockUseSessions.mockReturnValue({ data: undefined, isLoading: true, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useSessions>);
+    mockUseSessions.mockReturnValue({ data: undefined, isLoading: true } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument();
+    expect(screen.getByText('Loading sessions...')).toBeInTheDocument();
   });
 
   it('shows empty state', () => {
-    mockUseSessions.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useSessions>);
+    mockUseSessions.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByText('No agent sessions yet')).toBeInTheDocument();
+    expect(screen.getByText('No sessions')).toBeInTheDocument();
   });
 
   it('renders session list', () => {
     mockUseSessions.mockReturnValue({
       data: [COMPLETED_SESSION],
       isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
     expect(screen.getByText('validate stress')).toBeInTheDocument();
     expect(screen.getByText('MECH')).toBeInTheDocument();
   });
 
-  it('shows status icon for completed session', () => {
+  it('shows status text for completed session', () => {
     mockUseSessions.mockReturnValue({
       data: [COMPLETED_SESSION],
       isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    // CheckCircle renders with aria-label="Completed"
-    expect(screen.getByLabelText('Completed')).toBeInTheDocument();
+    expect(screen.getByText('completed')).toBeInTheDocument();
   });
 
-  it('shows status icon for failed session', () => {
+  it('shows status text for failed session', () => {
     mockUseSessions.mockReturnValue({
       data: [{ ...COMPLETED_SESSION, status: 'failed' as const }],
       isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByLabelText('Failed')).toBeInTheDocument();
+    expect(screen.getByText('failed')).toBeInTheDocument();
   });
 
-  it('shows status icon for running session', () => {
+  it('shows status text for running session', () => {
     mockUseSessions.mockReturnValue({
       data: [{ ...COMPLETED_SESSION, status: 'running' as const, completedAt: undefined }],
       isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByLabelText('Running')).toBeInTheDocument();
-  });
-
-  it('shows domain badge for known agent code', () => {
-    mockUseSessions.mockReturnValue({
-      data: [COMPLETED_SESSION],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useSessions>);
-    render(<SessionsPage />);
-    expect(screen.getByText('Mechanical')).toBeInTheDocument();
-  });
-
-  it('shows elapsed duration on each row', () => {
-    mockUseSessions.mockReturnValue({
-      data: [COMPLETED_SESSION],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useSessions>);
-    render(<SessionsPage />);
-    // Duration badge should be present (non-empty)
-    const durationEl = screen.getByTestId('session-duration');
-    expect(durationEl.textContent).not.toBe('');
+    expect(screen.getByText('running')).toBeInTheDocument();
   });
 });

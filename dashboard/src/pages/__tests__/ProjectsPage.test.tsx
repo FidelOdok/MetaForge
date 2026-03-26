@@ -14,8 +14,9 @@ const mockUseProjects = vi.mocked(useProjects);
 describe('ProjectsPage', () => {
   it('shows loading state', () => {
     mockUseProjects.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useProjects>);
-    render(<ProjectsPage />);
-    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument();
+    const { container } = render(<ProjectsPage />);
+    // KC renders SkeletonCard components with animate-pulse (no data-testid)
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', () => {

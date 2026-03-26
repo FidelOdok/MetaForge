@@ -26,9 +26,10 @@ describe('SkeletonCard', () => {
 describe('SkeletonTable', () => {
   it('renders the correct number of data rows', () => {
     const { container } = render(<SkeletonTable rows={3} cols={4} />);
-    // 1 header row + 3 data rows
-    const rows = container.querySelectorAll('[class*="border-b"]');
-    expect(rows.length).toBeGreaterThanOrEqual(3);
+    // 1 header row + 3 data rows, each with 4 animate-pulse cells = 16 total
+    // (border is inline style, not a class)
+    const pulses = container.querySelectorAll('.animate-pulse');
+    expect(pulses.length).toBeGreaterThanOrEqual(12);
   });
 });
 

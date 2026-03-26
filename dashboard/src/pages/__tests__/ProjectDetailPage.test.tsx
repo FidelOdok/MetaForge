@@ -18,8 +18,9 @@ const mockUseProject = vi.mocked(useProject);
 describe('ProjectDetailPage', () => {
   it('shows loading state', () => {
     mockUseProject.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useProject>);
-    render(<ProjectDetailPage />);
-    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument();
+    const { container } = render(<ProjectDetailPage />);
+    // KC renders animate-pulse skeleton elements (no data-testid)
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
   it('shows not found', () => {
@@ -43,7 +44,8 @@ describe('ProjectDetailPage', () => {
       isLoading: false,
     } as unknown as ReturnType<typeof useProject>);
     render(<ProjectDetailPage />);
-    expect(screen.getByText('Drone FC')).toBeInTheDocument();
+    // project name appears in breadcrumb + heading
+    expect(screen.getAllByText('Drone FC').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Schematic')).toBeInTheDocument();
   });
 });

@@ -26,14 +26,15 @@ const mockUseBom = vi.mocked(useBom);
 describe('BomPage', () => {
   it('shows loading state', () => {
     mockUseBom.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useBom>);
-    render(<BomPage />);
-    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument();
+    const { container } = render(<BomPage />);
+    // KC renders animate-pulse skeleton rows (no data-testid)
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', () => {
     mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
     render(<BomPage />);
-    expect(screen.getByText('No BOM entries')).toBeInTheDocument();
+    expect(screen.getByText('No components')).toBeInTheDocument();
   });
 
   it('renders BOM table', () => {
