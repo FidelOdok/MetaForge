@@ -1,15 +1,108 @@
 @import "tailwindcss";
 @variant dark (&:where(.dark, .dark *));
 
-/* ── Design tokens ──────────────────────────────────────────────────────────
-   Surface:   --surface (bg-white / dark:bg-zinc-900)
-   Elevated:  --surface-elevated (bg-zinc-50 / dark:bg-zinc-800)
-   Border:    --border-subtle (border-zinc-200 / dark:border-zinc-700)
-   Text:      --text-primary (text-zinc-900 / dark:text-zinc-100)
-              --text-muted (text-zinc-500 / dark:text-zinc-400)
-   Use Tailwind dark: variants directly — these tokens are documentation only.
+/* ── Kinetic Console design tokens ──────────────────────────────────────────
+   Always-dark engineering dashboard.
+   All surface/color utilities are available as Tailwind classes:
+   bg-surface, bg-surface-low, bg-surface-container, bg-surface-high,
+   bg-surface-highest, bg-surface-lowest, text-on-surface,
+   text-on-surface-variant, text-primary, text-primary-container,
+   bg-primary-container, text-tertiary, text-tertiary-container,
+   text-error, text-success, text-warning
    ─────────────────────────────────────────────────────────────────────────── */
 
-html {
-  transition: background-color 150ms ease, color 150ms ease;
+@theme {
+  --color-surface:           #111319;
+  --color-surface-low:       #191b22;
+  --color-surface-container: #1e1f26;
+  --color-surface-high:      #282a30;
+  --color-surface-highest:   #33343b;
+  --color-surface-lowest:    #0c0e14;
+
+  --color-on-surface:         #e2e2eb;
+  --color-on-surface-variant: #9a9aaa;
+
+  --color-primary:           #ffb783;
+  --color-primary-container: #e67e22;
+
+  --color-tertiary:           #86cfff;
+  --color-tertiary-container: #00a3e4;
+
+  --color-error:   #ffb4ab;
+  --color-success: #3dd68c;
+  --color-warning: #f59e0b;
+
+  --font-family-sans: 'Inter', sans-serif;
+  --font-family-mono: 'Roboto Mono', monospace;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #111319;
+  color: #e2e2eb;
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #282a30 transparent;
+}
+::-webkit-scrollbar         { width: 4px; height: 4px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: #282a30; border-radius: 2px; }
+
+/* ── Material Symbols ────────────────────────────────────────────────────── */
+
+.material-symbols-outlined {
+  font-size: 18px;
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
+  user-select: none;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ── Glass panel ─────────────────────────────────────────────────────────── */
+
+.glass {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* ── Nav rail active state ───────────────────────────────────────────────── */
+
+.nav-active {
+  background-color: rgba(40, 42, 48, 0.9);
+  border-left: 2px solid #e67e22;
+}
+.nav-btn {
+  border-left: 2px solid transparent;
+}
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+
+@keyframes livepulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+.live-dot {
+  animation: livepulse 2s ease-in-out infinite;
+}
+
+@keyframes riskpulse {
+  0%, 100% { transform: scale(1); opacity: 0.35; }
+  50%       { transform: scale(1.5); opacity: 0; }
+}
+.risk-ring {
+  animation: riskpulse 1.5s ease-out infinite;
 }
