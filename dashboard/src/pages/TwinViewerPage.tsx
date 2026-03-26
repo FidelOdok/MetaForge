@@ -7,6 +7,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { formatRelativeTime } from '../utils/format-time';
 import { useTwinNodes, useTwinNode } from '../hooks/use-twin';
+import { useAllLinks } from '../hooks/use-links';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
@@ -17,9 +18,30 @@ import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel } from '../api/endpoints/twin';
-import type { TwinNode } from '../types/twin';
+import type { TwinNode, FileLinkStatus } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 import { ImportZone } from '../components/ImportZone';
+import { LinkPanel } from '../components/LinkPanel';
+
+function LinkStatusDot({ status }: { status: FileLinkStatus }) {
+  const colors: Record<FileLinkStatus, string> = {
+    synced: 'bg-green-500',
+    changed: 'bg-yellow-500',
+    disconnected: 'bg-red-500',
+  };
+  const titles: Record<FileLinkStatus, string> = {
+    synced: 'File linked — synced',
+    changed: 'File linked — changes detected',
+    disconnected: 'File linked — file missing',
+  };
+  return (
+    <span
+      className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${colors[status]}`}
+      title={titles[status]}
+      aria-label={titles[status]}
+    />
+  );
+}
 
 const TYPE_ICONS: Record<TwinNode['type'], string> = {
   work_product: '\uD83D\uDCC4',
@@ -119,14 +141,21 @@ function NodeDetail({ node }: { node: TwinNode }) {
         onSendMessage={chat.sendMessage}
         onCreateThread={chat.createThread}
       />
+
+      <LinkPanel nodeId={node.id} />
     </div>
   );
 }
 
 function GraphView() {
   const { data: nodes, isLoading, isError, refetch } = useTwinNodes();
+  const { data: allLinks } = useAllLinks();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
+
+  const linkStatusMap = new Map<string, FileLinkStatus>(
+    (allLinks ?? []).map((l) => [l.node_id, l.status]),
+  );
 
   if (isLoading) {
     return (
@@ -172,28 +201,34 @@ function GraphView() {
     <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
       <Card className="max-h-[calc(100vh-12rem)] overflow-y-auto p-0">
         <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {items.map((node) => (
-            <li key={node.id}>
-              <button
-                type="button"
-                onClick={() => setSelectedId(node.id)}
-                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
-                  selectedId === node.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                }`}
-              >
-                <span>{TYPE_ICONS[node.type]}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    {node.name}
+          {items.map((node) => {
+            const linkStatus = linkStatusMap.get(node.id);
+            return (
+              <li key={node.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(node.id)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
+                    selectedId === node.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
+                >
+                  <span>{TYPE_ICONS[node.type]}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {node.name}
+                      </span>
+                      {linkStatus && <LinkStatusDot status={linkStatus} />}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      {node.domain} &middot; {node.type}
+                    </div>
                   </div>
-                  <div className="text-xs text-zinc-400">
-                    {node.domain} &middot; {node.type}
-                  </div>
-                </div>
-                <StatusBadge status={node.status} />
-              </button>
-            </li>
-          ))}
+                  <StatusBadge status={node.status} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </Card>
 

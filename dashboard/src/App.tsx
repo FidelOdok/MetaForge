@@ -10,6 +10,7 @@ import { SessionDetailPage } from './pages/SessionDetailPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { BomPage } from './pages/BomPage';
 import { TwinViewerPage } from './pages/TwinViewerPage';
+import { FilesPage } from './pages/FilesPage';
 import { DesignAssistantPage } from './pages/DesignAssistantPage';
 
 const queryClient = new QueryClient({
@@ -76,6 +77,14 @@ export function App() {
               element={
                 <ErrorBoundary>
                   <TwinViewerPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="files"
+              element={
+                <ErrorBoundary>
+                  <FilesPage />
                 </ErrorBoundary>
               }
             />

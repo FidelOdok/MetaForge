@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: '/approvals', label: 'Approvals',        icon: '\u2705',       shortcut: 'G A' },
   { to: '/bom',       label: 'BOM',              icon: '\uD83D\uDCCB', shortcut: 'G B' },
   { to: '/twin',      label: 'Digital Twin',     icon: '\uD83E\uDDE0', shortcut: 'G T' },
+  { to: '/files',     label: 'Files',            icon: '\uD83D\uDD17', shortcut: '' },
   { to: '/assistant', label: 'Design Assistant', icon: '\uD83E\uDD16', shortcut: 'G D' },
 ] as const;
 
