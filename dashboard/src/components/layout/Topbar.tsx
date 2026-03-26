@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { TopbarChatToggle } from './TopbarChatToggle';
-import { ThemeToggle } from './ThemeToggle';
 import { RunAgentDialog } from '../shared/RunAgentDialog';
 
 // ---------------------------------------------------------------------------
@@ -9,11 +8,12 @@ import { RunAgentDialog } from '../shared/RunAgentDialog';
 // ---------------------------------------------------------------------------
 
 const SEGMENT_LABELS: Record<string, string> = {
-  projects:  'Projects',
-  sessions:  'Sessions',
+  projects:  'Platform',
+  sessions:  'Orchestrator',
   approvals: 'Approvals',
   bom:       'BOM',
   twin:      'Digital Twin',
+  files:     'Knowledge',
   assistant: 'Design Assistant',
 };
 
@@ -23,7 +23,6 @@ const SEGMENT_LABELS: Record<string, string> = {
 
 interface BreadcrumbSegment {
   label: string;
-  /** True for the last (current) segment — rendered without a separator after it. */
   isCurrent: boolean;
 }
 
@@ -31,13 +30,10 @@ function useBreadcrumbs(): { segments: BreadcrumbSegment[]; pageTitle: string } 
   const { pathname } = useLocation();
   const params = useParams();
 
-  // Strip leading slash, split, filter empties
   const parts = pathname.replace(/^\//, '').split('/').filter(Boolean);
 
   const segments: BreadcrumbSegment[] = parts.map((part, idx) => {
     const isLast = idx === parts.length - 1;
-
-    // If it looks like a dynamic ID (UUID or similar), use a shortened form
     const isId = /^[0-9a-f-]{8,}$/i.test(part) || Object.values(params).includes(part);
 
     let label: string;
@@ -50,9 +46,10 @@ function useBreadcrumbs(): { segments: BreadcrumbSegment[]; pageTitle: string } 
     return { label, isCurrent: isLast };
   });
 
-  // Derive the current page name for <title>
   const topLevelSegment = parts[0] ?? '';
-  const pageTitle = SEGMENT_LABELS[topLevelSegment] ?? (topLevelSegment.charAt(0).toUpperCase() + topLevelSegment.slice(1) || 'Dashboard');
+  const pageTitle =
+    SEGMENT_LABELS[topLevelSegment] ??
+    (topLevelSegment.charAt(0).toUpperCase() + topLevelSegment.slice(1) || 'MetaForge');
 
   return { segments, pageTitle };
 }
@@ -65,34 +62,37 @@ export function Topbar() {
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const { segments, pageTitle } = useBreadcrumbs();
 
-  // Sync browser tab title
   useEffect(() => {
     document.title = pageTitle ? `${pageTitle} — MetaForge` : 'MetaForge';
   }, [pageTitle]);
 
   return (
     <>
-      <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-zinc-200 bg-white/80 px-6 backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/80">
+      <header
+        className="glass flex h-10 shrink-0 items-center justify-between px-5"
+        style={{
+          background: 'rgba(25,27,34,0.85)',
+          borderBottom: '1px solid rgba(65,72,90,0.2)',
+        }}
+      >
         {/* Breadcrumbs */}
         <nav aria-label="Breadcrumb" className="flex items-center">
           {segments.length === 0 ? (
-            <h1 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              MetaForge
-            </h1>
+            <span className="font-mono text-xs text-on-surface-variant">MetaForge</span>
           ) : (
-            <ol className="flex items-center gap-1.5 text-sm">
+            <ol className="flex items-center gap-1.5">
               {segments.map((seg, idx) => (
                 <li key={idx} className="flex items-center gap-1.5">
                   {idx > 0 && (
-                    <span className="text-zinc-400 dark:text-zinc-600" aria-hidden="true">
+                    <span className="font-mono text-xs text-on-surface-variant" aria-hidden="true">
                       /
                     </span>
                   )}
                   <span
                     className={
                       seg.isCurrent
-                        ? 'font-semibold text-zinc-900 dark:text-zinc-100'
-                        : 'text-zinc-500 dark:text-zinc-400'
+                        ? 'font-mono text-xs font-medium text-on-surface'
+                        : 'font-mono text-xs text-on-surface-variant'
                     }
                     aria-current={seg.isCurrent ? 'page' : undefined}
                   >
@@ -109,11 +109,14 @@ export function Topbar() {
           <button
             type="button"
             onClick={() => setRunDialogOpen(true)}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+            className="rounded px-3 py-1 font-sans text-xs font-medium transition-colors"
+            style={{
+              background: '#e67e22',
+              color: '#111319',
+            }}
           >
             Run Agent
           </button>
-          <ThemeToggle />
           <TopbarChatToggle />
         </div>
       </header>

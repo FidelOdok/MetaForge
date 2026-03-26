@@ -1,29 +1,18 @@
 import { Outlet } from 'react-router-dom';
-import { clsx } from 'clsx';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { ChatSidebar } from '../chat/ChatSidebar';
-import { useLayoutStore } from '@/store/layout-store';
 
 export function AppLayout() {
-  const { sidebarCollapsed } = useLayoutStore();
-
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
+    <div className="flex h-screen overflow-hidden bg-surface text-on-surface">
+      {/* 48px icon-only nav rail */}
       <Sidebar />
 
-      {/* Main content — offset by sidebar width with smooth transition */}
-      <div
-        className={clsx(
-          'transition-all duration-200',
-          // On mobile there is no persistent sidebar, so no left margin
-          'md:ml-14',
-          // On desktop, match sidebar width
-          !sidebarCollapsed && 'md:ml-56'
-        )}
-      >
+      {/* Main content — offset by 48px nav rail */}
+      <div className="flex flex-1 flex-col overflow-hidden ml-12">
         <Topbar />
-        <main className="p-6">
+        <main className="flex-1 overflow-y-auto p-6">
           <Outlet />
         </main>
       </div>
