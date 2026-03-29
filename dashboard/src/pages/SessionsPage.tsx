@@ -188,7 +188,7 @@ const STATIC_DAG_NODES: DagNode[] = [
 function DagPanel({ sessions }: { sessions: AgentSession[] }) {
   const runningSessions = sessions.filter((s) => s.status === 'running');
   const activeLabel =
-    runningSessions.length > 0
+    runningSessions.length > 0 && runningSessions[0]
       ? runningSessions[0].taskType.replace(/_/g, '-')
       : 'spec → bom';
 
@@ -254,8 +254,8 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
         {nodes.map((node, i) => (
           <div key={node.label} style={{ display: 'flex', alignItems: 'center', flex: i < nodes.length - 1 ? undefined : 0 }}>
             <DagNodePill node={node} />
-            {i < nodes.length - 1 && (
-              <DagConnector from={node.status} to={nodes[i + 1].status} />
+            {i < nodes.length - 1 && nodes[i + 1] && (
+              <DagConnector from={node.status} to={nodes[i + 1]!.status} />
             )}
           </div>
         ))}

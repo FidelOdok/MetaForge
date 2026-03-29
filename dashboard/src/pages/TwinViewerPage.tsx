@@ -4,6 +4,7 @@ import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
 import { useTwinNodes, useTwinNode, useTwinRelationships } from '../hooks/use-twin';
+import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
@@ -361,8 +362,9 @@ export function TwinViewerPage() {
   // ── data ──
   const { data: nodes, isLoading } = useTwinNodes();
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  useTwinRelationships();  // prefetch
+  const { data: relationships } = useTwinRelationships();
   const items = nodes ?? [];
+  const rels = relationships ?? [];
 
   // ── viewer store ──
   const viewMode = useViewerStore((s) => s.viewMode);
@@ -433,7 +435,6 @@ export function TwinViewerPage() {
       ════════════════════════════════════════════ */}
       <div style={{ position: 'absolute', inset: 0 }}>
         {isGraphMode ? (
-          /* Graph mode: empty canvas with floating node panels */
           isLoading ? (
             <div className="flex items-center justify-center h-full font-mono text-xs" style={{ color: KC.onSurfaceVariant }}>
               Loading twin graph…
@@ -446,7 +447,14 @@ export function TwinViewerPage() {
                 Work products will appear here when agents run.
               </span>
             </div>
-          ) : null
+          ) : (
+            <TwinGraphCanvas
+              nodes={items}
+              relationships={rels}
+              selectedId={selectedId}
+              onSelectNode={setSelectedId}
+            />
+          )
         ) : (
           /* 3D model mode */
           <>

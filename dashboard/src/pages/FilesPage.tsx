@@ -10,7 +10,7 @@ const STATUS_DOT_COLOR: Record<FileLinkStatus, string> = {
 };
 
 // ── Tool chip colours ─────────────────────────────────────────────────────────
-const TOOL_CHIP: Record<string, { color: string; bg: string }> = {
+const TOOL_CHIP: { [key: string]: { color: string; bg: string } } & { other: { color: string; bg: string } } = {
   kicad:  { color: '#86cfff', bg: 'rgba(134,207,255,0.1)' },
   freecad:{ color: '#e67e22', bg: 'rgba(230,126,34,0.1)'  },
   spice:  { color: '#3dd68c', bg: 'rgba(61,214,140,0.1)'  },
@@ -24,7 +24,8 @@ function toolKey(tool: FileLinkTool): string {
 // ── Tool chip ─────────────────────────────────────────────────────────────────
 function ToolChip({ tool }: { tool: FileLinkTool }) {
   const key = toolKey(tool);
-  const { color, bg } = TOOL_CHIP[key] ?? TOOL_CHIP.other;
+  const chip = TOOL_CHIP[key] ?? TOOL_CHIP.other;
+  const { color, bg } = chip;
   return (
     <span
       style={{
@@ -531,7 +532,7 @@ export function FilesPage() {
             {(['kicad', 'freecad', 'spice', 'other'] as const).map(key => {
               const count = toolCounts[key] ?? 0;
               const pct = toolTotal > 0 ? (count / toolTotal) * 100 : 0;
-              const { color } = TOOL_CHIP[key];
+              const { color } = TOOL_CHIP[key] ?? TOOL_CHIP.other;
               return (
                 <div key={key} style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>

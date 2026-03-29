@@ -22,3 +22,20 @@ class TwinNodeListResponse(BaseModel):
 
     nodes: list[TwinNodeResponse]
     total: int
+
+
+class TwinRelationshipResponse(BaseModel):
+    """A single directed edge in the Digital Twin graph."""
+
+    id: str
+    sourceId: str  # noqa: N815
+    targetId: str  # noqa: N815
+    type: str
+    label: str
+
+
+class TwinRelationshipListResponse(BaseModel):
+    """List of edges for the Digital Twin graph."""
+
+    relationships: list[TwinRelationshipResponse]
+    total: int
