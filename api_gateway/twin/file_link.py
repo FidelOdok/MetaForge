@@ -150,18 +150,26 @@ async def sync_linked_file(
         filename = p.name
         metadata = await service.extract_metadata(content, filename)
 
-        # Update work product metadata in Twin
+        # Fetch existing metadata so we can merge rather than replace
         from uuid import UUID
 
         now = datetime.now(UTC)
+        try:
+            wp_id_uuid = UUID(link.work_product_id)
+            existing_wp = await twin.get_work_product(wp_id_uuid)
+            existing_meta: dict[str, Any] = existing_wp.metadata if existing_wp else {}
+        except Exception:
+            existing_meta = {}
+
+        sync_metadata: dict[str, Any] = {
+            "synced_from": link.source_path,
+            "sync_tool": link.tool,
+            "last_synced_at": now.isoformat(),
+            "source_hash": new_hash,
+            **metadata,
+        }
         updates: dict[str, Any] = {
-            "metadata": {
-                "synced_from": link.source_path,
-                "sync_tool": link.tool,
-                "last_synced_at": now.isoformat(),
-                "source_hash": new_hash,
-                **metadata,
-            },
+            "metadata": {**existing_meta, **sync_metadata},
             "updated_at": now,
             "content_hash": new_hash,
         }
