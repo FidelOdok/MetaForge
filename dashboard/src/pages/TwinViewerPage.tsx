@@ -5,6 +5,8 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
 import { useTwinNodes, useTwinNode, useTwinRelationships } from '../hooks/use-twin';
 import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
+import { useNodeLink, useCreateLink, useDeleteLink, useSyncNode } from '../hooks/use-links';
+import type { FileLinkTool } from '../types/twin';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
@@ -117,6 +119,178 @@ function ToolBtn({
   );
 }
 
+// ── NodeLinkSection ───────────────────────────────────────────────────────────
+const TOOL_OPTIONS: { value: FileLinkTool; label: string }[] = [
+  { value: 'kicad',    label: 'KiCad' },
+  { value: 'freecad',  label: 'FreeCAD' },
+  { value: 'cadquery', label: 'CadQuery' },
+  { value: 'none',     label: 'Other' },
+];
+
+const SYNC_COLORS: Record<string, string> = {
+  synced:       '#3dd68c',
+  changed:      '#f5a623',
+  disconnected: '#9a9aaa',
+};
+
+function NodeLinkSection({ nodeId }: { nodeId: string }) {
+  const { data: link, isLoading } = useNodeLink(nodeId);
+  const createMutation  = useCreateLink(nodeId);
+  const deleteMutation  = useDeleteLink(nodeId);
+  const syncMutation    = useSyncNode(nodeId);
+
+  const [filePath, setFilePath] = useState('');
+  const [tool, setTool]         = useState<FileLinkTool>('kicad');
+  const [watch, setWatch]       = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [err, setErr]           = useState<string | null>(null);
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box',
+    background: KC.surfaceHigh, border: `1px solid ${KC.borderMid}`,
+    borderRadius: 4, color: KC.onSurface,
+    fontSize: 11, fontFamily: 'monospace',
+    padding: '5px 8px', outline: 'none',
+  };
+
+  if (isLoading) return null;
+
+  if (!link) {
+    return (
+      <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+        <div className="font-mono uppercase mb-2" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+          Link Source File
+        </div>
+        {err && (
+          <div style={{ background: 'rgba(231,76,60,0.12)', border: '1px solid rgba(231,76,60,0.3)', borderRadius: 4, padding: '4px 8px', fontSize: 11, color: '#e74c3c', marginBottom: 8 }}>
+            {err}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input
+            style={inputStyle}
+            placeholder="/path/to/file.kicad_sch"
+            value={filePath}
+            onChange={(e) => setFilePath(e.target.value)}
+          />
+          <select
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={tool}
+            onChange={(e) => setTool(e.target.value as FileLinkTool)}
+          >
+            {TOOL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: KC.onSurfaceVariant, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={watch}
+              onChange={(e) => setWatch(e.target.checked)}
+              style={{ accentColor: KC.orange }}
+            />
+            Watch for changes
+          </label>
+          <button
+            type="button"
+            disabled={createMutation.isPending || !filePath.trim()}
+            onClick={() => {
+              setErr(null);
+              createMutation.mutate(
+                { file_path: filePath.trim(), tool, watch },
+                {
+                  onSuccess: () => { setFilePath(''); },
+                  onError: (e) => setErr(e instanceof Error ? e.message : 'Failed to link'),
+                },
+              );
+            }}
+            style={{
+              background: KC.orange, color: KC.surface, border: 'none',
+              borderRadius: 4, padding: '5px 10px', fontSize: 11, fontWeight: 600,
+              cursor: createMutation.isPending || !filePath.trim() ? 'not-allowed' : 'pointer',
+              opacity: createMutation.isPending || !filePath.trim() ? 0.5 : 1,
+              fontFamily: 'monospace',
+            }}
+          >
+            {createMutation.isPending ? 'Linking…' : 'Link file'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const syncColor = SYNC_COLORS[link.status ?? 'disconnected'] ?? KC.onSurfaceVariant;
+
+  return (
+    <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <div className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+          Source File
+        </div>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: syncColor, fontFamily: 'monospace' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: syncColor, display: 'inline-block' }} />
+          {link.status ?? 'unknown'}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: KC.onSurface, fontFamily: 'monospace', wordBreak: 'break-all', marginBottom: 6 }}>
+        {link.file_path}
+      </div>
+      <div style={{ fontSize: 10, color: KC.onSurfaceVariant, marginBottom: 8, fontFamily: 'monospace' }}>
+        {link.tool} {link.watch ? '· watching' : ''}{link.last_synced_at ? ` · synced ${new Date(link.last_synced_at).toLocaleTimeString()}` : ''}
+      </div>
+      {err && (
+        <div style={{ background: 'rgba(231,76,60,0.12)', border: '1px solid rgba(231,76,60,0.3)', borderRadius: 4, padding: '4px 8px', fontSize: 11, color: '#e74c3c', marginBottom: 6 }}>
+          {err}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {link.status !== 'disconnected' && (
+          <button
+            type="button"
+            disabled={syncMutation.isPending}
+            onClick={() => {
+              setErr(null);
+              syncMutation.mutate(undefined, {
+                onError: (e) => setErr(e instanceof Error ? e.message : 'Sync failed'),
+              });
+            }}
+            style={{
+              flex: 1, background: link.status === 'changed' ? KC.orange : KC.surfaceHigh,
+              color: link.status === 'changed' ? KC.surface : KC.onSurface,
+              border: `1px solid ${KC.borderMid}`, borderRadius: 4,
+              padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+              opacity: syncMutation.isPending ? 0.5 : 1,
+            }}
+          >
+            {syncMutation.isPending ? 'Syncing…' : 'Sync now'}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={deleteMutation.isPending}
+          onClick={() => {
+            if (!confirming) { setConfirming(true); return; }
+            setErr(null);
+            deleteMutation.mutate(undefined, {
+              onSuccess: () => setConfirming(false),
+              onError: (e) => { setErr(e instanceof Error ? e.message : 'Unlink failed'); setConfirming(false); },
+            });
+          }}
+          onBlur={() => setConfirming(false)}
+          style={{
+            background: confirming ? '#e74c3c' : KC.surfaceHigh,
+            color: confirming ? '#fff' : KC.onSurfaceVariant,
+            border: `1px solid ${confirming ? '#e74c3c' : KC.borderMid}`,
+            borderRadius: 4, padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+          }}
+        >
+          {confirming ? 'Confirm?' : 'Unlink'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── NodeDetail (right floating panel) ────────────────────────────────────────
 function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
   const chat = useScopedChat({
@@ -217,6 +391,9 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             </table>
           </div>
         )}
+
+        {/* File link */}
+        <NodeLinkSection nodeId={node.id} />
 
         {/* Chat */}
         <div className="px-3 py-2 flex-1 min-h-0">
