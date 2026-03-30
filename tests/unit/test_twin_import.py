@@ -145,9 +145,7 @@ class TestImportServiceMetadata:
 
         mock_response = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "metadata": {"parts": [], "stats": {}}
-        }
+        mock_response.json.return_value = {"metadata": {"parts": [], "stats": {}}}
 
         with patch("httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
