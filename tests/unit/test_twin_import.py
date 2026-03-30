@@ -118,8 +118,8 @@ class TestImportServiceMetadata:
         assert meta["via_count"] == 1
         assert meta["zone_count"] == 1
 
-    async def test_fcstd_metadata(self):
-        # Create a minimal ZIP archive simulating a .FCStd file
+    async def test_fcstd_no_brep_returns_size_only(self):
+        """ZIP with no .brep files returns only format and file_size."""
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("Document.xml", "<Document/>")
@@ -128,10 +128,109 @@ class TestImportServiceMetadata:
 
         service = ImportService()
         meta = await service.extract_metadata(content, "part.FCStd")
-        assert meta["source"] == "fcstd_parser"
-        assert meta["entry_count"] == 2
-        assert meta["has_document"] is True
-        assert meta["has_gui_document"] is True
+        assert meta["format"] == "fcstd"
+        assert meta["file_size"] == len(content)
+        # No brep → no part_count, no geometry fields
+        assert "part_count" not in meta
+        assert "source" not in meta or meta.get("source") != "fcstd_parser"
+
+    async def test_fcstd_with_brep_returns_part_count(self):
+        """ZIP with 2 .brep files sets part_count == 2."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Document.xml", "<Document/>")
+            zf.writestr("Shape1.brep", b"BRep body 1 data")
+            zf.writestr("Shape2.brep", b"BRep body 2 larger data here")
+        content = buf.getvalue()
+
+        mock_response = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "metadata": {"parts": [], "stats": {}}
+        }
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_cls.return_value = mock_client
+
+            service = ImportService()
+            meta = await service.extract_metadata(content, "enclosure.FCStd")
+
+        assert meta["format"] == "fcstd"
+        assert meta["part_count"] == 2
+
+    async def test_fcstd_with_brep_calls_occt(self):
+        """OCCT geometry fields are merged into the result."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Shape.brep", b"BRep data")
+        content = buf.getvalue()
+
+        from unittest.mock import MagicMock
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "metadata": {
+                "parts": [
+                    {"name": "Body", "bounding_box": {"min_x": 0.0, "max_x": 100.0}},
+                ],
+                "stats": {"triangle_count": 800, "vertex_count": 400},
+            }
+        }
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_cls.return_value = mock_client
+
+            service = ImportService()
+            meta = await service.extract_metadata(content, "part.FCStd")
+
+        assert meta["format"] == "fcstd"
+        assert meta["part_count"] == 1
+        assert meta["source"] == "occt_converter"
+        assert meta["triangle_count"] == 800
+        assert meta["vertex_count"] == 400
+        assert meta["bounding_box"] == {"min_x": 0.0, "max_x": 100.0}
+
+    async def test_fcstd_invalid_zip_falls_back(self):
+        """Non-ZIP bytes return {format, file_size} without raising."""
+        content = b"this is not a zip file at all"
+        service = ImportService()
+        meta = await service.extract_metadata(content, "bad.FCStd")
+        assert meta["format"] == "fcstd"
+        assert meta["file_size"] == len(content)
+        assert "part_count" not in meta
+
+    async def test_fcstd_occt_unavailable_falls_back(self):
+        """When OCCT raises, result still has format, file_size, and part_count."""
+        import httpx as _httpx
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Shape.brep", b"BRep data")
+        content = buf.getvalue()
+
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = _httpx.ConnectError("refused")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            service = ImportService()
+            meta = await service.extract_metadata(content, "part.FCStd")
+
+        assert meta["format"] == "fcstd"
+        assert meta["file_size"] == len(content)
+        assert meta["part_count"] == 1
+        # No OCCT fields
+        assert "source" not in meta or meta.get("source") != "occt_converter"
 
     async def test_step_fallback_when_occt_unavailable(self):
         """ConnectError should fall back to basic metadata."""

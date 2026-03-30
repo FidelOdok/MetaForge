@@ -116,7 +116,7 @@ class ImportService:
             elif ext == ".kicad_pcb":
                 return await self._extract_kicad_pcb_metadata(content, filename)
             elif ext == ".fcstd":
-                return self._extract_fcstd_metadata(content, filename)
+                return await self._extract_fcstd_metadata(content, filename)
             else:
                 return self._basic_metadata(content, filename)
 
@@ -207,26 +207,51 @@ class ImportService:
 
         return meta
 
-    def _extract_fcstd_metadata(self, content: bytes, filename: str) -> dict[str, Any]:
-        """Extract FreeCAD metadata — list entries in the ZIP archive."""
-        meta = self._basic_metadata(content, filename)
-        meta["source"] = "fcstd_parser"
+    async def _extract_fcstd_metadata(self, content: bytes, filename: str) -> dict[str, Any]:
+        """Extract geometry metadata from a .FCStd file.
 
+        .FCStd is a ZIP archive containing .brep files (OpenCASCADE BRep format).
+        Extracts the largest .brep and sends it to the OCCT converter for geometry
+        analysis.  Falls back to size-only metadata if ZIP parsing fails or OCCT
+        is unavailable.
+        """
+        base: dict[str, Any] = {"format": "fcstd", "file_size": len(content)}
+
+        # Step 1: unzip and find .brep files
         try:
             with zipfile.ZipFile(BytesIO(content)) as zf:
-                entries = zf.namelist()
-                meta["archive_entries"] = entries
-                meta["entry_count"] = len(entries)
-                meta["has_gui_document"] = "GuiDocument.xml" in entries
-                meta["has_document"] = "Document.xml" in entries
-        except (zipfile.BadZipFile, Exception) as exc:
+                brep_names = [n for n in zf.namelist() if n.lower().endswith(".brep")]
+                if not brep_names:
+                    logger.debug(
+                        "fcstd_no_brep_found",
+                        filename=filename,
+                    )
+                    return base
+                base["part_count"] = len(brep_names)
+                # Use the largest .brep as the representative body
+                largest = max(brep_names, key=lambda n: zf.getinfo(n).file_size)
+                brep_bytes = zf.read(largest)
+        except Exception as exc:
             logger.warning(
-                "fcstd_parse_failed",
+                "fcstd_zip_parse_failed",
                 filename=filename,
                 error=str(exc),
             )
+            return base
 
-        return meta
+        # Step 2: send to OCCT converter (same pattern as _extract_cad_metadata)
+        # base fields (format, file_size, part_count) take priority over OCCT fields
+        # so that FCStd-level metadata is not overwritten by the BRep sub-file stats.
+        try:
+            occt_meta = await self._extract_cad_metadata(brep_bytes, "model.brep")
+            return {**occt_meta, **base}
+        except Exception as exc:
+            logger.warning(
+                "fcstd_occt_failed",
+                filename=filename,
+                error=str(exc),
+            )
+            return base
 
     @staticmethod
     def _basic_metadata(content: bytes, filename: str) -> dict[str, Any]:
