@@ -33,7 +33,7 @@ export function useAllLinks() {
 export function useCreateLink(nodeId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { file_path: string; tool: FileLinkTool; watch: boolean }) =>
+    mutationFn: (payload: { source_path: string; tool: FileLinkTool; watch: boolean }) =>
       createLink(nodeId, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: linkKeys.node(nodeId) });

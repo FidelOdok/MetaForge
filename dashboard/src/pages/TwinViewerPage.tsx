@@ -197,7 +197,7 @@ function NodeLinkSection({ nodeId }: { nodeId: string }) {
             onClick={() => {
               setErr(null);
               createMutation.mutate(
-                { file_path: filePath.trim(), tool, watch },
+                { source_path: filePath.trim(), tool, watch },
                 {
                   onSuccess: () => { setFilePath(''); },
                   onError: (e) => setErr(e instanceof Error ? e.message : 'Failed to link'),

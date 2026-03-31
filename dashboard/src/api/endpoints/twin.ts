@@ -96,7 +96,7 @@ export async function importWorkProduct(
 
 export async function createLink(
   nodeId: string,
-  payload: { file_path: string; tool: FileLinkTool; watch: boolean },
+  payload: { source_path: string; tool: FileLinkTool; watch: boolean },
 ): Promise<FileLink> {
   const { data } = await apiClient.post<FileLink>(`/twin/nodes/${nodeId}/link`, payload);
   return data;
