@@ -35,20 +35,19 @@ export type FileLinkStatus = 'synced' | 'changed' | 'disconnected';
 export type FileLinkTool = 'kicad' | 'freecad' | 'cadquery' | 'none';
 
 export interface FileLink {
-  id: string;
-  node_id: string;
-  file_path: string;
+  work_product_id: string;
+  source_path: string;
   tool: FileLinkTool;
   watch: boolean;
-  status: FileLinkStatus;
-  last_synced_at: string | null;
+  sync_status: FileLinkStatus;
+  source_hash: string;
+  last_synced_at: string;
   created_at: string;
 }
 
 export interface SyncResult {
-  link_id: string;
-  node_id: string;
-  status: FileLinkStatus;
+  work_product_id: string;
+  sync_status: FileLinkStatus;
   changes: Record<string, { before: unknown; after: unknown }>;
   synced_at: string;
 }

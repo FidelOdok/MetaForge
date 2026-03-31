@@ -109,8 +109,8 @@ function IconBtn({
 
 // ── File link row ─────────────────────────────────────────────────────────────
 function FileLinkRow({ link }: { link: FileLink }) {
-  const deleteMutation = useDeleteLink(link.node_id);
-  const syncMutation   = useSyncNode(link.node_id);
+  const deleteMutation = useDeleteLink(link.work_product_id);
+  const syncMutation   = useSyncNode(link.work_product_id);
   const relTime = link.last_synced_at ? formatRelative(link.last_synced_at) : '—';
 
   return (
@@ -126,7 +126,7 @@ function FileLinkRow({ link }: { link: FileLink }) {
     >
       <ToolChip tool={link.tool} />
       <span
-        title={link.file_path}
+        title={link.source_path}
         style={{
           flex: 1,
           fontSize: 13,
@@ -137,9 +137,9 @@ function FileLinkRow({ link }: { link: FileLink }) {
           minWidth: 0,
         }}
       >
-        {link.file_path}
+        {link.source_path}
       </span>
-      <StatusDot status={link.status} />
+      <StatusDot status={link.sync_status} />
       <span
         style={{
           fontFamily: 'monospace',
@@ -152,7 +152,7 @@ function FileLinkRow({ link }: { link: FileLink }) {
         {relTime}
       </span>
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-        {link.status !== 'disconnected' && (
+        {link.sync_status !== 'disconnected' && (
           <IconBtn
             icon="sync"
             title="Sync"
@@ -210,15 +210,15 @@ export function FilesPage() {
   const [filterTool, setFilterTool] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const synced       = links?.filter(l => l.status === 'synced').length       ?? 0;
-  const changed      = links?.filter(l => l.status === 'changed').length      ?? 0;
-  const disconnected = links?.filter(l => l.status === 'disconnected').length ?? 0;
+  const synced       = links?.filter(l => l.sync_status === 'synced').length       ?? 0;
+  const changed      = links?.filter(l => l.sync_status === 'changed').length      ?? 0;
+  const disconnected = links?.filter(l => l.sync_status === 'disconnected').length ?? 0;
   const total        = links?.length ?? 0;
 
   const filteredLinks = (links ?? []).filter(l => {
     const matchTool = filterTool === 'all' || toolKey(l.tool) === filterTool;
     const matchSearch = searchQuery === '' ||
-      l.file_path.toLowerCase().includes(searchQuery.toLowerCase());
+      l.source_path.toLowerCase().includes(searchQuery.toLowerCase());
     return matchTool && matchSearch;
   });
 
@@ -424,7 +424,7 @@ export function FilesPage() {
                 <span style={{ fontSize: 13, color: '#9a9aaa' }}>No source files linked yet</span>
               </div>
             ) : (
-              filteredLinks.map(link => <FileLinkRow key={link.id} link={link} />)
+              filteredLinks.map(link => <FileLinkRow key={link.work_product_id} link={link} />)
             )}
           </div>
 
@@ -442,7 +442,7 @@ export function FilesPage() {
             {pipelineRows
               ? pipelineRows.map(link => (
                   <div
-                    key={link.id}
+                    key={link.work_product_id}
                     style={{
                       height: 36,
                       padding: '0 16px',
@@ -453,7 +453,7 @@ export function FilesPage() {
                     }}
                   >
                     <span
-                      title={link.file_path}
+                      title={link.source_path}
                       style={{
                         fontFamily: 'monospace',
                         fontSize: 11,
@@ -465,10 +465,10 @@ export function FilesPage() {
                         minWidth: 0,
                       }}
                     >
-                      {link.file_path}
+                      {link.source_path}
                     </span>
                     <ToolChip tool={link.tool} />
-                    <StatusDot status={link.status} />
+                    <StatusDot status={link.sync_status} />
                     <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9aaa', whiteSpace: 'nowrap' }}>
                       {link.last_synced_at ? formatRelative(link.last_synced_at) : '—'}
                     </span>

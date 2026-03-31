@@ -219,7 +219,7 @@ function NodeLinkSection({ nodeId }: { nodeId: string }) {
     );
   }
 
-  const syncColor = SYNC_COLORS[link.status ?? 'disconnected'] ?? KC.onSurfaceVariant;
+  const syncColor = SYNC_COLORS[link.sync_status ?? 'disconnected'] ?? KC.onSurfaceVariant;
 
   return (
     <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
@@ -229,11 +229,11 @@ function NodeLinkSection({ nodeId }: { nodeId: string }) {
         </div>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: syncColor, fontFamily: 'monospace' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: syncColor, display: 'inline-block' }} />
-          {link.status ?? 'unknown'}
+          {link.sync_status ?? 'unknown'}
         </span>
       </div>
       <div style={{ fontSize: 11, color: KC.onSurface, fontFamily: 'monospace', wordBreak: 'break-all', marginBottom: 6 }}>
-        {link.file_path}
+        {link.source_path}
       </div>
       <div style={{ fontSize: 10, color: KC.onSurfaceVariant, marginBottom: 8, fontFamily: 'monospace' }}>
         {link.tool} {link.watch ? '· watching' : ''}{link.last_synced_at ? ` · synced ${new Date(link.last_synced_at).toLocaleTimeString()}` : ''}
@@ -244,7 +244,7 @@ function NodeLinkSection({ nodeId }: { nodeId: string }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 6 }}>
-        {link.status !== 'disconnected' && (
+        {link.sync_status !== 'disconnected' && (
           <button
             type="button"
             disabled={syncMutation.isPending}
@@ -255,8 +255,8 @@ function NodeLinkSection({ nodeId }: { nodeId: string }) {
               });
             }}
             style={{
-              flex: 1, background: link.status === 'changed' ? KC.orange : KC.surfaceHigh,
-              color: link.status === 'changed' ? KC.surface : KC.onSurface,
+              flex: 1, background: link.sync_status === 'changed' ? KC.orange : KC.surfaceHigh,
+              color: link.sync_status === 'changed' ? KC.surface : KC.onSurface,
               border: `1px solid ${KC.borderMid}`, borderRadius: 4,
               padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
               opacity: syncMutation.isPending ? 0.5 : 1,

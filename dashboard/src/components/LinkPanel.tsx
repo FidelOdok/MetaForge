@@ -99,7 +99,7 @@ export function LinkPanel({ nodeId }: LinkPanelProps) {
     if (!filePath.trim()) return;
     setErrorMsg(null);
     createLinkMutation.mutate(
-      { file_path: filePath.trim(), tool, watch },
+      { source_path: filePath.trim(), tool, watch },
       {
         onSuccess: () => {
           setFilePath('');
@@ -217,14 +217,14 @@ export function LinkPanel({ nodeId }: LinkPanelProps) {
         /* Has link — show status + actions */
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <StatusDot status={link.status} />
-            <StatusLabel status={link.status} />
+            <StatusDot status={link.sync_status} />
+            <StatusLabel status={link.sync_status} />
           </div>
 
           <div>
             <p className="text-xs text-zinc-500">File path</p>
             <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-              {link.file_path}
+              {link.source_path}
             </p>
           </div>
 
@@ -236,16 +236,16 @@ export function LinkPanel({ nodeId }: LinkPanelProps) {
             )}
           </div>
 
-          {link.status === 'disconnected' && (
+          {link.sync_status === 'disconnected' && (
             <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-400">
               Warning: the source file is missing or inaccessible.
             </p>
           )}
 
           <div className="flex gap-2">
-            {link.status !== 'disconnected' && (
+            {link.sync_status !== 'disconnected' && (
               <Button
-                variant={link.status === 'changed' ? 'primary' : 'secondary'}
+                variant={link.sync_status === 'changed' ? 'primary' : 'secondary'}
                 size="sm"
                 onClick={handleSync}
                 disabled={syncMutation.isPending}
