@@ -11,7 +11,6 @@ from api_gateway.twin.version_service import VersionService
 from twin_core.models.enums import WorkProductType
 from twin_core.models.work_product import WorkProduct
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
