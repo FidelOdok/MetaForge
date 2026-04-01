@@ -1,0 +1,85 @@
+// Grafana Alloy — Docker log scraper for MetaForge
+//
+// Discovers all containers in the metaforge compose project and ships
+// their stdout/stderr to Loki. OTel SDK logs from the gateway continue
+// to flow through the OTel collector as before.
+
+// ── Docker log discovery ──────────────────────────────────────────────────────
+
+discovery.docker "metaforge_containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=metaforge"]
+  }
+}
+
+// ── Relabelling: extract useful metadata from Docker labels ───────────────────
+
+discovery.relabel "metaforge_containers" {
+  targets = discovery.docker.metaforge_containers.targets
+
+  // Use the compose service name as the primary label
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // Keep the full container name for disambiguation
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+
+  // Keep the image name (useful for third-party services like temporal, neo4j)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_image"]
+    target_label  = "image"
+  }
+
+  // Mark all logs with the compose project
+  rule {
+    replacement  = "metaforge"
+    target_label = "project"
+  }
+}
+
+// ── Log scraping ──────────────────────────────────────────────────────────────
+
+loki.source.docker "metaforge_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.metaforge_containers.output
+  forward_to = [loki.process.metaforge_logs.receiver]
+}
+
+// ── Processing: parse JSON logs where possible, pass through others ───────────
+
+loki.process "metaforge_logs" {
+  // Try to parse JSON-structured logs (gateway, adapters use structlog JSON)
+  stage.json {
+    expressions = {
+      level   = "level",
+      logger  = "logger",
+      event   = "event",
+    }
+  }
+
+  // Promote log level to a label so you can filter by severity in Grafana
+  stage.labels {
+    values = {
+      level  = "level",
+    }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// ── Loki output ───────────────────────────────────────────────────────────────
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
