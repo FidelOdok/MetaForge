@@ -128,7 +128,7 @@ class TestVersionServiceDiff:
                 revision=i + 1,
                 created_at="2026-01-01T00:00:00+00:00",
                 content_hash=f"hash{i}",
-                change_description=f"Rev {i+1}",
+                change_description=f"Rev {i + 1}",
                 metadata_snapshot=snap,
             )
             for i, snap in enumerate(snapshots)
@@ -255,9 +255,7 @@ class TestVersionEndpoints:
 
     async def test_get_versions_unknown_node(self, client, twin):
         async with client:
-            resp = await client.get(
-                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/versions"
-            )
+            resp = await client.get("/v1/twin/nodes/00000000-0000-0000-0000-000000000099/versions")
         assert resp.status_code == 404
 
     async def test_iterate_adds_revision(self, client, twin):

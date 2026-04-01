@@ -96,13 +96,9 @@ class VersionService:
         Raises ``ValueError`` for out-of-range revision numbers.
         """
         if revision_a < 1 or revision_a > history.total:
-            raise ValueError(
-                f"revision_a={revision_a} out of range [1, {history.total}]"
-            )
+            raise ValueError(f"revision_a={revision_a} out of range [1, {history.total}]")
         if revision_b < 1 or revision_b > history.total:
-            raise ValueError(
-                f"revision_b={revision_b} out of range [1, {history.total}]"
-            )
+            raise ValueError(f"revision_b={revision_b} out of range [1, {history.total}]")
 
         meta_a = history.revisions[revision_a - 1].metadata_snapshot
         meta_b = history.revisions[revision_b - 1].metadata_snapshot
