@@ -78,3 +78,4 @@ class EdgeType(StrEnum):
     USES_COMPONENT = "uses_component"
     PARENT_OF = "parent_of"
     CONFLICTS_WITH = "conflicts_with"
+    SUPERSEDES = "supersedes"
