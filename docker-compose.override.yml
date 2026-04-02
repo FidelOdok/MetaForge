@@ -47,6 +47,7 @@ services:
       - dashboard-node-modules:/app/node_modules
     environment:
       - VITE_API_URL=http://gateway:8000
+      - VITE_FARO_URL=http://alloy:12347
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       gateway:

@@ -9,23 +9,26 @@ import path from 'path';
 // when Docker DNS and Node 20's Happy Eyeballs interact badly.
 dns.setDefaultResultOrder('ipv4first');
 
-// Resolve VITE_API_URL at startup; fallback to localhost for local dev.
-// When running in Docker, resolve the hostname to an IPv4 address to avoid
-// http-proxy ECONNREFUSED issues with Node 20's autoSelectFamily.
-let apiTarget = process.env.VITE_API_URL || 'http://localhost:8000';
-try {
-  const targetUrl = new URL(apiTarget);
-  if (targetUrl.hostname !== 'localhost' && targetUrl.hostname !== '127.0.0.1') {
-    const ip = execSync(`getent hosts ${targetUrl.hostname} | awk '{print $1}'`, {
-      encoding: 'utf-8',
-    }).trim();
-    if (ip) {
-      apiTarget = `${targetUrl.protocol}//${ip}:${targetUrl.port}`;
+// Resolve a proxy target hostname to IPv4 to avoid ECONNREFUSED with
+// Node 20's autoSelectFamily / Happy Eyeballs when running in Docker.
+function resolveTarget(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+      const ip = execSync(`getent hosts ${parsed.hostname} | awk '{print $1}'`, {
+        encoding: 'utf-8',
+      }).trim();
+      if (ip) return `${parsed.protocol}//${ip}:${parsed.port}`;
     }
+  } catch {
+    /* keep original */
   }
-} catch {
-  /* keep original target */
+  return url;
 }
+
+const apiTarget = resolveTarget(process.env.VITE_API_URL || 'http://localhost:8000');
+const faroTarget = resolveTarget(process.env.VITE_FARO_URL || 'http://localhost:12347');
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -48,6 +51,11 @@ export default defineConfig({
       '/ws': {
         target: apiTarget.replace('http', 'ws'),
         ws: true,
+      },
+      '/faro': {
+        target: faroTarget,
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/faro/, ''),
       },
     },
   },
