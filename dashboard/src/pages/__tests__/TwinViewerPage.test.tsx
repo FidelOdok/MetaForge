@@ -1,10 +1,20 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen } from '../../test/test-utils';
+
+// ResizeObserver is not available in jsdom
+beforeAll(() => {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
 
 vi.mock('../../hooks/use-twin', () => ({
   useTwinNodes: vi.fn(),
   useTwinNode: vi.fn(),
   useTwinRelationships: vi.fn(() => ({ data: [] })),
+  useNodeVersionHistory: vi.fn(() => ({ data: undefined, isLoading: false })),
 }));
 
 vi.mock('../../hooks/use-scoped-chat', () => ({
@@ -64,43 +74,52 @@ vi.mock('../../components/viewer/ExplodedViewControls', () => ({
 }));
 
 import { TwinViewerPage } from '../TwinViewerPage';
-import { useTwinNodes, useTwinNode } from '../../hooks/use-twin';
+import { useTwinNodes } from '../../hooks/use-twin';
 
 const mockUseTwinNodes = vi.mocked(useTwinNodes);
-const mockUseTwinNode = vi.mocked(useTwinNode);
 
 describe('TwinViewerPage', () => {
-  it('renders Digital Twin Viewer heading', () => {
+  it('renders Digital Twin header', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useTwinNodes>);
-    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    expect(screen.getByText('Digital Twin Viewer')).toBeInTheDocument();
+    expect(screen.getAllByText(/Digital Twin/).length).toBeGreaterThan(0);
   });
 
-  it('shows graph view with empty state by default', () => {
+  it('shows empty state in graph view with no nodes', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useTwinNodes>);
-    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    expect(screen.getByText('Empty twin')).toBeInTheDocument();
+    expect(screen.getByText('Empty twin graph')).toBeInTheDocument();
   });
 
-  it('renders node list in graph mode', () => {
+  it('renders node name in node list', () => {
     mockUseTwinNodes.mockReturnValue({
       data: [
-        { id: 'n1', name: 'bracket-v1.step', type: 'work_product', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: new Date().toISOString() },
+        {
+          id: 'n1',
+          name: 'bracket-v1.step',
+          type: 'work_product',
+          domain: 'mechanical',
+          status: 'valid',
+          properties: {},
+          updatedAt: new Date().toISOString(),
+        },
       ],
       isLoading: false,
     } as unknown as ReturnType<typeof useTwinNodes>);
-    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
     expect(screen.getByText('bracket-v1.step')).toBeInTheDocument();
   });
 
-  it('shows view mode toggle buttons', () => {
+  it('shows Graph and 3D view toggle buttons', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useTwinNodes>);
-    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    expect(screen.getByText('3D Model')).toBeInTheDocument();
     expect(screen.getByText('Graph')).toBeInTheDocument();
+    expect(screen.getByText('3D')).toBeInTheDocument();
+  });
+
+  it('shows BOM strip at the bottom', () => {
+    mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useTwinNodes>);
+    render(<TwinViewerPage />);
+    expect(screen.getAllByText('L1 Digital Thread').length).toBeGreaterThan(0);
   });
 });

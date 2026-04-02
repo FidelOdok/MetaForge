@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getTwinNodes, getTwinNode, getTwinRelationships } from '../api/endpoints/twin';
+import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory } from '../api/endpoints/twin';
 
 export const twinKeys = {
   all: ['twin'] as const,
@@ -29,5 +29,14 @@ export function useTwinRelationships() {
     queryKey: twinKeys.relationships,
     queryFn: getTwinRelationships,
     staleTime: 30_000,
+  });
+}
+
+export function useNodeVersionHistory(nodeId: string | undefined) {
+  return useQuery({
+    queryKey: [...twinKeys.all, nodeId, 'versions'] as const,
+    queryFn: () => getNodeVersionHistory(nodeId!),
+    enabled: !!nodeId,
+    staleTime: 15_000,
   });
 }

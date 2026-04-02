@@ -17,3 +17,11 @@ export interface TwinRelationship {
   type: string;
   label: string;
 }
+
+export interface WorkProductRevision {
+  revision: number;
+  created_at: string;
+  content_hash: string;
+  change_description: string;
+  metadata_snapshot: Record<string, unknown>;
+}

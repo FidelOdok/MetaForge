@@ -1,12 +1,5 @@
-import type { TwinNode, TwinRelationship } from '../../types/twin';
+import type { TwinNode, TwinRelationship, WorkProductRevision } from '../../types/twin';
 import apiClient from '../client';
-
-const MOCK_RELATIONSHIPS: TwinRelationship[] = [
-  { id: 'rel-001', sourceId: 'node-001', targetId: 'node-004', type: 'constrained_by', label: 'Stress constraint' },
-  { id: 'rel-002', sourceId: 'node-002', targetId: 'node-003', type: 'generates', label: 'PCB from schematic' },
-  { id: 'rel-003', sourceId: 'node-003', targetId: 'node-005', type: 'constrained_by', label: 'Clearance constraint' },
-  { id: 'rel-004', sourceId: 'node-002', targetId: 'node-009', type: 'constrained_by', label: 'Power budget' },
-];
 
 interface TwinNodeApiResponse {
   id: string;
@@ -54,8 +47,29 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
   }
 }
 
+interface TwinRelationshipListApiResponse {
+  relationships: TwinRelationship[];
+  total: number;
+}
+
 export async function getTwinRelationships(): Promise<TwinRelationship[]> {
-  return MOCK_RELATIONSHIPS;
+  try {
+    const response = await apiClient.get<TwinRelationshipListApiResponse>('/twin/relationships');
+    return response.data.relationships;
+  } catch {
+    return [];
+  }
+}
+
+export interface NodeVersionHistory {
+  work_product_id: string;
+  revisions: WorkProductRevision[];
+  total: number;
+}
+
+export async function getNodeVersionHistory(nodeId: string): Promise<NodeVersionHistory> {
+  const { data } = await apiClient.get<NodeVersionHistory>(`/twin/nodes/${nodeId}/versions`);
+  return data;
 }
 
 export interface NodeModelResult {
