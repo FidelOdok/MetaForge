@@ -189,7 +189,7 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
   const runningSessions = sessions.filter((s) => s.status === 'running');
   const activeLabel =
     runningSessions.length > 0
-      ? runningSessions[0].taskType.replace(/_/g, '-')
+      ? runningSessions[0]!.taskType.replace(/_/g, '-')
       : 'spec → bom';
 
   const isRunning = runningSessions.length > 0;
@@ -255,7 +255,7 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
           <div key={node.label} style={{ display: 'flex', alignItems: 'center', flex: i < nodes.length - 1 ? undefined : 0 }}>
             <DagNodePill node={node} />
             {i < nodes.length - 1 && (
-              <DagConnector from={node.status} to={nodes[i + 1].status} />
+              <DagConnector from={node.status} to={nodes[i + 1]!.status} />
             )}
           </div>
         ))}

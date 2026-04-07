@@ -24,7 +24,8 @@ function toolKey(tool: FileLinkTool): string {
 // ── Tool chip ─────────────────────────────────────────────────────────────────
 function ToolChip({ tool }: { tool: FileLinkTool }) {
   const key = toolKey(tool);
-  const { color, bg } = TOOL_CHIP[key] ?? TOOL_CHIP.other;
+  const entry = TOOL_CHIP[key] ?? TOOL_CHIP['other']!;
+  const { color, bg } = entry;
   return (
     <span
       style={{
@@ -531,7 +532,7 @@ export function FilesPage() {
             {(['kicad', 'freecad', 'spice', 'other'] as const).map(key => {
               const count = toolCounts[key] ?? 0;
               const pct = toolTotal > 0 ? (count / toolTotal) * 100 : 0;
-              const { color } = TOOL_CHIP[key];
+              const color = TOOL_CHIP[key]?.color ?? '#9a9aaa';
               return (
                 <div key={key} style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>

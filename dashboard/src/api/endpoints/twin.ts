@@ -128,3 +128,8 @@ export async function syncNode(nodeId: string): Promise<SyncResult> {
   const { data } = await apiClient.post<SyncResult>(`/twin/nodes/${nodeId}/sync`);
   return data;
 }
+
+export async function getNodeVersionHistory(nodeId: string): Promise<Record<string, unknown>[]> {
+  const { data } = await apiClient.get<Record<string, unknown>[]>(`/twin/nodes/${nodeId}/versions`);
+  return data;
+}
