@@ -66,7 +66,6 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
         """Check that the work_product exists and at least one CAD tool is available."""
         errors: list[str] = []
 
-        # Work product lookup is optional for generative actions
         if input_data.work_product_id is not None:
             work_product = await self.context.twin.get_work_product(
                 input_data.work_product_id, branch=self.context.branch

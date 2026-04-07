@@ -39,4 +39,4 @@ pytest tests/unit/test_tool_registry*.py -v
 - KiCad is read-only in Phase 1 (ERC/DRC/BOM/Gerber export); write capabilities come in Phase 2
 - Each adapter must declare its capabilities via `ToolCapability` metadata
 - MCP server handlers must validate all incoming requests against `mcp_core.schemas`
-- Add `structlog` logging and OTel tracing spans to all tool invocations
+- Add observability instrumentation (Logs, Metrics, Traces) to all tool invocations — see [Observability Requirements in root CLAUDE.md](../CLAUDE.md#observability-requirements) for all 7 levels

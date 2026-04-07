@@ -1,0 +1,1 @@
+"""MetaForge FreeCAD plugin."""

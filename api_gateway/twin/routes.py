@@ -33,7 +33,12 @@ from api_gateway.twin.import_service import (
     infer_domain,
     infer_wp_type,
 )
-from api_gateway.twin.schemas import TwinNodeListResponse, TwinNodeResponse
+from api_gateway.twin.schemas import (
+    TwinNodeListResponse,
+    TwinNodeResponse,
+    TwinRelationshipListResponse,
+    TwinRelationshipResponse,
+)
 from observability.tracing import get_tracer
 from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI
@@ -108,6 +113,38 @@ async def list_twin_nodes(
         return TwinNodeListResponse(nodes=nodes, total=len(nodes))
 
 
+@router.get("/relationships", response_model=TwinRelationshipListResponse)
+async def list_twin_relationships() -> TwinRelationshipListResponse:
+    """List all edges in the Digital Twin graph."""
+    with tracer.start_as_current_span("twin.list_relationships") as span:
+        work_products = await _twin.list_work_products()
+        edges = []
+        seen: set[str] = set()
+        for wp in work_products:
+            try:
+                wp_edges = await _twin.get_edges(wp.id)
+            except Exception:
+                continue
+            for edge in wp_edges:
+                key = f"{edge.source_id}:{edge.target_id}:{edge.edge_type}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                label = str(edge.edge_type).replace("_", " ")
+                edges.append(
+                    TwinRelationshipResponse(
+                        id=key,
+                        sourceId=str(edge.source_id),
+                        targetId=str(edge.target_id),
+                        type=str(edge.edge_type),
+                        label=label,
+                    )
+                )
+        span.set_attribute("twin.relationships_count", len(edges))
+        logger.info("twin_relationships_listed", count=len(edges))
+        return TwinRelationshipListResponse(relationships=edges, total=len(edges))
+
+
 @router.get("/nodes/{node_id}", response_model=TwinNodeResponse)
 async def get_twin_node(node_id: str) -> TwinNodeResponse:
     """Get a single work-product node by ID."""
@@ -131,7 +168,7 @@ _WORKSPACE_DIR = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
 async def get_node_model(
     node_id: str,
     quality: str = Query("standard", pattern="^(preview|standard|fine)$"),
-) -> dict:
+) -> dict[str, object]:
     """Convert a CAD work-product's STEP file to GLB and return the URL.
 
     Reads the STEP file from the shared adapter workspace, converts it
@@ -430,7 +467,7 @@ async def list_file_links() -> list[FileLinkResponse]:
 
 
 @router.post("/nodes/{node_id}/sync")
-async def sync_file_link(node_id: str) -> dict:
+async def sync_file_link(node_id: str) -> dict[str, object]:
     """Manually trigger a sync for a linked work product.
 
     Re-reads the source file, extracts metadata, and updates the Twin

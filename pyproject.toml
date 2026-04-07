@@ -57,8 +57,19 @@ knowledge = [
 cadquery = [
     "cadquery>=2.4.0",
 ]
+postgres = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+]
 docker = [
     "docker>=7.0",
+]
+# All extras needed for the Docker gateway image
+gateway = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "neo4j>=5.0",
+    "pgvector>=0.2",
 ]
 
 [tool.pytest.ini_options]

@@ -63,6 +63,14 @@ vi.mock('../../components/viewer/ExplodedViewControls', () => ({
   ExplodedViewControls: () => <div data-testid="exploded-controls" />,
 }));
 
+vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
+  TwinGraphCanvas: ({ nodes }: { nodes: { name: string }[] }) => (
+    <div data-testid="twin-graph-canvas">
+      {nodes.map((n) => <span key={n.name}>{n.name}</span>)}
+    </div>
+  ),
+}));
+
 import { TwinViewerPage } from '../TwinViewerPage';
 import { useTwinNodes, useTwinNode } from '../../hooks/use-twin';
 
@@ -95,7 +103,7 @@ describe('TwinViewerPage', () => {
     } as unknown as ReturnType<typeof useTwinNodes>);
     mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    expect(screen.getByText('bracket-v1.step')).toBeInTheDocument();
+    expect(screen.getAllByText('bracket-v1.step').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows view mode toggle buttons', () => {

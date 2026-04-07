@@ -1,0 +1,10 @@
+{
+  "name": "MetaForge Assistant",
+  "version": "0.1.0",
+  "description": "MetaForge AI assistant for FreeCAD — live sync, agent chat, and design validation",
+  "author": "MetaForge",
+  "freecad_min_version": "0.21.0",
+  "gateway_url_env": "METAFORGE_GATEWAY_URL",
+  "default_gateway_url": "http://localhost:8000",
+  "patch_server_port": 9001
+}

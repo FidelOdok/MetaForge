@@ -18,8 +18,9 @@ services:
       --reload-dir /app/api_gateway
       --reload-dir /app/orchestrator
       --reload-dir /app/twin_core
-      --reload-dir /app/domain_agents
       --reload-dir /app/shared
+      --reload-dir /app/domain_agents
+      --reload-dir /app/skill_registry
     environment:
       - WATCHFILES_FORCE_POLLING=true
     volumes:

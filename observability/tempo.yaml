@@ -36,10 +36,6 @@ metrics_generator:
     path: /var/tempo/generator/wal
     remote_write: []
 
-compactor:
-  compaction:
-    block_retention: 48h
-
 storage:
   trace:
     backend: local

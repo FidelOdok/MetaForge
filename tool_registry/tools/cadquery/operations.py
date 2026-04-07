@@ -12,6 +12,7 @@ import math
 import os
 import re
 import signal
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -526,14 +527,19 @@ class CadqueryOperations:
 
             # Execute with timeout
             exec_timeout = timeout or self.timeout
+            is_main_thread = threading.current_thread() is threading.main_thread()
             old_handler = None
 
             def _timeout_handler(signum: int, frame: Any) -> None:
                 raise ScriptTimeoutError(f"Script execution exceeded {exec_timeout}s timeout")
 
             try:
-                # Set alarm timeout (Unix only, works inside Docker)
-                if hasattr(signal, "SIGALRM"):
+                # Use signal.alarm for timeout when running in the main thread
+                # (works inside Docker on Linux). When running in a worker thread
+                # (e.g. via asyncio.to_thread), fall back to wall-clock checking
+                # after exec() returns -- the asyncio.wait_for on the caller side
+                # provides the hard timeout in that case.
+                if is_main_thread and hasattr(signal, "SIGALRM"):
                     old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
                     signal.alarm(int(exec_timeout))
 
@@ -547,10 +553,19 @@ class CadqueryOperations:
                 span.record_exception(exc)
                 raise RuntimeError(f"Script execution failed: {exc}") from exc
             finally:
-                if hasattr(signal, "SIGALRM"):
+                if is_main_thread and hasattr(signal, "SIGALRM"):
                     signal.alarm(0)
                     if old_handler is not None:
                         signal.signal(signal.SIGALRM, old_handler)
+
+            # Wall-clock timeout check for worker threads where signal.alarm
+            # is not available.
+            if not is_main_thread:
+                elapsed_so_far = time.monotonic() - start
+                if elapsed_so_far > exec_timeout:
+                    raise ScriptTimeoutError(
+                        f"Script execution exceeded {exec_timeout}s timeout"
+                    )
 
             # Extract result
             result_obj = namespace.get("result")

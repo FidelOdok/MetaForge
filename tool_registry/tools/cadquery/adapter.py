@@ -510,6 +510,8 @@ class CadqueryServer(McpToolServer):
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute a sandboxed CadQuery Python script."""
+        import asyncio
+
         script = arguments.get("script", "")
         output_path = arguments.get("output_path", "")
         timeout = arguments.get("timeout")
@@ -527,7 +529,8 @@ class CadqueryServer(McpToolServer):
             max_script_lines=self.config.max_script_lines,
             sandbox_enabled=self.config.sandbox_enabled,
         )
-        return ops.execute_script(script, output_path, timeout)
+        # Run in a thread to avoid blocking the async event loop during exec()
+        return await asyncio.to_thread(ops.execute_script, script, output_path, timeout)
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Create multi-part assembly from STEP files with constraints."""

@@ -37,11 +37,11 @@ class GenerateCadScriptHandler(SkillBase[GenerateCadScriptInput, GenerateCadScri
 
         # Work product lookup is optional for generative actions
         if input_data.work_product_id is not None:
-            wp = await self.context.twin.get_work_product(
+            work_product = await self.context.twin.get_work_product(
                 input_data.work_product_id, branch=self.context.branch
             )
-            if wp is None:
-                errors.append(f"WorkProduct {input_data.work_product_id} not found")
+            if work_product is None:
+                errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         if not await self.context.mcp.is_available("cadquery.execute_script"):
             errors.append("CadQuery execute_script tool is not available")
@@ -67,13 +67,9 @@ class GenerateCadScriptHandler(SkillBase[GenerateCadScriptInput, GenerateCadScri
             # In the full agent loop, the LLM generates this script. Here we
             # construct a minimal parametric script from structured constraints
             # as a deterministic fallback.
-            script = (
-                input_data.script.strip()
-                if input_data.script.strip()
-                else self._build_script(input_data.description, input_data.constraints)
-            )
+            script = self._build_script(input_data.description, input_data.constraints)
 
-            wp_tag = input_data.work_product_id or self.context.session_id
+            wp_tag = input_data.work_product_id or "new"
             output_path = f"output/script_{wp_tag}.{input_data.output_format}"
 
             try:
@@ -137,6 +133,8 @@ class GenerateCadScriptHandler(SkillBase[GenerateCadScriptInput, GenerateCadScri
         height = constraints.get("height", 20.0)
 
         return (
+            "import cadquery as cq\n"
+            "\n"
             f"# Generated from: {description[:80]}\n"
             f"length = {length}\n"
             f"width = {width}\n"

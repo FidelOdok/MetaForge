@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-# Install runtime dependencies only (no dev extras)
-RUN pip install --no-cache-dir . \
+# Install runtime + gateway database dependencies
+RUN pip install --no-cache-dir ".[gateway]" \
     && pip install --no-cache-dir uvicorn[standard]
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────

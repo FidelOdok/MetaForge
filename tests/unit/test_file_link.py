@@ -1,6 +1,8 @@
-"""Tests for file linking API (MET-252)."""
+"""Tests for file linking API (MET-252, MET-285)."""
 
 from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -8,6 +10,7 @@ from api_gateway.twin.file_link import (
     FileLink,
     FileLinkStore,
     check_sync_status,
+    sync_linked_file,
 )
 
 # ---------------------------------------------------------------------------
@@ -287,3 +290,161 @@ class TestFileLinkEndpoints:
         assert resp.status_code == 200
         assert resp.json()["status"] == "synced"
         assert resp.json()["message"] == "No changes detected"
+
+
+# ---------------------------------------------------------------------------
+# sync_linked_file — metadata merge (MET-285)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncMetadataMerge:
+    """Verify that sync_linked_file merges metadata instead of replacing it."""
+
+    @pytest.fixture
+    def temp_step(self, tmp_path):
+        """A dummy STEP file with a hash that differs from the link's stored hash."""
+        f = tmp_path / "part.step"
+        f.write_bytes(b"ISO-10303-21; /* fake step content */")
+        return f
+
+    def _make_link(self, path: str, stored_hash: str = "old_hash") -> FileLink:
+        return FileLink(
+            work_product_id="00000000-0000-0000-0000-000000000010",
+            source_path=path,
+            tool="freecad",
+            source_hash=stored_hash,
+        )
+
+    async def test_existing_metadata_preserved_after_sync(self, temp_step):
+        """Geometry fields present on the node before sync survive unchanged."""
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
+
+        twin = InMemoryTwinAPI.create()
+        wp = WorkProduct(
+            name="part",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path=str(temp_step),
+            content_hash="old_hash",
+            format="step",
+            created_by="test",
+            metadata={"volume": 1000, "surface_area": 500},
+        )
+        import uuid
+
+        wp.id = uuid.UUID("00000000-0000-0000-0000-000000000010")
+        await twin.create_work_product(wp)
+
+        link = self._make_link(str(temp_step))
+
+        with patch(
+            "api_gateway.twin.import_service.ImportService.extract_metadata",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            result = await sync_linked_file(link, twin)
+
+        assert result["status"] == "synced"
+        updated = await twin.get_work_product(uuid.UUID("00000000-0000-0000-0000-000000000010"))
+        assert updated is not None
+        assert updated.metadata["volume"] == 1000
+        assert updated.metadata["surface_area"] == 500
+
+    async def test_sync_fields_always_written(self, temp_step):
+        """synced_from, sync_tool, last_synced_at, source_hash are always present."""
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
+
+        twin = InMemoryTwinAPI.create()
+        import uuid
+
+        wp = WorkProduct(
+            name="part",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path=str(temp_step),
+            content_hash="old_hash",
+            format="step",
+            created_by="test",
+        )
+        wp.id = uuid.UUID("00000000-0000-0000-0000-000000000010")
+        await twin.create_work_product(wp)
+
+        link = self._make_link(str(temp_step))
+
+        with patch(
+            "api_gateway.twin.import_service.ImportService.extract_metadata",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            result = await sync_linked_file(link, twin)
+
+        assert result["status"] == "synced"
+        updated = await twin.get_work_product(uuid.UUID("00000000-0000-0000-0000-000000000010"))
+        assert updated is not None
+        meta = updated.metadata
+        assert meta["synced_from"] == str(temp_step)
+        assert meta["sync_tool"] == "freecad"
+        assert "last_synced_at" in meta
+        assert "source_hash" in meta
+
+    async def test_conflicting_key_overwritten_by_sync(self, temp_step):
+        """A key present in both existing metadata and extracted metadata uses the sync value."""
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
+
+        twin = InMemoryTwinAPI.create()
+        import uuid
+
+        wp = WorkProduct(
+            name="part",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path=str(temp_step),
+            content_hash="old_hash",
+            format="step",
+            created_by="test",
+            metadata={"format": "step"},
+        )
+        wp.id = uuid.UUID("00000000-0000-0000-0000-000000000010")
+        await twin.create_work_product(wp)
+
+        link = self._make_link(str(temp_step))
+
+        with patch(
+            "api_gateway.twin.import_service.ImportService.extract_metadata",
+            new_callable=AsyncMock,
+            return_value={"format": "kicad_sch"},
+        ):
+            result = await sync_linked_file(link, twin)
+
+        assert result["status"] == "synced"
+        updated = await twin.get_work_product(uuid.UUID("00000000-0000-0000-0000-000000000010"))
+        assert updated is not None
+        assert updated.metadata["format"] == "kicad_sch"
+
+    async def test_no_existing_wp_graceful(self, temp_step):
+        """If get_work_product returns None, sync still succeeds with just sync metadata."""
+        mock_twin = AsyncMock()
+        mock_twin.get_work_product.return_value = None
+        mock_twin.update_work_product.return_value = AsyncMock()
+
+        link = self._make_link(str(temp_step))
+
+        with patch(
+            "api_gateway.twin.import_service.ImportService.extract_metadata",
+            new_callable=AsyncMock,
+            return_value={"component_count": 5},
+        ):
+            result = await sync_linked_file(link, mock_twin)
+
+        assert result["status"] == "synced"
+        call_args = mock_twin.update_work_product.call_args
+        updates_passed = call_args[0][1]
+        meta = updates_passed["metadata"]
+        assert meta["synced_from"] == str(temp_step)
+        assert meta["component_count"] == 5
