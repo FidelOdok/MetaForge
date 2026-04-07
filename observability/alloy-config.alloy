@@ -1,8 +1,8 @@
 // Grafana Alloy — Docker log scraper for MetaForge
 //
 // Discovers all containers in the metaforge compose project and ships
-// their stdout/stderr to Loki. OTel SDK logs from the gateway continue
-// to flow through the OTel collector as before.
+// their stdout/stderr to Loki, labelled with service_name (OTel convention)
+// so Grafana Drilldown / Logs view shows them alongside gateway OTel logs.
 
 // ── Docker log discovery ──────────────────────────────────────────────────────
 
@@ -15,34 +15,34 @@ discovery.docker "metaforge_containers" {
   }
 }
 
-// ── Relabelling: extract useful metadata from Docker labels ───────────────────
+// ── Relabelling: extract metadata and use service_name (OTel convention) ─────
 
 discovery.relabel "metaforge_containers" {
   targets = discovery.docker.metaforge_containers.targets
 
-  // Use the compose service name as the primary label
+  // service_name matches the OTel label — Grafana Drilldown groups by this
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "service"
+    target_label  = "service_name"
   }
 
-  // Keep the full container name for disambiguation
+  // Full container name for disambiguation
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "/?(.*)"
-    target_label  = "container"
+    target_label  = "container_name"
   }
 
-  // Keep the image name (useful for third-party services like temporal, neo4j)
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_image"]
-    target_label  = "image"
-  }
-
-  // Mark all logs with the compose project
+  // Compose project label for cross-project filtering
   rule {
     replacement  = "metaforge"
     target_label = "project"
+  }
+
+  // deployment_environment to match OTel collector label
+  rule {
+    replacement  = "docker"
+    target_label = "deployment_environment"
   }
 }
 
@@ -52,28 +52,58 @@ loki.source.docker "metaforge_logs" {
   host       = "unix:///var/run/docker.sock"
   targets    = discovery.relabel.metaforge_containers.output
   forward_to = [loki.process.metaforge_logs.receiver]
+
+  // Re-read logs from container start so existing logs are captured on restart
+  refresh_interval = "5s"
 }
 
-// ── Processing: parse JSON logs where possible, pass through others ───────────
+// ── Processing: promote log level from JSON where available ──────────────────
 
 loki.process "metaforge_logs" {
-  // Try to parse JSON-structured logs (gateway, adapters use structlog JSON)
+  // Try to extract level from JSON-structured logs (gateway, adapters use structlog)
   stage.json {
     expressions = {
-      level   = "level",
-      logger  = "logger",
-      event   = "event",
+      extracted_level = "level",
+      extracted_event = "event",
     }
   }
 
-  // Promote log level to a label so you can filter by severity in Grafana
+  // Promote level to a Loki label for filtering
   stage.labels {
     values = {
-      level  = "level",
+      level = "extracted_level",
     }
   }
 
   forward_to = [loki.write.loki.receiver]
+}
+
+// ── Faro receiver — browser logs from the MetaForge dashboard ────────────────
+//
+// The Vite dev server proxies /faro/collect → http://alloy:12347/collect.
+// Faro SDK ships console logs, unhandled errors, and web vitals here.
+
+faro.receiver "dashboard" {
+  server {
+    listen_address       = "0.0.0.0"
+    listen_port          = 12347
+    cors_allowed_origins = ["*"]
+  }
+
+  output {
+    logs = [loki.write.faro.receiver]
+  }
+}
+
+// Separate Loki writer for Faro so browser logs get proper labels
+loki.write "faro" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  external_labels = {
+    service_name = "metaforge-dashboard",
+    source       = "faro",
+  }
 }
 
 // ── Loki output ───────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # observability
 
-Cross-cutting observability layer. Provides structured logging, distributed tracing, metrics collection, alerting, SLO tracking, audit logging, and Grafana dashboard definitions. Can be imported by any module at any layer.
+Cross-cutting observability layer. Canonical implementation of all 7 observability levels: Logs, Metrics, Traces, Profiling, Alerting, Synthetic Monitoring, and RUM (in progress). Can be imported by any module at any layer.
 
 ## Layer & Dependencies
 
@@ -22,9 +22,12 @@ Cross-cutting observability layer. Provides structured logging, distributed trac
 - `simulation_metrics.py` -- Simulation-specific metric helpers
 - `tenant_isolation.py` -- Multi-tenant metric isolation
 - `audit/` -- Audit logging: `logger.py`, `models.py`, `integrity.py`
-- `alerting/` -- Alert rule definitions (`rules.yaml`, `routes.yaml`)
+- `alerting/` -- Alert rule definitions (`rules.yaml`, `routes.yaml`) — Level 5 (Alerting)
 - `slo/` -- SLO definitions and calculator
 - `dashboards/` -- Grafana dashboard JSON definitions
+- `profiling/` -- Pyroscope profiling configuration and label conventions — Level 4 (Profiling); process-level, no per-module instrumentation required
+- `synthetic/` -- Synthetic monitoring probe definitions — Level 6 (Synthetic Monitoring); probe logic currently lives in `.claude/agents/dashboard-tester.agent.md`
+- `rum/` -- Real User Monitoring configuration — Level 7 (RUM); in progress (MET-288), front-end instrumentation only
 
 ## Testing
 
@@ -42,3 +45,5 @@ pytest tests/unit/test_observability*.py tests/unit/test_metrics*.py tests/unit/
 - Never import from other MetaForge modules -- this package must remain dependency-free within the project
 - Audit logs must include integrity hashes for tamper detection
 - Dashboard JSON files are auto-provisioned via `grafana-dashboards.yml`
+- Alert rules for new metrics must be added to `alerting/rules.yaml` — do not create ad-hoc Grafana alerts (Level 5)
+- Profiling is process-level and captured automatically via Pyroscope — module authors do not need to add profiling instrumentation (Level 4)

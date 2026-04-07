@@ -39,5 +39,5 @@ pytest tests/integration/test_api*.py -v --timeout=120
 - All routes use Pydantic v2 request/response schemas
 - Use dependency injection for services (Twin API, orchestrator, etc.)
 - Never put business logic in route handlers -- delegate to service layers
-- Add `structlog` logging and OTel tracing spans to all endpoints
+- Add observability instrumentation (Logs, Metrics, Traces) to all endpoints — see [Observability Requirements in root CLAUDE.md](../CLAUDE.md#observability-requirements) for all 7 levels
 - Manual verification: `uvicorn api_gateway.server:app` and test endpoints respond

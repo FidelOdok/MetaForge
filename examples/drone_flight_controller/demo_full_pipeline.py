@@ -46,8 +46,11 @@ from domain_agents.simulation.agent import SimulationAgent  # noqa: E402
 from domain_agents.simulation.agent import TaskRequest as SimTaskRequest  # noqa: E402
 from domain_agents.supply_chain.agent import SupplyChainAgent  # noqa: E402
 from domain_agents.supply_chain.agent import TaskRequest as SCTaskRequest  # noqa: E402
+from orchestrator.event_bus.subscribers import EventBus  # noqa: E402
 from skill_registry.mcp_bridge import InMemoryMcpBridge  # noqa: E402
 from twin_core.api import InMemoryTwinAPI  # noqa: E402
+from twin_core.constraint_engine.validator import InMemoryConstraintEngine  # noqa: E402
+from twin_core.graph_engine import InMemoryGraphEngine  # noqa: E402
 from twin_core.models.enums import WorkProductType  # noqa: E402
 from twin_core.models.work_product import WorkProduct  # noqa: E402
 
@@ -343,11 +346,11 @@ async def run_pipeline() -> dict[str, Any]:
     # Step 8: Run Compliance Agent -- checklist
     # -----------------------------------------------------------------------
     print("[8/8] Running Compliance Agent (checklist generation)...")
-    compliance_agent = ComplianceAgent(twin=twin, mcp=mcp)
+    compliance_agent = ComplianceAgent()
     compliance_result = await compliance_agent.run_task(
         ComplianceTaskRequest(
             task_type="generate_checklist",
-            work_product_id=bom_artifact.id,
+            project_id=str(bom_artifact.id),
             parameters={
                 "markets": ["UKCA", "CE", "FCC"],
                 "product_category": "electronic_device",
@@ -358,41 +361,17 @@ async def run_pipeline() -> dict[str, Any]:
     status = "PASS" if compliance_result.success else "FAIL"
     print(f"       Compliance checklist: {status}")
 
-    return results
+    return twin, results
 
 
-def run_gate_evaluation(results: dict[str, Any]) -> Any:
+async def run_gate_evaluation(twin: Any, results: dict[str, Any]) -> Any:
     """Run EVT gate readiness evaluation on collected results."""
-    gate_engine = GateEngine()
-
-    # Map agent results to gate check names
-    agent_results: dict[str, dict[str, Any]] = {}
-
-    mech = results.get("mechanical")
-    if mech is not None:
-        agent_results["mechanical_stress"] = {"success": mech.success}
-
-    ee = results.get("electronics")
-    if ee is not None:
-        agent_results["electronics_erc"] = {"success": ee.success}
-
-    fw = results.get("firmware")
-    if fw is not None:
-        agent_results["firmware_hal"] = {"success": fw.success}
-
-    sim = results.get("simulation")
-    if sim is not None:
-        agent_results["simulation_fea"] = {"success": sim.success}
-
-    sc = results.get("supply_chain")
-    if sc is not None:
-        agent_results["supply_chain_bom"] = {"success": sc.success}
-
-    comp = results.get("compliance")
-    if comp is not None:
-        agent_results["compliance_checklist"] = {"success": comp.success}
-
-    return gate_engine.evaluate_readiness(GateStage.EVT, agent_results)
+    gate_engine = GateEngine(
+        twin=twin,
+        constraint_engine=InMemoryConstraintEngine(graph=InMemoryGraphEngine()),
+        event_bus=EventBus(),
+    )
+    return await gate_engine.evaluate_readiness(GateStage.EVT)
 
 
 def print_summary(results: dict[str, Any], readiness: Any) -> None:
@@ -412,8 +391,9 @@ def print_summary(results: dict[str, Any], readiness: Any) -> None:
     for agent_name, result in results.items():
         status = "PASS" if result.success else "FAIL"
         detail = ""
-        if result.skill_results:
-            sr = result.skill_results[0]
+        skill_results = getattr(result, "skill_results", None)
+        if skill_results:
+            sr = skill_results[0]
             skill = sr.get("skill", "")
             if skill == "validate_stress":
                 cr = sr.get("constraint_results", [])
@@ -444,7 +424,7 @@ def print_summary(results: dict[str, Any], readiness: Any) -> None:
 
     # Supply chain details
     sc_result = results.get("supply_chain")
-    if sc_result and sc_result.skill_results:
+    if sc_result and getattr(sc_result, "skill_results", None):
         sr = sc_result.skill_results[0]
         print()
         print("  BOM Risk Analysis:")
@@ -459,27 +439,24 @@ def print_summary(results: dict[str, Any], readiness: Any) -> None:
 
     # Compliance details
     comp_result = results.get("compliance")
-    if comp_result and comp_result.skill_results:
-        sr = comp_result.skill_results[0]
+    if comp_result and comp_result.success:
         print()
         print("  Compliance Coverage:")
-        print(f"    Markets:  {', '.join(sr.get('markets_covered', []))}")
-        print(f"    Items:    {sr.get('total_items', 0)}")
-        print(f"    Coverage: {sr.get('coverage_pct', 0):.0f}%")
+        markets = comp_result.data.get("markets_covered", [])
+        print(f"    Markets:  {', '.join(markets) if markets else 'N/A'}")
+        total = comp_result.data.get("total_items", comp_result.total_requirements)
+        print(f"    Items:    {total}")
+        print(f"    Coverage: {comp_result.coverage_percent:.0f}%")
 
     # Gate readiness
     print()
     print("  EVT Gate Readiness:")
-    print(f"    Score:    {readiness.score:.0%}")
-    print(f"    Status:   {'PASS' if readiness.passed else 'FAIL'}")
+    print(f"    Score:    {readiness.overall_score:.0f}/100")
+    print(f"    Status:   {'PASS' if readiness.ready else 'FAIL'}")
     if readiness.blockers:
         print(f"    Blockers ({len(readiness.blockers)}):")
         for b in readiness.blockers:
             print(f"      - {b}")
-    if readiness.warnings:
-        print("    Warnings:")
-        for w in readiness.warnings:
-            print(f"      - {w}")
 
     print()
     print("=" * 70)
@@ -494,8 +471,8 @@ async def main() -> None:
     print("=" * 70)
     print()
 
-    results = await run_pipeline()
-    readiness = run_gate_evaluation(results)
+    twin, results = await run_pipeline()
+    readiness = await run_gate_evaluation(twin, results)
     print_summary(results, readiness)
 
 

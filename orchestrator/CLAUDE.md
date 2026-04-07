@@ -34,4 +34,4 @@ pytest tests/unit/test_orchestrator*.py tests/unit/test_workflow*.py tests/unit/
 - Event subscribers must not raise exceptions -- log and continue
 - All workflow steps must be traceable via OpenTelemetry spans
 - Never call domain agent code directly -- invoke through Temporal activities
-- Add `structlog` logging and OTel tracing spans to all public methods
+- Add observability instrumentation (Logs, Metrics, Traces) to all public methods — see [Observability Requirements in root CLAUDE.md](../CLAUDE.md#observability-requirements) for all 7 levels

@@ -7,9 +7,11 @@ import './index.css';
 import './store/theme-store';
 
 // Observability — init before React render
+import { initFaro } from './lib/faro';
 import { initTelemetry } from './lib/telemetry';
 import { initWebVitals } from './lib/web-vitals';
 
+initFaro();
 initTelemetry();
 initWebVitals();
 
