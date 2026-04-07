@@ -371,12 +371,14 @@ services:
     profiles: ["observability"]
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerting/rules.yaml:/etc/prometheus/rules/rules.yaml:ro
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     networks:
       - metaforge
     restart: unless-stopped

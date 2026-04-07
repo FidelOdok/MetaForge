@@ -15,17 +15,20 @@ services:
       - loki
     networks:
       - metaforge-obs
+      - metaforge
 
   prometheus:
     image: prom/prometheus:latest
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerting/rules.yaml:/etc/prometheus/rules/rules.yaml:ro
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     networks:
       - metaforge-obs
 
@@ -51,7 +54,7 @@ services:
       - metaforge-obs
 
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.7.0
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
       - ./observability/tempo.yaml:/etc/tempo.yaml:ro
