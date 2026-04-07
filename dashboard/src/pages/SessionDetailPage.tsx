@@ -1,26 +1,86 @@
 import { Link, useParams } from 'react-router-dom';
-import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSession } from '../hooks/use-sessions';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { SessionChatPanel } from '../components/chat/integrations/SessionChatPanel';
-import type { AgentEvent } from '../types/session';
+import type { AgentEvent, AgentSession } from '../types/session';
 
-const EVENT_ICONS: Record<AgentEvent['type'], string> = {
-  task_started: '\u25B6',
-  task_completed: '\u2713',
-  task_failed: '\u2717',
-  proposal_created: '\u25C6',
+// KC color tokens
+const KC = {
+  surfaceContainer: 'rgba(30,31,38,0.85)',
+  surfaceHigh: '#282a30',
+  surfaceLowest: '#0a0b10',
+  surfaceBorder: 'rgba(65,72,90,0.2)',
+  surfaceBorderFaint: 'rgba(65,72,90,0.08)',
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  primary: '#ffb783',
+  running: '#e67e22',
+  done: '#3dd68c',
+  pending: '#9a9aaa',
+  error: '#ffb4ab',
+  info: '#86cfff',
+  warning: '#f59e0b',
+} as const;
+
+function statusDotColor(status: AgentSession['status']): string {
+  switch (status) {
+    case 'running': return KC.running;
+    case 'completed': return KC.done;
+    case 'failed': return KC.error;
+    case 'pending': return KC.pending;
+    default: return KC.pending;
+  }
+}
+
+const EVENT_ICON: Record<AgentEvent['type'], string> = {
+  task_started: 'play_circle',
+  task_completed: 'check_circle',
+  task_failed: 'error',
+  proposal_created: 'add_circle',
 };
 
-const EVENT_COLORS: Record<AgentEvent['type'], string> = {
-  task_started: 'text-blue-500',
-  task_completed: 'text-green-500',
-  task_failed: 'text-red-500',
-  proposal_created: 'text-amber-500',
+const EVENT_COLOR: Record<AgentEvent['type'], string> = {
+  task_started: KC.info,
+  task_completed: KC.done,
+  task_failed: KC.error,
+  proposal_created: KC.warning,
 };
+
+function GlassPanel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div
+      className="rounded overflow-hidden"
+      style={{
+        background: KC.surfaceContainer,
+        border: `1px solid ${KC.surfaceBorder}`,
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function PanelHeader({ label }: { label: string }) {
+  return (
+    <div
+      className="flex items-center px-4"
+      style={{ height: 36, borderBottom: `1px solid ${KC.surfaceBorder}` }}
+    >
+      <span
+        className="font-mono uppercase"
+        style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -32,7 +92,11 @@ export function SessionDetailPage() {
   });
 
   if (isLoading) {
-    return <div className="text-sm text-zinc-500">Loading session...</div>;
+    return (
+      <div className="text-sm font-mono" style={{ color: KC.onSurfaceVariant }}>
+        Loading session...
+      </div>
+    );
   }
 
   if (!session) {
@@ -46,79 +110,129 @@ export function SessionDetailPage() {
 
   return (
     <div>
-      <div className="mb-1">
+      {/* Back link */}
+      <div style={{ marginBottom: 12 }}>
         <Link
           to="/sessions"
-          className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+          className="font-mono"
+          style={{ fontSize: 12, color: KC.onSurfaceVariant, textDecoration: 'none' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = KC.onSurface; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = KC.onSurfaceVariant; }}
         >
-          &larr; Sessions
+          <span style={{ marginRight: 4 }}>←</span>Sessions
         </Link>
       </div>
 
-      <div className="mb-6 flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
-          {session.agentCode}
-        </div>
+      {/* Page header */}
+      <div className="flex items-start justify-between" style={{ marginBottom: 16 }}>
         <div>
-          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 500, color: KC.onSurface, lineHeight: 1.2 }}>
             {session.taskType.replace(/_/g, ' ')}
-          </h2>
-          <span className="text-xs text-zinc-400">
-            Started {formatRelativeTime(session.startedAt)}
+          </h1>
+          <span
+            className="font-mono"
+            style={{ fontSize: 12, color: KC.onSurfaceVariant }}
+          >
+            {session.agentCode} · started {formatRelativeTime(session.startedAt)}
           </span>
         </div>
-        <StatusBadge status={session.status} />
+        <div className="flex items-center gap-2">
+          <span
+            style={{
+              display: 'inline-block',
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: statusDotColor(session.status),
+            }}
+          />
+          <span
+            className="font-mono"
+            style={{ fontSize: 11, color: statusDotColor(session.status) }}
+          >
+            {session.status}
+          </span>
+          <StatusBadge status={session.status} className="ml-1" />
+        </div>
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Card>
-          <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {session.id}
-          </div>
-          <div className="text-xs text-zinc-500">Session ID</div>
-        </Card>
-        <Card>
-          <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {session.runId ?? '\u2014'}
-          </div>
-          <div className="text-xs text-zinc-500">Run ID</div>
-        </Card>
-        <Card>
-          <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {session.completedAt ? formatRelativeTime(session.completedAt) : '\u2014'}
-          </div>
-          <div className="text-xs text-zinc-500">Completed</div>
-        </Card>
-      </div>
-
-      <h3 className="mb-3 text-lg font-medium text-zinc-900 dark:text-zinc-100">
-        Timeline
-      </h3>
-
-      {session.events.length === 0 ? (
-        <EmptyState title="No events" description="No events have been recorded yet." />
-      ) : (
-        <div className="relative space-y-0 border-l-2 border-zinc-200 pl-6 dark:border-zinc-700">
-          {session.events.map((event) => (
-            <div key={event.id} className="relative pb-6 last:pb-0">
-              <span
-                className={`absolute -left-[1.625rem] flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs dark:bg-zinc-900 ${EVENT_COLORS[event.type]}`}
+      {/* Meta row */}
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        {[
+          { label: 'SESSION ID', value: session.id },
+          { label: 'RUN ID', value: session.runId ?? '—' },
+          { label: 'COMPLETED', value: session.completedAt ? formatRelativeTime(session.completedAt) : '—' },
+        ].map(({ label, value }) => (
+          <GlassPanel key={label}>
+            <div style={{ padding: '10px 14px' }}>
+              <div
+                className="font-mono truncate"
+                style={{ fontSize: 12, color: KC.onSurface, marginBottom: 2 }}
               >
-                {EVENT_ICONS[event.type]}
-              </span>
-              <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                {event.message}
+                {value}
               </div>
-              <div className="text-xs text-zinc-400">
-                {formatRelativeTime(event.timestamp)}
+              <div
+                className="font-mono uppercase"
+                style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+              >
+                {label}
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </GlassPanel>
+        ))}
+      </div>
+
+      {/* Timeline */}
+      <GlassPanel style={{ marginBottom: 16 }}>
+        <PanelHeader label="TIMELINE" />
+
+        {session.events.length === 0 ? (
+          <div style={{ padding: '24px 16px' }}>
+            <EmptyState title="No events" description="No events have been recorded yet." />
+          </div>
+        ) : (
+          <div style={{ padding: '8px 0' }}>
+            {session.events.map((event, idx) => (
+              <div
+                key={event.id}
+                className="flex items-start gap-3 px-4"
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  borderBottom:
+                    idx < session.events.length - 1
+                      ? `1px solid ${KC.surfaceBorderFaint}`
+                      : 'none',
+                }}
+              >
+                {/* Icon */}
+                <span
+                  className="material-symbols-outlined shrink-0"
+                  style={{ fontSize: 15, color: EVENT_COLOR[event.type], lineHeight: 1.4 }}
+                >
+                  {EVENT_ICON[event.type]}
+                </span>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div style={{ fontSize: 13, color: KC.onSurface }}>
+                    {event.message}
+                  </div>
+                  <div
+                    className="font-mono"
+                    style={{ fontSize: 11, color: KC.onSurfaceVariant, marginTop: 2 }}
+                  >
+                    {formatRelativeTime(event.timestamp)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassPanel>
 
       {/* Session Chat Panel */}
-      <div className="mt-6">
+      <div style={{ marginTop: 16 }}>
         <SessionChatPanel
           sessionId={session.id}
           sessionTitle={session.taskType.replace(/_/g, ' ')}

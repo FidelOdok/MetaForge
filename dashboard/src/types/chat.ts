@@ -33,7 +33,7 @@ export interface ChatMessage {
 }
 
 /** Scope kinds for chat threads */
-export type ChatScopeKind = 'session' | 'approval' | 'bom-entry' | 'digital-twin-node' | 'project';
+export type ChatScopeKind = 'session' | 'approval' | 'bom-entry' | 'digital-twin-node' | 'project' | 'assistant';
 
 /** Scope that a chat thread is bound to */
 export interface ChatScope {

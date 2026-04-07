@@ -25,11 +25,13 @@ describe('Button', () => {
 
   it('applies primary variant by default', () => {
     render(<Button>Primary</Button>);
-    expect(screen.getByRole('button').className).toContain('bg-blue-600');
+    // KC primary uses inline style + text-surface class
+    expect(screen.getByRole('button').className).toContain('text-surface');
   });
 
   it('applies danger variant', () => {
     render(<Button variant="danger">Delete</Button>);
-    expect(screen.getByRole('button').className).toContain('bg-red-600');
+    // KC danger uses inline style + text-error class
+    expect(screen.getByRole('button').className).toContain('text-error');
   });
 });

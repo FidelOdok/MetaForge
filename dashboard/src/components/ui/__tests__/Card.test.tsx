@@ -12,7 +12,7 @@ describe('Card', () => {
     render(<Card>Test</Card>);
     const el = screen.getByText('Test');
     expect(el.className).toContain('rounded-lg');
-    expect(el.className).toContain('border');
+    // border is now an inline style (not a Tailwind class)
   });
 
   it('merges custom className', () => {

@@ -1,50 +1,100 @@
 import { NavLink } from 'react-router-dom';
-import { clsx } from 'clsx';
+
+// ---------------------------------------------------------------------------
+// Nav items — Material Symbols Outlined icon names
+// ---------------------------------------------------------------------------
 
 const NAV_ITEMS = [
-  { to: '/projects', label: 'Projects', icon: '\uD83D\uDCE6' },
-  { to: '/sessions', label: 'Sessions', icon: '\u26A1' },
-  { to: '/approvals', label: 'Approvals', icon: '\u2705' },
-  { to: '/bom', label: 'BOM', icon: '\uD83D\uDCCB' },
-  { to: '/twin', label: 'Digital Twin', icon: '\uD83E\uDDE0' },
-  { to: '/assistant', label: 'Design Assistant', icon: '\uD83E\uDD16' },
-];
+  { to: '/projects',  icon: 'grid_view',    title: 'Platform'         },
+  { to: '/sessions',  icon: 'account_tree', title: 'Orchestrator'     },
+  { to: '/approvals', icon: 'task_alt',     title: 'Approvals'        },
+  { to: '/bom',       icon: 'inventory_2',  title: 'BOM'              },
+  { to: '/twin',      icon: 'hub',          title: 'Digital Twin'     },
+  { to: '/files',     icon: 'psychology',   title: 'Knowledge'        },
+  { to: '/assistant', icon: 'auto_awesome', title: 'Design Assistant' },
+] as const;
+
+// ---------------------------------------------------------------------------
+// NavRail — 48px icon-only, always visible
+// ---------------------------------------------------------------------------
 
 export function Sidebar() {
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="flex h-14 items-center gap-2 border-b border-zinc-200 px-4 dark:border-zinc-700">
-        <span className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-          MetaForge
-        </span>
-        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-          v0.1
-        </span>
+    <nav
+      className="fixed inset-y-0 left-0 z-40 flex flex-col items-center"
+      style={{
+        width: 48,
+        background: '#191b22',
+        borderRight: '1px solid rgba(65,72,90,0.2)',
+      }}
+    >
+      {/* Logo mark */}
+      <div
+        className="mt-3 mb-3 flex shrink-0 items-center justify-center rounded"
+        style={{
+          width: 32,
+          height: 32,
+          background: '#e67e22',
+          fontFamily: 'Inter, sans-serif',
+          fontWeight: 700,
+          fontSize: 15,
+          color: '#111319',
+          letterSpacing: '-0.02em',
+          userSelect: 'none',
+        }}
+      >
+        M
       </div>
 
-      <nav className="flex-1 space-y-1 p-3">
+      {/* Nav items */}
+      <div className="flex flex-1 flex-col items-center w-full">
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            title={item.title}
             className={({ isActive }) =>
-              clsx(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+              [
+                'nav-btn flex w-full items-center justify-center transition-colors',
                 isActive
-                  ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
-                  : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
-              )
+                  ? 'nav-active text-primary-container'
+                  : 'text-on-surface-variant hover:bg-surface-high hover:text-on-surface',
+              ].join(' ')
             }
+            style={{ height: 44 }}
           >
-            <span>{item.icon}</span>
-            {item.label}
+            <span className="material-symbols-outlined">{item.icon}</span>
           </NavLink>
         ))}
-      </nav>
-
-      <div className="border-t border-zinc-200 p-3 dark:border-zinc-700">
-        <p className="text-xs text-zinc-400">MetaForge Platform v0.1.0</p>
       </div>
-    </aside>
+
+      {/* Bottom: settings + avatar */}
+      <div className="flex flex-col items-center gap-1 pb-3">
+        <button
+          type="button"
+          title="Settings"
+          className="flex items-center justify-center rounded text-on-surface-variant hover:bg-surface-high transition-colors"
+          style={{ width: 32, height: 32 }}
+        >
+          <span className="material-symbols-outlined">settings</span>
+        </button>
+        <div
+          className="flex shrink-0 items-center justify-center rounded-full"
+          style={{
+            width: 28,
+            height: 28,
+            background: '#282a30',
+            fontSize: 10,
+            fontWeight: 600,
+            color: '#9a9aaa',
+            letterSpacing: '0.03em',
+            cursor: 'pointer',
+          }}
+          title="Profile"
+        >
+          MF
+        </div>
+      </div>
+    </nav>
   );
 }

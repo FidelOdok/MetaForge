@@ -10,6 +10,8 @@ interface ViewerState {
   explodeDirection: ExplodeDirection;
   animating: boolean;
   viewMode: '3d' | 'graph';
+  /** Callback registered by the R3F canvas to reset the camera. */
+  _cameraResetFn: (() => void) | null;
 
   loadModel: (glbUrl: string, manifest: ModelManifest) => void;
   selectPart: (meshName: string | null) => void;
@@ -21,6 +23,10 @@ interface ViewerState {
   setAnimating: (animating: boolean) => void;
   setViewMode: (mode: '3d' | 'graph') => void;
   reset: () => void;
+  /** Register the camera reset callback from inside the R3F Canvas. */
+  registerCameraReset: (fn: () => void) => void;
+  /** Trigger the camera reset (called from outside the Canvas). */
+  resetCamera: () => void;
 }
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
@@ -32,6 +38,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   explodeDirection: 'radial' as ExplodeDirection,
   animating: false,
   viewMode: 'graph',
+  _cameraResetFn: null,
 
   loadModel: (glbUrl, manifest) =>
     set({ glbUrl, manifest, selectedMeshName: null, hiddenMeshes: new Set(), explodeFactor: 0, viewMode: '3d' }),
@@ -76,4 +83,11 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       explodeFactor: 0,
       viewMode: 'graph',
     }),
+
+  registerCameraReset: (fn) => set({ _cameraResetFn: fn }),
+
+  resetCamera: () => {
+    const fn = get()._cameraResetFn;
+    if (fn) fn();
+  },
 }));

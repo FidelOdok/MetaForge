@@ -1,6 +1,20 @@
 import { useState, useRef, useCallback, type KeyboardEvent } from 'react';
 
 // ---------------------------------------------------------------------------
+// KC color tokens
+// ---------------------------------------------------------------------------
+
+const KC = {
+  surface: '#111319',
+  surfaceHigh: '#282a30',
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  primaryContainer: '#e67e22',
+  border: 'rgba(65,72,90,0.2)',
+  borderStrong: 'rgba(65,72,90,0.3)',
+};
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -65,11 +79,18 @@ export function ChatComposer({
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
   }, [compact]);
 
+  const isEmpty = value.trim().length === 0;
+
   return (
     <div
-      className={`flex items-end gap-2 border-t border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900 ${
-        compact ? 'px-2 py-1.5' : 'px-3 py-2'
-      }`}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: '8px',
+        borderTop: `1px solid ${KC.border}`,
+        background: KC.surface,
+        padding: compact ? '6px 10px' : '10px 12px',
+      }}
     >
       <textarea
         ref={textareaRef}
@@ -82,19 +103,45 @@ export function ChatComposer({
         placeholder={placeholder}
         disabled={disabled}
         rows={1}
-        className={`flex-1 resize-none rounded-lg border border-zinc-200 bg-zinc-50 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-blue-500 dark:focus:ring-blue-500 ${
-          compact ? 'px-2.5 py-1.5 text-sm' : 'px-3 py-2 text-sm'
-        }`}
+        style={{
+          flex: 1,
+          resize: 'none',
+          borderRadius: '6px',
+          border: `1px solid ${KC.borderStrong}`,
+          background: KC.surfaceHigh,
+          color: KC.onSurface,
+          padding: compact ? '6px 10px' : '7px 10px',
+          fontSize: '13px',
+          fontFamily: 'Inter, sans-serif',
+          outline: 'none',
+          cursor: disabled ? 'not-allowed' : 'text',
+          opacity: disabled ? 0.5 : 1,
+          lineHeight: '1.5',
+        }}
+        onFocus={(e) => (e.currentTarget.style.borderColor = KC.primaryContainer)}
+        onBlur={(e) => (e.currentTarget.style.borderColor = KC.borderStrong)}
       />
 
       <button
         type="button"
         onClick={handleSend}
-        disabled={disabled || value.trim().length === 0}
+        disabled={disabled || isEmpty}
         aria-label="Send message"
-        className={`flex shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 ${
-          compact ? 'h-8 w-8' : 'h-9 w-9'
-        }`}
+        style={{
+          display: 'flex',
+          flexShrink: 0,
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: compact ? '32px' : '36px',
+          height: compact ? '32px' : '36px',
+          borderRadius: '6px',
+          background: KC.primaryContainer,
+          color: KC.surface,
+          border: 'none',
+          cursor: disabled || isEmpty ? 'not-allowed' : 'pointer',
+          opacity: disabled || isEmpty ? 0.4 : 1,
+          transition: 'opacity 0.15s',
+        }}
       >
         {/* Arrow-up / Send icon (inline SVG) */}
         <svg
@@ -105,7 +152,7 @@ export function ChatComposer({
           strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={compact ? 'h-4 w-4' : 'h-4.5 w-4.5'}
+          style={{ width: compact ? '14px' : '16px', height: compact ? '14px' : '16px' }}
         >
           <path d="m5 12 7-7 7 7" />
           <path d="M12 19V5" />

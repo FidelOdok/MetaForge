@@ -150,45 +150,32 @@ async def sync_linked_file(
         filename = p.name
         metadata = await service.extract_metadata(content, filename)
 
-        # Fetch existing work product for metadata merge + revision recording
+        # Fetch existing metadata so we can merge rather than replace
         from uuid import UUID
-
-        from api_gateway.twin.version_service import VersionService
 
         now = datetime.now(UTC)
         try:
-            wp_id = UUID(link.work_product_id)
-            existing_wp = await twin.get_work_product(wp_id)
+            wp_id_uuid = UUID(link.work_product_id)
+            existing_wp = await twin.get_work_product(wp_id_uuid)
+            existing_meta: dict[str, Any] = existing_wp.metadata if existing_wp else {}
         except Exception:
-            existing_wp = None
+            existing_meta = {}
 
-        existing_meta: dict[str, Any] = existing_wp.metadata if existing_wp else {}
-
-        # Build and record a revision from the current state before overwriting
-        if existing_wp is not None:
-            change_desc = f"File sync from {link.source_path}"
-            revision = VersionService.build_revision(existing_wp, change_desc)
-        else:
-            revision = None
-
-        sync_fields: dict[str, Any] = {
+        sync_metadata: dict[str, Any] = {
             "synced_from": link.source_path,
             "sync_tool": link.tool,
             "last_synced_at": now.isoformat(),
             "source_hash": new_hash,
             **metadata,
         }
-        merged_meta: dict[str, Any] = {**existing_meta, **sync_fields}
-        if revision is not None:
-            merged_meta = VersionService.append_to_metadata(merged_meta, revision)
-
         updates: dict[str, Any] = {
-            "metadata": merged_meta,
+            "metadata": {**existing_meta, **sync_metadata},
             "updated_at": now,
             "content_hash": new_hash,
         }
 
         try:
+            wp_id = UUID(link.work_product_id)
             await twin.update_work_product(wp_id, updates)
         except Exception as exc:
             span.record_exception(exc)

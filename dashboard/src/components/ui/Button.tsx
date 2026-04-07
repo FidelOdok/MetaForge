@@ -1,33 +1,44 @@
-import { cva, type VariantProps } from 'class-variance-authority';
 import { clsx } from 'clsx';
 
-const buttonVariants = cva(
-  'inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50',
-  {
-    variants: {
-      variant: {
-        primary: 'bg-blue-600 text-white hover:bg-blue-700',
-        secondary: 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700',
-        ghost: 'hover:bg-zinc-100 dark:hover:bg-zinc-800',
-        danger: 'bg-red-600 text-white hover:bg-red-700',
-      },
-      size: {
-        sm: 'h-8 px-3 text-xs',
-        md: 'h-9 px-4',
-        lg: 'h-10 px-6',
-      },
-    },
-    defaultVariants: { variant: 'primary', size: 'md' },
-  }
-);
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Size = 'sm' | 'md' | 'lg';
 
-type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonVariants>;
+const VARIANT_STYLES: Record<Variant, string> = {
+  primary:   'text-surface hover:opacity-90',
+  secondary: 'text-on-surface-variant hover:bg-surface-high hover:text-on-surface',
+  ghost:     'text-on-surface-variant hover:bg-surface-high hover:text-on-surface',
+  danger:    'text-error hover:opacity-90',
+};
 
-export function Button({ className, variant, size, ...props }: ButtonProps) {
+const VARIANT_INLINE: Record<Variant, React.CSSProperties> = {
+  primary:   { background: '#e67e22', border: 'none' },
+  secondary: { background: 'transparent', border: '1px solid rgba(65,72,90,0.3)' },
+  ghost:     { background: 'transparent', border: 'none' },
+  danger:    { background: 'rgba(255,180,171,0.1)', border: '1px solid rgba(255,180,171,0.2)' },
+};
+
+const SIZE_STYLES: Record<Size, string> = {
+  sm: 'h-7 px-2.5 text-xs',
+  md: 'h-8 px-3 text-xs',
+  lg: 'h-9 px-4 text-sm',
+};
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant;
+  size?: Size;
+}
+
+export function Button({ className, variant = 'primary', size = 'md', style, ...props }: ButtonProps) {
   return (
     <button
-      className={clsx(buttonVariants({ variant, size }), className)}
+      className={clsx(
+        'inline-flex items-center justify-center rounded font-medium tracking-wide transition-all',
+        'focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40',
+        VARIANT_STYLES[variant],
+        SIZE_STYLES[size],
+        className
+      )}
+      style={{ ...VARIANT_INLINE[variant], ...style }}
       {...props}
     />
   );

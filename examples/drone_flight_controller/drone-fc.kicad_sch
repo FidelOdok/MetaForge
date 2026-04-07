@@ -1,0 +1,187 @@
+(kicad_sch (version 20230121) (generator eeschema)
+
+  (uuid "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+  (paper "A4")
+
+  (title_block
+    (title "Drone Flight Controller")
+    (date "2026-03-23")
+    (rev "1.0")
+    (company "MetaForge")
+  )
+
+  (lib_symbols
+    (symbol "Device:R" (pin_names (offset 0)) (in_bom yes) (on_board yes)
+      (property "Reference" "R" (at 2.032 0 90) (effects (font (size 1.27 1.27))))
+      (property "Value" "R" (at -2.032 0 90) (effects (font (size 1.27 1.27))))
+      (symbol "R_0_1"
+        (rectangle (start -1.016 -2.54) (end 1.016 2.54) (stroke (width 0.254)) (fill (type none)))
+      )
+      (pin passive line (at 0 3.81 270) (length 1.27) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+      (pin passive line (at 0 -3.81 90) (length 1.27) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+    )
+    (symbol "Device:C" (pin_names (offset 0.254)) (in_bom yes) (on_board yes)
+      (property "Reference" "C" (at 0.635 2.54 0) (effects (font (size 1.27 1.27)) (justify left)))
+      (property "Value" "C" (at 0.635 -2.54 0) (effects (font (size 1.27 1.27)) (justify left)))
+      (symbol "C_0_1"
+        (polyline (pts (xy -2.032 -0.762) (xy 2.032 -0.762)) (stroke (width 0.508)) (fill (type none)))
+        (polyline (pts (xy -2.032 0.762) (xy 2.032 0.762)) (stroke (width 0.508)) (fill (type none)))
+      )
+      (pin passive line (at 0 3.81 270) (length 2.794) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+      (pin passive line (at 0 -3.81 90) (length 2.794) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+    )
+    (symbol "MCU_ST:STM32F405RGT6" (in_bom yes) (on_board yes)
+      (property "Reference" "U" (at -15.24 36.83 0) (effects (font (size 1.27 1.27)) (justify left)))
+      (property "Value" "STM32F405RGT6" (at 10.16 36.83 0) (effects (font (size 1.27 1.27)) (justify left)))
+      (symbol "STM32F405RGT6_0_1"
+        (rectangle (start -15.24 35.56) (end 15.24 -35.56) (stroke (width 0.254)) (fill (type background)))
+      )
+      (pin input line (at -17.78 33.02 0) (length 2.54) (name "NRST" (effects (font (size 1.27 1.27)))) (number "7" (effects (font (size 1.27 1.27)))))
+      (pin power_in line (at 0 38.1 270) (length 2.54) (name "VDD" (effects (font (size 1.27 1.27)))) (number "11" (effects (font (size 1.27 1.27)))))
+      (pin power_in line (at 0 -38.1 90) (length 2.54) (name "VSS" (effects (font (size 1.27 1.27)))) (number "12" (effects (font (size 1.27 1.27)))))
+    )
+    (symbol "Sensor:MPU6050" (in_bom yes) (on_board yes)
+      (property "Reference" "U" (at -10.16 16.51 0) (effects (font (size 1.27 1.27)) (justify left)))
+      (property "Value" "MPU6050" (at 2.54 16.51 0) (effects (font (size 1.27 1.27)) (justify left)))
+      (symbol "MPU6050_0_1"
+        (rectangle (start -10.16 15.24) (end 10.16 -15.24) (stroke (width 0.254)) (fill (type background)))
+      )
+      (pin input line (at -12.7 10.16 0) (length 2.54) (name "SDA" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+      (pin input line (at -12.7 7.62 0) (length 2.54) (name "SCL" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+      (pin power_in line (at 0 17.78 270) (length 2.54) (name "VDD" (effects (font (size 1.27 1.27)))) (number "3" (effects (font (size 1.27 1.27)))))
+      (pin power_in line (at 0 -17.78 90) (length 2.54) (name "GND" (effects (font (size 1.27 1.27)))) (number "4" (effects (font (size 1.27 1.27)))))
+    )
+    (symbol "Regulator_Linear:AMS1117-3.3" (in_bom yes) (on_board yes)
+      (property "Reference" "U" (at -5.08 5.08 0) (effects (font (size 1.27 1.27))))
+      (property "Value" "AMS1117-3.3" (at 5.08 5.08 0) (effects (font (size 1.27 1.27))))
+      (symbol "AMS1117-3.3_0_1"
+        (rectangle (start -7.62 3.81) (end 7.62 -3.81) (stroke (width 0.254)) (fill (type background)))
+      )
+      (pin power_in line (at -10.16 0 0) (length 2.54) (name "VIN" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+      (pin power_out line (at 10.16 0 180) (length 2.54) (name "VOUT" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+      (pin power_in line (at 0 -6.35 90) (length 2.54) (name "GND" (effects (font (size 1.27 1.27)))) (number "3" (effects (font (size 1.27 1.27)))))
+    )
+  )
+
+  ;; --- Component instances ---
+
+  ;; MCU
+  (symbol (lib_id "MCU_ST:STM32F405RGT6") (at 139.7 88.9 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "11111111-1111-1111-1111-111111111111")
+    (property "Reference" "U1" (at 139.7 48.26 0))
+    (property "Value" "STM32F405RGT6" (at 139.7 50.8 0))
+  )
+
+  ;; IMU
+  (symbol (lib_id "Sensor:MPU6050") (at 228.6 88.9 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "22222222-2222-2222-2222-222222222222")
+    (property "Reference" "U2" (at 228.6 70.16 0))
+    (property "Value" "MPU6050" (at 228.6 72.7 0))
+  )
+
+  ;; Voltage regulator
+  (symbol (lib_id "Regulator_Linear:AMS1117-3.3") (at 63.5 76.2 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "33333333-3333-3333-3333-333333333333")
+    (property "Reference" "U3" (at 63.5 68.58 0))
+    (property "Value" "AMS1117-3.3" (at 63.5 71.12 0))
+  )
+
+  ;; Decoupling caps
+  (symbol (lib_id "Device:C") (at 101.6 88.9 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "44444444-4444-4444-4444-444444444444")
+    (property "Reference" "C1" (at 104.14 86.36 0))
+    (property "Value" "100nF" (at 104.14 91.44 0))
+  )
+
+  (symbol (lib_id "Device:C") (at 109.22 88.9 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "55555555-5555-5555-5555-555555555555")
+    (property "Reference" "C2" (at 111.76 86.36 0))
+    (property "Value" "10uF" (at 111.76 91.44 0))
+  )
+
+  (symbol (lib_id "Device:C") (at 45.72 76.2 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "66666666-6666-6666-6666-666666666666")
+    (property "Reference" "C3" (at 48.26 73.66 0))
+    (property "Value" "10uF" (at 48.26 78.74 0))
+  )
+
+  (symbol (lib_id "Device:C") (at 81.28 76.2 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "77777777-7777-7777-7777-777777777777")
+    (property "Reference" "C4" (at 83.82 73.66 0))
+    (property "Value" "22uF" (at 83.82 78.74 0))
+  )
+
+  ;; Pull-up resistors for I2C
+  (symbol (lib_id "Device:R") (at 203.2 71.12 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "88888888-8888-8888-8888-888888888888")
+    (property "Reference" "R1" (at 205.74 71.12 0))
+    (property "Value" "4.7k" (at 200.66 71.12 0))
+  )
+
+  (symbol (lib_id "Device:R") (at 210.82 71.12 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no)
+    (uuid "99999999-9999-9999-9999-999999999999")
+    (property "Reference" "R2" (at 213.36 71.12 0))
+    (property "Value" "4.7k" (at 208.28 71.12 0))
+  )
+
+  ;; --- Wires ---
+
+  ;; VDD rail
+  (wire (pts (xy 63.5 76.2) (xy 81.28 76.2))
+    (stroke (width 0) (type default)) (uuid "w0000001-0000-0000-0000-000000000001"))
+  (wire (pts (xy 81.28 76.2) (xy 101.6 76.2))
+    (stroke (width 0) (type default)) (uuid "w0000002-0000-0000-0000-000000000002"))
+  (wire (pts (xy 101.6 76.2) (xy 139.7 76.2))
+    (stroke (width 0) (type default)) (uuid "w0000003-0000-0000-0000-000000000003"))
+
+  ;; I2C SDA
+  (wire (pts (xy 157.48 88.9) (xy 203.2 88.9))
+    (stroke (width 0) (type default)) (uuid "w0000004-0000-0000-0000-000000000004"))
+  (wire (pts (xy 203.2 88.9) (xy 215.9 88.9))
+    (stroke (width 0) (type default)) (uuid "w0000005-0000-0000-0000-000000000005"))
+
+  ;; I2C SCL
+  (wire (pts (xy 157.48 91.44) (xy 210.82 91.44))
+    (stroke (width 0) (type default)) (uuid "w0000006-0000-0000-0000-000000000006"))
+  (wire (pts (xy 210.82 91.44) (xy 215.9 91.44))
+    (stroke (width 0) (type default)) (uuid "w0000007-0000-0000-0000-000000000007"))
+
+  ;; GND
+  (wire (pts (xy 63.5 82.55) (xy 63.5 88.9))
+    (stroke (width 0) (type default)) (uuid "w0000008-0000-0000-0000-000000000008"))
+  (wire (pts (xy 139.7 127.0) (xy 228.6 127.0))
+    (stroke (width 0) (type default)) (uuid "w0000009-0000-0000-0000-000000000009"))
+
+  ;; --- Labels ---
+
+  (label "VDD_3V3" (at 88.9 76.2 0) (fields_autoplaced)
+    (effects (font (size 1.27 1.27))) (uuid "l0000001-0000-0000-0000-000000000001"))
+  (label "SDA" (at 180.34 88.9 0) (fields_autoplaced)
+    (effects (font (size 1.27 1.27))) (uuid "l0000002-0000-0000-0000-000000000002"))
+  (label "SCL" (at 180.34 91.44 0) (fields_autoplaced)
+    (effects (font (size 1.27 1.27))) (uuid "l0000003-0000-0000-0000-000000000003"))
+  (label "GND" (at 63.5 88.9 270) (fields_autoplaced)
+    (effects (font (size 1.27 1.27))) (uuid "l0000004-0000-0000-0000-000000000004"))
+  (label "VIN" (at 45.72 76.2 180) (fields_autoplaced)
+    (effects (font (size 1.27 1.27))) (uuid "l0000005-0000-0000-0000-000000000005"))
+
+  ;; --- Power symbols / net names ---
+
+  (net_name "VDD_3V3")
+  (net_name "GND")
+  (net_name "SDA")
+  (net_name "SCL")
+  (net_name "VIN")
+  (net_name "NRST")
+
+)

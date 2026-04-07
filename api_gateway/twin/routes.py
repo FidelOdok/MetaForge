@@ -33,13 +33,12 @@ from api_gateway.twin.import_service import (
     infer_domain,
     infer_wp_type,
 )
-from api_gateway.twin.schemas import TwinNodeListResponse, TwinNodeResponse
-from api_gateway.twin.version_schemas import (
-    IterateRequest,
-    RevisionDiff,
-    WorkProductVersionHistory,
+from api_gateway.twin.schemas import (
+    TwinNodeListResponse,
+    TwinNodeResponse,
+    TwinRelationshipListResponse,
+    TwinRelationshipResponse,
 )
-from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
 from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI
@@ -114,6 +113,38 @@ async def list_twin_nodes(
         return TwinNodeListResponse(nodes=nodes, total=len(nodes))
 
 
+@router.get("/relationships", response_model=TwinRelationshipListResponse)
+async def list_twin_relationships() -> TwinRelationshipListResponse:
+    """List all edges in the Digital Twin graph."""
+    with tracer.start_as_current_span("twin.list_relationships") as span:
+        work_products = await _twin.list_work_products()
+        edges = []
+        seen: set[str] = set()
+        for wp in work_products:
+            try:
+                wp_edges = await _twin.get_edges(wp.id)
+            except Exception:
+                continue
+            for edge in wp_edges:
+                key = f"{edge.source_id}:{edge.target_id}:{edge.edge_type}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                label = str(edge.edge_type).replace("_", " ")
+                edges.append(
+                    TwinRelationshipResponse(
+                        id=key,
+                        sourceId=str(edge.source_id),
+                        targetId=str(edge.target_id),
+                        type=str(edge.edge_type),
+                        label=label,
+                    )
+                )
+        span.set_attribute("twin.relationships_count", len(edges))
+        logger.info("twin_relationships_listed", count=len(edges))
+        return TwinRelationshipListResponse(relationships=edges, total=len(edges))
+
+
 @router.get("/nodes/{node_id}", response_model=TwinNodeResponse)
 async def get_twin_node(node_id: str) -> TwinNodeResponse:
     """Get a single work-product node by ID."""
@@ -137,7 +168,7 @@ _WORKSPACE_DIR = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
 async def get_node_model(
     node_id: str,
     quality: str = Query("standard", pattern="^(preview|standard|fine)$"),
-) -> dict:
+) -> dict[str, object]:
     """Convert a CAD work-product's STEP file to GLB and return the URL.
 
     Reads the STEP file from the shared adapter workspace, converts it
@@ -288,11 +319,6 @@ async def import_work_product(
 
         created_wp = await _twin.create_work_product(wp)
 
-        # Record initial revision
-        revision = VersionService.build_revision(created_wp, "Initial import")
-        initial_meta = VersionService.append_to_metadata(created_wp.metadata, revision)
-        await _twin.update_work_product(created_wp.id, {"metadata": initial_meta})
-
         # Link to project if requested
         if project_id:
             try:
@@ -441,7 +467,7 @@ async def list_file_links() -> list[FileLinkResponse]:
 
 
 @router.post("/nodes/{node_id}/sync")
-async def sync_file_link(node_id: str) -> dict:
+async def sync_file_link(node_id: str) -> dict[str, object]:
     """Manually trigger a sync for a linked work product.
 
     Re-reads the source file, extracts metadata, and updates the Twin
@@ -453,97 +479,3 @@ async def sync_file_link(node_id: str) -> dict:
 
     result = await sync_linked_file(link, _twin)
     return result
-
-
-# ---------------------------------------------------------------------------
-# Version history endpoints (MET-251)
-# ---------------------------------------------------------------------------
-
-
-@router.get("/nodes/{node_id}/versions", response_model=WorkProductVersionHistory)
-async def get_version_history(node_id: str) -> WorkProductVersionHistory:
-    """List all recorded revisions for a work product, oldest-first."""
-    with tracer.start_as_current_span("twin.get_version_history") as span:
-        span.set_attribute("twin.node_id", node_id)
-        try:
-            uid = UUID(node_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid node ID format")
-        wp = await _twin.get_work_product(uid)
-        if wp is None:
-            raise HTTPException(status_code=404, detail="Node not found")
-        history = VersionService.get_history(wp)
-        logger.info("version_history_listed", wp_id=node_id, total=history.total)
-        return history
-
-
-@router.get("/nodes/{node_id}/diff", response_model=RevisionDiff)
-async def diff_revisions(
-    node_id: str,
-    v1: int = Query(..., description="First revision number (1-indexed)"),
-    v2: int = Query(..., description="Second revision number (1-indexed)"),
-) -> RevisionDiff:
-    """Diff metadata between two revisions of a work product."""
-    with tracer.start_as_current_span("twin.diff_revisions") as span:
-        span.set_attribute("twin.node_id", node_id)
-        span.set_attribute("twin.v1", v1)
-        span.set_attribute("twin.v2", v2)
-        try:
-            uid = UUID(node_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid node ID format")
-        wp = await _twin.get_work_product(uid)
-        if wp is None:
-            raise HTTPException(status_code=404, detail="Node not found")
-        history = VersionService.get_history(wp)
-        try:
-            return VersionService.diff(history, v1, v2)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-
-@router.post("/nodes/{node_id}/iterate", status_code=201)
-async def iterate_work_product(
-    node_id: str,
-    body: IterateRequest,
-) -> dict:
-    """Record a new revision for a work product with a change description.
-
-    Applies ``metadata_updates`` to the work product and appends a revision
-    snapshot.  This is the lightweight iteration API — LLM-driven CAD
-    re-generation will call this internally after producing a new STEP file.
-    """
-    with tracer.start_as_current_span("twin.iterate_work_product") as span:
-        span.set_attribute("twin.node_id", node_id)
-        try:
-            uid = UUID(node_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid node ID format")
-        wp = await _twin.get_work_product(uid)
-        if wp is None:
-            raise HTTPException(status_code=404, detail="Node not found")
-
-        # Merge updates first so the revision snapshot captures the new state
-        merged = {**wp.metadata, **body.metadata_updates}
-        revision = VersionService.build_revision(
-            wp, body.change_description, snapshot_override=merged
-        )
-        updated_meta = VersionService.append_to_metadata(merged, revision)
-
-        now = datetime.now(UTC)
-        await _twin.update_work_product(
-            uid,
-            {"metadata": updated_meta, "updated_at": now},
-        )
-
-        logger.info(
-            "work_product_iterated",
-            wp_id=node_id,
-            revision=revision["revision"],
-            change=body.change_description,
-        )
-        return {
-            "revision": revision["revision"],
-            "change_description": body.change_description,
-            "created_at": revision["created_at"],
-        }
