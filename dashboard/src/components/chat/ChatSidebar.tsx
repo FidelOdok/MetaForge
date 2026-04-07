@@ -4,19 +4,23 @@ import { useChatThreads, useChatThread, useSendChatMessage } from '@/hooks/use-c
 import { ChatPanel } from './ChatPanel';
 import { ChatThreadList } from './ChatThreadList';
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+// KC color tokens
+const KC = {
+  surfaceLow: '#191b22',
+  surfaceBorder: 'rgba(65,72,90,0.2)',
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  surfaceHigh: '#282a30',
+} as const;
 
 /**
- * Persistent right-side chat sidebar.
+ * Persistent right-side chat sidebar — Kinetic Console styled.
  *
  * Two views:
- *   1. **Thread list** — shown when no thread is selected.
- *   2. **Thread detail** — shows a `ChatPanel` for the active thread.
+ *   1. Thread list  — shown when no thread is selected.
+ *   2. Thread detail — shows a ChatPanel for the active thread.
  *
- * Controlled by `useChatStore` (`sidebarOpen`, `activeSidebarThreadId`).
- * Includes a backdrop overlay on smaller screens.
+ * Controlled by useChatStore (sidebarOpen, activeSidebarThreadId).
  */
 export function ChatSidebar() {
   const {
@@ -27,7 +31,6 @@ export function ChatSidebar() {
     closeSidebar,
   } = useChatStore();
 
-  // ---- Data fetching ----
   const { data: threadsPage } = useChatThreads(undefined, {
     enabled: sidebarOpen,
   });
@@ -40,30 +43,21 @@ export function ChatSidebar() {
 
   const sendMessage = useSendChatMessage();
 
-  // ---- Handlers ----
   const handleSelectThread = useCallback(
-    (threadId: string) => {
-      openSidebar(threadId);
-    },
+    (threadId: string) => { openSidebar(threadId); },
     [openSidebar],
   );
 
-  const handleBack = useCallback(() => {
-    openSidebar(); // clears activeSidebarThreadId
-  }, [openSidebar]);
+  const handleBack = useCallback(() => { openSidebar(); }, [openSidebar]);
 
   const handleSend = useCallback(
     (content: string) => {
       if (!activeSidebarThreadId) return;
-      sendMessage.mutate({
-        threadId: activeSidebarThreadId,
-        payload: { content },
-      });
+      sendMessage.mutate({ threadId: activeSidebarThreadId, payload: { content } });
     },
     [activeSidebarThreadId, sendMessage],
   );
 
-  // ---- Escape key closes sidebar ----
   useEffect(() => {
     if (!sidebarOpen) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -73,17 +67,16 @@ export function ChatSidebar() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [sidebarOpen, closeSidebar]);
 
-  // Determine if the agent is typing in the active thread
   const isTypingInActiveThread =
     !!activeSidebarThreadId && typingThreadIds.has(activeSidebarThreadId);
 
-  // ---- Render ----
   return (
     <>
-      {/* Backdrop (visible on small screens when sidebar is open) */}
+      {/* Backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/30 md:hidden"
+          className="fixed inset-0 z-40 md:hidden"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
           onClick={closeSidebar}
           aria-hidden="true"
         />
@@ -91,68 +84,65 @@ export function ChatSidebar() {
 
       {/* Sidebar panel */}
       <aside
-        className={`fixed right-0 top-0 z-50 flex h-full w-[400px] max-w-full flex-col border-l border-zinc-200 bg-white shadow-lg transition-transform duration-200 ease-in-out dark:border-zinc-700 dark:bg-zinc-900 ${
+        className={`fixed right-0 top-0 z-50 flex h-full flex-col transition-transform duration-200 ease-in-out ${
           sidebarOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
+        style={{
+          width: 380,
+          background: KC.surfaceLow,
+          borderLeft: `1px solid ${KC.surfaceBorder}`,
+        }}
         aria-label="Chat sidebar"
       >
-        {/* ---- Sidebar header ---- */}
-        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+        {/* Header */}
+        <div
+          className="flex shrink-0 items-center justify-between px-4"
+          style={{
+            height: 48,
+            borderBottom: `1px solid ${KC.surfaceBorder}`,
+          }}
+        >
           <div className="flex items-center gap-2">
-            {/* Back arrow — only when viewing a thread */}
             {activeSidebarThreadId && (
               <button
                 type="button"
                 onClick={handleBack}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="flex h-7 w-7 items-center justify-center rounded transition-colors"
+                style={{ color: KC.onSurfaceVariant, background: 'transparent', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = KC.surfaceHigh; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                 aria-label="Back to thread list"
               >
-                {/* Left arrow SVG */}
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-4 w-4"
-                >
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
+                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>arrow_back</span>
               </button>
             )}
-
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              {activeSidebarThreadId ? 'Thread' : 'Conversations'}
-            </h2>
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#e67e22' }}>
+                auto_awesome
+              </span>
+              <span
+                className="font-mono uppercase"
+                style={{ fontSize: 11, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}
+              >
+                {activeSidebarThreadId ? 'Thread' : 'Conversations'}
+              </span>
+            </div>
           </div>
 
-          {/* Close button */}
           <button
             type="button"
             onClick={closeSidebar}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className="flex h-7 w-7 items-center justify-center rounded transition-colors"
+            style={{ color: KC.onSurfaceVariant, background: 'transparent', border: 'none', cursor: 'pointer' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = KC.surfaceHigh; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
             aria-label="Close chat sidebar"
           >
-            {/* X icon SVG */}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
+            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
           </button>
         </div>
 
-        {/* ---- Content area ---- */}
+        {/* Content */}
         <div className="flex-1 overflow-hidden">
           {activeSidebarThreadId && activeThread ? (
             <ChatPanel

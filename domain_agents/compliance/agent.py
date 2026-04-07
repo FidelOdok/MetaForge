@@ -33,6 +33,10 @@ class ComplianceTaskRequest(BaseModel):
     parameters: dict[str, Any] = {}
 
 
+# Alias so callers can use the standard `TaskRequest` name
+TaskRequest = ComplianceTaskRequest
+
+
 class ComplianceResult(BaseModel):
     """Result of a compliance agent task."""
 

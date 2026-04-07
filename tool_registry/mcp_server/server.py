@@ -101,6 +101,12 @@ class McpToolServer:
             response = make_error(request_id, _METHOD_NOT_FOUND, str(exc), {"tool_id": exc.tool_id})
             return json.dumps(response)
         except ToolHandlerError as exc:
+            logger.error(
+                "Tool handler failed",
+                tool_id=exc.tool_id,
+                details=exc.details,
+                duration_ms=round(exc.duration_ms, 2),
+            )
             response = make_error(
                 request_id,
                 _TOOL_EXECUTION_ERROR,

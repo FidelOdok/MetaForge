@@ -465,3 +465,26 @@ class TestHardcodedFallback:
 
             assert result.success is False
             assert any("Unsupported task type" in e for e in result.errors)
+
+
+class TestLlmRouting:
+    """Tests for LLM routing decisions."""
+
+    async def test_generate_cad_script_routes_to_llm(
+        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
+    ):
+        """generate_cad_script should use LLM path when available."""
+        with patch("domain_agents.mechanical.agent.is_llm_available", return_value=True):
+            agent = MechanicalAgent(twin=mock_twin, mcp=mcp_bridge)
+            with patch.object(agent, "_run_with_llm", new_callable=AsyncMock) as mock_llm:
+                mock_llm.return_value = TaskResult(
+                    task_type="generate_cad_script",
+                    success=True,
+                )
+                request = TaskRequest(
+                    task_type="generate_cad_script",
+                    parameters={"description": "A cylinder"},
+                )
+                result = await agent.run_task(request)
+                mock_llm.assert_called_once()
+                assert result.success is True

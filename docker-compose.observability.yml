@@ -73,6 +73,24 @@ services:
     networks:
       - metaforge-obs
 
+  alloy:
+    image: grafana/alloy:latest
+    command:
+      - run
+      - /etc/alloy/alloy-config.alloy
+      - --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./observability/alloy-config.alloy:/etc/alloy/alloy-config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy
+    ports:
+      - "12347:12347"  # Faro browser SDK receiver
+    depends_on:
+      - loki
+    networks:
+      - metaforge-obs
+      - metaforge
+
   alertmanager:
     image: prom/alertmanager:latest
     command: ["--config.file=/etc/alertmanager/alertmanager.yaml"]
@@ -90,7 +108,11 @@ volumes:
   tempo-data:
   loki-data:
   alertmanager-data:
+  alloy-data:
 
 networks:
   metaforge-obs:
     driver: bridge
+  metaforge:
+    external: true
+    name: metaforge_metaforge

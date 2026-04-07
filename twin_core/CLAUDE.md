@@ -35,6 +35,6 @@ pytest tests/unit/test_twin*.py tests/unit/test_constraint*.py tests/unit/test_g
 - All state mutations go through `TwinAPI` -- never modify the graph directly from outside
 - Models use Pydantic v2 with strict validation
 - Constraint rules are defined in YAML files under `constraint_engine/rules/`
-- Add `structlog` logging and OTel tracing spans to all public methods
+- Add observability instrumentation (Logs, Metrics, Traces) to all public methods — see [Observability Requirements in root CLAUDE.md](../CLAUDE.md#observability-requirements) for all 7 levels
 - `InMemoryTwinAPI` is the canonical test double -- use it in all unit tests
 - Gate engine scoring must be deterministic and auditable

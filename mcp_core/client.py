@@ -139,9 +139,13 @@ class McpClient:
         response = deserialize_response(raw_response)
         if isinstance(response, JsonRpcErrorResponse):
             error_data = response.error
+            # Prefer the detailed message from error.data.details (set by
+            # the tool adapter) over the generic top-level error.message.
+            nested = error_data.get("data") or {}
+            details = nested.get("details") or error_data.get("message") or "Unknown error"
             raise ToolExecutionError(
                 tool_id=request.tool_id,
-                details=error_data.get("message", "Unknown error"),
+                details=details,
                 duration_ms=elapsed_ms,
             )
 

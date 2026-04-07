@@ -409,8 +409,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _reattach_otel_log_handler()
     logger.info("gateway_starting", version="0.1.0", otel_active=_otel_state.is_active)
     await _init_orchestrator(app)
+    from api_gateway.twin.file_watcher import file_watcher
+
+    if hasattr(app.state, "twin"):
+        file_watcher.set_twin(app.state.twin)
+        await file_watcher.start()
     yield
     logger.info("gateway_stopping")
+    await file_watcher.stop()
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
     # Close PgVector knowledge store if active

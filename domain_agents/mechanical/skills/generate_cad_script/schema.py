@@ -30,6 +30,13 @@ class GenerateCadScriptInput(BaseModel):
         min_length=1,
         description="Natural language description of the desired 3D model",
     )
+    script: str = Field(
+        default="",
+        description=(
+            "CadQuery Python script to execute. "
+            "If empty, a fallback script is generated from description/constraints."
+        ),
+    )
     constraints: dict[str, Any] = Field(
         default_factory=dict,
         description="Design constraints (max dimensions, wall thickness, hole sizes, etc.)",
@@ -47,7 +54,9 @@ class GenerateCadScriptInput(BaseModel):
 class GenerateCadScriptOutput(BaseModel):
     """Output from the generate_cad_script skill."""
 
-    work_product_id: UUID = Field(..., description="Twin work_product ID")
+    work_product_id: UUID | None = Field(
+        default=None, description="Twin work_product ID (None for new generation)"
+    )
     cad_file: str = Field(..., description="Path to generated CAD file")
     script_text: str = Field(..., description="The CadQuery Python script that was executed")
     volume_mm3: float = Field(..., ge=0, description="Volume in cubic millimeters")

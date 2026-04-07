@@ -7,7 +7,7 @@ graceful degradation to hardcoded dispatch when no LLM is available.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -33,6 +33,7 @@ class AgentDependencies:
     mcp_bridge: McpBridge
     session_id: str
     branch: str = "main"
+    tool_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

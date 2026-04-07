@@ -43,9 +43,10 @@ async def writeback_cad(
         span.set_attribute("branch", branch)
 
         now = datetime.now(UTC)
+        skill_name = skill_output.get("skill", "generate_cad")
         metadata: dict[str, Any] = {
             "session_id": str(session_id),
-            "skill": "generate_cad",
+            "skill": skill_name,
             "shape_type": skill_output.get("shape_type", ""),
             "volume_mm3": skill_output.get("volume_mm3", 0.0),
             "surface_area_mm2": skill_output.get("surface_area_mm2", 0.0),
@@ -59,7 +60,8 @@ async def writeback_cad(
 
         wp = WorkProduct(
             id=uuid4(),
-            name=f"cad_{skill_output.get('shape_type', 'unknown')}",
+            name=skill_output.get("description", "")[:40].strip()
+            or f"cad_{skill_output.get('shape_type', 'unknown')}",
             type=WorkProductType.CAD_MODEL,
             domain="mechanical",
             file_path=skill_output.get("cad_file", ""),

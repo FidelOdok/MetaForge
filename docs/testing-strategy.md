@@ -2,19 +2,28 @@
 
 Testing strategy for MetaForge Phase 1 (v0.1–0.3). Covers the test pyramid, naming conventions, tooling, and per-module coverage expectations.
 
-## Test Pyramid
+## Testing Taxonomy
 
-```
-            ┌─────────┐
-            │  E2E    │  98 tests  — Full vertical: Agent → Skill → MCP → Twin
-            ├─────────┤
-            │ Integr. │  49 tests  — Cross-module wiring (agent+twin, orchestrator+agent)
-            ├─────────┤
-            │  Unit   │ 1607 tests — Single-module logic in isolation
-            └─────────┘
-```
+MetaForge uses a 12-level testing taxonomy. Each level answers a different question about system correctness.
 
-**Ratio target**: ~90% unit, ~5% integration, ~5% E2E. Actual: 92% / 3% / 5%.
+| Level | Name | Description | Tooling (MetaForge) | Status |
+|-------|------|-------------|---------------------|--------|
+| 1 | Static Analysis / Linting | Syntax errors, type issues, code smells | `ruff check .`, `mypy --strict` | Covered |
+| 2 | Unit Tests | Individual functions in isolation | `pytest tests/unit/` (1607 tests) | Covered |
+| 3 | Component Tests | Single module/node in isolation, no cross-module wiring | `pytest tests/unit/` with `InMemoryTwinAPI`, `InMemoryMcpBridge` | Partial |
+| 4 | Contract Tests | API/message schema agreements between services | No dedicated tooling yet — Pydantic schemas act as implicit contracts | Gap |
+| 5 | Integration Tests | Multiple real components wired together | `pytest tests/integration/` (49 tests) | Partial |
+| 6 | Smoke Tests | Does it start and respond at all? | `tests/integration/test_gateway_smoke.py`, manual `uvicorn` check | Covered |
+| 7 | Regression Tests | Did new changes break existing behaviour? | Full `pytest` suite run in CI on every PR | Covered (implicit) |
+| 8 | E2E / System Tests | Full pipeline start to finish | `pytest tests/e2e/` (98 tests, full vertical per agent) | Covered |
+| 9 | Performance / Load Tests | Throughput, latency under load | Not implemented | Gap |
+| 10 | Security Tests | Injection, auth, data exposure | Not implemented | Gap |
+| 11 | Acceptance Tests (UAT) | Meets requirements, user sign-off | Not implemented | Gap |
+| 12 | Chaos / Resilience Tests | Behaviour when things fail | Not implemented | Gap |
+
+**Component vs. Unit distinction:** Tests under `tests/unit/` use `InMemoryTwinAPI` and `InMemoryMcpBridge` as in-memory doubles, not mocks. Any test that wires a real `McpClient` or real `TwinAPI` to an agent is classified as Component (Level 3). Any test that wires two or more real modules is Integration (Level 5).
+
+**Regression (Level 7) is implicit:** MetaForge does not maintain a separate regression test directory. The full pytest suite acts as the regression gate on every PR via CI.
 
 ## Tooling
 
@@ -196,12 +205,18 @@ ruff check .
 mypy .
 ```
 
-## Known Gaps (Phase 1)
+## Coverage Gaps (Relative to Taxonomy)
 
-| Area | Status | Notes |
-|------|--------|-------|
-| CLI E2E tests | Not covered | CLI is TypeScript; Python E2E tests can't exercise it directly |
-| WebSocket/SSE gateway | Not covered | Requires persistent connections; defer to integration tests |
-| Multi-agent conflict resolution | Not covered | Phase 2 feature |
-| Performance / load testing | Not covered | Out of scope for Phase 1 |
-| FreeCAD full MCP stack | Partial | Uses InMemoryMcpBridge, not LoopbackTransport (no FreeCAD MCP server yet) |
+| Level | Name | Gap Detail | Priority |
+|-------|------|------------|---------|
+| 4 | Contract Tests | No consumer-driven contract tests between gateway↔orchestrator or agent↔twin API. Pydantic schemas provide implicit contracts but are not tested across service boundaries. | Phase 2 |
+| 9 | Performance / Load Tests | No throughput or latency-under-load tests. No benchmarking harness. | Phase 2 |
+| 10 | Security Tests | No injection, auth bypass, or data exposure tests. Auth module exists but is untested for adversarial inputs. | Phase 2 |
+| 11 | Acceptance Tests (UAT) | No formal acceptance criteria tests tied to PRD requirements. E2E tests approximate this but lack traceability. | Phase 2 |
+| 12 | Chaos / Resilience Tests | No tests for partial failures, container crashes, or dependency unavailability. Temporal retry logic is untested under failure injection. | Phase 3 |
+| — | CLI E2E | CLI is TypeScript; Python E2E tests cannot exercise it directly. | Phase 2 |
+| — | WebSocket / SSE gateway | Requires persistent connections; deferred to integration tests. | Phase 2 |
+| — | Multi-agent conflict resolution | Phase 2 feature, not yet implemented. | Phase 2 |
+| — | FreeCAD full MCP stack | Uses `InMemoryMcpBridge`, not `LoopbackTransport` — no FreeCAD MCP server yet. | Phase 2 |
+
+Gaps without a Level number are infrastructure or phase-scope limitations rather than missing taxonomy levels.

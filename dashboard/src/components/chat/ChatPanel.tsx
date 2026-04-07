@@ -5,6 +5,16 @@ import { TypingIndicator } from './TypingIndicator';
 import { ChatComposer } from './ChatComposer';
 
 // ---------------------------------------------------------------------------
+// KC color tokens
+// ---------------------------------------------------------------------------
+
+const KC = {
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  border: 'rgba(65,72,90,0.2)',
+};
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -55,22 +65,34 @@ export function ChatPanel({
   }, [messages.length, isTyping]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div style={{ display: 'flex', height: '100%', flexDirection: 'column' }}>
       {/* ---- Header ---- */}
       <div
-        className={`shrink-0 border-b border-zinc-200 dark:border-zinc-700 ${
-          compact ? 'px-3 py-2' : 'px-4 py-3'
-        }`}
+        style={{
+          flexShrink: 0,
+          borderBottom: `1px solid ${KC.border}`,
+          padding: compact ? '8px 12px' : '10px 16px',
+        }}
       >
         <h3
-          className={`font-semibold text-zinc-900 dark:text-zinc-100 ${
-            compact ? 'text-sm' : 'text-base'
-          }`}
+          style={{
+            margin: 0,
+            fontWeight: 500,
+            color: KC.onSurface,
+            fontSize: compact ? '13px' : '14px',
+            fontFamily: 'Inter, sans-serif',
+          }}
         >
           {thread.title}
         </h3>
         {thread.scope.label && (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          <span
+            style={{
+              fontSize: '11px',
+              color: KC.onSurfaceVariant,
+              fontFamily: 'Inter, sans-serif',
+            }}
+          >
             {thread.scope.label}
           </span>
         )}
@@ -79,11 +101,31 @@ export function ChatPanel({
       {/* ---- Message list ---- */}
       <div
         ref={scrollRef}
-        className={`flex-1 overflow-y-auto ${compact ? 'py-2' : 'py-3'}`}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: compact ? '8px 0' : '12px 0',
+          // Thin scrollbar
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(65,72,90,0.4) transparent',
+        }}
       >
         {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-zinc-400 dark:text-zinc-500">
+          <div
+            style={{
+              display: 'flex',
+              height: '100%',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <p
+              style={{
+                fontSize: '13px',
+                color: KC.onSurfaceVariant,
+                fontFamily: 'Inter, sans-serif',
+              }}
+            >
               No messages yet. Start the conversation.
             </p>
           </div>
@@ -98,7 +140,7 @@ export function ChatPanel({
         ))}
 
         {isTyping && (
-          <div className="px-4">
+          <div style={{ padding: '0 16px' }}>
             <TypingIndicator agentName={typingAgentName} />
           </div>
         )}

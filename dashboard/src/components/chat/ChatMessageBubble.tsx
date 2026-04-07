@@ -2,6 +2,21 @@ import { type ChatMessage, type ChatGraphRef } from '@/types/chat';
 import { formatRelativeTime } from '@/utils/format-time';
 
 // ---------------------------------------------------------------------------
+// KC color tokens
+// ---------------------------------------------------------------------------
+
+const KC = {
+  surface: '#111319',
+  surfaceHigh: '#282a30',
+  surfaceLowest: '#0c0e14',
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  primaryContainer: '#e67e22',
+  border: 'rgba(65,72,90,0.2)',
+  error: '#ffb4ab',
+};
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -42,7 +57,17 @@ function renderMarkdown(text: string): React.ReactNode[] {
         nodes.push(
           <pre
             key={`code-${codeKey++}`}
-            className="my-1 overflow-x-auto rounded bg-zinc-800 px-3 py-2 text-xs text-zinc-100"
+            style={{
+              margin: '4px 0',
+              overflowX: 'auto',
+              borderRadius: '4px',
+              background: KC.surfaceLowest,
+              padding: '10px 12px',
+              fontSize: '11px',
+              fontFamily: 'Roboto Mono, monospace',
+              color: KC.onSurface,
+              border: `1px solid ${KC.border}`,
+            }}
           >
             <code>{codeBlockLines.join('\n')}</code>
           </pre>,
@@ -74,7 +99,17 @@ function renderMarkdown(text: string): React.ReactNode[] {
     nodes.push(
       <pre
         key={`code-${codeKey}`}
-        className="my-1 overflow-x-auto rounded bg-zinc-800 px-3 py-2 text-xs text-zinc-100"
+        style={{
+          margin: '4px 0',
+          overflowX: 'auto',
+          borderRadius: '4px',
+          background: KC.surfaceLowest,
+          padding: '10px 12px',
+          fontSize: '11px',
+          fontFamily: 'Roboto Mono, monospace',
+          color: KC.onSurface,
+          border: `1px solid ${KC.border}`,
+        }}
       >
         <code>{codeBlockLines.join('\n')}</code>
       </pre>,
@@ -117,7 +152,14 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
       parts.push(
         <code
           key={key++}
-          className="rounded bg-zinc-200 px-1 py-0.5 text-xs dark:bg-zinc-700"
+          style={{
+            borderRadius: '3px',
+            background: KC.surfaceLowest,
+            padding: '1px 4px',
+            fontSize: '11px',
+            fontFamily: 'Roboto Mono, monospace',
+            color: KC.onSurface,
+          }}
         >
           {match[5]}
         </code>,
@@ -149,12 +191,24 @@ function ActorAvatar({
 }) {
   const bg =
     variant === 'user'
-      ? 'bg-blue-600 text-white'
-      : 'bg-emerald-600 text-white';
+      ? { background: KC.primaryContainer, color: KC.surface }
+      : { background: '#2a3a2e', color: '#3dd68c' };
 
   return (
     <span
-      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${bg}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '28px',
+        height: '28px',
+        flexShrink: 0,
+        borderRadius: '50%',
+        fontSize: '11px',
+        fontWeight: 600,
+        fontFamily: 'Inter, sans-serif',
+        ...bg,
+      }}
     >
       {label}
     </span>
@@ -173,18 +227,32 @@ function GraphRefBadge({
     <button
       type="button"
       onClick={() => onClick?.(graphRef.nodeType, graphRef.nodeId)}
-      className="mt-1 inline-flex items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+      style={{
+        marginTop: '4px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        borderRadius: '12px',
+        border: `1px solid rgba(230,126,34,0.3)`,
+        background: 'rgba(230,126,34,0.1)',
+        padding: '2px 8px',
+        fontSize: '11px',
+        fontWeight: 500,
+        color: KC.primaryContainer,
+        cursor: 'pointer',
+        fontFamily: 'Inter, sans-serif',
+      }}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 16 16"
         fill="currentColor"
-        className="h-3 w-3"
+        style={{ width: '10px', height: '10px' }}
       >
         <path d="M8 1a2.5 2.5 0 0 0-1 4.8V7H5a2 2 0 0 0-2 2v.7A2.5 2.5 0 1 0 5 12.3V9h6v3.3a2.5 2.5 0 1 0 2-2.6V9a2 2 0 0 0-2-2H9V5.8A2.5 2.5 0 0 0 8 1Z" />
       </svg>
       <span>{graphRef.label}</span>
-      <span className="text-blue-400">({graphRef.nodeType})</span>
+      <span style={{ color: KC.onSurfaceVariant }}>({graphRef.nodeType})</span>
     </button>
   );
 }
@@ -196,9 +264,9 @@ function GraphRefBadge({
 /**
  * Chat message bubble with layout that varies by actor kind.
  *
- * - **user**: right-aligned, primary background, user initial avatar
- * - **agent**: left-aligned, muted background, agent code badge
- * - **system**: center-aligned, muted/50 background, italic text
+ * - **user**: right-aligned, primary-container background, user initial avatar
+ * - **agent**: left-aligned, surface-high background, agent code badge
+ * - **system**: center-aligned, surface-high/50 background, italic text
  */
 export function ChatMessageBubble({
   message,
@@ -209,10 +277,22 @@ export function ChatMessageBubble({
   // --- System messages ---
   if (actor.kind === 'system') {
     return (
-      <div className="flex justify-center px-4 py-1">
-        <div className="max-w-md rounded-lg bg-zinc-100/50 px-4 py-2 text-center text-sm italic text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 16px' }}>
+        <div
+          style={{
+            maxWidth: '420px',
+            borderRadius: '6px',
+            background: 'rgba(40,42,48,0.5)',
+            padding: '6px 14px',
+            textAlign: 'center',
+            fontSize: '12px',
+            fontStyle: 'italic',
+            color: KC.onSurfaceVariant,
+            border: `1px solid ${KC.border}`,
+          }}
+        >
           {renderMarkdown(content)}
-          <div className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+          <div style={{ marginTop: '3px', fontSize: '10px', color: KC.onSurfaceVariant }}>
             {formatRelativeTime(createdAt)}
           </div>
         </div>
@@ -227,51 +307,85 @@ export function ChatMessageBubble({
     ? actor.displayName.charAt(0).toUpperCase()
     : actor.agentCode ?? actor.displayName.slice(0, 2).toUpperCase();
 
+  const bubbleStyle: React.CSSProperties = isUser
+    ? {
+        borderRadius: '10px 10px 2px 10px',
+        background: 'rgba(230,126,34,0.15)',
+        border: `1px solid rgba(230,126,34,0.2)`,
+        color: KC.onSurface,
+        padding: '8px 12px',
+        fontSize: '13px',
+        lineHeight: '1.5',
+      }
+    : {
+        borderRadius: '10px 10px 10px 2px',
+        background: KC.surfaceHigh,
+        color: KC.onSurface,
+        padding: '8px 12px',
+        fontSize: '13px',
+        lineHeight: '1.5',
+      };
+
   return (
     <div
-      className={`flex gap-2 px-4 py-1.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+      style={{
+        display: 'flex',
+        gap: '8px',
+        padding: '6px 16px',
+        flexDirection: isUser ? 'row-reverse' : 'row',
+      }}
     >
       {/* Avatar */}
-      <ActorAvatar
-        label={avatarLabel}
-        variant={isUser ? 'user' : 'agent'}
-      />
+      <ActorAvatar label={avatarLabel} variant={isUser ? 'user' : 'agent'} />
 
       {/* Bubble */}
       <div
-        className={`flex max-w-[75%] flex-col ${isUser ? 'items-end' : 'items-start'}`}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          maxWidth: '75%',
+          alignItems: isUser ? 'flex-end' : 'flex-start',
+        }}
       >
         {/* Sender name */}
-        <span className="mb-0.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        <span
+          style={{
+            marginBottom: '2px',
+            fontSize: '10px',
+            fontWeight: 500,
+            color: KC.onSurfaceVariant,
+            fontFamily: 'Inter, sans-serif',
+          }}
+        >
           {actor.displayName}
         </span>
 
-        <div
-          className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-            isUser
-              ? 'rounded-br-md bg-blue-600 text-white'
-              : 'rounded-bl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-          }`}
-        >
+        <div style={bubbleStyle}>
           {renderMarkdown(content)}
 
           {/* Graph reference badge */}
           {graphRef && (
-            <div className={`mt-1 ${isUser ? 'text-right' : 'text-left'}`}>
-              <GraphRefBadge
-                graphRef={graphRef}
-                onClick={onGraphRefClick}
-              />
+            <div style={{ marginTop: '4px', textAlign: isUser ? 'right' : 'left' }}>
+              <GraphRefBadge graphRef={graphRef} onClick={onGraphRefClick} />
             </div>
           )}
         </div>
 
         {/* Footer: timestamp + status */}
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500">
+        <div
+          style={{
+            marginTop: '2px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '10px',
+            color: KC.onSurfaceVariant,
+          }}
+        >
           <span>{formatRelativeTime(createdAt)}</span>
           {status === 'sending' && <span>Sending...</span>}
           {status === 'error' && (
-            <span className="text-red-500">Failed to send</span>
+            <span style={{ color: KC.error }}>Failed to send</span>
           )}
         </div>
       </div>

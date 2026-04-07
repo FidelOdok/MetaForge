@@ -81,7 +81,7 @@ class TestGenerateCadScriptHandler:
         assert output.cad_file == "output/script_result.step"
         assert output.volume_mm3 == 30000.0
         assert output.surface_area_mm2 == 6200.0
-        assert "cadquery" in output.script_text.lower()
+        assert "cq.Workplane" in output.script_text or "cadquery" in output.script_text.lower()
 
     async def test_execute_with_material(self):
         """Script generation includes material metadata."""
@@ -108,6 +108,19 @@ class TestGenerateCadScriptHandler:
         assert "A custom mounting plate" in script
         assert "100.0" in script
         assert "result" in script
+
+    async def test_execute_with_script_passthrough(self):
+        """When script is provided, _build_script is bypassed."""
+        _ctx, handler, work_product = await _make_ctx_and_handler()
+        custom_script = "result = cq.Workplane('XY').cylinder(20, 10)"
+        output = await handler.execute(
+            GenerateCadScriptInput(
+                work_product_id=work_product.id,
+                description="A cylinder",
+                script=custom_script,
+            )
+        )
+        assert output.cad_file == "output/script_result.step"
 
     async def test_preconditions_missing_tool(self):
         """Precondition check fails when CadQuery scripting tool is unavailable."""

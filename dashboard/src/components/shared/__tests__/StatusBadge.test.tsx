@@ -26,6 +26,7 @@ describe('StatusBadge', () => {
   it('applies success variant for completed', () => {
     render(<StatusBadge status="completed" />);
     const el = screen.getByText('Completed');
-    expect(el.className).toContain('bg-green-100');
+    // KC Badge uses inline styles; className has text-success class
+    expect(el.className).toContain('text-success');
   });
 });

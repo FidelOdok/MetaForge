@@ -11,18 +11,19 @@ describe('Badge', () => {
   it('applies default variant classes', () => {
     render(<Badge>Default</Badge>);
     const el = screen.getByText('Default');
-    expect(el.className).toContain('bg-zinc-100');
+    // KC uses inline styles; className has text color class
+    expect(el.className).toContain('text-on-surface-variant');
   });
 
   it('applies success variant', () => {
     render(<Badge variant="success">OK</Badge>);
     const el = screen.getByText('OK');
-    expect(el.className).toContain('bg-green-100');
+    expect(el.className).toContain('text-success');
   });
 
   it('applies error variant', () => {
     render(<Badge variant="error">Fail</Badge>);
     const el = screen.getByText('Fail');
-    expect(el.className).toContain('bg-red-100');
+    expect(el.className).toContain('text-error');
   });
 });

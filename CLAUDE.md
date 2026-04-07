@@ -268,16 +268,74 @@ Key architectural rules:
 - **MCP**: Model Context Protocol — the wire protocol for tool access
 - **Domain Agent**: Specialist agent for one engineering discipline (1:1 ratio)
 
+## Testing Requirements
+
+**Every module must have tests.** MetaForge uses a 12-level testing taxonomy — see [`docs/testing-strategy.md`](docs/testing-strategy.md) for the full taxonomy, per-level tooling, and coverage status.
+
+For Phase 1, the minimum bar per module is:
+
+- **Static Analysis (Level 1)**: `ruff check` and `mypy --strict` pass with zero errors
+- **Unit Tests (Level 2)**: all public functions exercised in isolation via `pytest tests/unit/`
+- **Component Tests (Level 3)**: key module entry points tested with in-memory doubles (`InMemoryTwinAPI`, `InMemoryMcpBridge`)
+- **Integration Tests (Level 5)**: cross-module wiring verified via `pytest tests/integration/`
+- **E2E / System Tests (Level 8)**: at least one full vertical test per agent in `pytest tests/e2e/`
+
+Levels 4, 9, 10, 11, and 12 (Contract, Performance, Security, Acceptance, Chaos) are Phase 2+ scope.
+
 ## Observability Requirements
 
-**Every module must include observability.** When creating or modifying any Python module, always add:
+**Every module must include observability.** MetaForge uses a 7-level observability taxonomy. When creating or modifying any Python module, instrument the following levels:
 
-1. **Structured logging** via `structlog`: `logger = structlog.get_logger(__name__)` — log key operations with keyword arguments
-2. **Tracing spans** via OpenTelemetry: `tracer = get_tracer("module.name")` from `observability.tracing` — wrap key operations with `tracer.start_as_current_span()`, set relevant attributes
-3. **Metrics** via `observability.metrics`: register counters, histograms, and gauges in `MetricsRegistry` for throughput, latency, and error rates where applicable
-4. **Exception recording**: call `span.record_exception(exc)` in except blocks within traced spans
+1. **Logs (Level 1)** — structured logging via `structlog`: `logger = structlog.get_logger(__name__)` — log key operations with keyword arguments. Implementation: `observability/logging.py` (`configure_logging`, `add_trace_context`).
+
+2. **Metrics (Level 2)** — via `observability.metrics`: register counters, histograms, and gauges in `MetricsRegistry` for throughput, latency, and error rates. Implementation: `observability/metrics.py` (`MetricDefinition`, `MetricsRegistry`).
+
+3. **Traces (Level 3)** — distributed tracing via OpenTelemetry: `tracer = get_tracer("module.name")` from `observability.tracing` — wrap key operations with `tracer.start_as_current_span()`, set relevant attributes. Call `span.record_exception(exc)` in except blocks. Implementation: `observability/tracing.py` (`get_tracer`, `NoOpTracer` fallback).
+
+4. **Profiling (Level 4)** — CPU/memory profiling via Pyroscope. Captured at the process level automatically — module authors do not need to add instrumentation. To inspect: use `mcp__grafana__query_pyroscope` or the Grafana Pyroscope datasource.
+
+5. **Alerting (Level 5)** — when writing new metrics, add corresponding alert rules to `observability/alerting/rules.yaml` for anomalous values (error rate spikes, latency SLO breaches). Do not create ad-hoc Grafana alerts — all alert rules must be version-controlled in `alerting/`.
+
+6. **Synthetic Monitoring (Level 6)** — proactive fake requests to verify the system is alive. Implemented via the `dashboard-tester` agent (`.claude/agents/dashboard-tester.agent.md`) and the `/test-dashboard` command. Not yet integrated as a polling service in CI.
+
+7. **RUM / Real User Monitoring (Level 7)** — experience as seen by actual users. In progress (MET-288). Front-end concern only — no per-module Python instrumentation required.
 
 Follow existing patterns in `observability/tracing.py` (get_tracer, NoOpTracer fallback) and `observability/metrics.py` (MetricDefinition, MetricsRegistry). The system degrades gracefully without the OTel SDK installed.
+
+## Observability Stack (Grafana)
+
+The dev environment includes a full observability stack accessible via Grafana MCP:
+
+| Datasource | UID | Purpose |
+|-----------|-----|---------|
+| Prometheus | `PBFA97CFB590B2093` | Metrics (HTTP latency, error rates, agent task counters) |
+| Loki | `loki` | Structured logs (all gateway/agent logs via OTel) |
+| Tempo | `P214B5B846CF3925F` | Distributed traces (spans across gateway → orchestrator → agent → skill) |
+
+### Log Labels
+
+Loki logs are labeled with `service_name` (currently `metaforge-gateway`) and `deployment_environment` (`docker`). Each log entry includes OTel context: `trace_id`, `span_id`, `scope_name` (logger), `severity_text`, and `code_file_path`.
+
+### Custom Agents & Commands
+
+| Agent / Command | File | Purpose |
+|----------------|------|---------|
+| `dashboard-tester` | `.claude/agents/dashboard-tester.agent.md` | E2E dashboard testing via Playwright + Grafana observability validation |
+| `bug-hunter` | `.claude/agents/bug-hunter.agent.md` | Scans Grafana for errors/anomalies, triages, deduplicates against Linear, files bugs |
+| `/test-dashboard` | `.claude/commands/test-dashboard.md` | Launch dashboard-tester agent with scenario or natural language |
+| `/bug-hunt` | `.claude/commands/bug-hunt.md` | Launch bug-hunter agent — scan last 1h (default), custom window, or focused search |
+
+### Bug Hunt Workflow
+
+`/bug-hunt` runs a 5-phase pipeline:
+
+1. **Pre-flight** — verify Grafana datasources are reachable
+2. **Scan** — Loki error logs, error patterns, Prometheus error rates, latency anomalies, firing alerts
+3. **Triage** — classify severity, enrich with trace context + source code, generate Grafana deeplinks, deduplicate against Linear
+4. **Report** — structured findings with code context and Grafana links
+5. **File** — create Linear issues (only after user approval)
+
+Scoped to **gateway** and **dashboard** services only. Never auto-files bugs without user confirmation.
 
 ## Critical Constraints
 

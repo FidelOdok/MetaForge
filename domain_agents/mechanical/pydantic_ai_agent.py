@@ -133,7 +133,13 @@ Given a user request, determine which tools to call and in what order. \
 Analyze the results and provide a clear engineering assessment with pass/fail \
 status, safety factors, and recommendations.
 
-Always validate that required parameters are available before calling a tool. \
+IMPORTANT: For generative tasks (generate_cad), you MUST call the generate_cad \
+tool even when no work_product_id is provided. Generative tasks CREATE new \
+work products — they do not require an existing one. Use the description/prompt \
+from the user request as the basis for the shape_type and dimensions.
+
+For validation tasks (validate_stress, check_tolerance, generate_mesh), validate \
+that required parameters like mesh_file_path are available before calling the tool. \
 If parameters are missing, note what is needed in your recommendations.
 """
 
@@ -254,7 +260,7 @@ def create_mechanical_agent(
                 branch=ctx.deps.branch,
             )
 
-            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else UUID(int=0)
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = GenerateMeshInput(
                 work_product_id=_wp_id,
                 cad_file=cad_file,
@@ -309,7 +315,7 @@ def create_mechanical_agent(
             tol_specs = [ToleranceSpec.model_validate(t) for t in tolerances]
             process = ManufacturingProcess.model_validate(manufacturing_process)
 
-            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else UUID(int=0)
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = CheckToleranceInput(
                 work_product_id=_wp_id,
                 tolerances=tol_specs,
@@ -362,7 +368,7 @@ def create_mechanical_agent(
                 branch=ctx.deps.branch,
             )
 
-            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else UUID(int=0)
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = GenerateCadInput(
                 work_product_id=_wp_id,
                 shape_type=shape_type,

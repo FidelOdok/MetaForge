@@ -95,12 +95,32 @@ function TreeNodeItem({ node, depth, searchTerm }: TreeNodeProps) {
   );
 }
 
+function anyMatch(parts: PartTreeNode[], term: string): boolean {
+  const lower = term.toLowerCase();
+  const check = (n: PartTreeNode): boolean =>
+    n.name.toLowerCase().includes(lower) || n.children.some(check);
+  return parts.some(check);
+}
+
+function NoMatchFallback({ parts, searchTerm }: { parts: PartTreeNode[]; searchTerm: string }) {
+  if (anyMatch(parts, searchTerm)) return null;
+  return (
+    <p className="px-4 py-3 text-xs text-zinc-400">No parts match &quot;{searchTerm}&quot;</p>
+  );
+}
+
+function countParts(parts: PartTreeNode[]): number {
+  return parts.reduce((acc, p) => acc + 1 + countParts(p.children), 0);
+}
+
 export function ComponentTree() {
   const manifest = useViewerStore((s) => s.manifest);
   const [searchTerm, setSearchTerm] = useState('');
   const [allExpanded, setAllExpanded] = useState(true);
 
   if (!manifest) return null;
+
+  const totalParts = countParts(manifest.parts);
 
   return (
     <div className="flex h-full flex-col">
@@ -109,6 +129,9 @@ export function ComponentTree() {
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
             Components
+            <span className="ml-1.5 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400">
+              {totalParts}
+            </span>
           </h3>
           <button
             type="button"
@@ -143,6 +166,9 @@ export function ComponentTree() {
             searchTerm={searchTerm}
           />
         ))}
+        {searchTerm && (
+          <NoMatchFallback parts={manifest.parts} searchTerm={searchTerm} />
+        )}
       </div>
 
       {/* Stats footer */}

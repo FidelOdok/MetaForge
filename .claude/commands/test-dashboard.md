@@ -10,7 +10,7 @@ Launch the `dashboard-tester` agent (defined in `.claude/agents/dashboard-tester
 
 If the user provides no arguments, use this prompt for the agent:
 
-> Run all test scenarios against the MetaForge dashboard at http://localhost:5173.
+> Run all test scenarios against the MetaForge dashboard at http://localhost:3000.
 > Start with pre-flight checks, then execute scenarios in this order:
 > 1. smoke-navigation (layout & navigation smoke test)
 > 2. mechanical-stress (stress validation E2E flow)
@@ -24,7 +24,7 @@ If the user provides no arguments, use this prompt for the agent:
 
 If the user provides a known scenario name (e.g., `/test-dashboard mechanical-stress`), use this prompt:
 
-> Run the test scenario "$ARGUMENT" against the MetaForge dashboard at http://localhost:5173.
+> Run the test scenario "$ARGUMENT" against the MetaForge dashboard at http://localhost:3000.
 > Start with pre-flight checks, then read and execute `.claude/test-scenarios/$ARGUMENT.scenario.md`.
 > Report results with a step-by-step breakdown.
 
@@ -32,7 +32,7 @@ If the user provides a known scenario name (e.g., `/test-dashboard mechanical-st
 
 If the user provides a natural language description (e.g., `/test-dashboard "test that creating a project works"`), use this prompt:
 
-> Test the MetaForge dashboard at http://localhost:5173 with this request: "$ARGUMENT"
+> Test the MetaForge dashboard at http://localhost:3000 with this request: "$ARGUMENT"
 > Start with pre-flight checks, then:
 > 1. Explore the relevant dashboard pages to understand current state
 > 2. Generate a test scenario from the description

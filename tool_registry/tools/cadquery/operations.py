@@ -93,6 +93,41 @@ _SAFE_BUILTINS = {
 # Blocked names in script source
 _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
 
+# Modules already provided in the sandbox namespace.  Import lines for
+# these are stripped before exec() so scripts work despite __import__
+# being excluded from safe builtins.
+_SANDBOX_MODULES = {"cadquery", "cq", "math"}
+
+_IMPORT_RE = re.compile(
+    r"^(?:import\s+(?P<mod>\w+)(?:\s+as\s+\w+)?|from\s+(?P<from_mod>\w+)\s+import\s+.+)$",
+)
+
+
+def _strip_sandbox_imports(script: str) -> str:
+    """Remove import lines for modules already injected into the sandbox.
+
+    LLM-generated and deterministic fallback scripts typically begin with
+    ``import cadquery as cq`` or ``import math``.  Since the sandbox namespace
+    already contains these modules and ``__import__`` is intentionally
+    excluded from the safe builtins, we strip those lines so they don't
+    cause a ``NameError`` at exec() time.
+
+    Only top-level import lines whose root module is in ``_SANDBOX_MODULES``
+    are removed.  Unknown imports are left in place so they correctly fail
+    against the sandbox policy.
+    """
+    out_lines: list[str] = []
+    for line in script.splitlines():
+        stripped = line.strip()
+        m = _IMPORT_RE.match(stripped)
+        if m:
+            mod = m.group("mod") or m.group("from_mod")
+            if mod in _SANDBOX_MODULES:
+                continue  # drop this import line
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
 # Shape dimension defaults per shape type
 _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
     "box": {"length": 10.0, "width": 10.0, "height": 10.0},
@@ -461,6 +496,13 @@ class CadqueryOperations:
                 for blocked in _BLOCKED_NAMES:
                     if re.search(r"\b" + re.escape(blocked) + r"\b", script):
                         raise ScriptSandboxError(f"Script contains blocked name: '{blocked}'")
+
+            # Strip import lines for modules already injected into the sandbox
+            # namespace.  Scripts (both LLM-generated and deterministic fallbacks)
+            # commonly start with ``import cadquery as cq`` or ``import math``,
+            # but the sandbox restricts __builtins__ (no __import__), so bare
+            # import statements would raise a NameError at exec() time.
+            script = _strip_sandbox_imports(script)
 
             if not output_path:
                 output_path = os.path.join(self.work_dir, "script_result.step")

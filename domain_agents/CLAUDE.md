@@ -37,4 +37,4 @@ pytest tests/unit/test_*agent*.py -v
 - Agents NEVER call tools directly -- all tool access goes through `McpBridge` / skill system
 - Use `pydantic_ai.models.test.TestModel` in tests -- NEVER call a live LLM
 - Agents read from and propose changes to the Digital Twin -- they do not own state
-- Add `structlog` logging and OTel tracing spans to all agent operations
+- Add observability instrumentation (Logs, Metrics, Traces) to all agent operations — see [Observability Requirements in root CLAUDE.md](../CLAUDE.md#observability-requirements) for all 7 levels

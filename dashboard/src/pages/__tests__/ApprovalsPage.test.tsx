@@ -27,14 +27,15 @@ const mockUseProposals = vi.mocked(useProposals);
 describe('ApprovalsPage', () => {
   it('shows loading state', () => {
     mockUseProposals.mockReturnValue({ data: undefined, isLoading: true } as unknown as ReturnType<typeof useProposals>);
-    render(<ApprovalsPage />);
-    expect(screen.getByText('Loading proposals...')).toBeInTheDocument();
+    const { container } = render(<ApprovalsPage />);
+    // KC renders animate-pulse skeleton divs (no data-testid)
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', () => {
     mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
-    expect(screen.getByText('No proposals')).toBeInTheDocument();
+    expect(screen.getByText('No pending proposals')).toBeInTheDocument();
   });
 
   it('renders proposals', () => {

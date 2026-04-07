@@ -1,17 +1,51 @@
 import { useState } from 'react';
 import { useSubmitRequest, useRunStatus } from '../hooks/use-assistant';
 import { useProjects } from '../hooks/use-projects';
-import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
 import type { RunStatusResponse } from '../api/endpoints/assistant';
+
+// ---------------------------------------------------------------------------
+// KC color tokens (as inline style values)
+// ---------------------------------------------------------------------------
+// surface         #111319
+// surface-low     #191b22
+// surface-high    #282a30
+// surface-lowest  #0c0e14
+// on-surface      #e2e2eb
+// on-surface-variant #9a9aaa
+// primary         #ffb783
+// primary-container #e67e22
+// error           #ffb4ab
+// success         #3dd68c
+
+const KC = {
+  surface: '#111319',
+  surfaceLow: '#191b22',
+  surfaceHigh: '#282a30',
+  surfaceLowest: '#0c0e14',
+  onSurface: '#e2e2eb',
+  onSurfaceVariant: '#9a9aaa',
+  primary: '#ffb783',
+  primaryContainer: '#e67e22',
+  border: 'rgba(65,72,90,0.2)',
+  borderStrong: 'rgba(65,72,90,0.3)',
+  error: '#ffb4ab',
+  errorBg: 'rgba(255,180,171,0.1)',
+  success: '#3dd68c',
+};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const ACTIONS = [
   { value: 'validate_stress', label: 'Validate Stress', needsTarget: true },
   { value: 'generate_mesh', label: 'Generate Mesh', needsTarget: true },
   { value: 'check_tolerances', label: 'Check Tolerances', needsTarget: true },
   { value: 'generate_cad', label: 'Generate CAD', needsTarget: false },
+  { value: 'generate_cad_script', label: 'Generate CAD Script (LLM)', needsTarget: false },
   { value: 'run_erc', label: 'Run ERC', needsTarget: true },
   { value: 'run_drc', label: 'Run DRC', needsTarget: true },
   { value: 'full_validation', label: 'Full Validation', needsTarget: true },
@@ -30,16 +64,20 @@ const EVENT_ICONS: Record<string, string> = {
 };
 
 const EVENT_COLORS: Record<string, string> = {
-  agent_started: 'text-blue-500',
-  agent_completed: 'text-green-500',
-  skill_started: 'text-indigo-400',
-  skill_completed: 'text-indigo-600',
-  change_proposed: 'text-amber-500',
-  twin_updated: 'text-teal-500',
-  task_started: 'text-blue-500',
-  task_completed: 'text-green-500',
-  task_failed: 'text-red-500',
+  agent_started: KC.primary,
+  agent_completed: KC.success,
+  skill_started: KC.primary,
+  skill_completed: KC.primaryContainer,
+  change_proposed: KC.primary,
+  twin_updated: KC.success,
+  task_started: KC.primary,
+  task_completed: KC.success,
+  task_failed: KC.error,
 };
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface StepInfo {
   status: string;
@@ -51,17 +89,148 @@ interface StepInfo {
   completed_at: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function GlassPanel({
+  children,
+  className,
+  style,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className={className}
+      style={{
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        background: 'rgba(30,31,38,0.85)',
+        border: `1px solid ${KC.border}`,
+        borderRadius: '6px',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** KC-styled select element */
+function KCSelect({
+  id,
+  value,
+  onChange,
+  disabled,
+  children,
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <select
+      id={id}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      style={{
+        width: '100%',
+        background: KC.surfaceHigh,
+        border: `1px solid ${KC.borderStrong}`,
+        borderRadius: '4px',
+        color: KC.onSurface,
+        padding: '6px 10px',
+        fontSize: '13px',
+        fontFamily: 'Inter, sans-serif',
+        outline: 'none',
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? 'not-allowed' : 'default',
+      }}
+    >
+      {children}
+    </select>
+  );
+}
+
+/** KC-styled text input */
+function KCInput({
+  id,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  type = 'text',
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  type?: string;
+}) {
+  return (
+    <input
+      id={id}
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      placeholder={placeholder}
+      style={{
+        width: '100%',
+        background: KC.surfaceHigh,
+        border: `1px solid ${KC.borderStrong}`,
+        borderRadius: '4px',
+        color: KC.onSurface,
+        padding: '6px 10px',
+        fontSize: '13px',
+        fontFamily: 'Inter, sans-serif',
+        outline: 'none',
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? 'not-allowed' : 'default',
+      }}
+    />
+  );
+}
+
+/** KC-styled label */
+function KCLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      style={{
+        display: 'block',
+        marginBottom: '4px',
+        fontSize: '11px',
+        fontWeight: 500,
+        color: KC.onSurfaceVariant,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
+      {children}
+    </label>
+  );
+}
+
 function StepTimeline({ steps }: { steps: Record<string, StepInfo> }) {
   const entries = Object.entries(steps);
 
   if (entries.length === 0) {
     return (
-      <p className="text-sm text-zinc-500">No steps recorded yet.</p>
+      <p style={{ fontSize: '13px', color: KC.onSurfaceVariant }}>No steps recorded yet.</p>
     );
   }
 
   return (
-    <div className="relative space-y-0 border-l-2 border-zinc-200 pl-6 dark:border-zinc-700">
+    <div style={{ position: 'relative', paddingLeft: '20px', borderLeft: `2px solid ${KC.border}` }}>
       {entries.map(([stepId, step]) => {
         const eventType =
           step.status === 'completed'
@@ -69,26 +238,39 @@ function StepTimeline({ steps }: { steps: Record<string, StepInfo> }) {
             : step.status === 'failed'
               ? 'task_failed'
               : 'task_started';
+        const color = EVENT_COLORS[eventType] ?? KC.onSurfaceVariant;
         return (
-          <div key={stepId} className="relative pb-6 last:pb-0">
+          <div key={stepId} style={{ position: 'relative', paddingBottom: '16px' }}>
             <span
-              className={`absolute -left-[1.625rem] flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs dark:bg-zinc-900 ${EVENT_COLORS[eventType] ?? 'text-zinc-400'}`}
+              style={{
+                position: 'absolute',
+                left: '-26px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '20px',
+                height: '20px',
+                borderRadius: '50%',
+                background: KC.surfaceHigh,
+                fontSize: '10px',
+                color,
+              }}
             >
               {EVENT_ICONS[eventType] ?? '?'}
             </span>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 500, color: KC.onSurface }}>
                 {step.agent_code} — {step.task_type.replace(/_/g, ' ')}
               </span>
               <StatusBadge status={step.status} />
             </div>
             {step.error && (
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+              <p style={{ marginTop: '4px', fontSize: '12px', color: KC.error }}>
                 {step.error}
               </p>
             )}
             {step.started_at && (
-              <div className="text-xs text-zinc-400">
+              <div style={{ fontSize: '11px', color: KC.onSurfaceVariant }}>
                 Started {formatRelativeTime(step.started_at)}
                 {step.completed_at &&
                   ` · Completed ${formatRelativeTime(step.completed_at)}`}
@@ -108,54 +290,167 @@ function ResultSection({ data }: { data: RunStatusResponse }) {
   const work_products: { name: string; url: string }[] = [];
   for (const [, step] of Object.entries(data.steps as Record<string, StepInfo>)) {
     const result = step.result ?? {};
-    if (typeof result.deliverable_url === 'string') {
-      work_products.push({
-        name: (result.deliverable_name as string) ?? 'Download deliverable',
-        url: result.deliverable_url,
-      });
+    const sources: Record<string, unknown>[] = [result];
+    if (Array.isArray(result.skill_results)) {
+      for (const sr of result.skill_results) {
+        if (sr && typeof sr === 'object') {
+          sources.push(sr as Record<string, unknown>);
+        }
+      }
     }
-    if (typeof result.download_url === 'string') {
-      work_products.push({
-        name: (result.file_name as string) ?? 'Download file',
-        url: result.download_url,
-      });
+    for (const src of sources) {
+      if (typeof src.deliverable_url === 'string') {
+        work_products.push({
+          name: (src.deliverable_name as string) ?? 'Download deliverable',
+          url: src.deliverable_url,
+        });
+      }
+      if (typeof src.download_url === 'string') {
+        work_products.push({
+          name: (src.file_name as string) ?? 'Download file',
+          url: src.download_url,
+        });
+      }
     }
   }
 
   return (
-    <Card className="space-y-3">
-      <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">
+    <GlassPanel style={{ padding: '16px', marginTop: '12px' }}>
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 500, color: KC.onSurface }}>
         Results
       </h3>
-      <div className="flex items-center gap-2">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
         <StatusBadge status="completed" />
-        <span className="text-sm text-zinc-600 dark:text-zinc-300">
+        <span style={{ fontSize: '13px', color: KC.onSurfaceVariant }}>
           Run completed
           {data.completed_at && ` ${formatRelativeTime(data.completed_at)}`}
         </span>
       </div>
 
       {work_products.length > 0 ? (
-        <div className="space-y-2">
-          {work_products.map((work_product, idx) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {work_products.map((wp, idx) => (
             <a
               key={idx}
-              href={work_product.url}
+              href={wp.url}
               download
-              className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderRadius: '4px',
+                border: `1px solid rgba(230,126,34,0.3)`,
+                background: 'rgba(230,126,34,0.1)',
+                padding: '6px 10px',
+                fontSize: '13px',
+                fontWeight: 500,
+                color: KC.primaryContainer,
+                textDecoration: 'none',
+              }}
             >
-              ↓ {work_product.name}
+              ↓ {wp.name}
             </a>
           ))}
         </div>
       ) : (
-        <p className="text-sm text-zinc-500">
-          No downloadable work_products were produced by this run.
+        <p style={{ fontSize: '13px', color: KC.onSurfaceVariant }}>
+          No downloadable work products were produced by this run.
         </p>
       )}
-    </Card>
+
+      {/* CAD generation details */}
+      {(() => {
+        const cadResults: Record<string, unknown>[] = [];
+        for (const [, step] of Object.entries(data.steps as Record<string, StepInfo>)) {
+          const r = step.result ?? {};
+          if (Array.isArray(r.skill_results)) {
+            for (const sr of r.skill_results) {
+              if (sr && typeof sr === 'object' && (sr as Record<string, unknown>).script_text) {
+                cadResults.push(sr as Record<string, unknown>);
+              }
+            }
+          }
+        }
+        if (cadResults.length === 0) return null;
+        return cadResults.map((sr, idx) => (
+          <div
+            key={idx}
+            style={{
+              marginTop: '12px',
+              paddingTop: '12px',
+              borderTop: `1px solid ${KC.border}`,
+            }}
+          >
+            <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', fontWeight: 500, color: KC.onSurfaceVariant }}>
+              CAD Generation Details
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px' }}>
+              {[
+                { label: 'Volume', value: typeof sr.volume_mm3 === 'number' ? `${sr.volume_mm3.toLocaleString()} mm³` : 'N/A' },
+                { label: 'Surface Area', value: typeof sr.surface_area_mm2 === 'number' ? `${sr.surface_area_mm2.toLocaleString()} mm²` : 'N/A' },
+                { label: 'Output', value: (sr.cad_file as string) ?? 'N/A' },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  style={{ background: KC.surfaceLowest, borderRadius: '4px', padding: '8px' }}
+                >
+                  <span style={{ fontSize: '11px', color: KC.onSurfaceVariant }}>{item.label}</span>
+                  <p
+                    style={{
+                      margin: '2px 0 0 0',
+                      fontSize: '12px',
+                      fontFamily: 'Roboto Mono, monospace',
+                      fontWeight: 500,
+                      color: KC.onSurface,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <details style={{ marginTop: '8px' }}>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  color: KC.primaryContainer,
+                  listStyle: 'none',
+                }}
+              >
+                View CadQuery Script
+              </summary>
+              <pre
+                style={{
+                  marginTop: '8px',
+                  maxHeight: '320px',
+                  overflow: 'auto',
+                  borderRadius: '4px',
+                  background: KC.surfaceLowest,
+                  padding: '10px',
+                  fontSize: '11px',
+                  fontFamily: 'Roboto Mono, monospace',
+                  color: KC.success,
+                  border: `1px solid ${KC.border}`,
+                }}
+              >
+                <code>{sr.script_text as string}</code>
+              </pre>
+            </details>
+          </div>
+        ));
+      })()}
+    </GlassPanel>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
 
 export function DesignAssistantPage() {
   const [prompt, setPrompt] = useState('');
@@ -174,7 +469,6 @@ export function DesignAssistantPage() {
   const selectedAction = ACTIONS.find((a) => a.value === action);
   const needsTarget = selectedAction?.needsTarget ?? true;
 
-  // Get work products for the selected project
   const selectedProject = projects?.find((p) => p.id === projectId);
   const workProducts = selectedProject?.work_products ?? [];
 
@@ -211,231 +505,259 @@ export function DesignAssistantPage() {
   }
 
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0' }}>
+
+      {/* Page header */}
+      <div style={{ marginBottom: '16px' }}>
+        <h1 style={{ margin: '0 0 3px 0', fontSize: '18px', fontWeight: 500, color: KC.onSurface, fontFamily: 'Inter, sans-serif' }}>
           Design Assistant
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Submit a request to an agent, track progress in real-time, and
-          download results.
-        </p>
+        </h1>
+        <span style={{ fontSize: '12px', color: KC.onSurfaceVariant, fontFamily: 'Inter, sans-serif' }}>
+          Submit a request to an agent, track progress in real-time, and download results.
+        </span>
       </div>
 
-      {/* --- Prompt form --- */}
-      <Card className="mb-6 space-y-4">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="project-select"
-              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-            >
-              Project
-            </label>
-            <select
-              id="project-select"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              disabled={!!runId}
-              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-            >
-              <option value="">Select a project...</option>
-              {projects?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+      {/* Main content — scrollable */}
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-          <div>
-            <label
-              htmlFor="action-select"
-              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-            >
-              Action
-            </label>
-            <select
-              id="action-select"
-              value={action}
-              onChange={(e) => setAction(e.target.value)}
-              disabled={!!runId}
-              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-            >
-              {ACTIONS.map((a) => (
-                <option key={a.value} value={a.value}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Request form */}
+        <GlassPanel style={{ padding: '16px' }}>
+          <form onSubmit={handleSubmit}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-          {needsTarget && (
-            <div>
-              <label
-                htmlFor="target-select"
-                className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-              >
-                Target work product
-              </label>
-              <select
-                id="target-select"
-                value={targetId}
-                onChange={(e) => setTargetId(e.target.value)}
-                disabled={!!runId || !projectId}
-                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-              >
-                <option value="">
-                  {!projectId
-                    ? 'Select a project first...'
-                    : workProducts.length === 0
-                      ? 'No work products in this project'
-                      : 'Select a work product...'}
-                </option>
-                {workProducts.map((wp) => (
-                  <option key={wp.id} value={wp.id}>
-                    {wp.name} ({wp.type.replace(/_/g, ' ')})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div>
-            <label
-              htmlFor="prompt-input"
-              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-            >
-              {needsTarget ? 'Additional instructions (optional)' : 'Description / prompt'}
-            </label>
-            <input
-              id="prompt-input"
-              type="text"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={!!runId}
-              placeholder={
-                needsTarget
-                  ? 'e.g. focus on thermal stress at mounting points'
-                  : 'e.g. simple bracket with two mounting holes'
-              }
-              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={
-                (!needsTarget && !prompt.trim()) ||
-                (needsTarget && !targetId) ||
-                !projectId ||
-                submitRequest.isPending ||
-                !!runId
-              }
-            >
-              {submitRequest.isPending ? 'Submitting...' : 'Submit request'}
-            </Button>
-            {runId && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleReset}
-                disabled={isRunning}
-              >
-                New request
-              </Button>
-            )}
-          </div>
-        </form>
-      </Card>
-
-      {/* --- Submission error --- */}
-      {submitRequest.isError && (
-        <Card className="mb-6 border-red-300 dark:border-red-700">
-          <p className="text-sm font-medium text-red-600 dark:text-red-400">
-            Request failed
-          </p>
-          <p className="mt-1 text-sm text-red-500">
-            {(submitRequest.error as Error)?.message ?? 'Unknown error'}
-          </p>
-        </Card>
-      )}
-
-      {/* --- Progress section --- */}
-      {runId && runStatus && (
-        <div className="space-y-6">
-          <Card>
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">
-                Progress
-              </h3>
-              <StatusBadge status={runStatus.status} />
-            </div>
-
-            <div className="mb-4 grid gap-4 sm:grid-cols-2">
+              {/* Project */}
               <div>
-                <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                  {runStatus.run_id}
-                </div>
-                <div className="text-xs text-zinc-500">Run ID</div>
+                <KCLabel htmlFor="project-select">Project</KCLabel>
+                <KCSelect
+                  id="project-select"
+                  value={projectId}
+                  onChange={setProjectId}
+                  disabled={!!runId}
+                >
+                  <option value="">Select a project...</option>
+                  {projects?.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </KCSelect>
               </div>
+
+              {/* Action */}
               <div>
-                <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                  {runStatus.completed_at
-                    ? formatRelativeTime(runStatus.completed_at)
-                    : isRunning
-                      ? 'In progress...'
-                      : '--'}
-                </div>
-                <div className="text-xs text-zinc-500">Completed</div>
+                <KCLabel htmlFor="action-select">Action</KCLabel>
+                <KCSelect
+                  id="action-select"
+                  value={action}
+                  onChange={setAction}
+                  disabled={!!runId}
+                >
+                  {ACTIONS.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </KCSelect>
               </div>
-            </div>
 
-            <h4 className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Steps
-            </h4>
-            <StepTimeline
-              steps={runStatus.steps as Record<string, StepInfo>}
-            />
-          </Card>
-
-          {/* --- Error display for failed runs --- */}
-          {runStatus.status === 'failed' && (
-            <Card className="border-red-300 dark:border-red-700">
-              <p className="text-sm font-medium text-red-600 dark:text-red-400">
-                Run failed
-              </p>
-              {Object.entries(
-                runStatus.steps as Record<string, StepInfo>,
-              ).map(
-                ([stepId, step]) =>
-                  step.error && (
-                    <p
-                      key={stepId}
-                      className="mt-1 text-sm text-red-500"
-                    >
-                      [{step.agent_code}] {step.error}
-                    </p>
-                  ),
+              {/* Target work product */}
+              {needsTarget && (
+                <div>
+                  <KCLabel htmlFor="target-select">Target work product</KCLabel>
+                  <KCSelect
+                    id="target-select"
+                    value={targetId}
+                    onChange={setTargetId}
+                    disabled={!!runId || !projectId}
+                  >
+                    <option value="">
+                      {!projectId
+                        ? 'Select a project first...'
+                        : workProducts.length === 0
+                          ? 'No work products in this project'
+                          : 'Select a work product...'}
+                    </option>
+                    {workProducts.map((wp) => (
+                      <option key={wp.id} value={wp.id}>
+                        {wp.name} ({wp.type.replace(/_/g, ' ')})
+                      </option>
+                    ))}
+                  </KCSelect>
+                </div>
               )}
-            </Card>
-          )}
 
-          {/* --- Result / download section --- */}
-          <ResultSection data={runStatus} />
-        </div>
-      )}
+              {/* Prompt */}
+              <div>
+                <KCLabel htmlFor="prompt-input">
+                  {needsTarget ? 'Additional instructions (optional)' : 'Description / prompt'}
+                </KCLabel>
+                <KCInput
+                  id="prompt-input"
+                  value={prompt}
+                  onChange={setPrompt}
+                  disabled={!!runId}
+                  placeholder={
+                    needsTarget
+                      ? 'e.g. focus on thermal stress at mounting points'
+                      : 'e.g. simple bracket with two mounting holes'
+                  }
+                />
+              </div>
 
-      {/* --- Loading state while waiting for first status poll --- */}
-      {runId && !runStatus && (
-        <Card>
-          <p className="text-sm text-zinc-500">
-            Waiting for run status...
-          </p>
-        </Card>
-      )}
+              {/* Actions row */}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="submit"
+                  disabled={
+                    (!needsTarget && !prompt.trim()) ||
+                    (needsTarget && !targetId) ||
+                    !projectId ||
+                    submitRequest.isPending ||
+                    !!runId
+                  }
+                  style={{
+                    background: KC.primaryContainer,
+                    color: KC.surface,
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '7px 16px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    fontFamily: 'Inter, sans-serif',
+                    cursor: 'pointer',
+                    opacity:
+                      (!needsTarget && !prompt.trim()) ||
+                      (needsTarget && !targetId) ||
+                      !projectId ||
+                      submitRequest.isPending ||
+                      !!runId
+                        ? 0.4
+                        : 1,
+                  }}
+                >
+                  {submitRequest.isPending ? 'Submitting...' : 'Submit request'}
+                </button>
+                {runId && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleReset}
+                    disabled={isRunning}
+                  >
+                    New request
+                  </Button>
+                )}
+              </div>
+
+            </div>
+          </form>
+        </GlassPanel>
+
+        {/* Submission error */}
+        {submitRequest.isError && (
+          <GlassPanel
+            style={{
+              padding: '12px 16px',
+              borderColor: `rgba(255,180,171,0.3)`,
+              background: KC.errorBg,
+            }}
+          >
+            <p style={{ margin: '0 0 4px 0', fontSize: '13px', fontWeight: 500, color: KC.error }}>
+              Request failed
+            </p>
+            <p style={{ margin: 0, fontSize: '12px', color: KC.error }}>
+              {(submitRequest.error as Error)?.message ?? 'Unknown error'}
+            </p>
+          </GlassPanel>
+        )}
+
+        {/* Progress section */}
+        {runId && runStatus && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <GlassPanel style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 500, color: KC.onSurface }}>
+                  Progress
+                </h3>
+                <StatusBadge status={runStatus.status} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: KC.onSurface, fontFamily: 'Roboto Mono, monospace' }}>
+                    {runStatus.run_id}
+                  </div>
+                  <div style={{ fontSize: '11px', color: KC.onSurfaceVariant }}>Run ID</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: KC.onSurface }}>
+                    {runStatus.completed_at
+                      ? formatRelativeTime(runStatus.completed_at)
+                      : isRunning
+                        ? 'In progress...'
+                        : '--'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: KC.onSurfaceVariant }}>Completed</div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  color: KC.onSurfaceVariant,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  marginBottom: '10px',
+                }}
+              >
+                Steps
+              </div>
+              <StepTimeline
+                steps={runStatus.steps as Record<string, StepInfo>}
+              />
+            </GlassPanel>
+
+            {/* Failed run error */}
+            {runStatus.status === 'failed' && (
+              <GlassPanel
+                style={{
+                  padding: '12px 16px',
+                  borderColor: 'rgba(255,180,171,0.3)',
+                  background: KC.errorBg,
+                }}
+              >
+                <p style={{ margin: '0 0 4px 0', fontSize: '13px', fontWeight: 500, color: KC.error }}>
+                  Run failed
+                </p>
+                {Object.entries(
+                  runStatus.steps as Record<string, StepInfo>,
+                ).map(
+                  ([stepId, step]) =>
+                    step.error && (
+                      <p key={stepId} style={{ margin: '2px 0 0 0', fontSize: '12px', color: KC.error }}>
+                        [{step.agent_code}] {step.error}
+                      </p>
+                    ),
+                )}
+              </GlassPanel>
+            )}
+
+            {/* Results / downloads */}
+            <ResultSection data={runStatus} />
+          </div>
+        )}
+
+        {/* Waiting for first status poll */}
+        {runId && !runStatus && (
+          <GlassPanel style={{ padding: '12px 16px' }}>
+            <p style={{ margin: 0, fontSize: '13px', color: KC.onSurfaceVariant }}>
+              Waiting for run status...
+            </p>
+          </GlassPanel>
+        )}
+
+      </div>
     </div>
   );
 }
