@@ -563,9 +563,7 @@ class CadqueryOperations:
             if not is_main_thread:
                 elapsed_so_far = time.monotonic() - start
                 if elapsed_so_far > exec_timeout:
-                    raise ScriptTimeoutError(
-                        f"Script execution exceeded {exec_timeout}s timeout"
-                    )
+                    raise ScriptTimeoutError(f"Script execution exceeded {exec_timeout}s timeout")
 
             # Extract result
             result_obj = namespace.get("result")

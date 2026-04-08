@@ -39,6 +39,13 @@ from api_gateway.twin.schemas import (
     TwinRelationshipListResponse,
     TwinRelationshipResponse,
 )
+from api_gateway.twin.version_schemas import (
+    IterateRequest,
+    RevisionDiff,
+    WorkProductRevision,
+    WorkProductVersionHistory,
+)
+from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
 from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI
@@ -319,6 +326,11 @@ async def import_work_product(
 
         created_wp = await _twin.create_work_product(wp)
 
+        # Record initial revision
+        revision = VersionService.build_revision(created_wp, "Initial import")
+        updated_metadata = VersionService.append_to_metadata(created_wp.metadata, revision)
+        await _twin.update_work_product(created_wp.id, {"metadata": updated_metadata})
+
         # Link to project if requested
         if project_id:
             try:
@@ -359,6 +371,48 @@ async def import_work_product(
             project_id=project_id,
             created_at=now.isoformat(),
         )
+
+
+# ---------------------------------------------------------------------------
+# Version history endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/nodes/{node_id}/versions", response_model=WorkProductVersionHistory)
+async def get_version_history(node_id: UUID) -> WorkProductVersionHistory:
+    """Return the full revision history for a work product."""
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    return VersionService.get_history(wp)
+
+
+@router.post("/nodes/{node_id}/iterate", response_model=WorkProductRevision, status_code=201)
+async def iterate_work_product(node_id: UUID, body: IterateRequest) -> WorkProductRevision:
+    """Record a new revision and apply metadata updates to a work product."""
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    updated_meta = {**wp.metadata, **body.metadata_updates}
+    revision = VersionService.build_revision(
+        wp, body.change_description, snapshot_override=updated_meta
+    )
+    final_meta = VersionService.append_to_metadata(updated_meta, revision)
+    await _twin.update_work_product(node_id, {"metadata": final_meta})
+    return WorkProductRevision(**revision)
+
+
+@router.get("/nodes/{node_id}/diff", response_model=RevisionDiff)
+async def diff_versions(node_id: UUID, v1: int = Query(...), v2: int = Query(...)) -> RevisionDiff:
+    """Return a metadata diff between two revisions (1-indexed)."""
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    history = VersionService.get_history(wp)
+    try:
+        return VersionService.diff(history, v1, v2)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

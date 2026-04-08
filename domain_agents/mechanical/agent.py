@@ -818,8 +818,10 @@ class MechanicalAgent:
         shape_type: str = request.parameters.get("shape_type", "")
         if not shape_type and prompt:
             request_copy = request.model_copy(
-                update={"task_type": "generate_cad_script",
-                        "parameters": {**request.parameters, "description": prompt}},
+                update={
+                    "task_type": "generate_cad_script",
+                    "parameters": {**request.parameters, "description": prompt},
+                },
             )
             return await self._run_generate_cad_script(request_copy)
 
