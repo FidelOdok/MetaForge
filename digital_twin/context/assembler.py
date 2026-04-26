@@ -35,7 +35,12 @@ from uuid import UUID
 
 import structlog
 
-from digital_twin.context.conflicts import ConflictDetector, ConflictSeverity
+from digital_twin.context.conflicts import (
+    Conflict,
+    ConflictDetector,
+    ConflictSeverity,
+)
+from digital_twin.context.identity_resolver import IdentityResolver
 from digital_twin.context.models import (
     ContextAssemblyRequest,
     ContextAssemblyResponse,
@@ -81,6 +86,7 @@ class ContextAssembler:
         knowledge_service: KnowledgeService,
         conflict_detector: ConflictDetector | None = None,
         collector: MetricsCollector | None = None,
+        identity_resolver: IdentityResolver | None = None,
     ) -> None:
         self._twin = twin
         self._knowledge_service = knowledge_service
@@ -93,6 +99,10 @@ class ContextAssembler:
         # ``metaforge_context_truncated_total`` so dashboards can
         # render the truncation rate per agent / source kind.
         self._collector = collector
+        # MET-324: cross-reference identity resolver. Default-on so
+        # every assembled response carries ``resolved_identity``
+        # annotations + a ``BLOCKING`` conflict per detected mismatch.
+        self._identity_resolver = identity_resolver or IdentityResolver()
 
     # ------------------------------------------------------------------
     # Public API
@@ -143,10 +153,42 @@ class ContextAssembler:
             sorted_fragments = self._rank(after_staleness)
             kept, dropped = self._enforce_budget(sorted_fragments, request.token_budget)
 
+            # MET-324: resolve cross-references first so conflicts can
+            # cite the canonical identity rather than raw source ids.
+            identity_clusters = self._identity_resolver.resolve(kept)
+            identity_mismatches = self._identity_resolver.mismatches(kept)
+            orphan_fragments = [
+                f
+                for f in kept
+                if isinstance(f.metadata.get("resolved_identity"), str)
+                and sum(
+                    1
+                    for c in identity_clusters
+                    if c.canonical == f.metadata["resolved_identity"]
+                    and len(c.fragment_indices) == 1
+                )
+                > 0
+            ]
+
             # MET-322: detect conflicts AFTER staleness/ranking but
             # against the kept set so the agent only sees disagreements
             # in the context it actually has access to.
-            conflicts = self._conflict_detector.detect(kept)
+            conflicts = list(self._conflict_detector.detect(kept))
+            # Each identity mismatch becomes a BLOCKING conflict — the
+            # agent must refuse to act on contradictory identity.
+            for mm in identity_mismatches:
+                conflicts.append(
+                    Conflict(
+                        field=mm.field,
+                        value_a=mm.value_a,
+                        value_b=mm.value_b,
+                        source_a=mm.source_id_a,
+                        source_b=mm.source_id_b,
+                        severity=ConflictSeverity.BLOCKING,
+                        grouping_key=f"{mm.weak_field}={mm.weak_value}",
+                        description=mm.description,
+                    )
+                )
             has_blocking = any(c.severity == ConflictSeverity.BLOCKING for c in conflicts)
 
             sources: dict[str, int] = {}
@@ -170,6 +212,9 @@ class ContextAssembler:
                     "stale_dropped_count": len(stale_dropped),
                     "stale_dropped_ids": [f.source_id for f in stale_dropped],
                     "conflict_count": len(conflicts),
+                    "identity_cluster_count": len(identity_clusters),
+                    "identity_mismatch_count": len(identity_mismatches),
+                    "orphan_source_ids": [f.source_id for f in orphan_fragments],
                 },
             )
             if conflicts:

@@ -338,3 +338,81 @@ class TestAttribution:
         # Every fragment must declare its origin and a non-empty source_id.
         assert all(f.source_id for f in response.fragments)
         assert all(f.source_kind in ContextSourceKind for f in response.fragments)
+
+
+# ---------------------------------------------------------------------------
+# MET-324: Identity resolution wiring
+# ---------------------------------------------------------------------------
+
+
+class TestIdentityResolution:
+    async def test_assembler_annotates_resolved_identity(
+        self,
+        assembler: ContextAssembler,
+        knowledge: _FakeKnowledgeService,
+    ) -> None:
+        # Two knowledge hits with the same MPN in metadata → one cluster.
+        knowledge.hits = [
+            SearchHit(
+                content="schematic note for U1",
+                similarity_score=0.9,
+                source_path="schem.md",
+                heading=None,
+                chunk_index=0,
+                total_chunks=1,
+                metadata={"mpn": "ATSAMD21G18", "ref_des": "U1"},
+            ),
+            SearchHit(
+                content="bom row for U1",
+                similarity_score=0.8,
+                source_path="bom.md",
+                heading=None,
+                chunk_index=0,
+                total_chunks=1,
+                metadata={"mpn": "ATSAMD21G18", "ref_des": "U1"},
+            ),
+        ]
+        request = ContextAssemblyRequest(agent_id="ee", query="U1?", scope=[ContextScope.KNOWLEDGE])
+        response = await assembler.assemble(request)
+        ids = {f.metadata.get("resolved_identity") for f in response.fragments}
+        assert ids == {"ATSAMD21G18"}
+        assert response.metadata["identity_cluster_count"] == 1
+        assert response.metadata["identity_mismatch_count"] == 0
+        assert response.has_blocking_conflict is False
+
+    async def test_mismatch_raises_blocking_conflict(
+        self,
+        assembler: ContextAssembler,
+        knowledge: _FakeKnowledgeService,
+    ) -> None:
+        # Same ref_des but different MPN — must surface as BLOCKING.
+        knowledge.hits = [
+            SearchHit(
+                content="schematic R12",
+                similarity_score=0.9,
+                source_path="schem.md",
+                heading=None,
+                chunk_index=0,
+                total_chunks=1,
+                metadata={"ref_des": "R12", "mpn": "ERJ-3EKF1002V"},
+            ),
+            SearchHit(
+                content="bom R12",
+                similarity_score=0.85,
+                source_path="bom.md",
+                heading=None,
+                chunk_index=0,
+                total_chunks=1,
+                metadata={"ref_des": "R12", "mpn": "RC0603FR-071K"},
+            ),
+        ]
+        request = ContextAssemblyRequest(
+            agent_id="ee", query="R12?", scope=[ContextScope.KNOWLEDGE]
+        )
+        response = await assembler.assemble(request)
+        assert response.metadata["identity_mismatch_count"] >= 1
+        assert response.has_blocking_conflict is True
+        # The blocking conflict carries the weak field as the grouping key.
+        blocking = [c for c in response.conflicts if c.severity.value == "blocking"]
+        assert blocking, response.conflicts
+        assert any(c.field == "mpn" for c in blocking)
