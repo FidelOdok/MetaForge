@@ -284,15 +284,43 @@ async def _init_orchestrator(app: FastAPI) -> None:
     _collector = getattr(app.state, "collector", None)
     workflow_engine = InMemoryWorkflowEngine.create()
 
-    # Select Twin backend from environment (Neo4j if NEO4J_URI is set)
+    # Select Twin backend from environment.
+    #
+    # Boot policy (MET-304):
+    #   * If NEO4J_URI is set, the Twin connects to Neo4j on startup.
+    #   * If METAFORGE_REQUIRE_NEO4J=true is set, a connection failure is
+    #     fatal — production deployments opt into this so a silent
+    #     fall-back to in-memory cannot mask data loss.
+    #   * Otherwise (dev), a connection failure logs an error and falls
+    #     back to InMemoryGraphEngine so contributors can still boot
+    #     without a running Neo4j.
+    require_neo4j = os.environ.get("METAFORGE_REQUIRE_NEO4J", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get("METAFORGE_NEO4J_URI")
     try:
         twin = await InMemoryTwinAPI.create_from_env(collector=_collector)
     except Exception as exc:
-        logger.warning(
+        if require_neo4j:
+            logger.error(
+                "neo4j_required_but_failed",
+                uri=neo4j_uri,
+                error=str(exc),
+            )
+            raise
+        logger.error(
             "neo4j_fallback_to_in_memory",
+            uri=neo4j_uri,
             error=str(exc),
+            hint="Set METAFORGE_REQUIRE_NEO4J=true to fail fast in production.",
         )
         twin = InMemoryTwinAPI.create_with_collector(_collector)
+    twin_backend = (
+        "neo4j" if type(twin._graph).__name__ == "Neo4jGraphEngine" else "in_memory"  # noqa: SLF001
+    )
+    logger.info("twin_backend_selected", backend=twin_backend, neo4j_uri=neo4j_uri)
     mcp = InMemoryMcpBridge()
 
     # Bootstrap tool adapters into the registry and create real MCP bridge
