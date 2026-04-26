@@ -140,17 +140,47 @@ ACTION_WORKFLOWS: dict[str, WorkflowDefinition] = {
 
 
 async def _init_database() -> None:
-    """Create PostgreSQL tables if DATABASE_URL is set and SQLAlchemy is available."""
+    """Create PostgreSQL tables and register the Postgres health check.
+
+    Boot policy (MET-305):
+
+    * If ``DATABASE_URL`` is set, the gateway connects on startup and
+      calls ``Base.metadata.create_all`` so chat / projects tables
+      exist.
+    * If ``METAFORGE_REQUIRE_POSTGRES=true`` is set, a connection
+      failure is fatal — production deployments opt into this so a
+      silent fall-back to in-memory cannot mask data loss for chat
+      threads, project metadata, etc.
+    * Otherwise (dev), failures log at ERROR level and the gateway
+      falls back to in-memory backends so contributors can still boot
+      without a running Postgres.
+
+    Pool sizing is configurable via ``METAFORGE_PG_POOL_SIZE`` /
+    ``METAFORGE_PG_MAX_OVERFLOW`` / ``METAFORGE_PG_POOL_RECYCLE``
+    (see ``api_gateway.db.engine``).
+    """
+    require_pg = os.environ.get("METAFORGE_REQUIRE_POSTGRES", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     try:
         from api_gateway.db import HAS_SQLALCHEMY
         from api_gateway.db.engine import get_engine
 
         if not HAS_SQLALCHEMY:
+            if require_pg:
+                raise RuntimeError(
+                    "METAFORGE_REQUIRE_POSTGRES=true but sqlalchemy is not installed"
+                )
             logger.debug("pg_init_skipped", reason="sqlalchemy not installed")
             return
 
         engine = get_engine()
         if engine is None:
+            if require_pg:
+                raise RuntimeError("METAFORGE_REQUIRE_POSTGRES=true but DATABASE_URL is not set")
             logger.debug("pg_init_skipped", reason="DATABASE_URL not set")
             return
 
@@ -159,8 +189,64 @@ async def _init_database() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("pg_tables_created")
+        _register_postgres_health_check()
     except Exception as exc:
-        logger.warning("pg_init_failed", error=str(exc))
+        if require_pg:
+            logger.error("pg_required_but_failed", error=str(exc))
+            raise
+        logger.error(
+            "pg_init_failed",
+            error=str(exc),
+            hint="Set METAFORGE_REQUIRE_POSTGRES=true to fail fast in production.",
+        )
+
+
+def _register_postgres_health_check() -> None:
+    """Register a ``postgres`` health check on the gateway.
+
+    Distinct from the ``pgvector`` check, which probes the L1 knowledge
+    store. This one verifies the SQLAlchemy engine that backs chat,
+    projects, sessions, etc.
+    """
+    from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
+
+    async def _postgres_health() -> ComponentHealth:
+        import time as _time
+
+        from sqlalchemy import text
+
+        from api_gateway.db.engine import get_engine, get_session
+
+        eng = get_engine()
+        if eng is None:
+            return ComponentHealth(
+                name="postgres",
+                status=DependencyStatus.UNHEALTHY,
+                latency_ms=0,
+                message="Engine not initialized",
+            )
+        t0 = _time.monotonic()
+        try:
+            async with get_session() as session:
+                await session.execute(text("SELECT 1"))
+            latency = round((_time.monotonic() - t0) * 1000, 2)
+            return ComponentHealth(
+                name="postgres",
+                status=DependencyStatus.HEALTHY,
+                latency_ms=latency,
+                message="Connected",
+            )
+        except Exception as exc:
+            latency = round((_time.monotonic() - t0) * 1000, 2)
+            return ComponentHealth(
+                name="postgres",
+                status=DependencyStatus.UNHEALTHY,
+                latency_ms=latency,
+                message=str(exc),
+            )
+
+    get_health_checker().register_check("postgres", _postgres_health)
+    logger.info("postgres_health_check_registered")
 
 
 async def _init_knowledge_store(app: FastAPI) -> None:
@@ -347,9 +433,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
 
     chat_backend = await create_backend()
     init_chat_backend(chat_backend)
+    logger.info(
+        "chat_backend_selected",
+        backend="postgres" if type(chat_backend).__name__ == "PgChatBackend" else "in_memory",
+    )
 
     project_backend = await create_project_backend()
     init_project_backend(project_backend)
+    logger.info(
+        "project_backend_selected",
+        backend=(
+            "postgres" if type(project_backend).__name__ == "PgProjectBackend" else "in_memory"
+        ),
+    )
 
     # Wire the real bridge and twin into chat routes and projects routes
     init_mcp_bridge(registry_bridge)

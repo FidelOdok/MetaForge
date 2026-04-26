@@ -42,25 +42,35 @@ def get_database_url() -> str | None:
 
 
 def _create_engine(url: str) -> AsyncEngine | None:
-    """Create an async engine with sensible pool defaults."""
+    """Create an async engine with sensible pool defaults.
+
+    Pool sizing reads ``METAFORGE_PG_POOL_SIZE`` (default 5) and
+    ``METAFORGE_PG_MAX_OVERFLOW`` (default 10) from the environment so
+    deployments can tune without a code change.
+    """
+    pool_size = int(os.environ.get("METAFORGE_PG_POOL_SIZE", "5"))
+    max_overflow = int(os.environ.get("METAFORGE_PG_MAX_OVERFLOW", "10"))
+    pool_recycle = int(os.environ.get("METAFORGE_PG_POOL_RECYCLE", "1800"))
+
     with tracer.start_as_current_span("db.create_engine") as span:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine
 
             engine: AsyncEngine = create_async_engine(
                 url,
-                pool_size=5,
-                max_overflow=10,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
                 pool_pre_ping=True,
-                pool_recycle=1800,
+                pool_recycle=pool_recycle,
                 echo=False,
             )
-            span.set_attribute("db.pool_size", 5)
-            span.set_attribute("db.max_overflow", 10)
+            span.set_attribute("db.pool_size", pool_size)
+            span.set_attribute("db.max_overflow", max_overflow)
             logger.info(
                 "pg_engine_created",
-                pool_size=5,
-                max_overflow=10,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_recycle=pool_recycle,
             )
             return engine
         except Exception as exc:

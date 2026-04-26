@@ -44,6 +44,12 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "httpx>=0.27",
+    # Pulled in so unit tests like ``test_pg_backend.py`` (which use
+    # in-process sqlite via ``aiosqlite``) run without extra setup. The
+    # production Postgres dependency stays under the ``[postgres]`` /
+    # ``[gateway]`` extras.
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
 ]
 temporal = [
     "temporalio>=1.5",
