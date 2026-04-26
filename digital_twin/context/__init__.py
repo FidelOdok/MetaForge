@@ -29,6 +29,7 @@ from digital_twin.context.role_scope import (
     get_role_knowledge_types,
     is_known_role,
 )
+from digital_twin.context.staleness import compute_staleness
 
 __all__ = [
     "ContextAssembler",
@@ -42,6 +43,7 @@ __all__ = [
     "ROLE_MECHANICAL_AGENT",
     "ROLE_SIMULATION_AGENT",
     "all_roles",
+    "compute_staleness",
     "get_role_knowledge_types",
     "is_known_role",
 ]
