@@ -35,6 +35,7 @@ from uuid import UUID
 
 import structlog
 
+from digital_twin.context.conflicts import ConflictDetector, ConflictSeverity
 from digital_twin.context.models import (
     ContextAssemblyRequest,
     ContextAssemblyResponse,
@@ -77,9 +78,14 @@ class ContextAssembler:
         self,
         twin: TwinAPI,
         knowledge_service: KnowledgeService,
+        conflict_detector: ConflictDetector | None = None,
     ) -> None:
         self._twin = twin
         self._knowledge_service = knowledge_service
+        # MET-322: detector is opt-in by reference but defaults to the
+        # standard tracked-fields list so the assembler always reports
+        # surface-level conflicts without configuration.
+        self._conflict_detector = conflict_detector or ConflictDetector()
 
     # ------------------------------------------------------------------
     # Public API
@@ -130,6 +136,12 @@ class ContextAssembler:
             sorted_fragments = self._rank(after_staleness)
             kept, dropped = self._enforce_budget(sorted_fragments, request.token_budget)
 
+            # MET-322: detect conflicts AFTER staleness/ranking but
+            # against the kept set so the agent only sees disagreements
+            # in the context it actually has access to.
+            conflicts = self._conflict_detector.detect(kept)
+            has_blocking = any(c.severity == ConflictSeverity.BLOCKING for c in conflicts)
+
             sources: dict[str, int] = {}
             for fragment in kept:
                 sources[fragment.source_kind.value] = sources.get(fragment.source_kind.value, 0) + 1
@@ -140,6 +152,8 @@ class ContextAssembler:
                 truncated=bool(dropped),
                 dropped_source_ids=[f.source_id for f in dropped],
                 sources=sources,
+                conflicts=list(conflicts),
+                has_blocking_conflict=has_blocking,
                 metadata={
                     "agent_id": request.agent_id,
                     "scope": [s.value for s in request.scope],
@@ -148,8 +162,17 @@ class ContextAssembler:
                     "staleness_threshold": request.staleness_threshold,
                     "stale_dropped_count": len(stale_dropped),
                     "stale_dropped_ids": [f.source_id for f in stale_dropped],
+                    "conflict_count": len(conflicts),
                 },
             )
+            if conflicts:
+                logger.info(
+                    "context_conflicts_detected",
+                    agent_id=request.agent_id,
+                    count=len(conflicts),
+                    blocking=has_blocking,
+                    fields=sorted({c.field for c in conflicts}),
+                )
             span.set_attribute("context.fragment_count", len(response.fragments))
             span.set_attribute("context.token_count", response.token_count)
             span.set_attribute("context.truncated", response.truncated)

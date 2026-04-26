@@ -348,4 +348,19 @@ class ContextAssemblyResponse(BaseModel):
         default_factory=dict,
         description="source_kind → fragment count, for quick attribution stats",
     )
+    conflicts: list[Any] = Field(
+        default_factory=list,
+        description=(
+            "Conflict rows surfaced by the cross-source detector "
+            "(MET-322). ``Any`` to avoid a circular import; in practice "
+            "always a list of ``digital_twin.context.conflicts.Conflict``."
+        ),
+    )
+    has_blocking_conflict: bool = Field(
+        default=False,
+        description=(
+            "Convenience flag — True iff any ``conflicts`` row has "
+            "severity ``blocking``. Agents should refuse to act."
+        ),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)

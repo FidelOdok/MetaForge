@@ -13,6 +13,11 @@ Follow-up issues build on this foundation:
 """
 
 from digital_twin.context.assembler import ContextAssembler
+from digital_twin.context.conflicts import (
+    Conflict,
+    ConflictDetector,
+    ConflictSeverity,
+)
 from digital_twin.context.models import (
     ContextAssemblyRequest,
     ContextAssemblyResponse,
@@ -46,4 +51,7 @@ __all__ = [
     "compute_staleness",
     "get_role_knowledge_types",
     "is_known_role",
+    "Conflict",
+    "ConflictDetector",
+    "ConflictSeverity",
 ]
