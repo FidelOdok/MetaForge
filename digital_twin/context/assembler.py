@@ -41,6 +41,7 @@ from digital_twin.context.models import (
     ContextFragment,
     ContextSourceKind,
     estimate_tokens,
+    fragment_priority,
 )
 from digital_twin.context.role_scope import get_role_knowledge_types
 from digital_twin.knowledge.service import KnowledgeService, SearchHit
@@ -132,6 +133,22 @@ class ContextAssembler:
             span.set_attribute("context.fragment_count", len(response.fragments))
             span.set_attribute("context.token_count", response.token_count)
             span.set_attribute("context.truncated", response.truncated)
+            if response.truncated:
+                # Per-source-kind tally of dropped fragments — feeds
+                # MET-326 retrieval-quality metrics without coupling.
+                dropped_sources: dict[str, int] = {}
+                for fragment in dropped:
+                    dropped_sources[fragment.source_kind.value] = (
+                        dropped_sources.get(fragment.source_kind.value, 0) + 1
+                    )
+                logger.info(
+                    "context_truncated",
+                    agent_id=request.agent_id,
+                    token_budget=request.token_budget,
+                    token_count=response.token_count,
+                    dropped_count=len(dropped),
+                    dropped_sources=dropped_sources,
+                )
             logger.info(
                 "context_assembled",
                 agent_id=request.agent_id,
@@ -337,17 +354,42 @@ class ContextAssembler:
 
     @staticmethod
     def _rank(fragments: list[ContextFragment]) -> list[ContextFragment]:
-        """Sort fragments by relevance, highest first.
+        """Sort fragments by composite priority, highest first (MET-317).
 
-        Knowledge hits use their cosine score; graph fragments use the
-        synthetic priority constants set at conversion time. Tie-break
-        favours shorter fragments so a budget cap retains more
-        fragments overall.
+        Composite key, descending::
+
+            priority = recency × authority × relevance
+
+        See ``digital_twin.context.models.fragment_priority`` for the
+        component definitions. Tie-break order:
+
+        1. Higher composite priority wins.
+        2. Newer ``metadata["created_at"]`` wins (deterministic given
+           timestamps; 0 when absent).
+        3. Smaller ``token_count`` wins so a budget cap retains more
+           fragments overall.
         """
-        return sorted(
-            fragments,
-            key=lambda f: (-(f.similarity_score or 0.0), f.token_count),
-        )
+
+        def _sort_key(f: ContextFragment) -> tuple[float, float, int]:
+            priority = fragment_priority(
+                source_kind=f.source_kind.value,
+                similarity=f.similarity_score,
+                metadata=f.metadata,
+            )
+            ts_raw = f.metadata.get("created_at", 0) or 0
+            ts: float
+            if isinstance(ts_raw, int | float):
+                ts = float(ts_raw)
+            else:
+                from datetime import datetime
+
+                try:
+                    ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")).timestamp()
+                except (TypeError, ValueError):
+                    ts = 0.0
+            return (-priority, -ts, f.token_count)
+
+        return sorted(fragments, key=_sort_key)
 
     @staticmethod
     def _enforce_budget(

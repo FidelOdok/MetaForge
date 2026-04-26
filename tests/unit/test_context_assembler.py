@@ -133,9 +133,12 @@ class TestModels:
         assert req.includes_work_product is False
 
     def test_estimate_tokens_deterministic(self) -> None:
+        # MET-317 swapped the char heuristic for tiktoken — empty stays
+        # 0, non-empty stays >= 1. Exact BPE counts are validated in
+        # ``tests/unit/test_token_budget.py``.
         assert estimate_tokens("") == 0
-        assert estimate_tokens("a") == 1
-        assert estimate_tokens("a" * 8) == 2  # 8 // 4
+        assert estimate_tokens("a") >= 1
+        assert estimate_tokens("a" * 8) >= 1
 
     def test_fragment_round_trip(self) -> None:
         wp_id = uuid4()

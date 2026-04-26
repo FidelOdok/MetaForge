@@ -65,6 +65,10 @@ knowledge = [
     # P1.13.
     "lightrag-hku>=1.4",
     "raganything>=1.2",
+    # Used by digital_twin.context.models for token-budget enforcement
+    # (MET-317). Already a transitive of lightrag-hku — hoisted explicit
+    # so the context layer doesn't depend on LightRAG just for tokens.
+    "tiktoken>=0.7",
 ]
 cadquery = [
     "cadquery>=2.4.0",
