@@ -409,8 +409,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
     logger.info("twin_backend_selected", backend=twin_backend, neo4j_uri=neo4j_uri)
     mcp = InMemoryMcpBridge()
 
-    # Bootstrap tool adapters into the registry and create real MCP bridge
-    tool_registry = await bootstrap_tool_registry()
+    # Initialize PostgreSQL schema first so chat/project backends can wire,
+    # AND the L1 KnowledgeService — both are needed before the tool registry
+    # boots so the knowledge MCP adapter (MET-335) and the consumer
+    # subscription (MET-307) can be registered with the live service.
+    await _init_database()
+    await _init_knowledge_store(app)
+
+    # Bootstrap tool adapters into the registry and create real MCP bridge.
+    # The knowledge MCP adapter is included only when a KnowledgeService is
+    # available on app.state.
+    tool_registry = await bootstrap_tool_registry(
+        knowledge_service=getattr(app.state, "knowledge_service", None),
+    )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
     app.state.mcp_bridge = registry_bridge
@@ -419,9 +430,6 @@ async def _init_orchestrator(app: FastAPI) -> None:
         adapters=len(tool_registry.list_adapters()),
         tools=len(tool_registry.list_tools()),
     )
-
-    # Initialize PostgreSQL schema if DATABASE_URL is set
-    await _init_database()
 
     # Initialize chat and project backends (PG or in-memory)
     from api_gateway.chat.backend import create_backend
@@ -452,10 +460,6 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_twin(twin)
     init_projects_twin(twin)
     init_twin_viewer(twin)
-
-    # Initialize the L1 KnowledgeService BEFORE creating the bus so the
-    # KnowledgeConsumer subscription can be wired in one shot (MET-307).
-    await _init_knowledge_store(app)
 
     event_bus = create_default_bus(
         workflow_engine,

@@ -159,6 +159,7 @@ def _create_adapter(adapter_id: str, spec: dict[str, str]) -> Any | None:
 async def bootstrap_tool_registry(
     registry: ToolRegistry | None = None,
     adapter_ids: list[str] | None = None,
+    knowledge_service: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -166,6 +167,10 @@ async def bootstrap_tool_registry(
         registry: Existing registry to populate. Creates a new one if None.
         adapter_ids: Explicit list of adapter IDs to register. If None,
             registers all known adapters that are enabled.
+        knowledge_service: Optional ``KnowledgeService`` instance. When
+            supplied, the ``knowledge`` MCP adapter (knowledge.search +
+            knowledge.ingest) is registered. When ``None``, the adapter
+            is skipped — it has no useful default backend (MET-335).
 
     Returns:
         The populated ToolRegistry.
@@ -236,6 +241,35 @@ async def bootstrap_tool_registry(
                 )
                 span.record_exception(exc)
                 failed.append(adapter_id)
+
+        # ----- Knowledge MCP adapter (MET-335) -----
+        # Registered separately because it depends on a runtime-injected
+        # KnowledgeService instance (no static factory in _ADAPTER_REGISTRY).
+        if knowledge_service is not None and _is_adapter_enabled("knowledge"):
+            try:
+                from tool_registry.tools.knowledge.adapter import KnowledgeServer
+
+                server = KnowledgeServer(service=knowledge_service)
+                await registry.register_adapter(server)
+                registered.append("knowledge")
+                logger.info(
+                    "knowledge_mcp_adapter_registered",
+                    service=type(knowledge_service).__name__,
+                )
+            except Exception as exc:
+                logger.error("knowledge_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("knowledge")
+        else:
+            skipped.append("knowledge")
+            logger.info(
+                "knowledge_mcp_adapter_skipped",
+                reason=(
+                    "no knowledge_service supplied"
+                    if knowledge_service is None
+                    else "disabled via config"
+                ),
+            )
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))
