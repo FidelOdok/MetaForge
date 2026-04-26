@@ -42,7 +42,9 @@ from digital_twin.context.models import (
     ContextSourceKind,
     estimate_tokens,
 )
+from digital_twin.context.role_scope import get_role_knowledge_types
 from digital_twin.knowledge.service import KnowledgeService, SearchHit
+from digital_twin.knowledge.types import KnowledgeType
 from observability.tracing import get_tracer
 from twin_core.api import TwinAPI
 from twin_core.models.work_product import WorkProduct
@@ -145,21 +147,63 @@ class ContextAssembler:
     # ------------------------------------------------------------------
 
     async def _collect_knowledge(self, request: ContextAssemblyRequest) -> list[ContextFragment]:
+        """Collect semantic hits with optional role-based scoping (MET-316).
+
+        Filter precedence:
+
+        1. ``request.knowledge_type`` (caller-explicit) — wins always.
+        2. Role map (via ``request.agent_id``) — narrows to the role's
+           allow-list when no caller-explicit filter is set.
+        3. No filter — back-compat with the pre-MET-316 contract.
+
+        Role narrowing is post-applied so a single ``search`` call
+        returns hits across the role's union of types; we just over-
+        fetch (``top_k * 4``) and drop anything outside the allow-list.
+        Avoids one ``search`` round-trip per allowed type.
+        """
         if not request.query:
             return []
         with tracer.start_as_current_span("context.collect_knowledge") as span:
             span.set_attribute("context.query_length", len(request.query))
+            span.set_attribute("context.agent_id", request.agent_id)
+
+            allowed_types: frozenset[KnowledgeType] | None = None
+            if request.knowledge_type is None:
+                allowed_types = get_role_knowledge_types(request.agent_id)
+
+            # Caller-explicit filter wins; otherwise role-narrow if known.
+            if request.knowledge_type is not None:
+                explicit_type: KnowledgeType | None = request.knowledge_type
+                fetch_k = request.knowledge_top_k
+            elif allowed_types is not None:
+                explicit_type = None
+                fetch_k = request.knowledge_top_k * 4
+                span.set_attribute(
+                    "context.role_filter",
+                    ",".join(sorted(t.value for t in allowed_types)),
+                )
+            else:
+                explicit_type = None
+                fetch_k = request.knowledge_top_k
+
             try:
                 hits = await self._knowledge_service.search(
                     query=request.query,
-                    top_k=request.knowledge_top_k,
-                    knowledge_type=request.knowledge_type,
+                    top_k=fetch_k,
+                    knowledge_type=explicit_type,
                     filters=request.filters or None,
                 )
             except Exception as exc:
                 span.record_exception(exc)
                 logger.warning("context_knowledge_search_failed", error=str(exc))
                 return []
+
+            if allowed_types is not None:
+                hits = [
+                    h for h in hits if h.knowledge_type is None or h.knowledge_type in allowed_types
+                ]
+                hits = hits[: request.knowledge_top_k]
+
             return [self._hit_to_fragment(hit) for hit in hits]
 
     async def _collect_work_product(self, request: ContextAssemblyRequest) -> list[ContextFragment]:

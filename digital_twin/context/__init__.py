@@ -20,6 +20,15 @@ from digital_twin.context.models import (
     ContextScope,
     ContextSourceKind,
 )
+from digital_twin.context.role_scope import (
+    ROLE_COMPLIANCE_AGENT,
+    ROLE_ELECTRONICS_AGENT,
+    ROLE_MECHANICAL_AGENT,
+    ROLE_SIMULATION_AGENT,
+    all_roles,
+    get_role_knowledge_types,
+    is_known_role,
+)
 
 __all__ = [
     "ContextAssembler",
@@ -28,4 +37,11 @@ __all__ = [
     "ContextFragment",
     "ContextScope",
     "ContextSourceKind",
+    "ROLE_COMPLIANCE_AGENT",
+    "ROLE_ELECTRONICS_AGENT",
+    "ROLE_MECHANICAL_AGENT",
+    "ROLE_SIMULATION_AGENT",
+    "all_roles",
+    "get_role_knowledge_types",
+    "is_known_role",
 ]
