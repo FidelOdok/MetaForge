@@ -277,6 +277,52 @@ class MetricsRegistry:
         labels=["node_type"],
     )
 
+    # ── Retrieval & context-assembly metrics (MET-326) ─────────────────
+    #
+    # Wire-and-aggregate inputs come from
+    # ``digital_twin.context.retrieval_metrics`` (precision / recall /
+    # MRR / NDCG) and the ``context_truncated`` structlog event emitted
+    # in MET-317.
+    RETRIEVAL_PRECISION_AT_K = MetricDefinition(
+        name="metaforge_retrieval_precision_at_k",
+        type="histogram",
+        description="precision@k for a knowledge retrieval (0=miss, 1=all relevant)",
+        labels=["agent_id", "k"],
+        # Buckets favour the high end — we expect precision in 0.4–1.0
+        # for tuned queries.
+        buckets=[0.0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    )
+    RETRIEVAL_RECALL_AT_K = MetricDefinition(
+        name="metaforge_retrieval_recall_at_k",
+        type="histogram",
+        description="recall@k for a knowledge retrieval",
+        labels=["agent_id", "k"],
+        buckets=[0.0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    )
+    RETRIEVAL_MRR = MetricDefinition(
+        name="metaforge_retrieval_mrr",
+        type="histogram",
+        description="Mean reciprocal rank of the first relevant hit",
+        labels=["agent_id"],
+        buckets=[0.0, 0.1, 0.2, 0.33, 0.5, 0.67, 1.0],
+    )
+    RETRIEVAL_NDCG_AT_K = MetricDefinition(
+        name="metaforge_retrieval_ndcg_at_k",
+        type="histogram",
+        description="Normalised DCG at k for a knowledge retrieval",
+        labels=["agent_id", "k"],
+        buckets=[0.0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    )
+    CONTEXT_TRUNCATED_TOTAL = MetricDefinition(
+        name="metaforge_context_truncated_total",
+        type="counter",
+        description=(
+            "Times a context fragment was dropped by the assembler's "
+            "token-budget pass (MET-317), labeled by source kind"
+        ),
+        labels=["agent_id", "source_kind"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -290,7 +336,19 @@ class MetricsRegistry:
             + cls.datastore_metrics()
             + cls.telemetry_metrics()
             + cls.constraint_metrics()
+            + cls.retrieval_metrics()
         )
+
+    @classmethod
+    def retrieval_metrics(cls) -> list[MetricDefinition]:
+        """MET-326 retrieval-quality + context-truncation metrics."""
+        return [
+            cls.RETRIEVAL_PRECISION_AT_K,
+            cls.RETRIEVAL_RECALL_AT_K,
+            cls.RETRIEVAL_MRR,
+            cls.RETRIEVAL_NDCG_AT_K,
+            cls.CONTEXT_TRUNCATED_TOTAL,
+        ]
 
     @classmethod
     def gateway_metrics(cls) -> list[MetricDefinition]:
@@ -645,3 +703,40 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.OSCILLATION_DETECTED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"node_type": node_type})
+
+    # ── Retrieval quality (MET-326) ───────────────────────────────────
+
+    def record_retrieval_precision(self, agent_id: str, k: int, value: float) -> None:
+        """Record a precision@k measurement for the given agent."""
+        hist = self._instruments.get(MetricsRegistry.RETRIEVAL_PRECISION_AT_K.name)
+        if hist is not None:
+            hist.record(value, attributes={"agent_id": agent_id, "k": str(k)})
+
+    def record_retrieval_recall(self, agent_id: str, k: int, value: float) -> None:
+        """Record a recall@k measurement for the given agent."""
+        hist = self._instruments.get(MetricsRegistry.RETRIEVAL_RECALL_AT_K.name)
+        if hist is not None:
+            hist.record(value, attributes={"agent_id": agent_id, "k": str(k)})
+
+    def record_retrieval_mrr(self, agent_id: str, value: float) -> None:
+        """Record a mean-reciprocal-rank measurement for the given agent."""
+        hist = self._instruments.get(MetricsRegistry.RETRIEVAL_MRR.name)
+        if hist is not None:
+            hist.record(value, attributes={"agent_id": agent_id})
+
+    def record_retrieval_ndcg(self, agent_id: str, k: int, value: float) -> None:
+        """Record an NDCG@k measurement for the given agent."""
+        hist = self._instruments.get(MetricsRegistry.RETRIEVAL_NDCG_AT_K.name)
+        if hist is not None:
+            hist.record(value, attributes={"agent_id": agent_id, "k": str(k)})
+
+    def record_context_truncated(self, agent_id: str, source_kind: str, count: int = 1) -> None:
+        """Increment ``metaforge_context_truncated_total`` by ``count``.
+
+        Wired from the MET-317 ``context_truncated`` event in
+        ``digital_twin.context.assembler``. One call per
+        (agent_id, source_kind) bucket per truncation.
+        """
+        counter = self._instruments.get(MetricsRegistry.CONTEXT_TRUNCATED_TOTAL.name)
+        if counter is not None:
+            counter.add(count, attributes={"agent_id": agent_id, "source_kind": source_kind})

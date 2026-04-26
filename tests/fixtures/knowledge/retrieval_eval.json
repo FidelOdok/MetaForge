@@ -1,0 +1,50 @@
+{
+  "version": "v1",
+  "description": "Labeled query → relevant source-paths for MET-326 retrieval-quality evaluation. The corpus mirrors the planner-repo content used in MET-346's spike, plus a handful of synthetic ME / EE / compliance / sim cases. Each row carries an optional `relevance_grades` map for graded NDCG; when absent, every relevant source counts as 1.0.",
+  "queries": [
+    {
+      "id": "Q-LAYERS",
+      "agent_id": "mechanical_agent",
+      "query": "What are the 4 hardware development layers?",
+      "relevant": [
+        "docs/research/hardware-development-layers.md"
+      ],
+      "relevance_grades": {
+        "docs/research/hardware-development-layers.md": 1.0
+      }
+    },
+    {
+      "id": "Q-LIGHTRAG-VS-R2R",
+      "agent_id": "mechanical_agent",
+      "query": "Why was LightRAG chosen over R2R?",
+      "relevant": [
+        "docs/architecture/adr-008-external-harness-and-l1-framework.md"
+      ]
+    },
+    {
+      "id": "Q-DT-DIGITAL-THREAD",
+      "agent_id": "compliance_agent",
+      "query": "How does the digital thread relate to a digital twin?",
+      "relevant": [
+        "docs/architecture/system-vision.md",
+        "docs/architecture/mvp-roadmap.md"
+      ]
+    },
+    {
+      "id": "Q-MECH-PRD",
+      "agent_id": "mechanical_agent",
+      "query": "What does the mechanical engineering agent do for stress validation?",
+      "relevant": [
+        "docs/agents/mechanical-engineering-prd.md"
+      ]
+    },
+    {
+      "id": "Q-MVP-PHASE-1",
+      "agent_id": "compliance_agent",
+      "query": "Phase 1 scope and milestone breakdown",
+      "relevant": [
+        "docs/architecture/mvp-roadmap.md"
+      ]
+    }
+  ]
+}

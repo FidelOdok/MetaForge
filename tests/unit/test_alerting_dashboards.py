@@ -84,10 +84,10 @@ class TestAlertingRules:
         assert "metaforge_warning" in group_names
 
     def test_total_alert_rules_count(self) -> None:
-        """There must be exactly 13 alert rules in total (8 original + 5 anomaly)."""
+        """15 total alert rules (8 original + 5 anomaly + 2 retrieval-quality)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 13
+        assert len(rules) == 15
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -112,11 +112,11 @@ class TestAlertingRules:
         assert len(critical) == 6
 
     def test_seven_warning_rules(self) -> None:
-        """There must be exactly 7 warning rules (5 original + 2 fleet)."""
+        """9 warning rules (5 original + 2 fleet + 2 retrieval-quality)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 7
+        assert len(warnings) == 9
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -141,12 +141,14 @@ class TestAlertingRules:
         warning_names = sorted(r["alert"] for r in rules if r["labels"]["severity"] == "warning")
         assert warning_names == sorted(
             [
+                "ContextTruncationSpike",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
                 "HighAgentFailureRate",
                 "KafkaConsumerLagHigh",
                 "LLMCostSpike",
                 "OscillationDetected",
+                "RetrievalPrecisionRegression",
                 "SensorOutOfRange",
             ]
         )

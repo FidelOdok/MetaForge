@@ -51,6 +51,7 @@ from digital_twin.context.staleness import (
 )
 from digital_twin.knowledge.service import KnowledgeService, SearchHit
 from digital_twin.knowledge.types import KnowledgeType
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 from twin_core.api import TwinAPI
 from twin_core.models.work_product import WorkProduct
@@ -79,6 +80,7 @@ class ContextAssembler:
         twin: TwinAPI,
         knowledge_service: KnowledgeService,
         conflict_detector: ConflictDetector | None = None,
+        collector: MetricsCollector | None = None,
     ) -> None:
         self._twin = twin
         self._knowledge_service = knowledge_service
@@ -86,6 +88,11 @@ class ContextAssembler:
         # standard tracked-fields list so the assembler always reports
         # surface-level conflicts without configuration.
         self._conflict_detector = conflict_detector or ConflictDetector()
+        # MET-326: optional metrics collector — when supplied, the
+        # ``context_truncated`` event also increments
+        # ``metaforge_context_truncated_total`` so dashboards can
+        # render the truncation rate per agent / source kind.
+        self._collector = collector
 
     # ------------------------------------------------------------------
     # Public API
@@ -178,7 +185,8 @@ class ContextAssembler:
             span.set_attribute("context.truncated", response.truncated)
             if response.truncated:
                 # Per-source-kind tally of dropped fragments — feeds
-                # MET-326 retrieval-quality metrics without coupling.
+                # MET-326's ``metaforge_context_truncated_total`` counter
+                # and the same-named structlog event.
                 dropped_sources: dict[str, int] = {}
                 for fragment in dropped:
                     dropped_sources[fragment.source_kind.value] = (
@@ -192,6 +200,13 @@ class ContextAssembler:
                     dropped_count=len(dropped),
                     dropped_sources=dropped_sources,
                 )
+                if self._collector is not None:
+                    for source_kind, count in dropped_sources.items():
+                        self._collector.record_context_truncated(
+                            agent_id=request.agent_id,
+                            source_kind=source_kind,
+                            count=count,
+                        )
             logger.info(
                 "context_assembled",
                 agent_id=request.agent_id,

@@ -262,8 +262,9 @@ class TestAllMetricsCombined:
     """Overall registry counts after MET-112 + MET-113 + MET-119 additions."""
 
     def test_all_metrics_returns_32(self) -> None:
-        # 4 gateway + 5 agent + 2 skill + 5 kafka + 7 datastore + 5 telemetry + 4 constraint
-        assert len(MetricsRegistry.all_metrics()) == 32
+        # 4 gateway + 5 agent + 2 skill + 5 kafka + 7 datastore + 5 telemetry
+        # + 4 constraint + 5 retrieval (MET-326)
+        assert len(MetricsRegistry.all_metrics()) == 37
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -274,6 +275,7 @@ class TestAllMetricsCombined:
             + len(MetricsRegistry.datastore_metrics())
             + len(MetricsRegistry.telemetry_metrics())
             + len(MetricsRegistry.constraint_metrics())
+            + len(MetricsRegistry.retrieval_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

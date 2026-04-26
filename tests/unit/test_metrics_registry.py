@@ -53,8 +53,9 @@ class TestMetricsRegistryGroupedAccess:
 
     def test_all_metrics_returns_full_list(self) -> None:
         all_metrics = MetricsRegistry.all_metrics()
-        # 4 gateway + 5 agent + 2 skill + 5 kafka + 7 datastore + 5 telemetry + 4 constraint
-        assert len(all_metrics) == 32
+        # 4 gateway + 5 agent + 2 skill + 5 kafka + 7 datastore + 5 telemetry
+        # + 4 constraint + 5 retrieval (MET-326)
+        assert len(all_metrics) == 37
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -77,6 +78,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.datastore_metrics())
             + len(MetricsRegistry.telemetry_metrics())
             + len(MetricsRegistry.constraint_metrics())
+            + len(MetricsRegistry.retrieval_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
