@@ -30,9 +30,7 @@ pytestmark = pytest.mark.integration
 
 
 _DEFAULT_DSN = "postgresql://metaforge:metaforge@localhost:5432/metaforge"
-SAMPLE_MD = (
-    Path(__file__).resolve().parent.parent / "fixtures" / "knowledge" / "sample.md"
-)
+SAMPLE_MD = Path(__file__).resolve().parent.parent / "fixtures" / "knowledge" / "sample.md"
 
 
 def _dsn() -> str:
@@ -64,9 +62,7 @@ async def service(tmp_path: Path) -> AsyncIterator[LightRAGKnowledgeService]:
 
 
 class TestIngest:
-    async def test_ingest_returns_chunk_count(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_ingest_returns_chunk_count(self, service: LightRAGKnowledgeService) -> None:
         content = SAMPLE_MD.read_text(encoding="utf-8")
         result = await service.ingest(
             content=content,
@@ -85,9 +81,7 @@ class TestIngest:
 
 
 class TestSearch:
-    async def test_search_after_ingest_returns_hit(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_search_after_ingest_returns_hit(self, service: LightRAGKnowledgeService) -> None:
         content = SAMPLE_MD.read_text(encoding="utf-8")
         await service.ingest(
             content=content,
@@ -101,9 +95,7 @@ class TestSearch:
         assert isinstance(hits[0], SearchHit)
         assert any(h.similarity_score > 0 for h in hits)
 
-    async def test_citation_metadata_round_trips(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_citation_metadata_round_trips(self, service: LightRAGKnowledgeService) -> None:
         content = SAMPLE_MD.read_text(encoding="utf-8")
         await service.ingest(
             content=content,
@@ -120,9 +112,7 @@ class TestSearch:
         assert hit.total_chunks is not None
         assert hit.chunk_index < hit.total_chunks
 
-    async def test_knowledge_type_filter(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_knowledge_type_filter(self, service: LightRAGKnowledgeService) -> None:
         # LightRAG dedupes by content hash, so two ingests with
         # identical content collapse — even under different knowledge
         # types. Distinct content per file keeps both rows alive so
@@ -154,9 +144,7 @@ class TestSearch:
             knowledge_type=KnowledgeType.DESIGN_DECISION,
         )
         assert decision_hits
-        assert all(
-            h.knowledge_type == KnowledgeType.DESIGN_DECISION for h in decision_hits
-        )
+        assert all(h.knowledge_type == KnowledgeType.DESIGN_DECISION for h in decision_hits)
 
 
 # ---------------------------------------------------------------------------
@@ -165,9 +153,7 @@ class TestSearch:
 
 
 class TestDelete:
-    async def test_reingest_same_source_dedupes(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_reingest_same_source_dedupes(self, service: LightRAGKnowledgeService) -> None:
         content = SAMPLE_MD.read_text(encoding="utf-8")
         first = await service.ingest(
             content=content,
@@ -186,9 +172,7 @@ class TestDelete:
         deleted = await service.delete_by_source(str(SAMPLE_MD))
         assert deleted == first.chunks_indexed
 
-    async def test_delete_by_source_removes_chunks(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_delete_by_source_removes_chunks(self, service: LightRAGKnowledgeService) -> None:
         content = SAMPLE_MD.read_text(encoding="utf-8")
         await service.ingest(
             content=content,
@@ -212,9 +196,7 @@ class TestDelete:
 
 
 class TestHealth:
-    async def test_health_check_reports_pgvector(
-        self, service: LightRAGKnowledgeService
-    ) -> None:
+    async def test_health_check_reports_pgvector(self, service: LightRAGKnowledgeService) -> None:
         report = await service.health_check()
         assert report["status"] == "ok"
         assert report["backend"] == "lightrag"

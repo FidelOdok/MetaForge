@@ -191,9 +191,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
             knowledge_service = create_knowledge_service(
                 "lightrag",
-                working_dir=os.environ.get(
-                    "METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"
-                ),
+                working_dir=os.environ.get("METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"),
                 postgres_dsn=dsn,
             )
             await knowledge_service.initialize()  # type: ignore[attr-defined]

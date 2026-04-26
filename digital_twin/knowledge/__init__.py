@@ -100,6 +100,4 @@ def create_knowledge_service(
             "llamaindex adapter is documented in ADR-008 but not implemented in MET-346. "
             "Add digital_twin/knowledge/llamaindex_service.py and wire it here when needed."
         )
-    raise ValueError(
-        f"Unknown knowledge provider: {provider!r}. Use 'lightrag' or 'llamaindex'."
-    )
+    raise ValueError(f"Unknown knowledge provider: {provider!r}. Use 'lightrag' or 'llamaindex'.")

@@ -43,9 +43,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if config.getoption("--integration"):
         return
     skip_integration = pytest.mark.skip(reason="needs --integration")
@@ -57,6 +55,7 @@ def pytest_collection_modifyitems(
     for item in items:
         if any(m.name == "integration" for m in item.iter_markers()):
             item.add_marker(skip_integration)
+
 
 # ---------------------------------------------------------------------------
 # Spy subscriber for capturing events

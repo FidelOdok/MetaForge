@@ -444,9 +444,7 @@ class LightRAGKnowledgeService:
             span.set_attribute("knowledge.result_count", len(hits))
             return hits
 
-    async def _search_pg(
-        self, chunks_vdb: Any, query: str, top_k: int
-    ) -> list[dict[str, Any]]:
+    async def _search_pg(self, chunks_vdb: Any, query: str, top_k: int) -> list[dict[str, Any]]:
         """Cosine query straight to ``lightrag_vdb_chunks`` for real scores.
 
         LightRAG's PG SQL template returns id/content/file_path but not
@@ -500,9 +498,7 @@ class LightRAGKnowledgeService:
                     await vec_store.delete([chunk_id])
                     deleted += 1
             except Exception as exc:  # pragma: no cover — best effort
-                logger.warning(
-                    "lightrag_delete_failed", chunk_id=chunk_id, error=str(exc)
-                )
+                logger.warning("lightrag_delete_failed", chunk_id=chunk_id, error=str(exc))
         self._source_index.pop(source_path, None)
         logger.info("lightrag_deleted_source", source_path=source_path, deleted=deleted)
         return deleted
@@ -521,9 +517,7 @@ class LightRAGKnowledgeService:
 
                 conn = await asyncpg.connect(self._cfg.postgres_dsn)
                 try:
-                    row = await conn.fetchval(
-                        "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
-                    )
+                    row = await conn.fetchval("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
                     pgvector_ok = row == 1
                 finally:
                     await conn.close()
@@ -632,9 +626,7 @@ class LightRAGKnowledgeService:
                 score = max(0.0, 1.0 - float(chunk["distance"]))
             else:
                 score = 0.0
-            file_path_field = (
-                chunk.get("file_path") or chunk.get("file_paths") or ""
-            )
+            file_path_field = chunk.get("file_path") or chunk.get("file_paths") or ""
             if isinstance(file_path_field, list):
                 file_path_field = file_path_field[0] if file_path_field else ""
         else:

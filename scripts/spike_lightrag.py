@@ -152,12 +152,9 @@ async def main() -> int:
         joined = "\n\n".join(h.content for h in hits)
         expected_groups = q["expected_any_of_in_top3"]
         any_group_passed = any(
-            all(term.lower() in joined.lower() for term in group)
-            for group in expected_groups
+            all(term.lower() in joined.lower() for term in group) for group in expected_groups
         )
-        spike_term_match = any(
-            term.lower() in joined.lower() for term in q["spike_test_terms"]
-        )
+        spike_term_match = any(term.lower() in joined.lower() for term in q["spike_test_terms"])
         nonzero_scores = all(h.similarity_score > 0 for h in hits)
         has_citations = all(
             h.source_path is not None and (h.heading is not None or h.chunk_index is not None)
@@ -196,23 +193,18 @@ async def main() -> int:
         CriterionResult(
             name="All similarity scores > 0",
             passed=all(q["nonzero_scores"] for q in query_results),
-            detail=", ".join(
-                f"{q['id']}_nonzero={q['nonzero_scores']}" for q in query_results
-            ),
+            detail=", ".join(f"{q['id']}_nonzero={q['nonzero_scores']}" for q in query_results),
         ),
         CriterionResult(
             name="Citations include source_path AND heading/chunk_index",
             passed=all(q["has_citations"] for q in query_results),
-            detail=", ".join(
-                f"{q['id']}_citations={q['has_citations']}" for q in query_results
-            ),
+            detail=", ".join(f"{q['id']}_citations={q['has_citations']}" for q in query_results),
         ),
         CriterionResult(
             name="Re-ingesting same file produces zero duplicates",
             passed=dedup_ok,
             detail=(
-                f"first_run={pre_ingest_chunks} "
-                f"second_run={'same' if dedup_ok else 'different'}"
+                f"first_run={pre_ingest_chunks} second_run={'same' if dedup_ok else 'different'}"
             ),
         ),
         CriterionResult(
