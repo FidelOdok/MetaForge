@@ -256,6 +256,15 @@ class ContextFragment(BaseModel):
     work_product_id: UUID | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
     token_count: int = Field(..., ge=0, description="Estimated token cost (see estimate_tokens)")
+    staleness_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Staleness score in [0, 1] — 0 fresh, 1 fully stale (MET-323). "
+            "Set by ``ContextAssembler``; callers shouldn't populate by hand."
+        ),
+    )
 
 
 class ContextAssemblyRequest(BaseModel):
@@ -291,6 +300,16 @@ class ContextAssemblyRequest(BaseModel):
         default=1, ge=0, le=5, description="Subgraph traversal depth around work_product_id"
     )
     token_budget: int = Field(default=8000, ge=1, description="Hard cap on total fragment tokens")
+    staleness_threshold: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Drop fragments whose staleness score exceeds this (MET-323). "
+            "Default 1.0 = no filter (back-compat). 0.5 ≈ drop > 30 days; "
+            "0.2 ≈ freshness-only."
+        ),
+    )
     filters: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary metadata filters forwarded to the knowledge service",

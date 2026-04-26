@@ -44,6 +44,10 @@ from digital_twin.context.models import (
     fragment_priority,
 )
 from digital_twin.context.role_scope import get_role_knowledge_types
+from digital_twin.context.staleness import (
+    annotate_cross_fragment_staleness,
+    compute_staleness,
+)
 from digital_twin.knowledge.service import KnowledgeService, SearchHit
 from digital_twin.knowledge.types import KnowledgeType
 from observability.tracing import get_tracer
@@ -110,7 +114,20 @@ class ContextAssembler:
             if request.includes_graph and request.work_product_id is not None:
                 collected.extend(await self._collect_graph(request))
 
-            sorted_fragments = self._rank(collected)
+            # MET-323: staleness annotation + threshold filtering runs
+            # *before* ranking so the budget pass works on a fresh-only
+            # set when the caller asked for one.
+            annotate_cross_fragment_staleness(collected)
+            stale_dropped: list[ContextFragment] = []
+            after_staleness: list[ContextFragment] = []
+            for fragment in collected:
+                fragment.staleness_score = compute_staleness(fragment.metadata)
+                if fragment.staleness_score > request.staleness_threshold:
+                    stale_dropped.append(fragment)
+                else:
+                    after_staleness.append(fragment)
+
+            sorted_fragments = self._rank(after_staleness)
             kept, dropped = self._enforce_budget(sorted_fragments, request.token_budget)
 
             sources: dict[str, int] = {}
@@ -128,6 +145,9 @@ class ContextAssembler:
                     "scope": [s.value for s in request.scope],
                     "knowledge_top_k": request.knowledge_top_k,
                     "graph_depth": request.graph_depth,
+                    "staleness_threshold": request.staleness_threshold,
+                    "stale_dropped_count": len(stale_dropped),
+                    "stale_dropped_ids": [f.source_id for f in stale_dropped],
                 },
             )
             span.set_attribute("context.fragment_count", len(response.fragments))
