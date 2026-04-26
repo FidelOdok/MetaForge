@@ -247,6 +247,8 @@ Adding a tracked conflict field:
 
 ## References
 
+- [Knowledge Ingestion Playbook](knowledge-ingestion-playbook.md) — how
+  to add a new `KnowledgeType` end-to-end (MET-314).
 - ADR-008 (planner repo) — L1 framework choice (LightRAG behind
   `KnowledgeService`).
 - MET-312 — Context Engineering epic.

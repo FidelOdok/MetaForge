@@ -35,3 +35,4 @@ pytest tests/unit/test_digital_twin*.py -v
 - Assistant-mode watchers are read-only by default; writes require explicit approval
 - Knowledge consumers must be idempotent -- replaying events should produce the same state
 - Add `structlog` logging and OTel tracing spans to all public methods
+- Adding a new `KnowledgeType`? Follow the [Knowledge Ingestion Playbook](../docs/architecture/knowledge-ingestion-playbook.md) — covers enum, consumer mapping, CLI, role allow-lists, validation, and eval coverage in one pass.
