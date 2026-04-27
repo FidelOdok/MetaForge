@@ -177,6 +177,22 @@ class ToolRegistry:
         """List all registered adapters."""
         return list(self._adapters.values())
 
+    def get_adapter_server(self, adapter_id: str) -> McpToolServer | None:
+        """Return the in-process ``McpToolServer`` for an adapter, if any.
+
+        Remote adapters (registered via ``register_remote_adapter``)
+        return ``None`` — they live in another process and aren't
+        directly composable. Used by ``metaforge.mcp.server`` to
+        aggregate every local adapter into one unified MCP entrypoint
+        (MET-337).
+        """
+        return self._servers.get(adapter_id)
+
+    def list_adapter_servers(self) -> list[McpToolServer]:
+        """Return every local adapter server registered. Remote-only
+        adapters are excluded — see ``get_adapter_server``."""
+        return list(self._servers.values())
+
     def get_tool(self, tool_id: str) -> ToolManifest | None:
         """Get a tool manifest by tool ID. Returns None if not found."""
         return self._tools.get(tool_id)
