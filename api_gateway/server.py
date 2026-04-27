@@ -424,11 +424,25 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
-    app.state.mcp_bridge = registry_bridge
     logger.info(
         "tool_registry_bootstrapped",
         adapters=len(tool_registry.list_adapters()),
         tools=len(tool_registry.list_tools()),
+    )
+
+    # MET-306: pick the active MCP bridge from env config. Default
+    # ``METAFORGE_MCP_BRIDGE=registry`` keeps the in-process registry
+    # bridge; ``http`` / ``stdio`` connect to an external server (e.g.
+    # the standalone ``python -m metaforge.mcp`` from MET-337) and fall
+    # back to the registry bridge on connection failure unless
+    # ``METAFORGE_REQUIRE_MCP=true`` is set.
+    from skill_registry.bridge_factory import create_mcp_bridge
+
+    active_bridge = await create_mcp_bridge(fallback=registry_bridge)
+    app.state.mcp_bridge = active_bridge
+    logger.info(
+        "mcp_bridge_active",
+        bridge_type=type(active_bridge).__name__,
     )
 
     # Initialize chat and project backends (PG or in-memory)
@@ -455,8 +469,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         ),
     )
 
-    # Wire the real bridge and twin into chat routes and projects routes
-    init_mcp_bridge(registry_bridge)
+    # Wire the active bridge and twin into chat routes and projects routes
+    init_mcp_bridge(active_bridge)
     init_twin(twin)
     init_projects_twin(twin)
     init_twin_viewer(twin)
@@ -471,9 +485,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
     for defn in ACTION_WORKFLOWS.values():
         await workflow_engine.register_workflow(defn)
 
-    # Create agents — use real bridge for tool access, InMemoryMcpBridge as fallback
-    mech_agent = MechanicalAgent(twin=twin, mcp=registry_bridge)
-    ee_agent = ElectronicsAgent(twin=twin, mcp=registry_bridge)
+    # Create agents — use active bridge for tool access (MET-306).
+    # Defaults to RegistryMcpBridge in-process; switches to external MCP
+    # server when METAFORGE_MCP_BRIDGE=http|stdio is set.
+    mech_agent = MechanicalAgent(twin=twin, mcp=active_bridge)
+    ee_agent = ElectronicsAgent(twin=twin, mcp=active_bridge)
 
     # Build a dependency graph from the full_validation workflow (most complex)
     # For single-step workflows the dep_graph is optional
