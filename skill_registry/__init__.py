@@ -1,5 +1,6 @@
 """MetaForge Skill Registry — foundational classes for the skill system."""
 
+from skill_registry.bridge_factory import create_mcp_bridge
 from skill_registry.loader import LoadedSkill, SkillLoader
 from skill_registry.loader import SkillLoadError as _LoaderSkillLoadError
 from skill_registry.mcp_bridge import (
@@ -40,4 +41,5 @@ __all__ = [
     "SkillRegistry",
     "SkillResult",
     "ToolRef",
+    "create_mcp_bridge",
 ]
