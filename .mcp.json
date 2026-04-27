@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "metaforge": {
+      "command": "python",
+      "args": ["-m", "metaforge.mcp", "--transport", "stdio"],
+      "env": {
+        "METAFORGE_ADAPTERS": "cadquery,calculix,knowledge"
+      }
+    }
+  }
+}

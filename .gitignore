@@ -51,8 +51,11 @@ node_modules/
 .gitconfig
 .gitmodules
 
-# MCP config
-.mcp.json
+# MCP config — `.mcp.json` is now version-controlled (MET-339): it's
+# the launcher entry that ships the canonical Claude Code config so
+# every contributor connects to the same MetaForge MCP server.
+# Local overrides go in `.mcp.local.json` (gitignored below).
+.mcp.local.json
 
 # LightRAG local storage (working_dir for the L1 KnowledgeService)
 .lightrag-storage/
