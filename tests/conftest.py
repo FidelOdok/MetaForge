@@ -26,12 +26,24 @@ from twin_core.models.work_product import WorkProduct
 # Tests marked ``@pytest.mark.integration`` need real backing services
 # (Postgres, Neo4j, etc.) and are skipped unless ``--integration`` is
 # passed. Keeps the default unit suite hermetic and fast.
+#
+# Tests marked ``@pytest.mark.uat`` are Level-11 acceptance tests
+# (see ``docs/testing-strategy.md``). They validate Cycle-1 + Cycle-2
+# acceptance bullets end-to-end and live under ``tests/uat/``. Opt in
+# with ``--uat``; most also need ``--integration`` because they hit
+# real backends.
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--integration",
         action="store_true",
         default=False,
         help="Run tests marked @pytest.mark.integration (requires live services).",
+    )
+    parser.addoption(
+        "--uat",
+        action="store_true",
+        default=False,
+        help="Run tests marked @pytest.mark.uat (Level-11 acceptance suite).",
     )
 
 
@@ -41,20 +53,24 @@ def pytest_configure(config: pytest.Config) -> None:
         "integration: requires live external services (Postgres+pgvector, Neo4j); "
         "opt in with --integration",
     )
+    config.addinivalue_line(
+        "markers",
+        "uat: Level-11 acceptance test (validates a Cycle-1/2 acceptance bullet); "
+        "opt in with --uat",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    if config.getoption("--integration"):
-        return
+    integration_on = config.getoption("--integration")
+    uat_on = config.getoption("--uat")
     skip_integration = pytest.mark.skip(reason="needs --integration")
-    # ``item.iter_markers`` checks for an explicit ``@pytest.mark.integration``
-    # decorator. Using ``"integration" in item.keywords`` would also match
-    # any test file whose path contains "integration" — surprising and
-    # would skip the existing httpx-only smoke tests under
-    # tests/integration/.
+    skip_uat = pytest.mark.skip(reason="needs --uat")
     for item in items:
-        if any(m.name == "integration" for m in item.iter_markers()):
+        markers = {m.name for m in item.iter_markers()}
+        if "integration" in markers and not integration_on:
             item.add_marker(skip_integration)
+        if "uat" in markers and not uat_on:
+            item.add_marker(skip_uat)
 
 
 # ---------------------------------------------------------------------------
