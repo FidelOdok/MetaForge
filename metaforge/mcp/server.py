@@ -47,6 +47,9 @@ tracer = get_tracer("metaforge.mcp.server")
 _INVALID_REQUEST = -32600
 _METHOD_NOT_FOUND = -32601
 _TOOL_EXECUTION_ERROR = -32001
+# MET-338: dedicated code for failed API-key auth so clients can branch
+# on it without parsing message strings.
+_AUTH_DENIED = -32002
 
 
 class UnifiedMcpServer:

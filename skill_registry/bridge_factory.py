@@ -66,6 +66,16 @@ async def create_mcp_bridge(
         # nothing for us to do but echo the fallback.
         return fb
 
+    # MET-338: optional client-side API key. ``METAFORGE_MCP_CLIENT_KEY``
+    # is sent on every outbound request (HTTP) or propagated to the
+    # spawned subprocess (stdio). Falls through to ``METAFORGE_MCP_API_KEY``
+    # for symmetric local dev use.
+    api_key = (
+        os.environ.get("METAFORGE_MCP_CLIENT_KEY")
+        or os.environ.get("METAFORGE_MCP_API_KEY")
+        or None
+    )
+
     if mode == "http":
         url = os.environ.get("METAFORGE_MCP_SERVER_URL")
         if not url:
@@ -74,7 +84,7 @@ async def create_mcp_bridge(
                 fb,
                 require,
             )
-        transport = HttpTransport(url)
+        transport = HttpTransport(url, api_key=api_key)
         return await _connect_and_wrap("http", url, transport, fb, require)
 
     if mode == "stdio":
@@ -89,6 +99,7 @@ async def create_mcp_bridge(
         transport = StdioTransport(
             command=shlex.split(cmd),
             ready_signal=ready,
+            api_key=api_key,
         )
         return await _connect_and_wrap("stdio", cmd, transport, fb, require)
 

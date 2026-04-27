@@ -22,13 +22,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
+import os
 import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
+from mcp_core.auth import AUTH_DENIED, redact, verify_api_key
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 
 logger = structlog.get_logger("metaforge.mcp")
@@ -86,13 +91,64 @@ def _adapter_ids_from_args(raw: str | None) -> list[str] | None:
 # ---------------------------------------------------------------------------
 
 
+def _auth_error_response(request_id: str, reason: str) -> str:
+    """JSON-RPC error envelope for an auth failure."""
+    return json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32002,
+                "message": "Authentication failed",
+                "data": {"error_type": AUTH_DENIED, "reason": reason},
+            },
+        }
+    )
+
+
+def _stdio_auth_check() -> tuple[bool, str]:
+    """Enforce API-key auth at stdio launch (MET-338).
+
+    Returns ``(ok, reason)``. ``ok=False`` means the caller should
+    write a single ``auth_error`` JSON-RPC message and exit.
+    """
+    expected = os.environ.get("METAFORGE_MCP_API_KEY") or ""
+    if not expected:
+        return True, "open_mode"
+    provided = os.environ.get("METAFORGE_MCP_CLIENT_KEY") or ""
+    result = verify_api_key(provided, expected)
+    if not result.ok:
+        logger.warning(
+            "mcp_auth_denied",
+            transport="stdio",
+            reason=result.reason,
+            redacted=result.redacted or redact(provided),
+        )
+        return False, result.reason
+    logger.info("mcp_auth_ok", transport="stdio", redacted=result.redacted)
+    return True, "match"
+
+
 async def run_stdio(server: UnifiedMcpServer) -> None:
     """Read line-delimited JSON-RPC requests from stdin; reply on stdout.
 
     Mirrors the per-adapter pattern in
     ``tool_registry.mcp_server.server.McpToolServer.start_stdio`` so
     transport semantics stay consistent across the codebase.
+
+    MET-338: API-key auth happens once at launch — stdio is a single
+    persistent channel from one client, so checking the env-supplied
+    key at startup matches the spec ("require key in env at spawn
+    time"). Mismatch emits a single auth_error response on stdout
+    and the process exits, mirroring the contract MCP harnesses
+    expect on rejection.
     """
+    ok, reason = _stdio_auth_check()
+    if not ok:
+        sys.stdout.write(_auth_error_response("auth", reason) + "\n")
+        sys.stdout.flush()
+        return
+
     logger.info(
         "mcp_stdio_ready",
         adapter_count=len(server.adapters),
@@ -130,17 +186,24 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-def build_http_app(server: UnifiedMcpServer, *, enable_sse: bool) -> Any:
+def build_http_app(
+    server: UnifiedMcpServer,
+    *,
+    enable_sse: bool,
+    api_key: str | None = None,
+) -> Any:
     """Construct a FastAPI app exposing the unified server.
 
     Defined as a function (not module-level) so callers can build a
     fresh app per test without binding a port. Lazy imports keep the
     stdio path free of FastAPI cost when running as a Claude Code
     subprocess.
-    """
-    from fastapi import FastAPI, Request
-    from fastapi.responses import JSONResponse, StreamingResponse
 
+    MET-338: when ``api_key`` is non-empty, every request to
+    ``/mcp`` and ``/mcp/sse`` must carry ``Authorization: Bearer <key>``.
+    ``/health`` is exempt — readiness checks must work without
+    credentials so orchestrators can probe the server.
+    """
     app = FastAPI(
         title="MetaForge MCP",
         version="0.1.0",
@@ -151,28 +214,50 @@ def build_http_app(server: UnifiedMcpServer, *, enable_sse: bool) -> Any:
         ),
     )
 
+    def _check_auth(authorization: str | None) -> None:
+        if not api_key:
+            return
+        provided: str | None = None
+        if authorization and authorization.lower().startswith("bearer "):
+            provided = authorization.split(None, 1)[1].strip()
+        result = verify_api_key(provided, api_key)
+        if not result.ok:
+            logger.warning(
+                "mcp_auth_denied",
+                transport="http",
+                reason=result.reason,
+                redacted=result.redacted or redact(provided or ""),
+            )
+            raise HTTPException(
+                status_code=401,
+                detail={"error_type": AUTH_DENIED, "reason": result.reason},
+            )
+
     @app.get("/health")
     async def health() -> JSONResponse:
         raw = await server.handle_request(
             '{"jsonrpc":"2.0","id":"health","method":"health/check","params":{}}'
         )
-        import json
-
         body = json.loads(raw)
         return JSONResponse(body.get("result", body))
 
     @app.post("/mcp")
-    async def mcp_post(request: Request) -> JSONResponse:
+    async def mcp_post(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _check_auth(authorization)
         raw_body = await request.body()
         response = await server.handle_request(raw_body.decode("utf-8"))
-        import json
-
         return JSONResponse(json.loads(response))
 
     if enable_sse:
 
         @app.get("/mcp/sse")
-        async def mcp_sse(request: Request) -> StreamingResponse:
+        async def mcp_sse(
+            request: Request,
+            authorization: str | None = Header(default=None),
+        ) -> StreamingResponse:
             """Stream tool-call results as server-sent events.
 
             The client sends one or more JSON-RPC requests as query
@@ -180,6 +265,7 @@ def build_http_app(server: UnifiedMcpServer, *, enable_sse: bool) -> Any:
             queue multiple. Each response is emitted as a separate
             ``data:`` event so generic SSE clients can consume them.
             """
+            _check_auth(authorization)
             queries = request.query_params.getlist("request")
 
             async def _events() -> AsyncIterator[bytes]:
@@ -201,7 +287,8 @@ def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool
     """Block on uvicorn until shutdown."""
     import uvicorn
 
-    app = build_http_app(server, enable_sse=enable_sse)
+    api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
+    app = build_http_app(server, enable_sse=enable_sse, api_key=api_key)
     config = uvicorn.Config(
         app,
         host=host,
@@ -215,6 +302,7 @@ def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool
         host=host,
         port=port,
         sse_enabled=enable_sse,
+        auth_enforced=bool(api_key),
         adapter_count=len(server.adapters),
         tool_count=len(server.tool_ids),
     )

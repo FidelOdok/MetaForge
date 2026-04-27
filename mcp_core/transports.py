@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING, Any
 
 from mcp_core.client import Transport
@@ -63,9 +64,18 @@ class HttpTransport(Transport):
         await client.connect("cadquery", transport)
     """
 
-    def __init__(self, base_url: str, timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 120.0,
+        *,
+        api_key: str | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # MET-338: optional API key sent as ``Authorization: Bearer <key>``
+        # on every request. ``None`` means open mode — no header sent.
+        self._api_key = api_key
         self._session: Any = None
         self._connected = False
 
@@ -75,10 +85,13 @@ class HttpTransport(Transport):
 
         if self._session is None:
             self._session = aiohttp.ClientSession()
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         async with self._session.post(
             f"{self._base_url}/mcp",
             data=message,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=aiohttp.ClientTimeout(total=self._timeout),
         ) as resp:
             return await resp.text()
@@ -133,9 +146,19 @@ class StdioTransport(Transport):
         env: dict[str, str] | None = None,
         ready_signal: str | None = None,
         ready_timeout: float = 30.0,
+        api_key: str | None = None,
     ) -> None:
         self._command = list(command)
-        self._env = env
+        # MET-338: when ``api_key`` is set, propagate it to the spawned
+        # subprocess as ``METAFORGE_MCP_CLIENT_KEY`` so the server-side
+        # auth check passes. The subprocess inherits the rest of the
+        # environment by default (``env=None`` means inherit).
+        if api_key is not None:
+            base = dict(env) if env is not None else dict(os.environ)
+            base["METAFORGE_MCP_CLIENT_KEY"] = api_key
+            self._env = base
+        else:
+            self._env = env
         self._ready_signal = ready_signal
         self._ready_timeout = ready_timeout
         self._proc: asyncio.subprocess.Process | None = None
