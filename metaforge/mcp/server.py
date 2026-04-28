@@ -176,15 +176,36 @@ class UnifiedMcpServer:
     async def _tool_list(self, params: dict[str, Any]) -> dict[str, Any]:
         """Aggregate ``tool/list`` across every registered adapter.
 
-        Honours the ``capability`` filter the per-adapter handler
-        already supports.
+        Delegates to each adapter's ``handle_request`` so remote-adapter
+        shims (which don't expose a ``_tools`` dict but DO speak JSON-RPC)
+        participate alongside in-process ``McpToolServer``s — see MET-373.
+        Honours the ``capability`` filter at the per-adapter layer.
         """
-        capability = params.get("capability")
+        sub_request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "unified-list",
+                "method": "tool/list",
+                "params": params,
+            }
+        )
         manifests: list[dict[str, Any]] = []
         for adapter in self._adapters:
-            for reg in adapter._tools.values():  # noqa: SLF001 — adapter is sibling
-                if capability is None or reg.manifest.capability == capability:
-                    manifests.append(reg.manifest.model_dump())
+            try:
+                sub_response_text = await adapter.handle_request(sub_request)
+            except Exception as exc:
+                logger.warning(
+                    "unified_mcp_tool_list_subcall_failed",
+                    adapter_id=getattr(adapter, "adapter_id", "?"),
+                    error=str(exc),
+                )
+                continue
+            try:
+                sub_response = json.loads(sub_response_text)
+            except json.JSONDecodeError:
+                continue
+            adapter_tools = sub_response.get("result", {}).get("tools", [])
+            manifests.extend(adapter_tools)
         return {"tools": manifests}
 
     async def _tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
