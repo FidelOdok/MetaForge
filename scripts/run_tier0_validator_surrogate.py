@@ -32,8 +32,10 @@ async def main() -> int:
 
     evidence: list[dict] = []
     verdicts: list[dict] = []
-    start_total = time.perf_counter()
     overall_status = "PASS"
+    # ``start_total`` is set AFTER svc.initialize() returns so the
+    # 60s elapsed budget excludes one-off embedder cold-load (MET-374).
+    start_total: float = 0.0
 
     def record(step: str, tool: str, request: dict, response: dict | str, duration_ms: float):
         evidence.append(
@@ -64,6 +66,7 @@ async def main() -> int:
         namespace_prefix=f"lightrag_tier0_{svc_suffix}",
     )
     await svc.initialize()
+    start_total = time.perf_counter()
     try:
         # ----- Step 1: knowledge.ingest -----
         ingest_request = {

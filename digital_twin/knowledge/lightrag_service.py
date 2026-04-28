@@ -362,10 +362,14 @@ class LightRAGKnowledgeService:
             span.set_attribute("knowledge.source_path", source_path)
             span.set_attribute("knowledge.type", str(knowledge_type))
 
+            if not content or not content.strip():
+                logger.info("lightrag_ingest_empty", source_path=source_path)
+                raise ValueError("content is empty or whitespace")
+
             chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
             if not chunks:
                 logger.info("lightrag_ingest_empty", source_path=source_path)
-                return IngestResult(entry_ids=[], chunks_indexed=0, source_path=source_path)
+                raise ValueError("content produced zero chunks after parsing")
 
             ids = [_stable_chunk_id(source_path, c.index, c.text) for c in chunks]
             file_paths = [
@@ -381,6 +385,20 @@ class LightRAGKnowledgeService:
                 for c in chunks
             ]
             texts = [c.text for c in chunks]
+
+            # Pre-delete prior chunks indexed under the same source_path
+            # so re-ingest with new content doesn't leave orphans. Also
+            # emits the ``knowledge_consumer_predelete`` event the L1
+            # observability contract (MET-307) promises.
+            existing_ids = self._source_index.get(source_path, set())
+            stale_ids = existing_ids - set(ids)
+            if stale_ids:
+                deleted = await self.delete_by_source(source_path)
+                logger.info(
+                    "knowledge_consumer_predelete",
+                    source_path=source_path,
+                    deleted=deleted,
+                )
 
             await self._rag.ainsert(input=texts, ids=ids, file_paths=file_paths)
 

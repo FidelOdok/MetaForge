@@ -52,6 +52,19 @@ class KnowledgeEntry(BaseModel):
     source_work_product_id: UUID | None = Field(
         default=None, description="ID of the source work_product in the Digital Twin"
     )
+    source_path: str | None = Field(
+        default=None,
+        description=(
+            "URI/path the entry was ingested from — "
+            "required for citable retrieval (MET-320)"
+        ),
+    )
+    chunk_index: int | None = Field(
+        default=None, description="Zero-based index of this chunk within its source"
+    )
+    total_chunks: int | None = Field(
+        default=None, description="Total number of chunks the source produced"
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the entry was created",
@@ -104,6 +117,23 @@ class KnowledgeStore(ABC):
 # ---------------------------------------------------------------------------
 # In-memory implementation
 # ---------------------------------------------------------------------------
+
+
+def _split_citation_fields(meta: Any) -> tuple[dict[str, Any], str | None, int | None, int | None]:
+    """Extract MET-376 citation fields from a metadata payload.
+
+    The pgvector store round-trips ``source_path`` / ``chunk_index`` /
+    ``total_chunks`` through the ``metadata`` JSONB column under
+    ``__``-prefixed keys to avoid a schema migration. Read paths use
+    this helper to surface them as top-level ``KnowledgeEntry`` fields.
+    """
+    if not isinstance(meta, dict):
+        return {}, None, None, None
+    data = dict(meta)
+    src = data.pop("__source_path", None)
+    ci = data.pop("__chunk_index", None)
+    tc = data.pop("__total_chunks", None)
+    return data, src, ci, tc
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -262,6 +292,16 @@ class PgVectorKnowledgeStore(KnowledgeStore):  # pragma: deprecated
 
                 async with self._pool.acquire() as conn:
                     embedding_str = "[" + ",".join(str(v) for v in entry.embedding) + "]"
+                    # Round-trip citation fields through metadata JSONB so
+                    # we don't need a schema migration. Reconstructed on
+                    # read into top-level KnowledgeEntry fields.
+                    metadata = dict(entry.metadata)
+                    if entry.source_path is not None:
+                        metadata["__source_path"] = entry.source_path
+                    if entry.chunk_index is not None:
+                        metadata["__chunk_index"] = entry.chunk_index
+                    if entry.total_chunks is not None:
+                        metadata["__total_chunks"] = entry.total_chunks
                     await conn.execute(
                         """
                         INSERT INTO knowledge_entries
@@ -279,7 +319,7 @@ class PgVectorKnowledgeStore(KnowledgeStore):  # pragma: deprecated
                         entry.content,
                         embedding_str,
                         str(entry.knowledge_type),
-                        json.dumps(entry.metadata),
+                        json.dumps(metadata),
                         entry.source_work_product_id,
                         entry.created_at,
                     )
@@ -341,14 +381,18 @@ class PgVectorKnowledgeStore(KnowledgeStore):  # pragma: deprecated
                     meta = row["metadata"]
                     if isinstance(meta, str):
                         meta = json.loads(meta)
+                    user_meta, src_path, chunk_idx, total_chunks = _split_citation_fields(meta)
                     results.append(
                         KnowledgeEntry(
                             id=row["id"],
                             content=row["content"],
                             embedding=emb_values,
                             knowledge_type=KnowledgeType(row["knowledge_type"]),
-                            metadata=meta,
+                            metadata=user_meta,
                             source_work_product_id=row["source_work_product_id"],
+                            source_path=src_path,
+                            chunk_index=chunk_idx,
+                            total_chunks=total_chunks,
                             created_at=row["created_at"],
                         )
                     )
@@ -389,12 +433,16 @@ class PgVectorKnowledgeStore(KnowledgeStore):  # pragma: deprecated
                 meta = row["metadata"]
                 if isinstance(meta, str):
                     meta = json.loads(meta)
+                user_meta, src_path, chunk_idx, total_chunks = _split_citation_fields(meta)
                 return KnowledgeEntry(
                     id=row["id"],
                     content=row["content"],
                     embedding=emb_values,
                     knowledge_type=KnowledgeType(row["knowledge_type"]),
-                    metadata=meta,
+                    metadata=user_meta,
+                    source_path=src_path,
+                    chunk_index=chunk_idx,
+                    total_chunks=total_chunks,
                     source_work_product_id=row["source_work_product_id"],
                     created_at=row["created_at"],
                 )
@@ -462,14 +510,18 @@ class PgVectorKnowledgeStore(KnowledgeStore):  # pragma: deprecated
                     meta = row["metadata"]
                     if isinstance(meta, str):
                         meta = json.loads(meta)
+                    user_meta, src_path, chunk_idx, total_chunks = _split_citation_fields(meta)
                     results.append(
                         KnowledgeEntry(
                             id=row["id"],
                             content=row["content"],
                             embedding=emb_values,
                             knowledge_type=KnowledgeType(row["knowledge_type"]),
-                            metadata=meta,
+                            metadata=user_meta,
                             source_work_product_id=row["source_work_product_id"],
+                            source_path=src_path,
+                            chunk_index=chunk_idx,
+                            total_chunks=total_chunks,
                             created_at=row["created_at"],
                         )
                     )

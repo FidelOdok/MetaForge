@@ -35,6 +35,9 @@ class KnowledgeEntryResponse(BaseModel):
     knowledge_type: KnowledgeType = Field(alias="knowledgeType")
     metadata: dict[str, Any]
     source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
+    source_path: str | None = Field(default=None, alias="sourcePath")
+    chunk_index: int | None = Field(default=None, alias="chunkIndex")
+    total_chunks: int | None = Field(default=None, alias="totalChunks")
     created_at: datetime = Field(alias="createdAt")
 
     model_config = {"populate_by_name": True}
@@ -57,6 +60,7 @@ class IngestRequest(BaseModel):
     knowledge_type: KnowledgeType = Field(alias="knowledgeType")
     metadata: dict[str, Any] = Field(default_factory=dict)
     source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
+    source_path: str | None = Field(default=None, alias="sourcePath")
 
     model_config = {"populate_by_name": True}
 
@@ -145,6 +149,9 @@ async def search_knowledge(
                 knowledgeType=e.knowledge_type,
                 metadata=e.metadata,
                 sourceWorkProductId=e.source_work_product_id,
+                sourcePath=e.source_path,
+                chunkIndex=e.chunk_index,
+                totalChunks=e.total_chunks,
                 createdAt=e.created_at,
             )
             for e in entries
@@ -233,6 +240,7 @@ async def ingest_knowledge(
             knowledge_type=body.knowledge_type,
             metadata=body.metadata,
             source_work_product_id=body.source_work_product_id,
+            source_path=body.source_path,
         )
         stored = await store.store(entry)
         logger.info(
@@ -259,5 +267,8 @@ async def get_knowledge_entry(
         knowledgeType=entry.knowledge_type,
         metadata=entry.metadata,
         sourceWorkProductId=entry.source_work_product_id,
+        sourcePath=entry.source_path,
+        chunkIndex=entry.chunk_index,
+        totalChunks=entry.total_chunks,
         createdAt=entry.created_at,
     )

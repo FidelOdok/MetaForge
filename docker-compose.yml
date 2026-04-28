@@ -297,6 +297,8 @@ services:
       dockerfile: tool_registry/tools/cadquery/Dockerfile
     image: metaforge/cadquery-adapter:latest
     stdin_open: true
+    ports:
+      - "8101:8101"
     volumes:
       - adapter-workspace:/workspace
     environment:
