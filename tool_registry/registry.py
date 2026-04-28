@@ -9,12 +9,42 @@ import structlog
 from mcp_core.client import McpClient
 from mcp_core.schemas import HealthStatus
 from mcp_core.schemas import ToolManifest as ClientToolManifest
-from mcp_core.transports import LoopbackTransport
+from mcp_core.transports import LoopbackTransport, Transport
 from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tool_metadata import AdapterInfo, AdapterStatus, ToolCapability
 
 logger = structlog.get_logger()
+
+
+class _RemoteAdapterServer:
+    """Adapter-server shim wrapping a remote ``McpClient`` so it can plug
+    into ``UnifiedMcpServer`` alongside in-process ``McpToolServer``s.
+
+    Exposes the same surface ``UnifiedMcpServer`` consumes: ``adapter_id``,
+    ``version``, ``tool_ids``, and ``handle_request(raw_text)``. Routes
+    every request through the connected ``McpClient``'s underlying
+    ``Transport`` so JSON-RPC payloads round-trip end-to-end (MET-373).
+    """
+
+    def __init__(
+        self,
+        adapter_id: str,
+        version: str,
+        tool_ids: list[str],
+        transport: Transport,
+    ) -> None:
+        self.adapter_id = adapter_id
+        self.version = version
+        self._tool_ids = list(tool_ids)
+        self._transport = transport
+
+    @property
+    def tool_ids(self) -> list[str]:
+        return list(self._tool_ids)
+
+    async def handle_request(self, raw_message: str) -> str:
+        return await self._transport.send(raw_message)
 
 
 class ToolRegistry:
@@ -129,7 +159,18 @@ class ToolRegistry:
 
         self._adapters[adapter_id] = adapter_info
         self._clients[adapter_id] = client
-        # No _servers entry for remote adapters
+        # Wire the remote adapter into ``_servers`` via a thin shim so
+        # ``list_adapter_servers()`` (consumed by UnifiedMcpServer) surfaces
+        # it alongside in-process adapters. The shim re-uses the client's
+        # transport for JSON-RPC pass-through (MET-373).
+        client_transport = client._transports.get(adapter_id)  # noqa: SLF001
+        if client_transport is not None:
+            self._servers[adapter_id] = _RemoteAdapterServer(  # type: ignore[assignment]
+                adapter_id=adapter_id,
+                version=version,
+                tool_ids=[m.tool_id for m in handler_manifests],
+                transport=client_transport,
+            )
 
         logger.info(
             "Registered remote adapter",

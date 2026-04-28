@@ -344,10 +344,24 @@ def _configure_logging_for_transport(transport: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _configure_logging_for_transport(args.transport)
-    server = asyncio.run(_bootstrap(args))
+
+    # Bootstrap and stdio loop must share one asyncio event loop because
+    # remote adapters open aiohttp ClientSessions during bootstrap that
+    # are bound to that loop's selector — closing the loop between
+    # bootstrap and run_stdio leaves the sessions orphaned and any
+    # subsequent ``send`` returns an empty/error response (MET-373).
     if args.transport == "stdio":
-        asyncio.run(run_stdio(server))
+
+        async def _stdio() -> None:
+            server = await _bootstrap(args)
+            await run_stdio(server)
+
+        asyncio.run(_stdio())
     else:
+        # HTTP path keeps the two-step flow: ``run_http`` runs uvicorn
+        # which manages its own loop and only consumes the bootstrapped
+        # server's introspection surface.
+        server = asyncio.run(_bootstrap(args))
         run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
     return 0
 
