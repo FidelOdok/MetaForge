@@ -12,7 +12,12 @@ description = "Local-first control plane for hardware design"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
-    "pydantic-ai>=0.1",
+    # ``pydantic-ai`` (the umbrella) pulls every provider's extras
+    # (gradio, xai-sdk, vertex, bedrock, …) and the resolver backtracks
+    # forever (MET-377). MetaForge only uses the openai + anthropic
+    # providers — pin the slim variant with just those, so Docker
+    # builds finish in minutes not hours.
+    "pydantic-ai-slim[openai,anthropic]>=0.1",
     "structlog>=24.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.30",
