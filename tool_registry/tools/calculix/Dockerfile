@@ -5,7 +5,11 @@
 # for stress/displacement analysis and result parsing.
 
 # -- Stage 1: dependencies ---------------------------------------------------
-FROM python:3.12-slim AS deps
+# NOTE: pinned to bookworm-slim (Debian 12) because trixie dropped the
+# ``calculix-ccx`` binary package from main — only the docs subset
+# (``calculix-ccx-test``) remained. Bookworm still ships the solver in
+# the standard repo. See MET-380.
+FROM python:3.12-slim-bookworm AS deps
 
 WORKDIR /build
 
@@ -19,7 +23,7 @@ COPY tool_registry/tools/calculix/requirements.txt /build/requirements.txt
 RUN pip install --no-cache-dir -r /build/requirements.txt
 
 # -- Stage 2: runtime --------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
 LABEL maintainer="MetaForge <team@metaforge.dev>"
 LABEL version="0.1.0"
@@ -28,11 +32,14 @@ LABEL org.opencontainers.image.source="https://github.com/MetaForge-HA/MetaForge
 
 WORKDIR /app
 
-# Install CalculiX solver and runtime dependencies
+# Install CalculiX solver and runtime dependencies. Verify via
+# ``command -v ccx`` rather than ``ccx -v`` — the binary prints its
+# version then returns exit 201 by design, which previously masked
+# real install failures behind a ``|| true`` (root cause of MET-380).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         calculix-ccx \
     && rm -rf /var/lib/apt/lists/* \
-    && ccx -v || true
+    && command -v ccx
 
 # Copy Python packages from deps stage
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
@@ -67,4 +74,4 @@ EXPOSE 8200
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')" || exit 1
 
-ENTRYPOINT ["python", "-m", "tool_registry.tools.calculix.mcp_server"]
+ENTRYPOINT ["python", "-m", "tool_registry.tools.calculix.entrypoint"]

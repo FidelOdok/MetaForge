@@ -1,4 +1,7 @@
 # CalculiX MCP adapter dependencies
+# aiohttp drives the JSON-RPC ``/mcp`` server (MET-379). FastAPI/uvicorn
+# left in until the legacy mcp_server.py entrypoint is fully retired.
+aiohttp>=3.9
 fastapi>=0.104.0
 uvicorn>=0.24.0
 pydantic>=2.0
