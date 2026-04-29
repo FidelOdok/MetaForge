@@ -10,6 +10,12 @@ from mcp_core.context import (
     set_context,
     with_context,
 )
+from mcp_core.errors import (
+    RETRYABLE_CODES,
+    ErrorCode,
+    McpToolError,
+    make_tool_error,
+)
 from mcp_core.protocol import (
     McpError,
     ToolExecutionError,
@@ -28,15 +34,18 @@ from mcp_core.schemas import (
 from mcp_core.transports import LoopbackTransport
 
 __all__ = [
+    "RETRYABLE_CODES",
+    "ErrorCode",
     "HealthStatus",
     "InMemoryTransport",
-    "LoopbackTransport",
     "JsonRpcErrorResponse",
     "JsonRpcRequest",
     "JsonRpcSuccessResponse",
+    "LoopbackTransport",
     "McpCallContext",
     "McpClient",
     "McpError",
+    "McpToolError",
     "ToolCallRequest",
     "ToolCallResult",
     "ToolExecutionError",
@@ -47,6 +56,7 @@ __all__ = [
     "context_from_env",
     "context_from_headers",
     "current_context",
+    "make_tool_error",
     "reset_context",
     "set_context",
     "with_context",
