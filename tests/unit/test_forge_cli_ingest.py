@@ -47,6 +47,7 @@ class _StubClient:
     ) -> dict[str, Any]:
         self.calls.append(
             {
+                "content": content,
                 "content_length": len(content),
                 "source_path": source_path,
                 "knowledge_type": knowledge_type,
@@ -130,6 +131,122 @@ class TestDiscoverFiles:
         assert recovered == len(pdf.read_bytes()), (
             f"PDF byte count drifted: handler saw {recovered}, "
             f"file is {len(pdf.read_bytes())} bytes"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Edge-case content (MET-400)
+#
+# These tests pin the chosen behaviours for malformed / unusual input.
+# Documented behaviours, NOT bugs — adopter projects will hit each of
+# these (Windows-default BOM markers, mixed-encoding repos, copy-paste
+# YAML frontmatter without closing fence). Failing the file blocks the
+# user; tolerating it gets them productive with a tiny content quirk.
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeCaseContent:
+    def test_bom_prefixed_utf8(self, tmp_path: Path) -> None:
+        """Files starting with a UTF-8 BOM marker (Windows default)
+        are read with the BOM stripped, not surfaced as content.
+        """
+        path = tmp_path / "windows.md"
+        # ``﻿`` written as utf-8 produces the 3-byte BOM ``EF BB BF``.
+        path.write_bytes(b"\xef\xbb\xbf# Decision\n\nbody text\n")
+
+        stub = _StubClient()
+        result = ingest_path(path, client=stub)
+
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        assert len(stub.calls) == 1
+        sent = stub.calls[0]["content"]
+        assert not sent.startswith("﻿"), f"BOM leaked into ingest payload: {sent!r}"
+        assert sent.startswith("# Decision"), sent[:60]
+
+    def test_invalid_utf8_bytes_are_replaced_not_rejected(self, tmp_path: Path) -> None:
+        """Stray non-UTF-8 bytes in markdown surface as U+FFFD.
+
+        Pinned behaviour: ``errors="replace"`` over reject. Refusing
+        the file blocks the user; a few replacement chars are harmless
+        to RAG retrieval. See ``_read_file_content`` docstring for the
+        rationale.
+        """
+        path = tmp_path / "mixed.md"
+        # Valid UTF-8 followed by a byte sequence that's invalid in
+        # UTF-8 (bare 0xff 0xfe).
+        path.write_bytes(b"# Title\n\nValid text \xff\xfe and more.\n")
+
+        stub = _StubClient()
+        result = ingest_path(path, client=stub)
+
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        sent = stub.calls[0]["content"]
+        assert "Valid text" in sent
+        assert "�" in sent, f"expected U+FFFD replacement char in content; got {sent!r}"
+
+    def test_malformed_yaml_frontmatter_passes_through(self, tmp_path: Path) -> None:
+        """Markdown with unclosed YAML frontmatter is ingested as-is —
+        the chunker treats the whole file as content rather than failing
+        the parse.
+        """
+        path = tmp_path / "broken_frontmatter.md"
+        path.write_text(
+            "---\n"
+            "title: Has no closing fence\n"
+            "author: someone\n"
+            "# Heading still here\n\n"
+            "Body content.\n",
+            encoding="utf-8",
+        )
+
+        stub = _StubClient()
+        result = ingest_path(path, client=stub)
+
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        sent = stub.calls[0]["content"]
+        # Frontmatter content survives — body still reaches the chunker.
+        assert "title: Has no closing fence" in sent
+        assert "Body content." in sent
+
+    def test_unclosed_code_fence_does_not_crash(self, tmp_path: Path) -> None:
+        """Markdown with an unclosed ```code``` fence still ingests."""
+        path = tmp_path / "broken_fence.md"
+        path.write_text(
+            "# Snippet\n\n```python\nprint('forgot to close the fence')\nmore code\n",
+            encoding="utf-8",
+        )
+
+        stub = _StubClient()
+        result = ingest_path(path, client=stub)
+
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        sent = stub.calls[0]["content"]
+        assert "print('forgot to close the fence')" in sent
+
+    def test_extremely_long_single_line(self, tmp_path: Path) -> None:
+        """A single 50KB line of text reaches the handler intact.
+
+        Catches future regressions where the walker might inadvertently
+        truncate or buffer-split unusually wide content.
+        """
+        path = tmp_path / "wide.md"
+        # 50 KB of ASCII on a single line, no newlines until the end.
+        big = "abcde" * 10_240  # 5 chars × 10240 = 51200 bytes
+        path.write_text(big + "\n", encoding="utf-8")
+
+        stub = _StubClient()
+        result = ingest_path(path, client=stub)
+
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        # The handler sees the full line plus the trailing newline.
+        sent_len = stub.calls[0]["content_length"]
+        assert sent_len >= len(big), (
+            f"Long line truncated: handler saw {sent_len}, file is {len(big) + 1} bytes"
         )
 
 

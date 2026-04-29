@@ -61,14 +61,23 @@ def _read_file_content(path: Path) -> str:
 
     For PDFs we still pass the raw bytes (decoded via latin-1 so the
     payload survives a JSON round-trip) — the gateway hands them to
-    ``raganything`` which knows how to parse them. For markdown / text
-    we read UTF-8 directly.
+    ``raganything`` which knows how to parse them. For markdown /
+    text we use ``utf-8-sig`` so a leading BOM is silently stripped
+    (Windows-defaults paste in a lot of files), and ``errors="replace"``
+    so a stray non-UTF-8 byte yields a U+FFFD replacement character
+    rather than crashing the whole batch (MET-400).
+
+    The "replace, don't reject" choice for invalid UTF-8 mirrors how
+    most ingestion pipelines (Pandoc, ripgrep --no-utf8-strict)
+    behave for adopter friendliness — a few replacement characters
+    are harmless to RAG retrieval, whereas refusing the file blocks
+    the user. Recorded in ``docs/architecture/ai-memory.md``.
     """
     if path.suffix.lower() == ".pdf":
         # Use latin-1 so every byte maps to a unique codepoint and the
         # payload is JSON-encodable. Provider parses bytes back out.
         return path.read_bytes().decode("latin-1")
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
 def _discover_files(target: Path, recursive: bool) -> list[Path]:
