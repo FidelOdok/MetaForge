@@ -46,6 +46,45 @@ class ToolRegistration:
         self.handler = handler
 
 
+# --- Resources (MET-384) -----------------------------------------------------
+
+
+class ResourceManifestEntry(BaseModel):
+    """Server-side manifest for a discoverable resource.
+
+    The wire shape mirrors ``mcp_core.schemas.ResourceManifest`` but
+    lives here too so handlers don't need a layer-2→layer-1 import.
+    """
+
+    uri_template: str
+    name: str
+    description: str
+    mime_type: str = "application/json"
+    adapter_id: str
+
+
+# A reader takes a concrete URI and returns one or more ``ResourceContent``-shaped
+# dicts (``uri``, ``mime_type``, ``text``/``blob_base64``).
+ResourceReader = Callable[[str], Awaitable[list[dict[str, Any]]]]
+
+
+class ResourceRegistration:
+    """Internal record of a registered resource manifest + reader."""
+
+    def __init__(
+        self,
+        manifest: ResourceManifestEntry,
+        reader: ResourceReader,
+        matcher: Callable[[str], bool],
+    ) -> None:
+        self.manifest = manifest
+        self.reader = reader
+        # ``matcher`` decides whether a concrete URI belongs to this
+        # registration. We don't bake URI templating into the server —
+        # adapters know best how to recognise their own URIs.
+        self.matcher = matcher
+
+
 # --- JSON-RPC 2.0 helpers (self-contained to avoid dep on mcp_core) ---
 
 
@@ -169,3 +208,63 @@ class ToolHandlerError(Exception):
         self.details = details
         self.duration_ms = duration_ms
         super().__init__(f"Tool '{tool_id}' handler failed: {details}")
+
+
+class ResourceNotFoundError(Exception):
+    """Raised when ``resources/read`` URI matches no registration."""
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+        super().__init__(f"Resource not found: {uri}")
+
+
+class ResourceReadError(Exception):
+    """Raised when a registered resource reader fails."""
+
+    def __init__(self, uri: str, details: str) -> None:
+        self.uri = uri
+        self.details = details
+        super().__init__(f"Resource read failed for {uri}: {details}")
+
+
+# --- Resource handlers (MET-384) ---------------------------------------------
+
+
+async def handle_resources_list(
+    resources: dict[str, ResourceRegistration],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the discoverable manifest for every registered resource.
+
+    Optional ``adapter_id`` filter narrows to one adapter — useful when
+    a federated server wraps several adapters and the harness only
+    cares about one.
+    """
+    adapter_filter = params.get("adapter_id")
+    out: list[dict[str, Any]] = []
+    for reg in resources.values():
+        if adapter_filter is None or reg.manifest.adapter_id == adapter_filter:
+            out.append(reg.manifest.model_dump())
+    return {"resources": out}
+
+
+async def handle_resources_read(
+    resources: dict[str, ResourceRegistration],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Dispatch ``resources/read`` to the matching registration."""
+    uri = params.get("uri")
+    if not isinstance(uri, str) or not uri:
+        raise ResourceReadError(str(uri), "uri is required")
+
+    for reg in resources.values():
+        if reg.matcher(uri):
+            try:
+                contents = await reg.reader(uri)
+            except ResourceNotFoundError:
+                raise
+            except Exception as exc:
+                raise ResourceReadError(uri, str(exc)) from exc
+            return {"contents": list(contents)}
+
+    raise ResourceNotFoundError(uri)

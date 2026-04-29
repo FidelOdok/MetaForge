@@ -12,12 +12,19 @@ import structlog
 
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
+    ResourceManifestEntry,
+    ResourceNotFoundError,
+    ResourceReader,
+    ResourceReadError,
+    ResourceRegistration,
     ToolHandler,
     ToolHandlerError,
     ToolManifest,
     ToolNotFoundError,
     ToolRegistration,
     handle_health_check,
+    handle_resources_list,
+    handle_resources_read,
     handle_tool_call,
     handle_tool_list,
     make_error,
@@ -31,6 +38,8 @@ tracer = get_tracer("tool_registry.mcp_server.server")
 _INVALID_REQUEST = -32600
 _METHOD_NOT_FOUND = -32601
 _TOOL_EXECUTION_ERROR = -32001
+_RESOURCE_NOT_FOUND = -32004
+_RESOURCE_READ_ERROR = -32005
 
 
 class McpToolServer:
@@ -55,6 +64,7 @@ class McpToolServer:
         self.adapter_id = adapter_id
         self.version = version
         self._tools: dict[str, ToolRegistration] = {}
+        self._resources: dict[str, ResourceRegistration] = {}
         self._start_time = datetime.now(UTC)
 
     def register_tool(self, manifest: ToolManifest, handler: ToolHandler) -> None:
@@ -64,10 +74,39 @@ class McpToolServer:
         self._tools[manifest.tool_id] = ToolRegistration(manifest, handler)
         logger.info("Registered tool", tool_id=manifest.tool_id, adapter=self.adapter_id)
 
+    def register_resource(
+        self,
+        manifest: ResourceManifestEntry,
+        reader: ResourceReader,
+        matcher: Any,
+    ) -> None:
+        """Register a discoverable read-only resource (MET-384).
+
+        ``matcher(uri) -> bool`` decides whether the registration
+        owns a given concrete URI. Use a closure that pattern-matches
+        the suffix after ``metaforge://<adapter>/`` — keeping the
+        matcher inside the adapter avoids baking templating into the
+        server.
+        """
+        key = manifest.uri_template
+        if key in self._resources:
+            raise ValueError(f"Resource '{key}' is already registered")
+        self._resources[key] = ResourceRegistration(manifest, reader, matcher)
+        logger.info(
+            "Registered resource",
+            uri_template=manifest.uri_template,
+            adapter=self.adapter_id,
+        )
+
     @property
     def tool_ids(self) -> list[str]:
         """List registered tool IDs."""
         return list(self._tools.keys())
+
+    @property
+    def resource_uri_templates(self) -> list[str]:
+        """List the registered resource URI templates."""
+        return list(self._resources.keys())
 
     async def handle_request(self, raw_message: str) -> str:
         """Parse JSON-RPC request, dispatch to handler, return JSON-RPC response.
@@ -118,6 +157,10 @@ class McpToolServer:
                     result = await handle_tool_list(self._tools, params)
                 elif method == "tool/call":
                     result = await handle_tool_call(self._tools, params)
+                elif method == "resources/list":
+                    result = await handle_resources_list(self._resources, params)
+                elif method == "resources/read":
+                    result = await handle_resources_read(self._resources, params)
                 elif method == "health/check":
                     result = await handle_health_check(
                         self.adapter_id, self.version, self._tools, self._start_time
@@ -128,6 +171,29 @@ class McpToolServer:
                         request_id, _METHOD_NOT_FOUND, f"Unknown method: {method}"
                     )
                     return json.dumps(response)
+            except ResourceNotFoundError as exc:
+                span.set_attribute("mcp.status", "resource_not_found")
+                span.set_attribute("mcp.error.uri", exc.uri)
+                span.record_exception(exc)
+                response = make_error(
+                    request_id,
+                    _RESOURCE_NOT_FOUND,
+                    str(exc),
+                    {"uri": exc.uri},
+                )
+                return json.dumps(response)
+            except ResourceReadError as exc:
+                span.set_attribute("mcp.status", "resource_read_error")
+                span.set_attribute("mcp.error.uri", exc.uri)
+                span.record_exception(exc)
+                logger.error("Resource read failed", uri=exc.uri, details=exc.details)
+                response = make_error(
+                    request_id,
+                    _RESOURCE_READ_ERROR,
+                    "Resource read failed",
+                    {"uri": exc.uri, "details": exc.details},
+                )
+                return json.dumps(response)
             except ToolNotFoundError as exc:
                 span.set_attribute("mcp.status", "tool_not_found")
                 span.set_attribute("mcp.error.tool_id", exc.tool_id)

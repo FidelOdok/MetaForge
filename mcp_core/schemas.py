@@ -92,6 +92,53 @@ class HealthStatus(BaseModel):
     last_invocation: datetime | None = None
 
 
+# --- Resources (MET-384) ---
+
+
+class ResourceManifest(BaseModel):
+    """Manifest entry for a discoverable read-only resource.
+
+    ``uri_template`` follows RFC 6570 — the discoverable form,
+    e.g. ``metaforge://twin/node/{node_id}``. Concrete URIs handed to
+    ``resources/read`` substitute the variables.
+    """
+
+    uri_template: str
+    name: str
+    description: str
+    mime_type: str = "application/json"
+    adapter_id: str
+
+
+class ResourceContent(BaseModel):
+    """One read-out resource. ``text`` xor ``blob_base64`` is set."""
+
+    uri: str
+    mime_type: str = "application/json"
+    text: str | None = None
+    blob_base64: str | None = None
+
+
+class ResourceListRequest(BaseModel):
+    """Parameters for resources/list."""
+
+    adapter_id: str | None = None
+
+
+class ResourceReadRequest(BaseModel):
+    """Parameters for resources/read."""
+
+    uri: str = Field(..., description="Concrete resource URI (no templates)")
+
+
+class ResourceListResult(BaseModel):
+    resources: list[ResourceManifest]
+
+
+class ResourceReadResult(BaseModel):
+    contents: list[ResourceContent]
+
+
 # --- Errors ---
 
 
