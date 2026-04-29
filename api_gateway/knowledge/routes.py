@@ -1,13 +1,20 @@
 """Knowledge API routes for semantic search and ingestion.
 
 Endpoints live under ``/api/v1/knowledge``.
+
+When ``app.state.knowledge_service`` is wired (production gateway —
+LightRAG via ``digital_twin.knowledge``), every read and write routes
+through the service so dedup, predelete, and citation-field
+round-tripping all happen consistently. The legacy
+``app.state.knowledge_store`` path is still honoured for unit tests
+that haven't migrated yet — see MET-390.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -15,6 +22,11 @@ from pydantic import BaseModel, Field
 
 from digital_twin.knowledge.store import KnowledgeType
 from observability.tracing import get_tracer
+
+# Namespace UUID for deriving deterministic entry IDs from a
+# ``(source_path, chunk_index)`` pair when the underlying
+# ``KnowledgeService`` doesn't already expose a UUID per chunk.
+_ENTRY_ID_NAMESPACE = UUID("4f3c4f0a-1ae6-4b9c-a4a3-0e2c4d3a1b2f")
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.knowledge")
@@ -115,6 +127,33 @@ def _get_embedding(request: Request) -> Any:
     return svc
 
 
+def _maybe_service(request: Request) -> Any | None:
+    """Return the active ``KnowledgeService`` if one is wired; else None.
+
+    The production gateway sets ``app.state.knowledge_service`` to a
+    LightRAG-backed instance (MET-346). When present, all read/write
+    operations on ``/ingest`` and ``/search`` flow through the same
+    service so they see the same data — closes the dual-storage gap
+    surfaced by Tier-2 (MET-390).
+
+    Unit tests that only initialise ``knowledge_store`` continue to
+    work via the legacy path.
+    """
+    return getattr(request.app.state, "knowledge_service", None)
+
+
+def _entry_id_for(source_path: str | None, chunk_index: int | None) -> UUID:
+    """Deterministic entry-ID for a chunk surfaced via ``KnowledgeService``.
+
+    The service-layer ``SearchHit`` doesn't carry a UUID; we mint one
+    from ``source_path + chunk_index`` so the same chunk always maps
+    to the same response ``id`` across calls — which keeps consumers
+    that key on ``id`` (dashboard, MCP search bridge) stable.
+    """
+    seed = f"{source_path or ''}#{chunk_index if chunk_index is not None else 0}"
+    return uuid5(_ENTRY_ID_NAMESPACE, seed)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -129,9 +168,50 @@ async def search_knowledge(
     ),
     limit: int = Query(default=5, ge=1, le=50, description="Max results"),
 ) -> SearchResponse:
-    """Semantic search over indexed knowledge."""
+    """Semantic search over indexed knowledge.
+
+    Routes through ``KnowledgeService`` when available so it shares
+    the same backend as ``/ingest`` and ``/documents`` (MET-390).
+    """
     with tracer.start_as_current_span("knowledge_api.search") as span:
         span.set_attribute("knowledge.query_length", len(query))
+
+        service = _maybe_service(request)
+        if service is not None:
+            hits = await service.search(
+                query=query,
+                top_k=limit,
+                knowledge_type=knowledge_type,
+            )
+            now = datetime.now(UTC)
+            results = [
+                KnowledgeEntryResponse(
+                    id=_entry_id_for(h.source_path, h.chunk_index),
+                    content=h.content,
+                    knowledgeType=h.knowledge_type or KnowledgeType.DESIGN_DECISION,
+                    metadata=h.metadata,
+                    sourceWorkProductId=h.source_work_product_id,
+                    sourcePath=h.source_path,
+                    chunkIndex=h.chunk_index,
+                    totalChunks=h.total_chunks,
+                    createdAt=now,
+                )
+                for h in hits
+            ]
+            logger.info(
+                "knowledge_search",
+                query=query[:80],
+                result_count=len(results),
+                backend="knowledge_service",
+            )
+            return SearchResponse(
+                results=results,
+                query=query,
+                totalFound=len(results),
+            )
+
+        # Legacy path — direct ``KnowledgeStore`` access. Used by unit
+        # tests that don't wire ``knowledge_service``.
         store = _get_store(request)
         embedding_svc = _get_embedding(request)
 
@@ -156,7 +236,12 @@ async def search_knowledge(
             )
             for e in entries
         ]
-        logger.info("knowledge_search", query=query[:80], result_count=len(results))
+        logger.info(
+            "knowledge_search",
+            query=query[:80],
+            result_count=len(results),
+            backend="knowledge_store",
+        )
         return SearchResponse(
             results=results,
             query=query,
@@ -217,9 +302,50 @@ async def ingest_knowledge(
     request: Request,
     body: IngestRequest,
 ) -> IngestResponse:
-    """Manually ingest a knowledge entry."""
+    """Manually ingest a knowledge entry.
+
+    Routes through ``KnowledgeService`` when available so the chunk
+    pipeline, dedup, and citation-field round-trip apply consistently
+    with ``/documents`` and ``/search`` (MET-390).
+    """
     with tracer.start_as_current_span("knowledge_api.ingest") as span:
         span.set_attribute("knowledge.type", str(body.knowledge_type))
+
+        service = _maybe_service(request)
+        if service is not None:
+            # Service-backed ingest: chunks the content, populates
+            # citation fields, triggers predelete on re-ingest. Mint
+            # a synthetic source_path when caller didn't supply one
+            # so dedup keys stay stable per-content (uuid5 of body).
+            source_path = body.source_path or (
+                f"manual://{uuid5(_ENTRY_ID_NAMESPACE, body.content)}"
+            )
+            try:
+                result = await service.ingest(
+                    content=body.content,
+                    source_path=source_path,
+                    knowledge_type=body.knowledge_type,
+                    source_work_product_id=body.source_work_product_id,
+                    metadata=body.metadata or None,
+                )
+            except ValueError as exc:
+                # KnowledgeService raises on empty content (MET-375).
+                span.record_exception(exc)
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            entry_id = (
+                result.entry_ids[0] if result.entry_ids else uuid5(_ENTRY_ID_NAMESPACE, source_path)
+            )
+            logger.info(
+                "knowledge_ingested",
+                entry_id=str(entry_id),
+                embedded=result.chunks_indexed > 0,
+                chunks=result.chunks_indexed,
+                backend="knowledge_service",
+            )
+            return IngestResponse(entryId=entry_id, embedded=result.chunks_indexed > 0)
+
+        # Legacy path — direct ``KnowledgeStore`` write. Kept for unit
+        # tests that don't wire ``knowledge_service``.
         store = _get_store(request)
         embedding_svc = _get_embedding(request)
 
@@ -247,6 +373,7 @@ async def ingest_knowledge(
             "knowledge_ingested",
             entry_id=str(stored.id),
             embedded=embedded,
+            backend="knowledge_store",
         )
         return IngestResponse(entryId=stored.id, embedded=embedded)
 
