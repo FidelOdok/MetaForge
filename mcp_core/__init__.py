@@ -32,8 +32,16 @@ from mcp_core.schemas import (
     ToolManifest,
 )
 from mcp_core.transports import LoopbackTransport
+from mcp_core.versioning import (
+    DEFAULT_VERSION,
+    deprecation_message,
+    normalise_version,
+    parse_versioned_tool_id,
+    versioned_tool_id,
+)
 
 __all__ = [
+    "DEFAULT_VERSION",
     "RETRYABLE_CODES",
     "ErrorCode",
     "HealthStatus",
@@ -56,8 +64,12 @@ __all__ = [
     "context_from_env",
     "context_from_headers",
     "current_context",
+    "deprecation_message",
     "make_tool_error",
+    "normalise_version",
+    "parse_versioned_tool_id",
     "reset_context",
     "set_context",
+    "versioned_tool_id",
     "with_context",
 ]
