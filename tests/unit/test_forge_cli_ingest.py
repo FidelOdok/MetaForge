@@ -106,6 +106,32 @@ class TestDiscoverFiles:
     def test_supported_extensions_set(self) -> None:
         assert {".md", ".pdf", ".txt", ".markdown"} <= SUPPORTED_EXTENSIONS
 
+    def test_pdf_content_reaches_handler_unmangled(self, tmp_path: Path) -> None:
+        """PDF bytes survive the walker → handler hop intact (MET-399).
+
+        Catches a regression where a future refactor of
+        ``_read_file_content`` could swallow PDF content (UTF-8 decode
+        on bytes that aren't UTF-8) — the old code path returned an
+        empty string for binary files.
+        """
+        pdf = tmp_path / "datasheet.pdf"
+        # Minimal valid-enough PDF header + a payload byte that's not
+        # valid UTF-8 (0xff). The walker must surface every byte.
+        pdf.write_bytes(b"%PDF-1.4\n%\xff binary-payload\n%%EOF\n")
+
+        stub = _StubClient()
+        result = ingest_path(pdf, client=stub)
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        assert len(stub.calls) == 1
+        # Roundtrip latin-1 to recover the original bytes.
+        recovered = stub.calls[0]["content_length"]
+        # 35 bytes in the original PDF should arrive at the handler.
+        assert recovered == len(pdf.read_bytes()), (
+            f"PDF byte count drifted: handler saw {recovered}, "
+            f"file is {len(pdf.read_bytes())} bytes"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Type inference
