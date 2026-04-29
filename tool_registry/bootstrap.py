@@ -161,6 +161,8 @@ async def bootstrap_tool_registry(
     adapter_ids: list[str] | None = None,
     knowledge_service: Any = None,
     constraint_engine: Any = None,
+    twin: Any = None,
+    twin_allow_mutations: bool = False,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -176,6 +178,13 @@ async def bootstrap_tool_registry(
             When supplied, the ``constraint`` MCP adapter (MET-383) is
             registered. When ``None``, skipped — same pattern as
             knowledge_service since both are runtime-injected.
+        twin: Optional ``TwinAPI`` instance. When supplied, the ``twin``
+            MCP adapter (MET-382) registers five tools (get_node /
+            thread_for / find_by_property / constraint_violations /
+            query_cypher). When ``None``, skipped.
+        twin_allow_mutations: When True, ``twin.query_cypher`` accepts
+            mutating Cypher (CREATE / DELETE / SET / MERGE / ...). Off
+            by default; every call is audit-logged regardless.
 
     Returns:
         The populated ToolRegistry.
@@ -303,6 +312,33 @@ async def bootstrap_tool_registry(
                     if constraint_engine is None
                     else "disabled via config"
                 ),
+            )
+
+        # ----- Twin MCP adapter (MET-382) -----
+        # Same runtime-injection pattern as knowledge / constraint:
+        # depends on a TwinAPI instance the gateway holds, not a
+        # static factory.
+        if twin is not None and _is_adapter_enabled("twin"):
+            try:
+                from tool_registry.tools.twin.adapter import TwinServer
+
+                server = TwinServer(twin=twin, allow_mutations=twin_allow_mutations)
+                await registry.register_adapter(server)
+                registered.append("twin")
+                logger.info(
+                    "twin_mcp_adapter_registered",
+                    twin=type(twin).__name__,
+                    allow_mutations=twin_allow_mutations,
+                )
+            except Exception as exc:
+                logger.error("twin_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("twin")
+        else:
+            skipped.append("twin")
+            logger.info(
+                "twin_mcp_adapter_skipped",
+                reason=("no twin supplied" if twin is None else "disabled via config"),
             )
 
         span.set_attribute("adapters.registered", len(registered))
