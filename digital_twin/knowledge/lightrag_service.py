@@ -366,6 +366,17 @@ class LightRAGKnowledgeService:
                 logger.info("lightrag_ingest_empty", source_path=source_path)
                 raise ValueError("content is empty or whitespace")
 
+            # MET-401: auto-stamp ingest with the active project_id from
+            # the MCP call context (MET-387) so subsequent searches can
+            # scope correctly. Caller-supplied metadata wins — passing
+            # ``project_id`` explicitly overrides the ambient context.
+            from mcp_core.context import current_context
+
+            ctx_project_id = current_context().project_id
+            metadata = dict(metadata or {})
+            if ctx_project_id is not None and "project_id" not in metadata:
+                metadata["project_id"] = str(ctx_project_id)
+
             chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
             if not chunks:
                 logger.info("lightrag_ingest_empty", source_path=source_path)
@@ -439,6 +450,18 @@ class LightRAGKnowledgeService:
         with tracer.start_as_current_span("lightrag.search") as span:
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
+
+            # MET-401: auto-scope search to the active project_id from
+            # the MCP call context (MET-387). Caller-supplied filters
+            # win — passing ``project_id`` explicitly overrides the
+            # ambient context (intentional escape hatch for cross-project
+            # admin queries).
+            from mcp_core.context import current_context
+
+            ctx_project_id = current_context().project_id
+            if ctx_project_id is not None:
+                filters = dict(filters or {})
+                filters.setdefault("project_id", str(ctx_project_id))
 
             chunks_vdb = getattr(self._rag, "chunks_vdb", None)
             if chunks_vdb is None:
