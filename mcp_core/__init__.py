@@ -16,6 +16,14 @@ from mcp_core.errors import (
     McpToolError,
     make_tool_error,
 )
+from mcp_core.progress import (
+    ProgressEmitter,
+    current_emitter,
+    emit_progress,
+    progress_notification,
+    reset_emitter,
+    set_emitter,
+)
 from mcp_core.protocol import (
     McpError,
     ToolExecutionError,
@@ -42,6 +50,7 @@ from mcp_core.schemas import (
     ToolCallRequest,
     ToolCallResult,
     ToolManifest,
+    ToolProgress,
 )
 from mcp_core.transports import LoopbackTransport
 from mcp_core.versioning import (
@@ -68,6 +77,7 @@ __all__ = [
     "McpError",
     "McpToolError",
     "ParsedResourceUri",
+    "ProgressEmitter",
     "ResourceContent",
     "ResourceListRequest",
     "ResourceListResult",
@@ -79,19 +89,25 @@ __all__ = [
     "ToolCallResult",
     "ToolExecutionError",
     "ToolManifest",
+    "ToolProgress",
     "ToolTimeoutError",
     "ToolUnavailableError",
     "Transport",
     "context_from_env",
     "context_from_headers",
     "current_context",
+    "current_emitter",
     "deprecation_message",
+    "emit_progress",
     "make_tool_error",
     "normalise_version",
     "parse_resource_uri",
     "parse_versioned_tool_id",
+    "progress_notification",
     "reset_context",
+    "reset_emitter",
     "set_context",
+    "set_emitter",
     "versioned_tool_id",
     "with_context",
 ]

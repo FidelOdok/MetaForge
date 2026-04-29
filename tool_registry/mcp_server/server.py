@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 
+from mcp_core.progress import ProgressEmitter, reset_emitter, set_emitter
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceManifestEntry,
@@ -66,6 +67,20 @@ class McpToolServer:
         self._tools: dict[str, ToolRegistration] = {}
         self._resources: dict[str, ResourceRegistration] = {}
         self._start_time = datetime.now(UTC)
+        # MET-388: optional per-server progress sink. When set, every
+        # ``tool/call`` runs with the sink installed in mcp_core's
+        # contextvar so handlers can ``await emit_progress(...)``.
+        self._progress_sink: ProgressEmitter | None = None
+
+    def set_progress_sink(self, sink: ProgressEmitter | None) -> None:
+        """Install (or clear) the progress sink (MET-388).
+
+        Long-running tools call ``mcp_core.progress.emit_progress`` —
+        events are routed to ``sink`` when one is installed, dropped
+        otherwise. Transports decide how to deliver the events
+        (SSE frames, stdio lines, in-memory queue for tests).
+        """
+        self._progress_sink = sink
 
     def register_tool(self, manifest: ToolManifest, handler: ToolHandler) -> None:
         """Register a tool with its manifest and handler function."""
@@ -156,7 +171,14 @@ class McpToolServer:
                 if method == "tool/list":
                     result = await handle_tool_list(self._tools, params)
                 elif method == "tool/call":
-                    result = await handle_tool_call(self._tools, params)
+                    # MET-388: scope the progress emitter to this call so
+                    # concurrent requests don't leak progress between
+                    # each other.
+                    token = set_emitter(self._progress_sink)
+                    try:
+                        result = await handle_tool_call(self._tools, params)
+                    finally:
+                        reset_emitter(token)
                 elif method == "resources/list":
                     result = await handle_resources_list(self._resources, params)
                 elif method == "resources/read":
