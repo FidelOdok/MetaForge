@@ -118,16 +118,35 @@ class UnifiedMcpServer:
         request_id: str = data.get("id", "null")
         method: str = data.get("method", "")
         params: dict[str, Any] = data.get("params", {})
+        is_notification = "id" not in data
 
         if data.get("jsonrpc") != "2.0":
             return json.dumps(
                 make_error(request_id, _INVALID_REQUEST, "Not a valid JSON-RPC 2.0 message")
             )
 
+        # JSON-RPC notifications carry no ``id`` and MUST NOT receive a
+        # response. The MCP spec sends ``notifications/initialized`` (and
+        # cancellation notifications) this way; replying to them breaks
+        # the client's framing. Return an empty string to signal "no
+        # response" — the stdio loop only writes a line when the body
+        # is non-empty.
+        if is_notification:
+            return ""
+
         with tracer.start_as_current_span("unified_mcp.handle_request") as span:
             span.set_attribute("rpc.method", method)
             try:
-                if method == "tool/list":
+                # Standard MCP protocol methods (what Claude Code speaks).
+                if method == "initialize":
+                    result = self._initialize(params)
+                elif method == "tools/list":
+                    result = await self._mcp_tools_list(params)
+                elif method == "tools/call":
+                    result = await self._mcp_tools_call(params)
+                # Legacy MetaForge dialect (kept for backward compat with
+                # internal callers and existing integration tests).
+                elif method == "tool/list":
                     result = await self._tool_list(params)
                 elif method == "tool/call":
                     result = await self._tool_call(params)
@@ -170,7 +189,101 @@ class UnifiedMcpServer:
             return json.dumps(make_success(request_id, result))
 
     # ------------------------------------------------------------------
-    # Method handlers
+    # Method handlers — standard MCP protocol (Claude Code, Cursor, etc.)
+    # ------------------------------------------------------------------
+
+    # Protocol version we negotiate with. The MCP spec rev that Claude
+    # Code 2.1.x speaks; bumping this is a coordinated change with the
+    # client side, not a routine bump.
+    _MCP_PROTOCOL_VERSION = "2024-11-05"
+
+    def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Standard MCP handshake — return server capabilities.
+
+        Claude Code (and any spec-compliant client) sends ``initialize``
+        as the first request after spawning the stdio process. The
+        response advertises the protocol version we understand and the
+        feature set we expose. Echoing the client's protocolVersion when
+        compatible is the spec-recommended path; we pin to our known
+        version to keep the contract stable across client upgrades.
+        """
+        return {
+            "protocolVersion": self._MCP_PROTOCOL_VERSION,
+            "capabilities": {
+                # ``listChanged`` would let us push notifications when
+                # the tool set mutates at runtime. Our adapters are
+                # static after bootstrap, so we don't advertise it.
+                "tools": {},
+            },
+            "serverInfo": {
+                "name": "metaforge-mcp",
+                "version": self._version,
+            },
+        }
+
+    async def _mcp_tools_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Standard MCP ``tools/list`` — wraps the legacy aggregate.
+
+        Translation rules (legacy ``tool/list`` → MCP ``tools/list``):
+        - ``tool_id`` → ``name`` (MCP uses ``name`` as the unique id)
+        - ``input_schema`` → ``inputSchema`` (camelCase per MCP spec)
+        - drop fields the client doesn't consume (``adapter_id``,
+          ``capability``, ``output_schema``, ``phase``, ``resource_limits``)
+        """
+        legacy = await self._tool_list(params)
+        mcp_tools: list[dict[str, Any]] = []
+        for entry in legacy.get("tools", []):
+            mcp_tool: dict[str, Any] = {
+                "name": entry.get("tool_id") or entry.get("name", ""),
+                "description": entry.get("description", ""),
+            }
+            schema = entry.get("input_schema") or entry.get("inputSchema")
+            if schema:
+                mcp_tool["inputSchema"] = schema
+            mcp_tools.append(mcp_tool)
+        return {"tools": mcp_tools}
+
+    async def _mcp_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Standard MCP ``tools/call`` — wraps the legacy aggregate.
+
+        The MCP spec uses ``{name, arguments}`` for the call shape and
+        ``{content: [...], isError: bool}`` for the response. Translate
+        both directions so the existing ``_tool_call`` logic (and every
+        adapter handler underneath) stays untouched.
+        """
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {}) or {}
+        try:
+            # Forward under ``arguments`` (not ``parameters``) — that's
+            # the key ``tool_registry.mcp_server.handlers.handle_tool_call``
+            # reads. Sending ``parameters`` silently dropped every arg
+            # and broke every spec-compliant client (Claude Code etc.).
+            result = await self._tool_call(
+                {"tool_id": tool_name, "arguments": arguments}
+            )
+        except (ToolNotFoundError, ToolHandlerError):
+            # Re-raise so the outer handler emits a JSON-RPC error
+            # envelope. The MCP spec also accepts isError=true content
+            # responses, but JSON-RPC errors are clearer for "tool not
+            # found" / hard execution failures and Claude Code surfaces
+            # both correctly.
+            raise
+        # Body is wrapped in MCP's ``content`` array. We use ``text``
+        # type with a JSON-serialised payload — the adapter outputs are
+        # structured dicts, and clients can json.parse the text. If we
+        # add binary outputs later we'll branch here on result shape.
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(result),
+                }
+            ],
+            "isError": False,
+        }
+
+    # ------------------------------------------------------------------
+    # Method handlers — legacy MetaForge dialect
     # ------------------------------------------------------------------
 
     async def _tool_list(self, params: dict[str, Any]) -> dict[str, Any]:
