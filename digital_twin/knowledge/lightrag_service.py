@@ -356,26 +356,38 @@ class LightRAGKnowledgeService:
         knowledge_type: KnowledgeType,
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> IngestResult:
+        """Ingest a document.
+
+        ``project_id`` (MET-401) is stamped into ``metadata["project_id"]``
+        so subsequent searches can scope to it. The MCP adapter forwards
+        the active call-context project_id; callers may also pass it
+        explicitly. An explicit ``project_id`` argument wins over any
+        existing ``metadata["project_id"]`` so the multi-tenant isolation
+        contract is unambiguous at the storage layer.
+        """
         await self._ensure_initialized()
         with tracer.start_as_current_span("lightrag.ingest") as span:
             span.set_attribute("knowledge.source_path", source_path)
             span.set_attribute("knowledge.type", str(knowledge_type))
+            if project_id is not None:
+                span.set_attribute("knowledge.project_id", str(project_id))
 
             if not content or not content.strip():
-                logger.info("lightrag_ingest_empty", source_path=source_path)
+                logger.info(
+                    "lightrag_ingest_empty",
+                    source_path=source_path,
+                    project_id=str(project_id) if project_id is not None else None,
+                )
                 raise ValueError("content is empty or whitespace")
 
-            # MET-401: auto-stamp ingest with the active project_id from
-            # the MCP call context (MET-387) so subsequent searches can
-            # scope correctly. Caller-supplied metadata wins — passing
-            # ``project_id`` explicitly overrides the ambient context.
-            from mcp_core.context import current_context
-
-            ctx_project_id = current_context().project_id
+            # MET-401: stamp project_id into the chunk metadata so
+            # `search(project_id=...)` can scope correctly. Explicit
+            # argument always wins over any pre-existing metadata key.
             metadata = dict(metadata or {})
-            if ctx_project_id is not None and "project_id" not in metadata:
-                metadata["project_id"] = str(ctx_project_id)
+            if project_id is not None:
+                metadata["project_id"] = str(project_id)
 
             chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
             if not chunks:
@@ -421,6 +433,7 @@ class LightRAGKnowledgeService:
                 source_path=source_path,
                 chunks=len(chunks),
                 knowledge_type=str(knowledge_type),
+                project_id=str(project_id) if project_id is not None else None,
             )
             return IngestResult(
                 entry_ids=entry_ids,
@@ -434,6 +447,7 @@ class LightRAGKnowledgeService:
         top_k: int = 5,
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> list[SearchHit]:
         """Pure vector search.
 
@@ -445,23 +459,31 @@ class LightRAGKnowledgeService:
         ``1 - distance`` similarity, since LightRAG's PG ``chunks`` SQL
         template drops the score column. For NanoVectorDB we call
         ``chunks_vdb.query`` and read ``distance`` directly.
+
+        ``project_id`` (MET-401) scopes the search to chunks ingested
+        with that ``project_id`` stamped into their metadata. When
+        ``project_id is None`` we fall back to the documented
+        default-tenant behaviour: only chunks whose
+        ``metadata.project_id == "default"`` are returned. This is the
+        safer default than "search every project" — leaking project A's
+        docs into an unscoped search would defeat the whole point of
+        the isolation contract. Cross-project admin queries are an
+        explicit out-of-band concern (the MCP adapter does not expose
+        a way to bypass scoping).
         """
         await self._ensure_initialized()
         with tracer.start_as_current_span("lightrag.search") as span:
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
 
-            # MET-401: auto-scope search to the active project_id from
-            # the MCP call context (MET-387). Caller-supplied filters
-            # win — passing ``project_id`` explicitly overrides the
-            # ambient context (intentional escape hatch for cross-project
-            # admin queries).
-            from mcp_core.context import current_context
-
-            ctx_project_id = current_context().project_id
-            if ctx_project_id is not None:
-                filters = dict(filters or {})
-                filters.setdefault("project_id", str(ctx_project_id))
+            # MET-401: resolve the effective project scope.
+            # - explicit ``project_id`` argument always wins
+            # - otherwise scope to the "default" tenant for safety
+            #   (do NOT silently search across all projects)
+            scope_project_id: str = str(project_id) if project_id is not None else "default"
+            span.set_attribute("knowledge.project_id", scope_project_id)
+            filters = dict(filters or {})
+            filters.setdefault("project_id", scope_project_id)
 
             chunks_vdb = getattr(self._rag, "chunks_vdb", None)
             if chunks_vdb is None:
@@ -469,7 +491,9 @@ class LightRAGKnowledgeService:
             fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
 
             if self._cfg.postgres_dsn:
-                raw_chunks = await self._search_pg(chunks_vdb, query, fetch_k)
+                raw_chunks = await self._search_pg(
+                    chunks_vdb, query, fetch_k, project_scope=scope_project_id
+                )
             else:
                 raw_chunks = await chunks_vdb.query(query, top_k=fetch_k)
 
@@ -487,15 +511,36 @@ class LightRAGKnowledgeService:
             hits.sort(key=lambda h: h.similarity_score, reverse=True)
             hits = hits[:top_k]
             span.set_attribute("knowledge.result_count", len(hits))
+            logger.info(
+                "lightrag_search",
+                query_length=len(query),
+                top_k=top_k,
+                result_count=len(hits),
+                project_id=scope_project_id,
+            )
             return hits
 
-    async def _search_pg(self, chunks_vdb: Any, query: str, top_k: int) -> list[dict[str, Any]]:
+    async def _search_pg(
+        self,
+        chunks_vdb: Any,
+        query: str,
+        top_k: int,
+        *,
+        project_scope: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Cosine query straight to ``lightrag_vdb_chunks`` for real scores.
 
         LightRAG's PG SQL template returns id/content/file_path but not
         the cosine distance. We re-issue the query through asyncpg with
         the distance projected so callers see meaningful similarity
         scores instead of a row of 0.0s.
+
+        When ``project_scope`` is set (MET-401) we push the project_id
+        predicate down into SQL via the ``file_path`` JSON blob (our
+        encoded metadata lives at ``$.x.project_id``). Pushing it into
+        the LIMIT'd query is required for correctness: if we only
+        post-filter, a tenant with many chunks could starve another
+        tenant's results out of the top-k.
         """
         embedder = self._make_embedder()
         emb = await embedder([query])
@@ -504,12 +549,25 @@ class LightRAGKnowledgeService:
         table = getattr(chunks_vdb, "table_name", "lightrag_vdb_chunks")
         workspace = getattr(chunks_vdb, "workspace", self._cfg.namespace_prefix)
         threshold = 1 - getattr(chunks_vdb, "cosine_better_than_threshold", 0.0)
+
+        params: list[Any] = [workspace, embedding_str, threshold, top_k]
+        project_clause = ""
+        if project_scope is not None:
+            params.append(project_scope)
+            # ``file_path`` is plain text but always carries our JSON
+            # metadata blob (see ``_encode_meta``). Cast on read so the
+            # filter runs without requiring a schema migration.
+            project_clause = (
+                "  AND COALESCE((c.file_path::jsonb->'x'->>'project_id'), 'default') = $5\n"
+            )
+
         sql = (
             f"SELECT c.id, c.content, c.file_path, "
             f"       1 - (c.content_vector <=> $2::vector) AS similarity "
             f"FROM {table} c "
             f"WHERE c.workspace = $1 "
             f"  AND c.content_vector <=> $2::vector < $3 "
+            f"{project_clause}"
             f"ORDER BY c.content_vector <=> $2::vector "
             f"LIMIT $4;"
         )
@@ -519,7 +577,7 @@ class LightRAGKnowledgeService:
         assert self._cfg.postgres_dsn is not None
         conn = await asyncpg.connect(self._cfg.postgres_dsn)
         try:
-            rows = await conn.fetch(sql, workspace, embedding_str, threshold, top_k)
+            rows = await conn.fetch(sql, *params)
         finally:
             await conn.close()
         return [dict(row) for row in rows]
@@ -761,6 +819,15 @@ def _matches_filters(hit: SearchHit, filters: dict[str, Any]) -> bool:
                 return False
         elif key == "source_path":
             if hit.source_path != expected:
+                return False
+        elif key == "project_id":
+            # MET-401: legacy chunks ingested before project isolation
+            # have no project_id stamped — treat them as the "default"
+            # tenant so an unscoped (project_id is None -> "default")
+            # query still returns them. Mirrors the SQL COALESCE in
+            # ``_search_pg``.
+            actual = hit.metadata.get("project_id", "default")
+            if str(actual) != str(expected):
                 return False
         else:
             actual = hit.metadata.get(key)

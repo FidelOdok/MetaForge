@@ -55,9 +55,16 @@ class _FakeKnowledgeService:
         top_k: int = 5,
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> list[SearchHit]:
         self.calls.append(
-            {"query": query, "top_k": top_k, "knowledge_type": knowledge_type, "filters": filters}
+            {
+                "query": query,
+                "top_k": top_k,
+                "knowledge_type": knowledge_type,
+                "filters": filters,
+                "project_id": project_id,
+            }
         )
         if self.fail:
             raise RuntimeError("simulated knowledge failure")
