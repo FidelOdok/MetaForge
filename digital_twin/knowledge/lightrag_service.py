@@ -85,6 +85,55 @@ class LightRAGConfig:
 
 
 # ---------------------------------------------------------------------------
+# PDF detection + extraction (MET-399)
+# ---------------------------------------------------------------------------
+
+
+# CLI ``cli/forge_cli/ingest.py:_read_file_content`` ships PDFs as a
+# latin-1-decoded string so the bytes survive a JSON round-trip. The
+# magic bytes ``%PDF-`` are pure ASCII, so they survive that round-trip
+# unchanged — letting us sniff PDFs at this layer without a side-channel
+# content-type field.
+_PDF_MAGIC = "%PDF-"
+
+
+def _looks_like_pdf(content: str) -> bool:
+    """Return True when ``content`` is a latin-1-decoded PDF payload."""
+    return content.startswith(_PDF_MAGIC)
+
+
+def _extract_pdf_text(pdf_bytes: bytes) -> tuple[str, int]:
+    """Extract text from PDF bytes via pdfplumber, returning (text, pages).
+
+    Each page is rendered as a ``## Page N`` H2 section so the existing
+    heading-aware chunker can split on page boundaries and bake the
+    page label into the chunk's ``heading`` field. The format matches
+    ``scripts/datasheets/fetch_and_extract.py`` so the offline fixture
+    pipeline and the live ingest path produce identical chunk shapes.
+
+    Long-term home: ``raganything`` (declared in the ``[knowledge]``
+    extra) is the spec'd PDF/multimodal parser. We use pdfplumber here
+    because it's already pulled in via ``[dev]`` (and is a transitive
+    of raganything via pdfminer.six). When raganything's container
+    integration lands, this function moves there and the ingest branch
+    below collapses to a single ``raganything.parse()`` call.
+    """
+    import io
+
+    import pdfplumber
+
+    pages: list[str] = []
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for i, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text() or ""
+            # Match scripts/datasheets/fetch_and_extract.py exactly so a
+            # PDF ingested live and one extracted offline produce the
+            # same chunk shapes downstream.
+            pages.append(f"\n\n## Page {i}\n\n{text}\n")
+    return "".join(pages), len(pages)
+
+
+# ---------------------------------------------------------------------------
 # Heading-aware markdown chunking
 # ---------------------------------------------------------------------------
 
@@ -397,6 +446,25 @@ class LightRAGKnowledgeService:
             metadata = dict(metadata or {})
             if project_id is not None:
                 metadata["project_id"] = str(project_id)
+
+            # MET-399: detect PDF payloads (latin-1-decoded bytes whose
+            # magic bytes survive the round-trip) and parse them through
+            # pdfplumber before chunking. The result is markdown-shaped
+            # text with ``## Page N`` H2 sections so the existing
+            # heading-aware chunker handles it identically to a normal
+            # markdown document. raganything is the long-term home —
+            # see ``_extract_pdf_text``.
+            if _looks_like_pdf(content):
+                pdf_bytes = content.encode("latin-1")
+                extracted_text, page_count = _extract_pdf_text(pdf_bytes)
+                span.set_attribute("knowledge.pdf_pages", page_count)
+                logger.info(
+                    "pdf_extracted",
+                    source_path=source_path,
+                    pages=page_count,
+                    total_chars=len(extracted_text),
+                )
+                content = extracted_text
 
             chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
             if not chunks:

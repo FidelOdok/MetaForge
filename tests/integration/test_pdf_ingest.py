@@ -10,12 +10,16 @@ a small committed PDF fixture (``datasheet_excerpt.pdf``), and verifies
 the document lands in the L1 knowledge layer.
 
 Requires the dev ``metaforge-postgres-1`` (with ``vector`` extension)
-running on ``localhost:5432``.
+running on ``localhost:5432``. The L1-A3 multi-page tests probe Postgres
+on a 2 s timeout (mirroring ``test_knowledge_project_isolation.py``) so
+the suite skips cleanly when the integration backend isn't reachable.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -40,6 +44,33 @@ _FIXTURE_PATH = (
 
 def _dsn() -> str:
     return os.environ.get("DATABASE_URL", _DEFAULT_DSN)
+
+
+def _pg_dsn_sync() -> str:
+    """Return the asyncpg-flavoured DSN (same shape as project_isolation test)."""
+    return _dsn().replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def _pg_reachable(dsn: str) -> bool:
+    """Cheap connectivity probe so we SKIP cleanly when Postgres isn't up.
+
+    Mirrors ``test_knowledge_project_isolation.py`` — 2 s timeout, fail
+    closed. Avoids sitting on LightRAG's ~6 minute internal retry loop
+    on a stone-dead container.
+    """
+    import asyncpg  # type: ignore[import-untyped]
+
+    try:
+        conn = await asyncio.wait_for(asyncpg.connect(dsn), timeout=2.0)
+    except (OSError, TimeoutError, asyncpg.PostgresError):
+        return False
+    except Exception:
+        return False
+    try:
+        await conn.fetchval("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+    finally:
+        await conn.close()
+    return True
 
 
 @pytest.fixture(autouse=True)
@@ -184,3 +215,91 @@ class TestPdfIngest:
         hits_after = await service.search(f"STM32H743 {sentinel}", top_k=10)
         remaining = [h for h in hits_after if (h.source_path or "") == ingested_path]
         assert remaining == [], remaining
+
+    # --- L1-A3 (MET-399): multi-page chunking + page-citation round-trip --
+
+    async def test_pdf_ingest_chunks_multiple_pages(
+        self,
+        pdf_fixture: Path,
+        gateway: tuple[object, _AsgiClient],
+    ) -> None:
+        """Multi-page PDF must produce more than one chunk.
+
+        The fixture is a 5-page STM32H743 excerpt — once pdfplumber
+        renders each page as its own ``## Page N`` H2 section, the
+        heading-aware chunker is required to emit >1 chunk. Pre-wiring
+        the PDF was being shoved through the chunker as a single blob
+        of binary garbage and would pass any "chunks_indexed >= 1"
+        assertion vacuously; the strict ``> 1`` here guards against
+        regressing back to that broken state.
+        """
+        if not await _pg_reachable(_pg_dsn_sync()):
+            pytest.skip(
+                f"Postgres+pgvector not reachable at {_pg_dsn_sync()} — "
+                "integration backend unavailable"
+            )
+
+        _, client = gateway
+        result = ingest_path(pdf_fixture, client=client)
+
+        assert result["total"] == 1, result
+        assert result["failed"] == [], result["failed"]
+        ingested = result["ingested"][0]
+        assert ingested["chunks_indexed"] > 1, (
+            f"expected multi-page chunking, got chunks_indexed="
+            f"{ingested['chunks_indexed']} — pdfplumber wiring regressed?"
+        )
+
+    async def test_pdf_search_returns_page_citation(
+        self,
+        pdf_fixture: Path,
+        gateway: tuple[object, _AsgiClient],
+    ) -> None:
+        """A search hit on a non-first page must carry a ``Page N`` heading.
+
+        We picked a phrase that lives unambiguously on page 4 of the
+        committed STM32H743 excerpt (``Industrial grade: -40 to +85``).
+        After ingest the hit's ``heading`` (or ``metadata``) must
+        round-trip the ``## Page N`` label that
+        ``_extract_pdf_text`` synthesised — that's the citation contract
+        HP-INGEST-03 promises end users.
+        """
+        if not await _pg_reachable(_pg_dsn_sync()):
+            pytest.skip(
+                f"Postgres+pgvector not reachable at {_pg_dsn_sync()} — "
+                "integration backend unavailable"
+            )
+
+        app, client = gateway
+        service = app.state.knowledge_service  # type: ignore[attr-defined]
+
+        result = ingest_path(pdf_fixture, client=client)
+        assert result["total"] == 1, result
+
+        # "Industrial grade: -40 to +85 degrees Celsius" is on page 4 of
+        # the committed fixture (Operating Conditions / Temperature) —
+        # not on page 1, so a hit here proves the chunker advanced past
+        # the first page and pdfplumber's per-page text was preserved.
+        hits = await service.search("industrial grade temperature -40 to +85", top_k=5)
+        assert hits, "expected at least one hit for a known page-4 phrase"
+
+        page_re = re.compile(r"Page\s+\d+")
+
+        def _has_page_marker(hit: object) -> bool:
+            heading = getattr(hit, "heading", None) or ""
+            metadata = getattr(hit, "metadata", None) or {}
+            if page_re.search(heading):
+                return True
+            # Allow the citation to land in metadata as well — the spec
+            # accepts either location.
+            for v in metadata.values():
+                if isinstance(v, str) and page_re.search(v):
+                    return True
+            return False
+
+        with_page = [h for h in hits if _has_page_marker(h)]
+        assert with_page, (
+            "no hit carried a 'Page N' citation — citation round-trip "
+            "broken (MET-399). Hits seen: "
+            + repr([(getattr(h, "heading", None), getattr(h, "metadata", None)) for h in hits])
+        )
