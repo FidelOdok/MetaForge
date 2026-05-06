@@ -1,0 +1,47 @@
+datasheets:
+- mpn: RP2040
+  vendor: Raspberry Pi
+  family: MCU
+  source_url: https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf
+  pdf_sha256: be56fbb75ba0ae9e26558a73c93ac3e75c2ad4e6878d3b6703de2a76d886ea8c
+  text_path: tests/fixtures/datasheets/rp2040.txt
+  text_sha256: 53eaeec5361bb6f652412f0a0e39465d6194d9fb9b01c3b84c09cf0f06a38027
+  license_note: 'Public technical reference document by Raspberry Pi Ltd. Excerpt
+
+    committed for UAT testing under fair-use technical-reference
+
+    doctrine. PDF is NOT redistributed; fetched on demand from the
+
+    source URL above.
+
+    '
+- mpn: BME280
+  vendor: Bosch Sensortec
+  family: Sensor (T/P/H)
+  source_url: https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme280-ds002.pdf
+  pdf_sha256: a2ccdb449fec94380742fe8eec851a11d9bd4142252d332b34682b4deecd7d89
+  text_path: tests/fixtures/datasheets/bme280.txt
+  text_sha256: 2b754591896cf9ef8df8aa190d5f83d7faf4ace1c981615e3babe73c6507c9d0
+  license_note: 'Public datasheet by Bosch Sensortec GmbH. Excerpt committed for
+
+    UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
+- mpn: TPS62840
+  vendor: Texas Instruments
+  family: Power (low-Iq buck)
+  source_url: https://www.ti.com/lit/ds/symlink/tps62840.pdf
+  pdf_sha256: b715ae80beb8f08b5c4a417537c5f52e01ad0a52f3791c240146b72fec5f3214
+  text_path: tests/fixtures/datasheets/tps62840.txt
+  text_sha256: 90edcd035de3d61d4931023ac17b3022ee0a94c9e633c5fd079a2f30bcc5f3d2
+  license_note: 'Public datasheet by Texas Instruments Incorporated. Excerpt
+
+    committed for UAT testing under fair-use technical-reference
+
+    doctrine. PDF is NOT redistributed; fetched on demand from the
+
+    source URL above.
+
+    '

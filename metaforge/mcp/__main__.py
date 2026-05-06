@@ -179,6 +179,10 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
             if not raw:
                 continue
             response = await server.handle_request(raw)
+            # JSON-RPC notifications return an empty body — writing a
+            # blank line breaks the client's JSON line framing.
+            if not response:
+                continue
             sys.stdout.write(response + "\n")
             sys.stdout.flush()
     except asyncio.CancelledError:
@@ -263,6 +267,10 @@ def build_http_app(
         ctx = context_from_headers(dict(request.headers))
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
+        # JSON-RPC notifications produce no body — return 204 so the
+        # client doesn't try to json-parse an empty string.
+        if not response:
+            return JSONResponse(content=None, status_code=204)
         return JSONResponse(json.loads(response))
 
     if enable_sse:

@@ -1,0 +1,80 @@
+mpn: RP2040
+vendor: Raspberry Pi
+family: MCU
+source_url: https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf
+fixture_text: tests/fixtures/datasheets/rp2040.txt
+license_note: |
+  Public technical reference document by Raspberry Pi Ltd. Excerpt
+  committed for UAT testing under fair-use technical-reference
+  doctrine. Not redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-RP2040-PWR-001
+    category: power
+    question: "What is the nominal core supply voltage (DVDD) of the RP2040?"
+    expected_substring: "1.1V"
+    expected_section: "Pin Descriptions / Power Supplies"
+    notes: "DVDD nominal voltage."
+
+  - id: KB-DS-RP2040-PWR-002
+    category: power
+    question: "What input range is supported by the RP2040 internal voltage regulator (VREG_VIN)?"
+    expected_substring: "1.8V to 3.3V"
+    expected_section: "Pin Descriptions / Power Supplies"
+    notes: ""
+
+  - id: KB-DS-RP2040-PERF-001
+    category: performance
+    question: "What is the maximum CPU clock frequency of the RP2040?"
+    expected_substring: "133MHz"
+    expected_section: "About / Architecture"
+    notes: "Higher overclock at 1.15V is documented separately (200MHz)."
+
+  - id: KB-DS-RP2040-PERF-002
+    category: performance
+    question: "How many CPU cores does the RP2040 have, and which architecture?"
+    expected_substring: "Dual ARM Cortex-M0+"
+    expected_section: "Features"
+    notes: ""
+
+  - id: KB-DS-RP2040-PERF-003
+    category: performance
+    question: "What ADC does the RP2040 include?"
+    expected_substring: "12-bit conversion"
+    expected_section: "Features / ADC"
+    notes: "4-channel SAR ADC, 500 ksps, 12-bit."
+
+  - id: KB-DS-RP2040-PERF-004
+    category: performance
+    question: "How many PIO state machines does the RP2040 have?"
+    expected_substring: "8 PIO state machines"
+    expected_section: "Features / PIO"
+    notes: "Two PIO blocks each with 4 state machines."
+
+  - id: KB-DS-RP2040-PERF-005
+    category: performance
+    question: "How many GPIO pins are available on the RP2040?"
+    expected_substring: "30 GPIO pins"
+    expected_section: "Features"
+    notes: "Of which 4 can be analog inputs."
+
+  - id: KB-DS-RP2040-MEM-001
+    category: memory
+    question: "How much on-chip SRAM does the RP2040 have?"
+    expected_substring: "264kB"
+    expected_section: "Features / Memory"
+    notes: "Six independent banks."
+
+  - id: KB-DS-RP2040-PKG-001
+    category: package
+    question: "What package is the RP2040 supplied in?"
+    expected_substring: "QFN-56"
+    expected_section: "Pinout / Package"
+    notes: "7×7 mm QFN-56 with reduced ePad."
+
+  - id: KB-DS-RP2040-THERM-001
+    category: thermal
+    question: "What minimum operating temperature is the RP2040 qualified for?"
+    expected_substring: "qualified to -40°C"
+    expected_section: "Errata / Document History"
+    notes: "Originally specified to -20°C; later qualified down to -40°C."

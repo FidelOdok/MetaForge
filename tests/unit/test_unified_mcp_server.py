@@ -172,6 +172,79 @@ class TestProtocolHygiene:
 
 
 # ---------------------------------------------------------------------------
+# Standard MCP protocol surface (initialize / tools/list / tools/call)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpStandardProtocol:
+    """Cover the spec-compliant ``initialize`` / ``tools/*`` surface.
+
+    These are the methods Claude Code and any spec-compliant client
+    speak. ``tool/list`` / ``tool/call`` (singular) are the legacy
+    in-process dialect — both code paths must work.
+    """
+
+    @pytest.mark.asyncio
+    async def test_initialize_returns_handshake(self, server: UnifiedMcpServer) -> None:
+        raw = await server.handle_request(_request("initialize"))
+        body = json.loads(raw)
+        result = body["result"]
+        assert "protocolVersion" in result
+        assert result["serverInfo"]["name"] == "metaforge-mcp"
+        assert "tools" in result["capabilities"]
+
+    @pytest.mark.asyncio
+    async def test_tools_list_returns_spec_shape(self, server: UnifiedMcpServer) -> None:
+        raw = await server.handle_request(_request("tools/list"))
+        body = json.loads(raw)
+        tools = body["result"]["tools"]
+        assert len(tools) == 4
+        # Every entry exposes ``name``; the legacy ``tool_id`` /
+        # ``input_schema`` keys are not leaked.
+        for tool in tools:
+            assert "name" in tool
+            assert "tool_id" not in tool
+            assert "input_schema" not in tool
+
+    @pytest.mark.asyncio
+    async def test_tools_call_forwards_arguments(self, server: UnifiedMcpServer) -> None:
+        """Regression: ``tools/call`` must forward ``arguments`` to the
+        underlying handler. The earlier translation passed them under
+        ``parameters``, which the handler ignored — so every spec-
+        compliant client call (Claude Code, etc.) saw empty args.
+        """
+        raw = await server.handle_request(
+            _request(
+                "tools/call",
+                {"name": "alpha.add", "arguments": {"a": 3, "b": 4}},
+            )
+        )
+        body = json.loads(raw)
+        assert "error" not in body, body
+        assert body["result"]["isError"] is False
+        # Adapter result is JSON-serialised under content[0].text.
+        payload = json.loads(body["result"]["content"][0]["text"])
+        assert payload["data"] == {"sum": 7}
+
+    @pytest.mark.asyncio
+    async def test_tools_call_unknown_tool_propagates_error(self, server: UnifiedMcpServer) -> None:
+        raw = await server.handle_request(
+            _request("tools/call", {"name": "gamma.missing", "arguments": {}})
+        )
+        body = json.loads(raw)
+        assert body["error"]["code"] == -32601
+
+    @pytest.mark.asyncio
+    async def test_notification_returns_empty_body(self, server: UnifiedMcpServer) -> None:
+        # JSON-RPC notifications carry no ``id`` and must not produce
+        # a response — replying breaks the client's framing on stdio.
+        raw = await server.handle_request(
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        )
+        assert raw == ""
+
+
+# ---------------------------------------------------------------------------
 # Construction guards
 # ---------------------------------------------------------------------------
 
