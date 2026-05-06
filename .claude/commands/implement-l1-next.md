@@ -221,11 +221,27 @@ The runner (i.e., `/loop /implement-l1-next`) should stop when:
 
 ## Pre-flight (run on every iteration before step 1)
 
-- `git status` clean? If not, abort with: "working tree dirty —
-  resolve before running the loop again."
+- **Working tree clean (except for known-local files).** Run
+  `git status --porcelain` and ignore lines whose path is `.mcp.json`
+  — that file is intentionally allowed to carry machine-local edits
+  (venv-specific Python path, locally-enabled adapters). If any other
+  line remains, abort with: "working tree dirty — resolve before
+  running the loop again." See "Why .mcp.json is excluded" below.
 - Current branch is `main`? If not, abort with: "expected to start
   from main; checked out branch is X."
 - `pytest --collect-only -q` returns 0 errors? If not, abort —
   baseline tests are broken, not safe to add more.
 - `gh auth status` returns OK? If not, abort — can't open PRs without
   the GitHub CLI authenticated.
+
+### Why `.mcp.json` is excluded from the dirty-tree check
+
+`.mcp.json` is the launcher Claude Code uses to start the MetaForge
+MCP server. Engineers commonly need machine-local edits to it — e.g.
+`.venv/bin/python` instead of system `python`, or a different
+`METAFORGE_ADAPTERS` set depending on which adapters are wired
+locally. Those edits should NOT be committed (they would break other
+contributors), but they also should NOT block the loop. The right
+long-term fix is to untrack `.mcp.json` and ship a
+`.mcp.json.example` template; until that lands, the pre-flight
+treats `.mcp.json` as if it were untracked.
