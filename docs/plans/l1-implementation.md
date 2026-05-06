@@ -106,7 +106,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | ID | Title | MET | Effort | Deps | Status | Branch | PR | Notes |
 |---|---|---|---|---|---|---|---|---|
 | L1-A1 | Project isolation enforcement | MET-401 | M | — | ✅ | feat/met-401-knowledge-project-isolation | [#163](https://github.com/FidelOdok/MetaForge/pull/163) | 13 passed, 2 skipped (no PG); minor: also touched test_context_assembler.py |
-| L1-A2 | Hybrid-search reranker | MET-335 | M | — | ⏳ | — | — | adds bge-reranker-base dep |
+| L1-A2 | Hybrid-search reranker | MET-335 | M | — | ✅ | feat/met-335-knowledge-reranker | [#164](https://github.com/FidelOdok/MetaForge/pull/164) | 20 passed; mypy: 2 pre-existing errors on api_gateway/server.py noted, not introduced |
 | L1-A3 | PDF parser shipped | MET-399 | S | — | ⏳ | — | — | already in raganything; verify wiring |
 | L1-A4 | CSV row-level chunker | MET-340 | M | — | ⏳ | — | — | for BOMs; HP-INGEST-04 |
 | L1-A5 | Workspace separation enforced | MET-346 | M | — | ⏸️ | — | — | Requires human decision (shared vs separate) |
