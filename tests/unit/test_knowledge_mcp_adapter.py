@@ -38,6 +38,7 @@ class _FakeService:
         knowledge_type: KnowledgeType,
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> IngestResult:
         self.ingest_calls.append(
             {
@@ -46,6 +47,7 @@ class _FakeService:
                 "knowledge_type": knowledge_type,
                 "source_work_product_id": source_work_product_id,
                 "metadata": metadata,
+                "project_id": project_id,
             }
         )
         return IngestResult(
@@ -60,6 +62,7 @@ class _FakeService:
         top_k: int = 5,
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> list[SearchHit]:
         self.search_calls.append(
             {
@@ -67,6 +70,7 @@ class _FakeService:
                 "top_k": top_k,
                 "knowledge_type": knowledge_type,
                 "filters": filters,
+                "project_id": project_id,
             }
         )
         return [
@@ -223,3 +227,48 @@ class TestProviderIndependence:
     def test_satisfies_runtime_checkable_service(self, server: KnowledgeServer) -> None:
         """The fake injected into the server still passes the Protocol check."""
         assert isinstance(server.service, KnowledgeService)
+
+
+# ---------------------------------------------------------------------------
+# MET-401: project_id forwarding from MCP call context
+# ---------------------------------------------------------------------------
+
+
+class TestProjectIdForwarding:
+    """The adapter must forward ``current_context().project_id`` to both methods."""
+
+    async def test_search_forwards_project_id_from_context(self, server: KnowledgeServer) -> None:
+        from mcp_core.context import McpCallContext, with_context
+
+        project = UUID("11111111-1111-4111-8111-111111111111")
+        with with_context(McpCallContext(project_id=project)):
+            await server.handle_search({"query": "anything"})
+
+        service = server.service  # type: ignore[attr-defined]
+        assert service.search_calls[-1]["project_id"] == project  # type: ignore[attr-defined]
+
+    async def test_ingest_forwards_project_id_from_context(self, server: KnowledgeServer) -> None:
+        from mcp_core.context import McpCallContext, with_context
+
+        project = UUID("22222222-2222-4222-8222-222222222222")
+        with with_context(McpCallContext(project_id=project)):
+            await server.handle_ingest(
+                {
+                    "content": "body",
+                    "source_path": "/x.md",
+                    "knowledge_type": "session",
+                }
+            )
+
+        service = server.service  # type: ignore[attr-defined]
+        assert service.ingest_calls[-1]["project_id"] == project  # type: ignore[attr-defined]
+
+    async def test_search_forwards_none_when_no_context_project(
+        self, server: KnowledgeServer
+    ) -> None:
+        # Default sentinel context has project_id=None — adapter must
+        # forward that as-is so the service applies its default-tenant
+        # fallback (not silently scope to some random project).
+        await server.handle_search({"query": "anything"})
+        service = server.service  # type: ignore[attr-defined]
+        assert service.search_calls[-1]["project_id"] is None  # type: ignore[attr-defined]

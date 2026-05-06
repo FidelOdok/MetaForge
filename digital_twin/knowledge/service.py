@@ -81,6 +81,7 @@ class KnowledgeService(Protocol):
         knowledge_type: KnowledgeType,
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> IngestResult: ...
 
     async def search(
@@ -89,6 +90,7 @@ class KnowledgeService(Protocol):
         top_k: int = 5,
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
+        project_id: UUID | None = None,
     ) -> list[SearchHit]: ...
 
     async def delete_by_source(self, source_path: str) -> int: ...

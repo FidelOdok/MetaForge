@@ -29,6 +29,7 @@ import structlog
 # L1 contract import — see module docstring for the layer-rule rationale.
 from digital_twin.knowledge.service import IngestResult, KnowledgeService, SearchHit
 from digital_twin.knowledge.types import KnowledgeType
+from mcp_core.context import current_context
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -215,14 +216,21 @@ class KnowledgeServer(McpToolServer):
             kt_raw = arguments.get("knowledge_type")
             knowledge_type = self._coerce_knowledge_type(kt_raw)
             filters = arguments.get("filters") or None
+            # MET-401: forward the active call-context project_id so the
+            # service can scope retrieval. Falls back to "default tenant"
+            # behaviour inside the service when no project is active.
+            project_id = current_context().project_id
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
+            if project_id is not None:
+                span.set_attribute("knowledge.project_id", str(project_id))
 
             hits = await self.service.search(
                 query=query,
                 top_k=top_k,
                 knowledge_type=knowledge_type,
                 filters=filters,
+                project_id=project_id,
             )
             span.set_attribute("knowledge.result_count", len(hits))
             return {"hits": [_hit_to_dict(h) for h in hits]}
@@ -243,9 +251,15 @@ class KnowledgeServer(McpToolServer):
                 )
             wp_id = self._coerce_uuid(arguments.get("source_work_product_id"))
             metadata = arguments.get("metadata") or None
+            # MET-401: stamp the active call-context project_id onto the
+            # ingest so subsequent searches under the same project find
+            # this content (and other projects do not).
+            project_id = current_context().project_id
 
             span.set_attribute("knowledge.source_path", source_path)
             span.set_attribute("knowledge.type", str(knowledge_type))
+            if project_id is not None:
+                span.set_attribute("knowledge.project_id", str(project_id))
 
             result = await self.service.ingest(
                 content=content,
@@ -253,6 +267,7 @@ class KnowledgeServer(McpToolServer):
                 knowledge_type=knowledge_type,
                 source_work_product_id=wp_id,
                 metadata=metadata,
+                project_id=project_id,
             )
             return _ingest_result_to_dict(result)
 
