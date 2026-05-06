@@ -227,9 +227,7 @@ class TestMcpStandardProtocol:
         assert payload["data"] == {"sum": 7}
 
     @pytest.mark.asyncio
-    async def test_tools_call_unknown_tool_propagates_error(
-        self, server: UnifiedMcpServer
-    ) -> None:
+    async def test_tools_call_unknown_tool_propagates_error(self, server: UnifiedMcpServer) -> None:
         raw = await server.handle_request(
             _request("tools/call", {"name": "gamma.missing", "arguments": {}})
         )

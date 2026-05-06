@@ -20,7 +20,7 @@ SCENARIO_PATH = REPO_ROOT / "tests" / "uat" / "scenarios" / "tier1" / "datasheet
 
 ORDER = ["rp2040", "bme280", "tps62840"]
 
-PREAMBLE = '''# Tier-1 — real-datasheet retrieval QA (KB-DS)
+PREAMBLE = """# Tier-1 — real-datasheet retrieval QA (KB-DS)
 
 Validates: MET-346 (ingest), MET-293 (search top_k), MET-335 (citations).
 Tier: 1
@@ -52,9 +52,9 @@ contents in the report — that is a retrieval-ranking signal, not a
 test-harness regression.
 
 ---
-'''
+"""
 
-ACCEPTANCE = '''
+ACCEPTANCE = """
 ---
 
 ## Acceptance
@@ -65,9 +65,9 @@ ACCEPTANCE = '''
   contents in the report so the failure mode (retrieval ranking,
   extraction quality, chunk boundary) is immediately diagnosable.
 - Verdict roll-up updates `docs/uat/kb-test-plan.md` §11.
-'''
+"""
 
-SCENARIO_TEMPLATE = '''
+SCENARIO_TEMPLATE = """
 ---
 
 ## Scenario: {qid} — {mpn} {cat}
@@ -98,7 +98,7 @@ Tier: 1
 - Top-1 hit's `content` contains the literal substring `"{expect}"`.
 - Top-1 hit's `metadata.mpn == "{mpn}"`.
 - Top-1 hit's `heading` is non-empty (heading-aware chunking honoured).
-'''
+"""
 
 
 def main() -> None:

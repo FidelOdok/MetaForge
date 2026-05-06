@@ -258,9 +258,7 @@ class UnifiedMcpServer:
             # the key ``tool_registry.mcp_server.handlers.handle_tool_call``
             # reads. Sending ``parameters`` silently dropped every arg
             # and broke every spec-compliant client (Claude Code etc.).
-            result = await self._tool_call(
-                {"tool_id": tool_name, "arguments": arguments}
-            )
+            result = await self._tool_call({"tool_id": tool_name, "arguments": arguments})
         except (ToolNotFoundError, ToolHandlerError):
             # Re-raise so the outer handler emits a JSON-RPC error
             # envelope. The MCP spec also accepts isError=true content
