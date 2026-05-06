@@ -271,6 +271,16 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     pgvector_active = False
 
     # ----- New L1 service (LightRAG) ---------------------------------
+    # MET-335: hybrid-search reranker is opt-in. Default false because
+    # the BGE cross-encoder model is ~440 MB and few deployments need it
+    # by default — flipping it on is a deliberate ops choice.
+    reranker_enabled = os.environ.get("KNOWLEDGE_RERANKER_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    app.state.knowledge_reranker_enabled = reranker_enabled
+
     knowledge_service = None
     if db_url:
         try:
@@ -279,10 +289,14 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 "lightrag",
                 working_dir=os.environ.get("METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"),
                 postgres_dsn=dsn,
+                reranker_enabled=reranker_enabled,
             )
             await knowledge_service.initialize()  # type: ignore[attr-defined]
             pgvector_active = True
-            logger.info("knowledge_service_lightrag_initialized")
+            logger.info(
+                "knowledge_service_lightrag_initialized",
+                reranker_enabled=reranker_enabled,
+            )
         except Exception as exc:
             logger.warning("knowledge_service_lightrag_failed", error=str(exc))
             knowledge_service = None
