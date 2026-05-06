@@ -106,17 +106,25 @@ Validates: MET-335 (reranker integration)
 Tier: 1
 
 ### Given
+- `KNOWLEDGE_RERANKER_ENABLED=true` in the gateway environment so
+  the cross-encoder reranker (`BAAI/bge-reranker-base`) is wired
+  into `LightRAGKnowledgeService.search`. If the env var is unset
+  or `false`, this scenario reports BLOCKED with an environment
+  note (not FAIL) — the reranker is opt-in by design.
 - A corpus where one chunk is technically the most relevant but
   has lower raw cosine score than a noisier near-duplicate.
 
 ### When
-1. Search with reranker disabled, capture top hit.
-2. Search again with reranker enabled, capture top hit.
+1. Call `knowledge.search(query=..., top_k=3, rerank=False)` —
+   capture the top hit. (This is the raw cosine baseline.)
+2. Call `knowledge.search(query=..., top_k=3, rerank=True)` —
+   capture the top hit. (This routes through the cross-encoder.)
 
 ### Then
 - The reranked top hit is judged as relevant or more relevant
   than the raw cosine top hit. (LLM-graded acceptance — Claude
-  assesses the two answers and reports which is on-topic.)
+  assesses the two answers and reports which is on-topic. The
+  judgement is intrinsically subjective; a tie counts as PASS.)
 
 ---
 

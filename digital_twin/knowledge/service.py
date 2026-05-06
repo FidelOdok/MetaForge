@@ -91,6 +91,7 @@ class KnowledgeService(Protocol):
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        rerank: bool = False,
     ) -> list[SearchHit]: ...
 
     async def delete_by_source(self, source_path: str) -> int: ...

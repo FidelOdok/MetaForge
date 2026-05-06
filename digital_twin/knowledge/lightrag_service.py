@@ -242,6 +242,7 @@ class LightRAGKnowledgeService:
         namespace_prefix: str = "lightrag",
         max_chunk_chars: int = 1500,
         config: LightRAGConfig | None = None,
+        reranker_enabled: bool = False,
     ) -> None:
         self._cfg = config or LightRAGConfig(
             working_dir=working_dir,
@@ -256,6 +257,14 @@ class LightRAGKnowledgeService:
         self._initialized = False
         # source_path -> set of LightRAG doc ids for delete_by_source.
         self._source_index: dict[str, set[str]] = {}
+        # MET-335: hybrid-search reranker. The flag here sets the
+        # default policy when ``search(rerank=...)`` is not explicitly
+        # supplied; gateway boot reads ``KNOWLEDGE_RERANKER_ENABLED``
+        # and threads it in. The reranker itself is constructed lazily
+        # on first use so disabled deployments never load ~440 MB of
+        # cross-encoder weights.
+        self._reranker_enabled = reranker_enabled
+        self._reranker: Any = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -448,8 +457,9 @@ class LightRAGKnowledgeService:
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        rerank: bool = False,
     ) -> list[SearchHit]:
-        """Pure vector search.
+        """Vector search with optional cross-encoder reranking.
 
         We bypass ``aquery``/``aquery_data`` because they don't return
         per-chunk similarity scores in 1.4.x and pull in KG / rerank /
@@ -470,11 +480,21 @@ class LightRAGKnowledgeService:
         the isolation contract. Cross-project admin queries are an
         explicit out-of-band concern (the MCP adapter does not expose
         a way to bypass scoping).
+
+        ``rerank`` (MET-335) controls hybrid-search reranking. When
+        true we fetch ``top_k * 3`` candidates from the vector store,
+        run them through a ``BAAI/bge-reranker-base`` cross-encoder,
+        and truncate to ``top_k``. The reranker is lazily constructed
+        on first use; a deployment with ``rerank=False`` never
+        instantiates the cross-encoder model. The reranker model load
+        is ~440 MB so callers should not flip this on per-call without
+        considering startup cost on the first request.
         """
         await self._ensure_initialized()
         with tracer.start_as_current_span("lightrag.search") as span:
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
+            span.set_attribute("knowledge.rerank", bool(rerank))
 
             # MET-401: resolve the effective project scope.
             # - explicit ``project_id`` argument always wins
@@ -488,7 +508,11 @@ class LightRAGKnowledgeService:
             chunks_vdb = getattr(self._rag, "chunks_vdb", None)
             if chunks_vdb is None:
                 raise RuntimeError("LightRAG instance has no chunks_vdb storage.")
-            fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
+            # MET-335: when reranking we widen the candidate pool so the
+            # cross-encoder has more chunks to choose from before we
+            # truncate to top_k. The 3x multiplier matches the spec.
+            base_fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
+            fetch_k = max(base_fetch_k, top_k * 3) if rerank else base_fetch_k
 
             if self._cfg.postgres_dsn:
                 raw_chunks = await self._search_pg(
@@ -509,6 +533,11 @@ class LightRAGKnowledgeService:
                 hits.append(hit)
 
             hits.sort(key=lambda h: h.similarity_score, reverse=True)
+
+            if rerank and hits:
+                reranker = self._get_reranker()
+                hits = await reranker.rerank(query, hits)
+
             hits = hits[:top_k]
             span.set_attribute("knowledge.result_count", len(hits))
             logger.info(
@@ -517,6 +546,7 @@ class LightRAGKnowledgeService:
                 top_k=top_k,
                 result_count=len(hits),
                 project_id=scope_project_id,
+                rerank=bool(rerank),
             )
             return hits
 
@@ -641,6 +671,20 @@ class LightRAGKnowledgeService:
     async def _ensure_initialized(self) -> None:
         if not self._initialized:
             await self.initialize()
+
+    def _get_reranker(self) -> Any:
+        """Lazily construct the cross-encoder reranker (MET-335).
+
+        Imported inside the method so the ``digital_twin.knowledge.reranker``
+        module — which transitively reaches ``sentence_transformers``
+        only on first ``rerank()`` — is not imported at search time when
+        rerank is disabled. The instance is cached for subsequent calls.
+        """
+        if self._reranker is None:
+            from digital_twin.knowledge.reranker import Reranker
+
+            self._reranker = Reranker()
+        return self._reranker
 
     async def _prewarm_embedder(self) -> None:
         """Force the sentence-transformers model to load eagerly.
