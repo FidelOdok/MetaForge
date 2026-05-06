@@ -60,6 +60,11 @@ dev = [
     # ``[gateway]`` extras.
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.20",
+    # Used by scripts/datasheets/fetch_and_extract.py to extract text
+    # from real public datasheet PDFs into committed text fixtures
+    # under tests/fixtures/datasheets/. Decoupled from the production
+    # PDF ingest path (MET-399) — fixture prep only.
+    "pdfplumber>=0.10",
 ]
 temporal = [
     "temporalio>=1.5",

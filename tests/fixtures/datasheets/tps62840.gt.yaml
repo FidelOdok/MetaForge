@@ -1,0 +1,80 @@
+mpn: TPS62840
+vendor: Texas Instruments
+family: Power (low-Iq buck)
+source_url: https://www.ti.com/lit/ds/symlink/tps62840.pdf
+fixture_text: tests/fixtures/datasheets/tps62840.txt
+license_note: |
+  Public datasheet by Texas Instruments Incorporated. Excerpt
+  committed for UAT testing under fair-use technical-reference
+  doctrine. Not redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-TPS62840-PWR-001
+    category: power
+    question: "What is the typical operating quiescent current of the TPS62840?"
+    expected_substring: "60 nA"
+    expected_section: "Description / Features"
+    notes: "Cited as a headline feature of the part."
+
+  - id: KB-DS-TPS62840-PWR-002
+    category: power
+    question: "What is the input voltage range of the TPS62840?"
+    expected_substring: "1.8 V to 6.5 V"
+    expected_section: "Description"
+    notes: ""
+
+  - id: KB-DS-TPS62840-PWR-003
+    category: power
+    question: "What is the maximum output current the TPS62840 can deliver?"
+    expected_substring: "750 mA"
+    expected_section: "Description"
+    notes: ""
+
+  - id: KB-DS-TPS62840-PERF-001
+    category: performance
+    question: "What is the nominal switching frequency of the TPS62840?"
+    expected_substring: "1.8 MHz"
+    expected_section: "Detailed Description"
+    notes: ""
+
+  - id: KB-DS-TPS62840-THERM-001
+    category: thermal
+    question: "What is the maximum operating junction temperature TJ for the TPS62840?"
+    expected_substring: "125 °C"
+    expected_section: "Recommended Operating Conditions"
+    notes: "pdfplumber merged 'Operatingjunctiontemperaturerange'; the bare value is unambiguous."
+
+  - id: KB-DS-TPS62840-REL-001
+    category: reliability
+    question: "What is the ESD HBM rating of the TPS62840?"
+    expected_substring: "±2000"
+    expected_section: "ESD Ratings"
+    notes: "Stated as ±2000 V (HBM, per ANSI/ESDA/JEDEC JS-001)."
+
+  - id: KB-DS-TPS62840-REL-002
+    category: reliability
+    question: "What is the ESD CDM rating of the TPS62840?"
+    expected_substring: "±500"
+    expected_section: "ESD Ratings"
+    notes: "Stated as ±500 V (CDM, per JESD22-C101)."
+
+  - id: KB-DS-TPS62840-PKG-001
+    category: package
+    question: "Is the TPS62840 available in a SON-8 package?"
+    expected_substring: "SON-8"
+    expected_section: "Device Information / Mechanical"
+    notes: ""
+
+  - id: KB-DS-TPS62840-APP-001
+    category: application
+    question: "What control architecture does the TPS62840 use?"
+    expected_substring: "DCS-Control"
+    expected_section: "Description"
+    notes: "TI's proprietary DCS-Control topology."
+
+  - id: KB-DS-TPS62840-CMP-001
+    category: compliance
+    question: "Are TPS62840 orderable parts RoHS compliant?"
+    expected_substring: "RoHS"
+    expected_section: "Mechanical, Packaging, and Orderable Information"
+    notes: "Part of the orderable-addendum table."

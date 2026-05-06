@@ -61,6 +61,11 @@ node_modules/
 .lightrag-storage/
 .lightrag-spike-storage/
 
+# Datasheet PDFs cached by scripts/datasheets/fetch_and_extract.py.
+# Extracted text fixtures are committed under tests/fixtures/datasheets/;
+# the binary PDFs are fetched on demand and never go in git.
+.cache/datasheets/
+
 # Ripgrep config
 .ripgreprc
 

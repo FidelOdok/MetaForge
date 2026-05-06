@@ -1,0 +1,80 @@
+mpn: BME280
+vendor: Bosch Sensortec
+family: Sensor (T/P/H)
+source_url: https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme280-ds002.pdf
+fixture_text: tests/fixtures/datasheets/bme280.txt
+license_note: |
+  Public datasheet by Bosch Sensortec GmbH. Excerpt committed for
+  UAT testing under fair-use technical-reference doctrine. Not
+  redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-BME280-PWR-001
+    category: power
+    question: "What is the supply voltage range VDD for the BME280?"
+    expected_substring: "1.71 V to 3.6 V"
+    expected_section: "Features"
+    notes: "VDD is the main sensor supply rail."
+
+  - id: KB-DS-BME280-PWR-002
+    category: power
+    question: "What VDDIO range does the BME280 support for its digital interface?"
+    expected_substring: "1.2 V to 3.6 V"
+    expected_section: "Features"
+    notes: ""
+
+  - id: KB-DS-BME280-PWR-003
+    category: power
+    question: "What is the BME280's current consumption in sleep mode?"
+    expected_substring: "0.1 µA"
+    expected_section: "Features / Power Consumption"
+    notes: ""
+
+  - id: KB-DS-BME280-PERF-001
+    category: performance
+    question: "What is the maximum I²C clock speed supported by the BME280?"
+    expected_substring: "3.4 MHz"
+    expected_section: "Features / Digital Interface"
+    notes: ""
+
+  - id: KB-DS-BME280-PERF-002
+    category: performance
+    question: "What is the maximum SPI clock speed supported by the BME280?"
+    expected_substring: "10 MHz"
+    expected_section: "Features / Digital Interface"
+    notes: "SPI 3- and 4-wire."
+
+  - id: KB-DS-BME280-PERF-003
+    category: performance
+    question: "Does the BME280 support both SPI and I²C interfaces?"
+    expected_substring: "SPI and I²C"
+    expected_section: "General Description"
+    notes: ""
+
+  - id: KB-DS-BME280-THERM-001
+    category: thermal
+    question: "What is the operating temperature range of the BME280?"
+    expected_substring: "Operating range -40"
+    expected_section: "Features"
+    notes: "Quoted from feature bullet: '-40…+85 °C, 0…100 % rel. humidity'."
+
+  - id: KB-DS-BME280-REL-001
+    category: reliability
+    question: "What is the ESD HBM rating of the BME280?"
+    expected_substring: "±2 kV"
+    expected_section: "Electrical Characteristics"
+    notes: ""
+
+  - id: KB-DS-BME280-PKG-001
+    category: package
+    question: "What are the package dimensions of the BME280?"
+    expected_substring: "2.5 mm x 2.5 mm x 0.93 mm"
+    expected_section: "Features"
+    notes: "Metal-lid LGA package."
+
+  - id: KB-DS-BME280-CMP-001
+    category: compliance
+    question: "Is the BME280 RoHS-compliant and halogen-free?"
+    expected_substring: "RoHS compliant, halogen-free, MSL1"
+    expected_section: "Features"
+    notes: ""
