@@ -110,7 +110,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-A3 | PDF parser shipped | MET-399 | S | — | ✅ | feat/met-399-pdf-ingest-wiring | [#165](https://github.com/FidelOdok/MetaForge/pull/165) | wired pdfplumber path; HP-INGEST-03 promoted; 20 passed, 8 skipped (no PG) |
 | L1-A4 | CSV row-level chunker | MET-340 | M | — | ✅ | feat/met-340-csv-row-chunker | [#166](https://github.com/FidelOdok/MetaForge/pull/166) | chunk_csv() + ingest detection; 8 unit tests + 28 passed |
 | L1-A5 | Workspace separation enforced | MET-346 | M | — | ⏸️ | — | — | Requires human decision (shared vs separate) |
-| L1-A6 | Re-ingest after edit retires stale | MET-307 | S | — | ⏳ | — | — | beyond identical-dedup |
+| L1-A6 | Re-ingest after edit retires stale | MET-307 | S | — | ✅ | feat/met-307-supersede-on-edit | [#167](https://github.com/FidelOdok/MetaForge/pull/167) | sha256-based supersede; 28 passed, 11 skipped (no PG) |
 | L1-A7 | Latency SLO instrumentation | MET-401 | S | L1-D2 | ⏳ | — | — | p95 <200ms gate |
 | L1-A8 | `list_sources()` Protocol method | MET-415 | S | — | ⏳ | — | — | unblocks L1-B1, L1-C1, L1-E2 |
 | L1-B1 | `metaforge://knowledge/sources` resource | MET-384 | S | L1-A8 | ⏳ | — | — | resources/list + resources/read |
