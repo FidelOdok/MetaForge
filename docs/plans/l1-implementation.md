@@ -129,7 +129,14 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | ⏳ | — | — | citations + snippet highlight |
 | L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | ⏳ | — | — | Sigma.js, multi-iteration allowed |
 | L1-E5 | Sidebar relabel | new | XS | L1-E2 | ⏳ | — | — | Knowledge → /knowledge; Files → /files |
-| L1-F1 | Author 26 NEW kb-test-plan rows | MET-410 | L | — | ⏳ | — | — | scenarios from §1–§10 |
+| L1-F1 | Author 26 NEW kb-test-plan rows | MET-410 | L | — | 🔧 | — | — | split into F1a..F1g; ✅ when all 7 sub-rows ✅ |
+| L1-F1a | full-capability.md (7 scenarios) | MET-410 | S | — | ✅ | test/met-410-full-capability | [#177](https://github.com/FidelOdok/MetaForge/pull/177) | 7 scenarios; master plan Verdicts flipped for 4 already-implemented rows |
+| L1-F1b | cli-error-paths.md (2 scenarios) | MET-410 | XS | — | ⏳ | — | — | tier1/cli-error-paths.md, KB-CLI-005, KB-CLI-006 |
+| L1-F1c | error-envelope-probe.md extend (7) | MET-410 | S | — | ⏳ | — | — | tier2/error-envelope-probe.md, KB-ING-010..011, KB-ERR-002..003, KB-RES-004, KB-SRC-013..014 |
+| L1-F1d | streaming-progress-probe.md (3) | MET-410 | S | — | ⏳ | — | — | tier2/streaming-progress-probe.md, KB-PRG-001..003 |
+| L1-F1e | observability-knowledge-probe.md (3) | MET-410 | S | — | ⏳ | — | — | tier2/observability-knowledge-probe.md, KB-OBS-002..003, KB-CTX-003 |
+| L1-F1f | event-ingest.md (3) | MET-410 | S | — | ⏳ | — | — | tier1/event-ingest.md, KB-EVT-002..004 |
+| L1-F1g | retrieval.md extend (2) | MET-410 | XS | — | ⏳ | — | — | tier1/retrieval.md extension, KB-SRC-012, KB-CTX-004 |
 | L1-F2 | Real-content corpus expansion | MET-340 | M | — | ⏳ | — | — | 5 more datasheets |
 | L1-F3 | Dual-project isolation integration test | MET-401 | S | L1-A1 | ⏳ | — | — | end-to-end |
 | L1-F4 | Citation round-trip integration test | MET-389 | S | — | ⏳ | — | — | source_path → heading → chunk_index |

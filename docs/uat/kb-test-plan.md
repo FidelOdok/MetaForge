@@ -71,16 +71,16 @@
 | 2 | `knowledge_search` MCP tool | 14 | 10 | 0 | 1 | 3 | 0 | MET-293, MET-335, MET-417 |
 | 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | MET-336, MET-399 |
 | 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | MET-307 |
-| 5 | Resources surface | 4 | 1 | 0 | 0 | 3 | 0 | MET-384 |
+| 5 | Resources surface | 4 | 3 | 0 | 0 | 1 | 0 | MET-384 |
 | 6 | Streaming progress | 3 | 0 | 0 | 0 | 3 | 0 | MET-388 |
-| 7 | Per-call context / isolation | 4 | 1 | 0 | 0 | 3 | 0 | MET-401, MET-387 |
+| 7 | Per-call context / isolation | 4 | 2 | 0 | 0 | 2 | 0 | MET-401, MET-387 |
 | 8 | Error envelope | 3 | 1 | 0 | 0 | 2 | 0 | MET-385 |
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
 | 11 | Real-datasheet retrieval QA | 30 | 0 | 0 | 0 | 30 | 0 | MET-346, MET-293, MET-335 |
-| | **Totals** | **86** | **28** | **0** | **4** | **54** | **0** | |
+| | **Totals** | **86** | **31** | **0** | **4** | **51** | **0** | |
 
-> **Read.** 86 distinct trackable tests. 28 already pass. 54 are
+> **Read.** 86 distinct trackable tests. 31 already pass. 51 are
 > 🔄 NEW (the 24 cross-cutting gap-fills in §1–§10 plus the 30
 > real-datasheet rows in §11 — those have an executable scenario
 > file at `tests/uat/scenarios/tier1/datasheets-real.md` and become
@@ -256,10 +256,11 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 
 ---
 
-### KB-ING-009 — re-ingest after edit retires stale fragments  ✅ COVERED
+### KB-ING-009 — re-ingest after edit retires stale fragments  ✅
 **Validates:** MET-307 (extension)
 **Tier:** 1
-**Status:** ✅ COVERED — `tests/integration/test_reingest_after_edit.py` (L1-A6, MET-307). Hash-based supersede in `LightRAGKnowledgeService.ingest`: identical re-ingest dedups (chunks_indexed=0); edited re-ingest predeletes prior chunks and emits `knowledge_consumer_predelete` with `old_chunk_count`.
+**Existing scenario:** `tier1/full-capability.md` → "KB-ING-009 — re-ingest after edit retires stale fragments" (L1-F1a).
+**Verdict:** ✅ PASS — implementation lives in `tests/integration/test_reingest_after_edit.py` (L1-A6, MET-307). Hash-based supersede in `LightRAGKnowledgeService.ingest`: identical re-ingest dedups (chunks_indexed=0); edited re-ingest predeletes prior chunks and emits `knowledge_consumer_predelete` with `old_chunk_count`.
 
 #### Given
 - Source path `uat://kb/ing/009-edit`.
@@ -674,9 +675,10 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 
 ---
 
-### KB-RES-002 — single-source detail via `sources/{id}`  🔄 NEW
+### KB-RES-002 — single-source detail via `sources/{id}`  ✅
 **Validates:** MET-384
-**Status:** 🔄 NEW.
+**Existing scenario:** `tier1/full-capability.md` → "KB-RES-002 — single-source detail via `sources/{id}`" (L1-F1a).
+**Verdict:** ✅ PASS — `metaforge://knowledge/sources/{id}` URI registered in L1-B1 (MET-384, PR #169); detail handler returns metadata, chunk list, and content preview.
 
 #### When
 1. Ingest at `uat://kb/res/002-detail`.
@@ -689,9 +691,10 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 
 ---
 
-### KB-RES-003 — resources/list advertises knowledge URIs in capabilities  🔄 NEW
+### KB-RES-003 — resources/list advertises knowledge URIs in capabilities  ✅
 **Validates:** MET-384
-**Status:** 🔄 NEW.
+**Existing scenario:** `tier1/full-capability.md` → "KB-RES-003 — `resources/list` advertises knowledge URIs" (L1-F1a).
+**Verdict:** ✅ PASS — `metaforge://knowledge/sources` advertised in `resources/list` (L1-B1, MET-384, PR #169) with non-empty `name` and `description`.
 
 #### When
 1. Call `resources/list` at session start.
@@ -773,10 +776,11 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 
 ---
 
-### KB-CTX-002 — project isolation between ingest and search  🔄 NEW
+### KB-CTX-002 — project isolation between ingest and search  ✅
 **Validates:** MET-401
 **Tier:** 1
-**Status:** 🔄 NEW. Open TODO at `lightrag_service.py:235–276`.
+**Existing scenario:** `tier1/full-capability.md` → "KB-CTX-002 — project isolation between ingest and search" (L1-F1a).
+**Verdict:** ✅ PASS — project-scoped ingest/search wired in L1-A1 (MET-401, PR #163); `current_context().project_id` propagates from adapter through `LightRAGKnowledgeService` to the pgvector tenant filter.
 
 #### Given
 - Two distinct project UUIDs `P_A`, `P_B`.
