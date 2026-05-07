@@ -108,6 +108,42 @@ class IngestDocumentResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class SourceSummaryResponse(BaseModel):
+    """One row from ``GET /knowledge/sources`` — mirrors ``SourceSummary`` (MET-411)."""
+
+    source_path: str = Field(alias="sourcePath")
+    knowledge_type: str | None = Field(default=None, alias="knowledgeType")
+    fragment_count: int = Field(alias="fragmentCount")
+    indexed_at: datetime = Field(alias="indexedAt")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
+
+
+class SourceListResponse(BaseModel):
+    """Envelope for ``GET /knowledge/sources``."""
+
+    sources: list[SourceSummaryResponse]
+    total: int
+
+    model_config = {"populate_by_name": True}
+
+
+class SourceDetailResponse(SourceSummaryResponse):
+    """Per-source detail — adds an empty ``chunks`` list for parity with the MCP resource."""
+
+    chunks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SourceDeleteResponse(BaseModel):
+    """Envelope for ``DELETE /knowledge/sources/{path}``."""
+
+    source_path: str = Field(alias="sourcePath")
+    deleted_chunks: int = Field(alias="deletedChunks")
+
+    model_config = {"populate_by_name": True}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -378,6 +414,134 @@ async def ingest_knowledge(
             backend="knowledge_store",
         )
         return IngestResponse(entryId=stored.id, embedded=embedded)
+
+
+def _summary_to_response(summary: Any) -> SourceSummaryResponse:
+    """Project a ``SourceSummary`` dataclass onto the wire model.
+
+    ``knowledge_type`` may be a ``KnowledgeType`` enum, a string, or
+    ``None`` — coerce to the bare string form so JSON consumers don't
+    have to branch.
+    """
+    kt = summary.knowledge_type
+    if kt is None:
+        kt_str: str | None = None
+    elif isinstance(kt, KnowledgeType):
+        kt_str = str(kt)
+    else:
+        kt_str = str(kt)
+    return SourceSummaryResponse(
+        sourcePath=summary.source_path,
+        knowledgeType=kt_str,
+        fragmentCount=summary.fragment_count,
+        indexedAt=summary.indexed_at,
+        metadata=dict(summary.metadata or {}),
+    )
+
+
+@router.get("/sources", response_model=SourceListResponse)
+async def list_knowledge_sources(
+    request: Request,
+    knowledge_type: KnowledgeType | None = Query(
+        default=None, alias="knowledgeType", description="Filter by knowledge type"
+    ),
+    project_id: UUID | None = Query(
+        default=None, alias="projectId", description="Filter by project UUID"
+    ),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max sources to return"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+) -> SourceListResponse:
+    """List ingested knowledge sources via ``KnowledgeService.list_sources()``.
+
+    Backs the ``forge sources list`` CLI (MET-411). Mirrors the schema
+    surfaced by the ``metaforge://knowledge/sources`` MCP resource.
+    """
+    with tracer.start_as_current_span("knowledge_api.list_sources") as span:
+        if knowledge_type is not None:
+            span.set_attribute("knowledge.type", str(knowledge_type))
+        if project_id is not None:
+            span.set_attribute("knowledge.project_id", str(project_id))
+        service = _get_knowledge_service(request)
+        summaries = await service.list_sources(
+            project_id=project_id,
+            knowledge_type=knowledge_type,
+            limit=limit,
+            offset=offset,
+        )
+        rows = [_summary_to_response(s) for s in summaries]
+        span.set_attribute("knowledge.result_count", len(rows))
+        logger.info(
+            "knowledge_sources_listed",
+            count=len(rows),
+            knowledge_type=str(knowledge_type) if knowledge_type else None,
+            project_id=str(project_id) if project_id else None,
+        )
+        return SourceListResponse(sources=rows, total=len(rows))
+
+
+@router.get("/sources/{source_path:path}", response_model=SourceDetailResponse)
+async def get_knowledge_source(
+    request: Request,
+    source_path: str,
+    project_id: UUID | None = Query(
+        default=None, alias="projectId", description="Filter by project UUID"
+    ),
+) -> SourceDetailResponse:
+    """Per-source detail — looks up by exact ``source_path`` match.
+
+    No dedicated single-source accessor exists in the ``KnowledgeService``
+    contract, so we list and find — fine for CLI usage where the user
+    has already picked a known path. Returns 404 when the source isn't
+    registered.
+    """
+    with tracer.start_as_current_span("knowledge_api.get_source") as span:
+        span.set_attribute("knowledge.source_path", source_path)
+        service = _get_knowledge_service(request)
+        # Page through up to 1000 sources to find the match. The CLI
+        # workflow targets recently-ingested sources so this is fine
+        # for Phase 1; a dedicated accessor lands separately.
+        summaries = await service.list_sources(project_id=project_id, limit=1000)
+        match = next((s for s in summaries if s.source_path == source_path), None)
+        if match is None:
+            span.set_attribute("knowledge.not_found", True)
+            logger.info("knowledge_source_not_found", source_path=source_path)
+            raise HTTPException(
+                status_code=404,
+                detail=f"No knowledge source registered for {source_path!r}",
+            )
+        base = _summary_to_response(match)
+        return SourceDetailResponse(
+            sourcePath=base.source_path,
+            knowledgeType=base.knowledge_type,
+            fragmentCount=base.fragment_count,
+            indexedAt=base.indexed_at,
+            metadata=base.metadata,
+            chunks=[],
+        )
+
+
+@router.delete("/sources/{source_path:path}", response_model=SourceDeleteResponse)
+async def delete_knowledge_source(
+    request: Request,
+    source_path: str,
+) -> SourceDeleteResponse:
+    """Delete every chunk for a source via ``KnowledgeService.delete_by_source()``.
+
+    Backs the ``forge sources delete`` CLI (MET-411). Returns the
+    chunk count the backend removed; ``0`` when the source was already
+    absent — callers treat that as a no-op rather than an error.
+    """
+    with tracer.start_as_current_span("knowledge_api.delete_source") as span:
+        span.set_attribute("knowledge.source_path", source_path)
+        service = _get_knowledge_service(request)
+        deleted = await service.delete_by_source(source_path)
+        span.set_attribute("knowledge.deleted_chunks", int(deleted))
+        logger.info(
+            "knowledge_source_deleted",
+            source_path=source_path,
+            deleted_chunks=int(deleted),
+        )
+        return SourceDeleteResponse(sourcePath=source_path, deletedChunks=int(deleted))
 
 
 @router.get("/{entry_id}", response_model=KnowledgeEntryResponse)
