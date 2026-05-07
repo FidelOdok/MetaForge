@@ -67,7 +67,7 @@
 
 | # | Capability area | Tests | ✅ | ❌ | ⚠️ | 🔄 | 📅 | Linear |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `knowledge_ingest` MCP tool | 12 | 8 | 0 | 1 | 3 | 0 | MET-346, MET-307 |
+| 1 | `knowledge_ingest` MCP tool | 12 | 9 | 0 | 1 | 2 | 0 | MET-346, MET-307, MET-385 |
 | 2 | `knowledge_search` MCP tool | 14 | 9 | 0 | 1 | 4 | 0 | MET-293, MET-335 |
 | 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | MET-336, MET-399 |
 | 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | MET-307 |
@@ -78,10 +78,10 @@
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
 | 11 | Real-datasheet retrieval QA | 30 | 0 | 0 | 0 | 30 | 0 | MET-346, MET-293, MET-335 |
-| | **Totals** | **86** | **26** | **0** | **4** | **56** | **0** | |
+| | **Totals** | **86** | **27** | **0** | **4** | **55** | **0** | |
 
-> **Read.** 86 distinct trackable tests. 26 already pass. 56 are
-> 🔄 NEW (the 26 cross-cutting gap-fills in §1–§10 plus the 30
+> **Read.** 86 distinct trackable tests. 27 already pass. 55 are
+> 🔄 NEW (the 25 cross-cutting gap-fills in §1–§10 plus the 30
 > real-datasheet rows in §11 — those have an executable scenario
 > file at `tests/uat/scenarios/tier1/datasheets-real.md` and become
 > ✅ PASS the moment the first `/uat-cycle12` run records the
@@ -278,10 +278,10 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 
 ---
 
-### KB-ING-010 — malformed knowledge_type returns MET-385 envelope  🔄 NEW
+### KB-ING-010 — malformed knowledge_type returns MET-385 envelope  ✅ COVERED
 **Validates:** MET-385, MET-307
 **Tier:** 2
-**Status:** 🔄 NEW — author under `tier2/error-envelope-probe.md`.
+**Status:** ✅ COVERED — `tests/unit/test_knowledge_tool_errors.py` (L1-B4, MET-385). The knowledge MCP adapter validates `knowledge_type` against the `KnowledgeType` enum at request-decode time on both `knowledge.ingest` and `knowledge.search`; on mismatch (or empty string) it raises `McpToolError(code=invalid_input, ...)` with `data.field`, `data.value`, and `data.allowed` populated, and the recovery probe (Step 2) confirms the adapter remains responsive after the rejection.
 
 #### Given
 - (none)
