@@ -256,10 +256,10 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 
 ---
 
-### KB-ING-009 — re-ingest after edit retires stale fragments  🔄 NEW
+### KB-ING-009 — re-ingest after edit retires stale fragments  ✅ COVERED
 **Validates:** MET-307 (extension)
 **Tier:** 1
-**Status:** 🔄 NEW — to be authored under `tier1/full-capability.md` as `FC-01`.
+**Status:** ✅ COVERED — `tests/integration/test_reingest_after_edit.py` (L1-A6, MET-307). Hash-based supersede in `LightRAGKnowledgeService.ingest`: identical re-ingest dedups (chunks_indexed=0); edited re-ingest predeletes prior chunks and emits `knowledge_consumer_predelete` with `old_chunk_count`.
 
 #### Given
 - Source path `uat://kb/ing/009-edit`.

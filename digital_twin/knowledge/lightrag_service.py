@@ -232,6 +232,21 @@ def _stable_chunk_id(source_path: str, index: int, text: str) -> str:
     return h.hexdigest()
 
 
+def _hash_content(content: str | bytes) -> str:
+    """SHA-256 hex digest of the raw ingest payload.
+
+    Drives the MET-307 supersede decision: if the engineer edited the
+    file, the hash changes and the prior chunks must be retired before
+    we store new ones. Strings are encoded as UTF-8 (the wire format we
+    take in over JSON-RPC); bytes are hashed as-is so PDFs — which
+    enter as a latin-1-decoded ``str`` containing the raw bytes — get a
+    stable digest regardless of which branch handles them.
+    """
+    if isinstance(content, bytes):
+        return hashlib.sha256(content).hexdigest()
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -328,6 +343,12 @@ class LightRAGKnowledgeService:
         self._initialized = False
         # source_path -> set of LightRAG doc ids for delete_by_source.
         self._source_index: dict[str, set[str]] = {}
+        # MET-307: source_path -> last-stored content_sha256. Used to
+        # short-circuit identical re-ingests in-process and as a
+        # fast-path before falling back to the PG SELECT for the
+        # cross-process case. Persisted copy lives in chunk metadata
+        # under ``metadata.content_sha256``.
+        self._content_sha_index: dict[str, str] = {}
         # MET-335: hybrid-search reranker. The flag here sets the
         # default policy when ``search(rerank=...)`` is not explicitly
         # supplied; gateway boot reads ``KNOWLEDGE_RERANKER_ENABLED``
@@ -469,6 +490,41 @@ class LightRAGKnowledgeService:
             if project_id is not None:
                 metadata["project_id"] = str(project_id)
 
+            # MET-307: hash the raw content so we can detect edits to
+            # the same source_path. Two outcomes:
+            #   * matching prior hash -> identical re-ingest, dedup
+            #     (return chunks_indexed=0) without re-chunking.
+            #   * different hash (and prior chunks exist) -> the
+            #     engineer edited the file: predelete the stale
+            #     fragments, emit ``knowledge_consumer_predelete``, then
+            #     proceed with normal chunking + storage.
+            content_sha256 = _hash_content(content)
+            metadata["content_sha256"] = content_sha256
+            existing_sha = await self._existing_content_sha256(source_path)
+            if existing_sha is not None and existing_sha == content_sha256:
+                logger.info(
+                    "lightrag_ingest_dedup",
+                    source_path=source_path,
+                    content_sha256=content_sha256,
+                    project_id=str(project_id) if project_id is not None else None,
+                )
+                return IngestResult(
+                    entry_ids=[],
+                    chunks_indexed=0,
+                    source_path=source_path,
+                )
+            if existing_sha is not None and existing_sha != content_sha256:
+                old_chunk_count = len(self._source_index.get(source_path, set()))
+                deleted = await self.delete_by_source(source_path)
+                if deleted > old_chunk_count:
+                    old_chunk_count = deleted
+                span.set_attribute("knowledge.supersede", True)
+                logger.info(
+                    "knowledge_consumer_predelete",
+                    source_path=source_path,
+                    old_chunk_count=old_chunk_count,
+                )
+
             # MET-399: detect PDF payloads (latin-1-decoded bytes whose
             # magic bytes survive the round-trip) and parse them through
             # pdfplumber before chunking. The result is markdown-shaped
@@ -541,23 +597,10 @@ class LightRAGKnowledgeService:
             ]
             texts = [c.text for c in chunks]
 
-            # Pre-delete prior chunks indexed under the same source_path
-            # so re-ingest with new content doesn't leave orphans. Also
-            # emits the ``knowledge_consumer_predelete`` event the L1
-            # observability contract (MET-307) promises.
-            existing_ids = self._source_index.get(source_path, set())
-            stale_ids = existing_ids - set(ids)
-            if stale_ids:
-                deleted = await self.delete_by_source(source_path)
-                logger.info(
-                    "knowledge_consumer_predelete",
-                    source_path=source_path,
-                    deleted=deleted,
-                )
-
             await self._rag.ainsert(input=texts, ids=ids, file_paths=file_paths)
 
             self._source_index.setdefault(source_path, set()).update(ids)
+            self._content_sha_index[source_path] = content_sha256
             entry_ids = [_uuid_from_chunk_id(cid) for cid in ids]
             span.set_attribute("knowledge.chunks_indexed", len(chunks))
             logger.info(
@@ -756,8 +799,74 @@ class LightRAGKnowledgeService:
             except Exception as exc:  # pragma: no cover — best effort
                 logger.warning("lightrag_delete_failed", chunk_id=chunk_id, error=str(exc))
         self._source_index.pop(source_path, None)
+        # MET-307: clear the cached content hash so the next ingest
+        # at this source treats it as a fresh insert, not a dedup.
+        self._content_sha_index.pop(source_path, None)
         logger.info("lightrag_deleted_source", source_path=source_path, deleted=deleted)
         return deleted
+
+    async def _existing_content_sha256(self, source_path: str) -> str | None:
+        """Return the stored ``content_sha256`` for ``source_path`` (or None).
+
+        Drives MET-307: identical re-ingests dedup, edited re-ingests
+        supersede. Two lookup tiers:
+
+        1. **In-process cache** (``self._content_sha_index``) — covers
+           the common case of repeat ingests within one gateway
+           lifetime. Fast and avoids a round-trip.
+        2. **Postgres SELECT** — falls back to one row from the
+           ``lightrag_vdb_chunks`` table when PG is configured, so the
+           supersede decision survives gateway restarts. The column we
+           read is ``file_path`` (plain text holding our JSON metadata
+           blob); the hash is at ``$.x.content_sha256``. ``LIMIT 1`` —
+           we only need one chunk's metadata to know the source's
+           current hash.
+
+        Returns ``None`` when no prior entry exists, or when the prior
+        entry pre-dates MET-307 (no ``content_sha256`` stamped).
+        """
+        cached = self._content_sha_index.get(source_path)
+        if cached is not None:
+            return cached
+        if not self._cfg.postgres_dsn:
+            return None
+        chunks_vdb = getattr(self._rag, "chunks_vdb", None)
+        if chunks_vdb is None:
+            return None
+        table = getattr(chunks_vdb, "table_name", "lightrag_vdb_chunks")
+        workspace = getattr(chunks_vdb, "workspace", self._cfg.namespace_prefix)
+        sql = (
+            f"SELECT c.file_path::jsonb->'x'->>'content_sha256' AS sha "
+            f"FROM {table} c "
+            f"WHERE c.workspace = $1 "
+            f"  AND c.file_path::jsonb->>'src' = $2 "
+            f"LIMIT 1;"
+        )
+        try:
+            import asyncpg  # type: ignore[import-untyped]
+
+            assert self._cfg.postgres_dsn is not None
+            conn = await asyncpg.connect(self._cfg.postgres_dsn)
+            try:
+                row = await conn.fetchrow(sql, workspace, source_path)
+            finally:
+                await conn.close()
+        except Exception as exc:  # pragma: no cover — best effort
+            logger.warning(
+                "lightrag_existing_sha_lookup_failed",
+                source_path=source_path,
+                error=str(exc),
+            )
+            return None
+        if row is None:
+            return None
+        sha = row["sha"]
+        if isinstance(sha, str) and sha:
+            # Repopulate the cache so subsequent calls in this process
+            # skip the SELECT.
+            self._content_sha_index[source_path] = sha
+            return sha
+        return None
 
     async def health_check(self) -> dict[str, Any]:
         if not self._initialized:
