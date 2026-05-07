@@ -10,8 +10,30 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
+
+
+class ForgeClientError(Exception):
+    """Raised by ``ForgeClient`` for non-transport errors callers should surface.
+
+    ``status_code`` is set when the underlying HTTP response carried one
+    so handlers can branch on 404 vs 5xx without re-parsing exception
+    text.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class ForgeClientNotFound(ForgeClientError):
+    """Raised when the gateway returns 404 for a lookup-by-id endpoint."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status_code=404)
+
 
 _DEFAULT_GATEWAY_URL = "http://localhost:8000"
 
@@ -189,5 +211,57 @@ class ForgeClient:
         eff_timeout = timeout if timeout is not None else self.timeout
         with httpx.Client(base_url=self.base_url, timeout=eff_timeout) as client:
             resp = client.post(self._url("/knowledge/documents"), json=payload)
+            resp.raise_for_status()
+            return resp.json()
+
+    # ------------------------------------------------------------------
+    # Knowledge sources (MET-411)
+    # ------------------------------------------------------------------
+
+    def list_sources(
+        self,
+        knowledge_type: str | None = None,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List ingested knowledge sources via ``GET /api/v1/knowledge/sources``.
+
+        Returns the raw response envelope ``{"sources": [...], "total": N}``.
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if knowledge_type:
+            params["knowledgeType"] = knowledge_type
+        if project_id:
+            params["projectId"] = project_id
+        with self._client() as client:
+            resp = client.get(self._url("/knowledge/sources"), params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+    def get_source(self, source_path: str) -> dict[str, Any]:
+        """Fetch one source via ``GET /api/v1/knowledge/sources/{path}``.
+
+        Raises ``ForgeClientNotFound`` on 404 so the CLI can surface a
+        clean message instead of a stack trace.
+        """
+        encoded = quote(source_path, safe="")
+        with self._client() as client:
+            resp = client.get(self._url(f"/knowledge/sources/{encoded}"))
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No knowledge source registered for {source_path!r}")
+            resp.raise_for_status()
+            return resp.json()
+
+    def delete_source(self, source_path: str) -> dict[str, Any]:
+        """Delete a source via ``DELETE /api/v1/knowledge/sources/{path}``.
+
+        Returns ``{"sourcePath": ..., "deletedChunks": N}``.
+        """
+        encoded = quote(source_path, safe="")
+        with self._client() as client:
+            resp = client.delete(self._url(f"/knowledge/sources/{encoded}"))
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No knowledge source registered for {source_path!r}")
             resp.raise_for_status()
             return resp.json()

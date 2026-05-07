@@ -22,6 +22,8 @@ from typing import Any
 
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.formatters import format_output
+from cli.forge_cli.sources import handle_sources
+from cli.forge_cli.sources import register_subparser as register_sources_subparser
 
 # ---------------------------------------------------------------------------
 # Argument parser construction
@@ -139,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # -- sources -----------------------------------------------------------
+    register_sources_subparser(subparsers)
+
     return parser
 
 
@@ -229,6 +234,7 @@ _HANDLERS = {
     "approve": handle_approve,
     "reject": handle_reject,
     "ingest": handle_ingest,
+    "sources": handle_sources,
 }
 
 
@@ -253,6 +259,11 @@ def main(argv: list[str] | None = None) -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    # Handlers that print directly to stdout (sources, etc.) return
+    # ``None`` so the dispatcher doesn't double-render their output.
+    if result is None:
+        return
 
     output = format_output(result, fmt=args.output_format)
     print(output)
