@@ -119,7 +119,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-B4 | Malformed knowledge_type → MET-385 envelope | MET-385 | XS | — | ✅ | fix/met-385-knowledge-type-envelope | [#172](https://github.com/FidelOdok/MetaForge/pull/172) | enum validation at adapter layer; 13 tests, 65 passed |
 | L1-B5 | Compound filter semantics pinned | MET-417 | XS | — | ✅ | feat/met-417-compound-filters | [#173](https://github.com/FidelOdok/MetaForge/pull/173) | AND-across-keys equality; str/int/bool/None values; dict/list rejected; 10 tests, 75 passed |
 | L1-C1 | `forge sources list/show/delete` | MET-411 | S | L1-A8, L1-B1 | ✅ | feat/met-411-forge-sources-cli | [#174](https://github.com/FidelOdok/MetaForge/pull/174) | CLI + REST passthrough; 20 new tests, 240 forge/knowledge passing |
-| L1-C2 | CLI error reporting on bad input | MET-411 | XS | — | ⏳ | — | — | KB-CLI-005, KB-CLI-006 |
+| L1-C2 | CLI error reporting on bad input | MET-411 | XS | — | ✅ | fix/met-411-forge-ingest-errors | [#175](https://github.com/FidelOdok/MetaForge/pull/175) | nonexistent/empty/binary/permission paths handled; 8 new tests, 101 passed |
 | L1-C3 | CLI PDF walker integration | MET-399 | XS | L1-A3 | ⏳ | — | — | end-to-end forge ingest *.pdf |
 | L1-D1 | Phase-1 UI shared-workspace alignment | MET-346 | S | — | ⏸️ | — | — | Requires human decision (Ollama/Gemini/separate) |
 | L1-D2 | MET-346 adoption checklist green | MET-346 | S | L1-D1 | ⏳ | — | — | 5 boxes: ingest, graph, vector, hybrid, citation |
