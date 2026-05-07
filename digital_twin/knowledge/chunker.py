@@ -3,10 +3,16 @@
 Splits long text into overlapping chunks suitable for embedding.
 Default configuration uses 512-token chunks with 64-token overlap,
 approximated by whitespace-delimited word counts.
+
+Also exposes :func:`chunk_csv` (MET-340) — a row-level chunker for
+CSV BOMs so each row becomes its own searchable fragment.
 """
 
 from __future__ import annotations
 
+import csv
+import io
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -15,6 +21,108 @@ from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.chunker")
+
+
+@dataclass
+class CsvRowChunk:
+    """One CSV data row, formatted for embedding + retrieval (MET-340).
+
+    Attributes
+    ----------
+    content:
+        The row rendered as ``col=val; col=val; ...`` so the embedding
+        model sees both the column names and the values. Engineers
+        searching for a part number get a hit on the whole row.
+    row_index:
+        Zero-based index of the data row (the header row does not
+        count). ``row_index == 0`` is the first row beneath the header.
+    columns:
+        The row as a ``{column_name: value}`` mapping. Round-trips the
+        row's structure into search results without re-parsing the
+        source CSV.
+    header:
+        The CSV column names in source order. Bundled into every
+        chunk's metadata so retrieval consumers can reconstruct the
+        row layout for context display.
+    """
+
+    content: str
+    row_index: int
+    columns: dict[str, str]
+    header: list[str] = field(default_factory=list)
+
+
+def chunk_csv(content: str, *, header_in_metadata: bool = True) -> list[CsvRowChunk]:
+    """Split a CSV document into one chunk per data row.
+
+    The first row is treated as the header. Each subsequent row becomes
+    a single :class:`CsvRowChunk` whose ``content`` is the row formatted
+    as ``key=value`` pairs joined with ``"; "`` — for example
+    ``"mpn=STM32H723VGT6; package=LQFP100; price=8.50"``. The full
+    column header is preserved on every chunk so retrieval consumers
+    can reconstruct the row's shape.
+
+    Empty rows (all values blank or whitespace-only) are skipped — the
+    spec is "one chunk per real BOM row," and a stray trailing newline
+    would otherwise produce a garbage chunk that polluted search.
+
+    Parameters
+    ----------
+    content:
+        The CSV text. Encoding handling is the caller's responsibility;
+        ``content`` is consumed as-is.
+    header_in_metadata:
+        Reserved switch (default True). The header is always included
+        in :attr:`CsvRowChunk.header`; the flag exists so future
+        consumers can opt out without breaking the call signature.
+    """
+    with tracer.start_as_current_span("chunker.chunk_csv") as span:
+        span.set_attribute("chunker.input_length", len(content))
+        if not content or not content.strip():
+            span.set_attribute("chunker.chunk_count", 0)
+            return []
+
+        reader = csv.DictReader(io.StringIO(content))
+        header = list(reader.fieldnames or [])
+        if not header:
+            span.set_attribute("chunker.chunk_count", 0)
+            return []
+
+        chunks: list[CsvRowChunk] = []
+        data_index = 0
+        for raw_row in reader:
+            # csv.DictReader pads missing trailing columns with None; we
+            # canonicalise to "" so downstream consumers get a stable
+            # ``dict[str, str]`` shape.
+            row = {col: ("" if raw_row.get(col) is None else str(raw_row[col])) for col in header}
+            # Skip rows that are entirely empty/whitespace — DictReader
+            # will happily emit an entry for a trailing blank line.
+            if not any(value.strip() for value in row.values()):
+                continue
+            content_str = "; ".join(f"{col}={row[col]}" for col in header)
+            chunks.append(
+                CsvRowChunk(
+                    content=content_str,
+                    row_index=data_index,
+                    columns=row,
+                    header=list(header) if header_in_metadata else [],
+                )
+            )
+            data_index += 1
+
+        span.set_attribute("chunker.chunk_count", len(chunks))
+        logger.debug(
+            "csv_chunked",
+            row_count=len(chunks),
+            column_count=len(header),
+        )
+        return chunks
+
+
+# Type alias kept light so callers don't need to import the dataclass
+# just to type a list. The real shape lives on :class:`CsvRowChunk`.
+_CsvChunkList = list[CsvRowChunk]
+__all__ = ["TextChunker", "CsvRowChunk", "chunk_csv"]
 
 
 class TextChunker:  # pragma: deprecated

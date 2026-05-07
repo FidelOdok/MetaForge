@@ -1,0 +1,6 @@
+mpn,manufacturer,package,price
+STM32H723VGT6,STMicroelectronics,LQFP100,8.50
+BME280,Bosch Sensortec,LGA-8,3.95
+TPS62840DLCR,Texas Instruments,SOT-563,1.20
+MCP2515-I/SO,Microchip,SOIC-18,2.45
+RP2040,Raspberry Pi,QFN-56,1.00

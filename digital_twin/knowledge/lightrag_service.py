@@ -38,6 +38,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
+from digital_twin.knowledge.chunker import chunk_csv
 from digital_twin.knowledge.service import (
     IngestResult,
     KnowledgeService,
@@ -100,6 +101,27 @@ _PDF_MAGIC = "%PDF-"
 def _looks_like_pdf(content: str) -> bool:
     """Return True when ``content`` is a latin-1-decoded PDF payload."""
     return content.startswith(_PDF_MAGIC)
+
+
+# ---------------------------------------------------------------------------
+# CSV detection (MET-340)
+# ---------------------------------------------------------------------------
+
+
+def _looks_like_csv(source_path: str, metadata: dict[str, Any] | None) -> bool:
+    """Return True when this payload should go through the CSV chunker.
+
+    Two triggers, per spec:
+
+    * ``metadata.content_type == "text/csv"`` — explicit signal from
+      callers that set the MIME type (gateway, tests, future CLI work).
+    * ``source_path`` ends in ``.csv`` (case-insensitive) — the
+      practical primary trigger from today's CLI, which doesn't set
+      ``content_type`` for CSVs (see ``cli/forge_cli/ingest.py:_read_file_content``).
+    """
+    if metadata and metadata.get("content_type") == "text/csv":
+        return True
+    return source_path.lower().endswith(".csv")
 
 
 def _extract_pdf_text(pdf_bytes: bytes) -> tuple[str, int]:
@@ -465,8 +487,41 @@ class LightRAGKnowledgeService:
                     total_chars=len(extracted_text),
                 )
                 content = extracted_text
+                chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
+                per_chunk_extras: list[dict[str, Any]] = [dict(metadata) for _ in chunks]
+            elif _looks_like_csv(source_path, metadata):
+                # MET-340: row-level CSV chunking. Each data row becomes
+                # its own ``_Chunk`` carrying the row's MPN/columns in
+                # ``content`` and the row's structured metadata
+                # (row_index, columns, header) in the per-chunk extra
+                # dict so downstream consumers can hit a BOM by part
+                # number.
+                csv_chunks = chunk_csv(content)
+                total = len(csv_chunks)
+                chunks = [
+                    _Chunk(text=row.content, heading=None, index=row.row_index, total=total)
+                    for row in csv_chunks
+                ]
+                per_chunk_extras = [
+                    {
+                        **metadata,
+                        "row_index": row.row_index,
+                        "columns": row.columns,
+                        "header": row.header,
+                    }
+                    for row in csv_chunks
+                ]
+                span.set_attribute("knowledge.csv_rows", total)
+                logger.info(
+                    "csv_chunked",
+                    source_path=source_path,
+                    rows=total,
+                    columns=len(csv_chunks[0].header) if csv_chunks else 0,
+                )
+            else:
+                chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
+                per_chunk_extras = [dict(metadata) for _ in chunks]
 
-            chunks = _chunk_by_heading(content, self._cfg.max_chunk_chars)
             if not chunks:
                 logger.info("lightrag_ingest_empty", source_path=source_path)
                 raise ValueError("content produced zero chunks after parsing")
@@ -480,9 +535,9 @@ class LightRAGKnowledgeService:
                     heading=c.heading,
                     knowledge_type=knowledge_type,
                     source_work_product_id=source_work_product_id,
-                    extra=metadata,
+                    extra=per_chunk_extras[i],
                 )
-                for c in chunks
+                for i, c in enumerate(chunks)
             ]
             texts = [c.text for c in chunks]
 
