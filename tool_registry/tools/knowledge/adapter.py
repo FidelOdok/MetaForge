@@ -5,6 +5,13 @@ Exposes the L1 knowledge contract as two MCP tools:
 * ``knowledge.search`` — semantic + keyword retrieval
 * ``knowledge.ingest`` — write-through ingestion
 
+…and two MCP resources (MET-384, L1-B1):
+
+* ``metaforge://knowledge/sources`` — ``SourceSummary`` list summary.
+* ``metaforge://knowledge/sources/{id}`` — per-source detail keyed
+  on a URL-encoded ``source_path`` (the natural identifier — there is
+  no separate stable id in this codebase).
+
 The adapter depends only on ``digital_twin.knowledge.service``
 (the framework-agnostic Protocol from MET-346 / ADR-008). It never
 imports LightRAG or any other concrete backend, so swapping the
@@ -13,26 +20,46 @@ change here.
 
 Layer note: ``tool_registry/CLAUDE.md`` normally bars imports from
 ``digital_twin``. Importing the ``KnowledgeService`` Protocol +
-``SearchHit`` / ``IngestResult`` dataclasses is an explicit exception
-because that module is the published L1 contract — any backend the
-tool registry knows how to talk to must satisfy it. No heavy
-``digital_twin`` runtime code is pulled in.
+``SearchHit`` / ``IngestResult`` / ``SourceSummary`` dataclasses is an
+explicit exception because that module is the published L1 contract —
+any backend the tool registry knows how to talk to must satisfy it.
+No heavy ``digital_twin`` runtime code is pulled in.
 """
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from typing import Any
+from urllib.parse import quote, unquote
 from uuid import UUID
 
 import structlog
 
 # L1 contract import — see module docstring for the layer-rule rationale.
-from digital_twin.knowledge.service import IngestResult, KnowledgeService, SearchHit
+from digital_twin.knowledge.service import (
+    IngestResult,
+    KnowledgeService,
+    SearchHit,
+    SourceSummary,
+)
 from digital_twin.knowledge.types import KnowledgeType
 from mcp_core.context import current_context
+from mcp_core.errors import ErrorCode, make_tool_error
 from observability.tracing import get_tracer
-from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+from tool_registry.mcp_server.handlers import (
+    ResourceLimits,
+    ResourceManifestEntry,
+    ResourceNotFoundError,
+    ToolManifest,
+)
 from tool_registry.mcp_server.server import McpToolServer
+
+# Resource URI constants — kept here so a typo can't drift the list URI
+# from the templated URI silently.
+_SOURCES_LIST_URI = "metaforge://knowledge/sources"
+_SOURCES_ITEM_PREFIX = "metaforge://knowledge/sources/"
+_SOURCES_ITEM_TEMPLATE = "metaforge://knowledge/sources/{id}"
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.knowledge.adapter")
@@ -55,6 +82,7 @@ class KnowledgeServer(McpToolServer):
         super().__init__(adapter_id="knowledge", version="0.1.0")
         self._service: KnowledgeService | None = service
         self._register_tools()
+        self._register_resources()
 
     # ------------------------------------------------------------------
     # Late binding
@@ -204,6 +232,170 @@ class KnowledgeServer(McpToolServer):
         )
 
     # ------------------------------------------------------------------
+    # Resource registration (MET-384)
+    # ------------------------------------------------------------------
+
+    def _register_resources(self) -> None:
+        """Wire the two ``metaforge://knowledge/sources`` URIs.
+
+        The list URI surfaces a ``SourceSummary`` array; the templated
+        item URI carries a URL-encoded ``source_path`` as ``{id}`` so
+        callers can round-trip arbitrary file paths / URLs without a
+        separate stable id (none exists in the codebase today).
+        """
+        self.register_resource(
+            manifest=ResourceManifestEntry(
+                uri_template=_SOURCES_LIST_URI,
+                name="Knowledge sources",
+                description=(
+                    "List of ingested knowledge sources, one row per "
+                    "(source_path, knowledge_type) pair, with fragment "
+                    "count and last-indexed timestamp."
+                ),
+                mime_type="application/json",
+                adapter_id="knowledge",
+            ),
+            reader=self._read_sources_list,
+            # Exact-match: only the bare list URI lands here. The
+            # templated reader takes everything under
+            # ``metaforge://knowledge/sources/`` (note the trailing
+            # slash) so the two registrations don't fight.
+            matcher=lambda uri: uri == _SOURCES_LIST_URI,
+        )
+
+        self.register_resource(
+            manifest=ResourceManifestEntry(
+                uri_template=_SOURCES_ITEM_TEMPLATE,
+                name="Knowledge source detail",
+                description=(
+                    "Per-source detail (source_path, knowledge_type, "
+                    "fragment_count, indexed_at, metadata, chunks). "
+                    "{id} is the URL-encoded source_path."
+                ),
+                mime_type="application/json",
+                adapter_id="knowledge",
+            ),
+            reader=self._read_source_detail,
+            matcher=lambda uri: uri.startswith(_SOURCES_ITEM_PREFIX) and uri != _SOURCES_LIST_URI,
+        )
+
+    # ------------------------------------------------------------------
+    # Resource readers
+    # ------------------------------------------------------------------
+
+    async def _read_sources_list(self, uri: str) -> list[dict[str, Any]]:
+        """Reader for ``metaforge://knowledge/sources`` (MET-384).
+
+        Delegates to ``KnowledgeService.list_sources()`` (L1-A8) and
+        forwards the ambient ``project_id`` from the call context so
+        tenant scoping mirrors the search/ingest tools.
+        """
+        with tracer.start_as_current_span("knowledge.mcp.resources.list_sources") as span:
+            project_id = current_context().project_id
+            span.set_attribute("knowledge.resource.uri", uri)
+            if project_id is not None:
+                span.set_attribute("knowledge.project_id", str(project_id))
+
+            summaries = await self.service.list_sources(project_id=project_id)
+            payload = {"sources": [_source_summary_to_dict(s) for s in summaries]}
+            span.set_attribute("knowledge.result_count", len(summaries))
+            logger.info(
+                "knowledge_resource_read",
+                uri=uri,
+                result_count=len(summaries),
+                not_found=False,
+            )
+            return [
+                {
+                    "uri": uri,
+                    "mime_type": "application/json",
+                    "text": json.dumps(payload),
+                }
+            ]
+
+    async def _read_source_detail(self, uri: str) -> list[dict[str, Any]]:
+        """Reader for ``metaforge://knowledge/sources/{id}`` (MET-384).
+
+        ``{id}`` is a URL-encoded ``source_path`` (the natural
+        identifier — no separate stable id exists in the codebase).
+        Resolves the source by scanning ``list_sources()`` for an
+        exact match. On miss, raises ``ResourceNotFoundError`` so the
+        server emits the MET-385 not_found envelope with the offending
+        URI in ``data``.
+
+        Chunks come from a filtered ``search()`` keyed on
+        ``source_path``. They may be empty if no backend hits surface
+        for the source (e.g. a freshly-deleted source mid-flight) —
+        the field is always present.
+        """
+        with tracer.start_as_current_span("knowledge.mcp.resources.source_detail") as span:
+            raw_id = uri[len(_SOURCES_ITEM_PREFIX) :]
+            source_path = unquote(raw_id)
+            project_id = current_context().project_id
+            span.set_attribute("knowledge.resource.uri", uri)
+            span.set_attribute("knowledge.source_path", source_path)
+            if project_id is not None:
+                span.set_attribute("knowledge.project_id", str(project_id))
+
+            summaries = await self.service.list_sources(project_id=project_id)
+            match = next((s for s in summaries if s.source_path == source_path), None)
+            if match is None:
+                span.set_attribute("knowledge.not_found", True)
+                logger.info(
+                    "knowledge_resource_read",
+                    uri=uri,
+                    not_found=True,
+                )
+                err = make_tool_error(
+                    ErrorCode.NOT_FOUND,
+                    f"No knowledge source registered for {source_path!r}",
+                    details={"uri": uri, "source_path": source_path},
+                )
+                # The server wraps ResourceNotFoundError into a JSON-RPC
+                # -32004 with ``data.uri`` populated. Stash the MET-385
+                # envelope on the exception so transports / tests can
+                # surface it without an extra contract change.
+                exc = ResourceNotFoundError(uri)
+                exc.error_envelope = err.model_dump()  # type: ignore[attr-defined]
+                raise exc
+
+            # Best-effort chunk fetch. ``search`` with a source_path
+            # filter is the only public path the L1 contract exposes —
+            # the dedicated chunk-by-source method lands separately.
+            try:
+                hits = await self.service.search(
+                    query=source_path,
+                    top_k=max(match.fragment_count, 1),
+                    filters={"source_path": source_path},
+                    project_id=project_id,
+                )
+            except Exception as exc:  # pragma: no cover — defensive
+                # A flaky search backend must not break resource reads.
+                logger.warning(
+                    "knowledge_resource_chunk_fetch_failed",
+                    uri=uri,
+                    error=str(exc),
+                )
+                hits = []
+
+            payload = _source_summary_to_dict(match)
+            payload["chunks"] = [_hit_to_dict(h) for h in hits]
+            span.set_attribute("knowledge.result_count", len(hits))
+            logger.info(
+                "knowledge_resource_read",
+                uri=uri,
+                result_count=len(hits),
+                not_found=False,
+            )
+            return [
+                {
+                    "uri": uri,
+                    "mime_type": "application/json",
+                    "text": json.dumps(payload),
+                }
+            ]
+
+    # ------------------------------------------------------------------
     # Tool handlers
     # ------------------------------------------------------------------
 
@@ -325,3 +517,39 @@ def _ingest_result_to_dict(result: IngestResult) -> dict[str, Any]:
         "chunks_indexed": result.chunks_indexed,
         "source_path": result.source_path,
     }
+
+
+def _source_summary_to_dict(summary: SourceSummary) -> dict[str, Any]:
+    """Wire-safe serialization of a ``SourceSummary``.
+
+    ``knowledge_type`` may already be a string (legacy rows) or a
+    ``KnowledgeType`` enum — both are coerced to the bare string form
+    so downstream JSON consumers don't have to branch.
+    ``indexed_at`` is emitted as ISO-8601.
+    """
+    kt = summary.knowledge_type
+    if isinstance(kt, KnowledgeType):
+        kt_str: str | None = str(kt)
+    elif kt is None:
+        kt_str = None
+    else:
+        kt_str = str(kt)
+    indexed_at = summary.indexed_at
+    indexed_at_str = indexed_at.isoformat() if isinstance(indexed_at, datetime) else str(indexed_at)
+    return {
+        "source_path": summary.source_path,
+        "knowledge_type": kt_str,
+        "fragment_count": summary.fragment_count,
+        "indexed_at": indexed_at_str,
+        "metadata": dict(summary.metadata or {}),
+    }
+
+
+def _encode_source_id(source_path: str) -> str:
+    """URL-encode a ``source_path`` for embedding in the templated URI.
+
+    Kept here as a helper (vs inlined ``quote(safe="")``) so callers
+    constructing resource links — CLI, dashboard — share the exact
+    encoding rules with the reader's ``unquote`` round-trip.
+    """
+    return quote(source_path, safe="")
