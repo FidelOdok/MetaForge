@@ -134,7 +134,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-F1b | cli-error-paths.md (2 scenarios) | MET-410 | XS | — | ✅ | test/met-410-cli-errors | [#178](https://github.com/FidelOdok/MetaForge/pull/178) | KB-CLI-005, KB-CLI-006 already ✅ from L1-C2; just adds executable scenarios |
 | L1-F1c | error-envelope-probe.md extend (7) | MET-410 | S | — | ✅ | test/met-410-error-envelope-extend | [#179](https://github.com/FidelOdok/MetaForge/pull/179) | 7 scenarios; 3 Verdicts flipped (KB-ING-010, KB-RES-004, KB-SRC-014); 4 await impl |
 | L1-F1d | streaming-progress-probe.md (3) | MET-410 | S | — | ✅ | test/met-410-streaming-progress-probe | [#180](https://github.com/FidelOdok/MetaForge/pull/180) | 3 scenarios; Verdicts flipped (KB-PRG-001..003); all backed by L1-B2 |
-| L1-F1e | observability-knowledge-probe.md (3) | MET-410 | S | — | ⏳ | — | — | tier2/observability-knowledge-probe.md, KB-OBS-002..003, KB-CTX-003 |
+| L1-F1e | observability-knowledge-probe.md (3) | MET-410 | S | — | ✅ | test/met-410-observability-knowledge | [#181](https://github.com/FidelOdok/MetaForge/pull/181) | 3 scenarios w/ PromQL+LogQL; KB-CTX-003 flipped ✅; OBS-002/003 await impl |
 | L1-F1f | event-ingest.md (3) | MET-410 | S | — | ⏳ | — | — | tier1/event-ingest.md, KB-EVT-002..004 |
 | L1-F1g | retrieval.md extend (2) | MET-410 | XS | — | ⏳ | — | — | tier1/retrieval.md extension, KB-SRC-012, KB-CTX-004 |
 | L1-F2 | Real-content corpus expansion | MET-340 | M | — | ⏳ | — | — | 5 more datasheets |

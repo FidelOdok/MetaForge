@@ -810,7 +810,8 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 ### KB-CTX-003 — actor_id propagates to span attributes  ✅ PASS
 **Validates:** MET-387
 **Tier:** 2
-**Status:** ✅ PASS (L1-B3, MET-387). Verified by `tests/unit/test_knowledge_call_context.py::TestOtelSpanAttributes`.
+**Existing scenario:** `tier2/observability-knowledge-probe.md` → "KB-CTX-003 — actor_id propagates to span attributes" (L1-F1e).
+**Verdict:** ✅ PASS — backed by L1-B3 (MET-387). Verified by `tests/unit/test_knowledge_call_context.py::TestOtelSpanAttributes`; `mcp.actor_id` propagates from the per-call `X-Actor-Id` header through `current_context().actor_id` onto both the ingest and search OTel spans (scope `tool_registry.tools.knowledge.adapter`).
 
 #### When
 1. Call `knowledge_ingest` with header `X-Actor-Id: claude-uat-runner`.
@@ -905,7 +906,8 @@ Existing scenarios: `tier2/error-envelope-probe.md` (Cycle 3 in flight).
 ### KB-OBS-002 — Prometheus increments `knowledge_ingest_total`  🔄 NEW
 **Validates:** observability MET (find via `observability/metrics.py`)
 **Tier:** 2
-**Status:** 🔄 NEW.
+**Existing scenario:** `tier2/observability-knowledge-probe.md` → "KB-OBS-002 — Prometheus increments knowledge_ingest_total" (L1-F1e).
+**Status:** 🔄 NEW. Scenario authored (L1-F1e); records BLOCKED at runtime until the `knowledge_ingest_total` counter is registered in `observability/metrics.py` and incremented by the ingest path.
 
 #### When
 1. Read `knowledge_ingest_total` counter.
@@ -920,7 +922,8 @@ Existing scenarios: `tier2/error-envelope-probe.md` (Cycle 3 in flight).
 ### KB-OBS-003 — Loki carries `source_path` and `knowledge_type` labels  🔄 NEW
 **Validates:** provenance
 **Tier:** 2
-**Status:** 🔄 NEW.
+**Existing scenario:** `tier2/observability-knowledge-probe.md` → "KB-OBS-003 — Loki carries source_path and knowledge_type labels" (L1-F1e).
+**Status:** 🔄 NEW. Scenario authored (L1-F1e); records BLOCKED at runtime until Loki label promotion of `source_path` and `knowledge_type` is verified end-to-end (structlog kwargs are emitted today, but the JSON parse pipeline that promotes them to Loki labels is not yet confirmed).
 
 #### When
 1. Run KB-ING-001.
