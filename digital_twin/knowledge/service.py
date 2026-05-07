@@ -109,6 +109,7 @@ class KnowledgeService(Protocol):
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        actor_id: str | None = None,
     ) -> IngestResult: ...
 
     async def search(
@@ -119,6 +120,7 @@ class KnowledgeService(Protocol):
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
         rerank: bool = False,
+        actor_id: str | None = None,
     ) -> list[SearchHit]: ...
 
     async def delete_by_source(self, source_path: str) -> int: ...

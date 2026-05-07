@@ -470,14 +470,24 @@ class KnowledgeServer(McpToolServer):
             kt_raw = arguments.get("knowledge_type")
             knowledge_type = self._coerce_knowledge_type(kt_raw)
             filters = arguments.get("filters") or None
-            # MET-401: forward the active call-context project_id so the
-            # service can scope retrieval. Falls back to "default tenant"
-            # behaviour inside the service when no project is active.
-            project_id = current_context().project_id
+            # MET-401 / MET-387: forward project_id and actor_id from the
+            # active call-context. project_id scopes retrieval (search
+            # falls back to "default tenant" when None); actor_id is an
+            # attribution signal — it rides through as an OTel/log
+            # attribute and never filters hits.
+            ctx = current_context()
+            project_id = ctx.project_id
+            actor_id = _resolve_actor_id(ctx.actor_id)
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
+            # MET-387: stamp the standard mcp.* attributes onto the
+            # adapter span so it joins up with the McpToolServer parent
+            # span the harness already correlates on.
             if project_id is not None:
                 span.set_attribute("knowledge.project_id", str(project_id))
+                span.set_attribute("mcp.project_id", str(project_id))
+            if actor_id is not None:
+                span.set_attribute("mcp.actor_id", actor_id)
 
             hits = await self.service.search(
                 query=query,
@@ -485,8 +495,16 @@ class KnowledgeServer(McpToolServer):
                 knowledge_type=knowledge_type,
                 filters=filters,
                 project_id=project_id,
+                actor_id=actor_id,
             )
             span.set_attribute("knowledge.result_count", len(hits))
+            logger.info(
+                "knowledge_search",
+                top_k=top_k,
+                result_count=len(hits),
+                project_id=str(project_id) if project_id is not None else None,
+                actor_id=actor_id,
+            )
             return {"hits": [_hit_to_dict(h) for h in hits]}
 
     async def handle_ingest(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -515,15 +533,22 @@ class KnowledgeServer(McpToolServer):
                 )
             wp_id = self._coerce_uuid(arguments.get("source_work_product_id"))
             metadata = arguments.get("metadata") or None
-            # MET-401: stamp the active call-context project_id onto the
-            # ingest so subsequent searches under the same project find
-            # this content (and other projects do not).
-            project_id = current_context().project_id
+            # MET-401 / MET-387: stamp the active call-context's
+            # project_id and actor_id onto the ingest. project_id scopes
+            # the chunks to a tenant; actor_id is forwarded as both a
+            # span attribute and per-chunk metadata so attribution
+            # survives a round-trip through the store.
+            ctx = current_context()
+            project_id = ctx.project_id
+            actor_id = _resolve_actor_id(ctx.actor_id)
 
             span.set_attribute("knowledge.source_path", source_path)
             span.set_attribute("knowledge.type", str(knowledge_type))
             if project_id is not None:
                 span.set_attribute("knowledge.project_id", str(project_id))
+                span.set_attribute("mcp.project_id", str(project_id))
+            if actor_id is not None:
+                span.set_attribute("mcp.actor_id", actor_id)
 
             result = await self.service.ingest(
                 content=content,
@@ -532,6 +557,14 @@ class KnowledgeServer(McpToolServer):
                 source_work_product_id=wp_id,
                 metadata=metadata,
                 project_id=project_id,
+                actor_id=actor_id,
+            )
+            logger.info(
+                "knowledge_ingest",
+                source_path=source_path,
+                chunks_indexed=result.chunks_indexed,
+                project_id=str(project_id) if project_id is not None else None,
+                actor_id=actor_id,
             )
             return _ingest_result_to_dict(result)
 
@@ -563,9 +596,14 @@ class KnowledgeServer(McpToolServer):
                     "files": [],
                 }
 
-            project_id = current_context().project_id
+            ctx = current_context()
+            project_id = ctx.project_id
+            actor_id = _resolve_actor_id(ctx.actor_id)
             if project_id is not None:
                 span.set_attribute("knowledge.project_id", str(project_id))
+                span.set_attribute("mcp.project_id", str(project_id))
+            if actor_id is not None:
+                span.set_attribute("mcp.actor_id", actor_id)
 
             # Caller-supplied id correlates progress events with the
             # originating ``tool/call``. When absent we synthesise one
@@ -612,6 +650,7 @@ class KnowledgeServer(McpToolServer):
                     source_work_product_id=wp_id,
                     metadata=metadata,
                     project_id=project_id,
+                    actor_id=actor_id,
                 )
 
                 serialised = _ingest_result_to_dict(result)
@@ -637,6 +676,7 @@ class KnowledgeServer(McpToolServer):
                     source_path=source_path,
                     progress=progress_value,
                     emitted=emitted,
+                    actor_id=actor_id,
                 )
 
             return {
@@ -671,6 +711,24 @@ class KnowledgeServer(McpToolServer):
             return UUID(str(value))
         except (TypeError, ValueError):
             return None
+
+
+def _resolve_actor_id(raw: str | None) -> str | None:
+    """Project the call-context ``actor_id`` to forwarded form (MET-387).
+
+    The context model defaults ``actor_id`` to ``"system:unattributed"``
+    so it always resolves to a string — but at the adapter boundary
+    "no caller identity" should travel as ``None`` so the service /
+    span / log layer can elide the field entirely instead of stamping
+    a misleading sentinel onto every chunk's metadata. Empty strings
+    follow the same rule for defence in depth.
+    """
+    if raw is None:
+        return None
+    cleaned = raw.strip()
+    if not cleaned or cleaned == "system:unattributed":
+        return None
+    return cleaned
 
 
 def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
