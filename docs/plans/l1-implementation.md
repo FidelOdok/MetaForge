@@ -129,14 +129,14 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | ⏳ | — | — | citations + snippet highlight |
 | L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | ⏳ | — | — | Sigma.js, multi-iteration allowed |
 | L1-E5 | Sidebar relabel | new | XS | L1-E2 | ⏳ | — | — | Knowledge → /knowledge; Files → /files |
-| L1-F1 | Author 26 NEW kb-test-plan rows | MET-410 | L | — | 🔧 | — | — | split into F1a..F1g; ✅ when all 7 sub-rows ✅ |
+| L1-F1 | Author 26 NEW kb-test-plan rows | MET-410 | L | — | ✅ | (parent of F1a–F1g) | (PRs #177, #178, #179, #180, #181, #182, #183) | all 7 sub-iterations merged |
 | L1-F1a | full-capability.md (7 scenarios) | MET-410 | S | — | ✅ | test/met-410-full-capability | [#177](https://github.com/FidelOdok/MetaForge/pull/177) | 7 scenarios; master plan Verdicts flipped for 4 already-implemented rows |
 | L1-F1b | cli-error-paths.md (2 scenarios) | MET-410 | XS | — | ✅ | test/met-410-cli-errors | [#178](https://github.com/FidelOdok/MetaForge/pull/178) | KB-CLI-005, KB-CLI-006 already ✅ from L1-C2; just adds executable scenarios |
 | L1-F1c | error-envelope-probe.md extend (7) | MET-410 | S | — | ✅ | test/met-410-error-envelope-extend | [#179](https://github.com/FidelOdok/MetaForge/pull/179) | 7 scenarios; 3 Verdicts flipped (KB-ING-010, KB-RES-004, KB-SRC-014); 4 await impl |
 | L1-F1d | streaming-progress-probe.md (3) | MET-410 | S | — | ✅ | test/met-410-streaming-progress-probe | [#180](https://github.com/FidelOdok/MetaForge/pull/180) | 3 scenarios; Verdicts flipped (KB-PRG-001..003); all backed by L1-B2 |
 | L1-F1e | observability-knowledge-probe.md (3) | MET-410 | S | — | ✅ | test/met-410-observability-knowledge | [#181](https://github.com/FidelOdok/MetaForge/pull/181) | 3 scenarios w/ PromQL+LogQL; KB-CTX-003 flipped ✅; OBS-002/003 await impl |
 | L1-F1f | event-ingest.md (3) | MET-410 | S | — | ✅ | test/met-410-event-ingest | [#182](https://github.com/FidelOdok/MetaForge/pull/182) | 3 Kafka-gated scenarios; report BLOCKED if broker absent |
-| L1-F1g | retrieval.md extend (2) | MET-410 | XS | — | ⏳ | — | — | tier1/retrieval.md extension, KB-SRC-012, KB-CTX-004 |
+| L1-F1g | retrieval.md extend (2) | MET-410 | XS | — | ✅ | test/met-410-retrieval-extend | [#183](https://github.com/FidelOdok/MetaForge/pull/183) | HP-RETR-11/12; KB-SRC-012, KB-CTX-004 flipped ✅ |
 | L1-F2 | Real-content corpus expansion | MET-340 | M | — | ⏳ | — | — | 5 more datasheets |
 | L1-F3 | Dual-project isolation integration test | MET-401 | S | L1-A1 | ⏳ | — | — | end-to-end |
 | L1-F4 | Citation round-trip integration test | MET-389 | S | — | ⏳ | — | — | source_path → heading → chunk_index |

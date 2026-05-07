@@ -471,9 +471,10 @@ Surface: `mcp__metaforge__knowledge_search`.
 
 ---
 
-### KB-SRC-012 — multi-filter compound query  🔄 NEW
-**Validates:** MET-293, MET-307
-**Status:** 🔄 NEW.
+### KB-SRC-012 — multi-filter compound query  ✅ PASS
+**Validates:** MET-293, MET-307, MET-417
+**Existing scenario:** `tier1/retrieval.md` → "HP-RETR-11 — multi-filter compound query (AND across keys + type)" (L1-F1g).
+**Verdict:** ✅ PASS — backed by the pinned AND-across-keys contract (L1-B5, MET-417). `_matches_filters` and the pgvector `_search_pg` push-down both AND filter keys (knowledge_type + metadata equality) so a `(knowledge_type="component", project_id="A")` query cannot leak hits from project B or from `design_decision`.
 
 #### Given
 - Corpus with `{component, design_decision} × {project_A, project_B}` pre-seeded.
@@ -825,7 +826,8 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 
 ### KB-CTX-004 — missing project_id falls back to default tenant  ✅ PASS
 **Validates:** MET-401
-**Status:** ✅ PASS (L1-A1 + L1-B3). Adapter forwards `current_context().project_id` (None when unset) and the LightRAG service scopes to the `"default"` tenant on both ingest and search.
+**Existing scenario:** `tier1/retrieval.md` → "HP-RETR-12 — missing project_id falls back to default tenant" (L1-F1g).
+**Verdict:** ✅ PASS (L1-A1 + L1-B3). Adapter forwards `current_context().project_id` (None when unset) and the LightRAG service scopes to the `"default"` tenant on both ingest and search.
 
 #### When
 1. Ingest with no `project_id` in the per-call context.
