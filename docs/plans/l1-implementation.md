@@ -108,7 +108,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-A1 | Project isolation enforcement | MET-401 | M | — | ✅ | feat/met-401-knowledge-project-isolation | [#163](https://github.com/FidelOdok/MetaForge/pull/163) | 13 passed, 2 skipped (no PG); minor: also touched test_context_assembler.py |
 | L1-A2 | Hybrid-search reranker | MET-335 | M | — | ✅ | feat/met-335-knowledge-reranker | [#164](https://github.com/FidelOdok/MetaForge/pull/164) | 20 passed; mypy: 2 pre-existing errors on api_gateway/server.py noted, not introduced |
 | L1-A3 | PDF parser shipped | MET-399 | S | — | ✅ | feat/met-399-pdf-ingest-wiring | [#165](https://github.com/FidelOdok/MetaForge/pull/165) | wired pdfplumber path; HP-INGEST-03 promoted; 20 passed, 8 skipped (no PG) |
-| L1-A4 | CSV row-level chunker | MET-340 | M | — | ⏳ | — | — | for BOMs; HP-INGEST-04 |
+| L1-A4 | CSV row-level chunker | MET-340 | M | — | ✅ | feat/met-340-csv-row-chunker | [#166](https://github.com/FidelOdok/MetaForge/pull/166) | chunk_csv() + ingest detection; 8 unit tests + 28 passed |
 | L1-A5 | Workspace separation enforced | MET-346 | M | — | ⏸️ | — | — | Requires human decision (shared vs separate) |
 | L1-A6 | Re-ingest after edit retires stale | MET-307 | S | — | ⏳ | — | — | beyond identical-dedup |
 | L1-A7 | Latency SLO instrumentation | MET-401 | S | L1-D2 | ⏳ | — | — | p95 <200ms gate |

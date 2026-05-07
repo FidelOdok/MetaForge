@@ -551,13 +551,18 @@ Source: `cli/commands/ingest.ts` (calls `knowledge_ingest` under the hood).
 ---
 
 ### KB-CLI-004 — CSV BOM row-level chunks
-**Validates:** MET-336, MET-346
+**Validates:** MET-336, MET-346, MET-340
 **Existing:** HP-INGEST-04.
-**Verdict:** ⚠️ BLOCKED — CSV row chunker pending.
+**Status:** ✅ EXECUTABLE — `chunk_csv` wired in
+`digital_twin/knowledge/chunker.py` and CSV detection branch added to
+`LightRAGKnowledgeService.ingest` (L1-A4). Detected by `.csv`
+extension or `metadata.content_type=text/csv`; one chunk per data
+row, content rendered as `col=val; col=val`, `row_index` + `columns`
++ `header` carried through chunk metadata.
 
 #### Then
-- `chunks_indexed` equals row count (±1 for header).
-- Hit metadata preserves `row_id`.
+- `chunks_indexed` equals data-row count (header excluded).
+- Hit content contains the row's MPN; metadata exposes `row_index`.
 
 ---
 

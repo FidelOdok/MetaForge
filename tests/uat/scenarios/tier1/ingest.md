@@ -83,22 +83,30 @@ remains the long-term home — see `digital_twin/knowledge/lightrag_service.py`
 ---
 
 ## Scenario: HP-INGEST-04 — CSV BOM rows → row-level chunks
-Validates: MET-336 (walker), MET-346
+Validates: MET-336 (walker), MET-346, MET-340 (CSV row chunker)
 Tier: 1
+Status: executable (L1-A4 wired `chunk_csv` in
+`digital_twin/knowledge/chunker.py`; `LightRAGKnowledgeService.ingest`
+detects `.csv` extension or `metadata.content_type=text/csv` and emits
+one chunk per data row).
 
 ### Given
-- A BOM CSV at `tests/fixtures/knowledge/bom.csv` with at least
-  3 rows including an MPN column.
+- A 5-row BOM CSV fixture at `tests/fixtures/knowledge/bom.csv` with
+  columns `mpn,manufacturer,package,price`. The third data row
+  (index 2) is `TPS62840DLCR` — used as the search target below.
 
 ### When
-1. Ingest the CSV with `knowledge_type="component"`.
-2. Search for the MPN of row 2 with `top_k=1`.
+1. Ingest the CSV with `knowledge_type="component"` (via `forge ingest
+   tests/fixtures/knowledge/bom.csv` or the `knowledge.ingest` MCP tool).
+2. Search for `TPS62840DLCR` with `top_k=1`.
 
 ### Then
-- Each CSV row becomes a searchable chunk (chunks_indexed equals
-  the row count, ±1 for the header).
-- The search hit's content contains the row's MPN; its metadata
-  preserves a `row_id` (or equivalent index field).
+- Step 1 returns `IngestResult.chunks_indexed == 5` (one chunk per
+  data row; the header is excluded).
+- Step 2 returns at least one hit whose `content` contains
+  `TPS62840DLCR` and whose metadata exposes `row_index` (the rendered
+  content matches the `col=val; col=val` form, e.g.
+  `mpn=TPS62840DLCR; manufacturer=Texas Instruments; package=SOT-563; price=1.20`).
 
 ---
 
