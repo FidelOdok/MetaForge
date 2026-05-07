@@ -227,6 +227,52 @@ If your new type drags any of these below floor, the embedding model
 or chunker is the suspect, not the eval set — fix the producer side
 before relaxing the floor.
 
+## Search filters
+
+The `filters` argument on `knowledge_search` (and on the underlying
+`KnowledgeService.search`) is pinned to a small, unambiguous contract
+(MET-417, KB-SRC-014). Adding a new metadata key to your ingest
+payload makes it filterable with no further wiring — but the
+semantics are fixed and must not be re-litigated per caller.
+
+**Pinned semantics:**
+
+- **AND across keys, equality match.** `filters={"a": "x", "b": "y"}`
+  returns only chunks whose metadata has `a == "x"` *and* `b == "y"`.
+  There is no OR, no inequality, no range, no `LIKE`. Add a separate
+  call (or compose at a higher layer) if you need disjunctive logic.
+- **Unknown keys pass through as literal metadata equality.** A filter
+  on a key the corpus has never seen yields zero hits with no error.
+  This is by design — it lets producers stamp arbitrary structured
+  metadata at ingest time and have it become filterable immediately
+  without a schema migration. If you misspell a key, you get an empty
+  result set; `tools/list` does *not* enumerate the legal filter keys.
+- **Reserved keys.** `source_path`, `source_work_product_id`, and
+  `project_id` are special-cased: they match the top-level encoded
+  fields, not the user-extras blob. `knowledge_type` is a separate
+  argument, not a filter key. Everything else lives at
+  `$.metadata.<key>` (the `extra` dict you passed to `ingest`).
+- **Allowed value types: `str` / `int` / `bool` / `None`.** Composite
+  values (`dict`, `list`) are rejected at the adapter boundary with the
+  MET-385 `invalid_input` error envelope, listing the offending field
+  and type. `None` matches null / missing metadata; `bool` round-trips
+  literally without coercing to `0` / `1`.
+- **Pushed down to SQL on the pgvector path.** Filters become
+  `AND c.file_path::jsonb->'x'->>'<key>' = $<n>` (or top-level
+  `->>'src'` / `->>'wp'` for the reserved keys) so the LIMIT'd query
+  doesn't starve filter matches off the top-k tail. The naive /
+  in-memory backend post-filters the returned hits in Python with the
+  same equality semantics.
+- **Observability.** A successful search with filters emits
+  `knowledge_search_filters_applied` with the sorted **keys** and the
+  resulting hit count. Filter **values** are never logged — they may
+  carry PII, project names, or actor handles.
+
+Want a new filter? Just stamp the key into `metadata={…}` at ingest.
+No code change required. If you need a non-equality operator, file a
+Linear issue against MET-417 — that's a contract change, not a config
+toggle.
+
 ## Failure modes to know about
 
 - **Empty payloads silently skipped.** If a producer publishes an

@@ -68,6 +68,13 @@ tracer = get_tracer("tool_registry.tools.knowledge.adapter")
 
 _KNOWLEDGE_TYPE_VALUES = sorted(kt.value for kt in KnowledgeType)
 
+# Allowed scalar types for ``filters`` values (MET-417 / L1-B5).
+# Pinned: filters are AND-across-keys, equality-match against literal
+# metadata values. Composite types (dict / list) are rejected at the
+# adapter boundary so the wire contract stays unambiguous — there is no
+# "search inside a list" or "match a sub-object" semantics to debate.
+_ALLOWED_FILTER_VALUE_TYPES: tuple[type, ...] = (str, int, bool, type(None))
+
 
 class McpToolError(ValueError):
     """Adapter-side raise form of the MET-385 ``McpToolError`` envelope.
@@ -161,6 +168,68 @@ def _validate_knowledge_type(
             allowed=list(_KNOWLEDGE_TYPE_VALUES),
         )
         raise error from None
+
+
+def _validate_filter_values(raw: Any) -> dict[str, Any] | None:
+    """Validate ``filters`` value types against the pinned contract (MET-417).
+
+    The pinned contract (KB-SRC-014, see
+    ``docs/architecture/knowledge-ingestion-playbook.md``) is:
+
+    * Filters are **AND across keys, equality match**.
+    * Unknown keys pass through as literal metadata-key equality
+      (a hit lacking the key is dropped — this naturally yields zero
+      hits for keys the corpus has never seen, with no error).
+    * Filter values must be ``str`` / ``int`` / ``bool`` / ``None``.
+      ``dict`` and ``list`` are rejected with the MET-385
+      ``invalid_input`` envelope listing the offending field and type.
+
+    Returns ``None`` when ``raw`` itself is ``None`` (no filters), or
+    the validated dict otherwise. Raises ``McpToolError`` on any
+    offending value type.
+
+    Note: ``bool`` is intentionally *not* coerced to ``int`` here even
+    though Python treats ``True`` as ``1`` — both are accepted and the
+    value rides through to the service / metadata layer literally.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        error = McpToolError(
+            code=ErrorCode.INVALID_INPUT,
+            message=("'filters' must be an object mapping str keys to scalar values"),
+            data={
+                "field": "filters",
+                "value_type": type(raw).__name__,
+            },
+        )
+        logger.info(
+            "knowledge_invalid_input",
+            field="filters",
+            value_type=type(raw).__name__,
+        )
+        raise error
+    for key, value in raw.items():
+        if not isinstance(value, _ALLOWED_FILTER_VALUE_TYPES):
+            field = f"filters.{key}"
+            type_name = type(value).__name__
+            error = McpToolError(
+                code=ErrorCode.INVALID_INPUT,
+                message=(f"'{field}' must be one of str / int / bool / None; got {type_name}"),
+                data={
+                    "field": field,
+                    "value_type": type_name,
+                    "value": repr(value),
+                    "allowed_types": ["str", "int", "bool", "null"],
+                },
+            )
+            logger.info(
+                "knowledge_invalid_input",
+                field=field,
+                value_type=type_name,
+            )
+            raise error
+    return dict(raw)
 
 
 class KnowledgeServer(McpToolServer):
@@ -573,7 +642,16 @@ class KnowledgeServer(McpToolServer):
             else:
                 knowledge_type = None
             top_k = int(arguments.get("top_k", 5))
-            filters = arguments.get("filters") or None
+            # MET-417 (L1-B5): validate filter VALUE TYPES at request-decode
+            # time so dict / list payloads surface the canonical
+            # MET-385 envelope instead of leaking through to the service
+            # and producing opaque downstream errors. ``None`` (or
+            # missing key) means "no filters" — falsy empty dicts are
+            # also normalised to ``None`` so the service path skips its
+            # filter-AND fast path.
+            raw_filters = arguments.get("filters")
+            validated_filters = _validate_filter_values(raw_filters)
+            filters = validated_filters if validated_filters else None
             # MET-401 / MET-387: forward project_id and actor_id from the
             # active call-context. project_id scopes retrieval (search
             # falls back to "default tenant" when None); actor_id is an
@@ -609,6 +687,16 @@ class KnowledgeServer(McpToolServer):
                 project_id=str(project_id) if project_id is not None else None,
                 actor_id=actor_id,
             )
+            # MET-417 (L1-B5): structured log for filter observability.
+            # Emit the *keys* only — never the values — so PII / project
+            # names / actor handles in the filter payload don't leak
+            # into log aggregation.
+            if filters:
+                logger.info(
+                    "knowledge_search_filters_applied",
+                    filter_keys=sorted(filters.keys()),
+                    result_count=len(hits),
+                )
             return {"hits": [_hit_to_dict(h) for h in hits]}
 
     async def handle_ingest(self, arguments: dict[str, Any]) -> dict[str, Any]:

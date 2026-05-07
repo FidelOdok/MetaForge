@@ -68,7 +68,7 @@
 | # | Capability area | Tests | ✅ | ❌ | ⚠️ | 🔄 | 📅 | Linear |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `knowledge_ingest` MCP tool | 12 | 9 | 0 | 1 | 2 | 0 | MET-346, MET-307, MET-385 |
-| 2 | `knowledge_search` MCP tool | 14 | 9 | 0 | 1 | 4 | 0 | MET-293, MET-335 |
+| 2 | `knowledge_search` MCP tool | 14 | 10 | 0 | 1 | 3 | 0 | MET-293, MET-335, MET-417 |
 | 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | MET-336, MET-399 |
 | 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | MET-307 |
 | 5 | Resources surface | 4 | 1 | 0 | 0 | 3 | 0 | MET-384 |
@@ -78,10 +78,10 @@
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
 | 11 | Real-datasheet retrieval QA | 30 | 0 | 0 | 0 | 30 | 0 | MET-346, MET-293, MET-335 |
-| | **Totals** | **86** | **27** | **0** | **4** | **55** | **0** | |
+| | **Totals** | **86** | **28** | **0** | **4** | **54** | **0** | |
 
-> **Read.** 86 distinct trackable tests. 27 already pass. 55 are
-> 🔄 NEW (the 25 cross-cutting gap-fills in §1–§10 plus the 30
+> **Read.** 86 distinct trackable tests. 28 already pass. 54 are
+> 🔄 NEW (the 24 cross-cutting gap-fills in §1–§10 plus the 30
 > real-datasheet rows in §11 — those have an executable scenario
 > file at `tests/uat/scenarios/tier1/datasheets-real.md` and become
 > ✅ PASS the moment the first `/uat-cycle12` run records the
@@ -503,15 +503,15 @@ Surface: `mcp__metaforge__knowledge_search`.
 
 ---
 
-### KB-SRC-014 — unknown filter key is silently ignored OR rejected (pinned)  🔄 NEW
-**Validates:** MET-346, MET-385
-**Status:** 🔄 NEW.
+### KB-SRC-014 — unknown filter key is silently ignored OR rejected (pinned)  ✅ COVERED
+**Validates:** MET-346, MET-385, MET-417
+**Status:** ✅ COVERED — `tests/unit/test_knowledge_filters.py` (L1-B5, MET-417). The pinned contract is documented in `docs/architecture/knowledge-ingestion-playbook.md#search-filters`: filters are AND-across-keys equality match; unknown keys pass through as literal metadata-key equality and naturally yield zero hits (no exception). Filter values are restricted to `str` / `int` / `bool` / `None`; `dict` and `list` values are rejected at the adapter boundary with the MET-385 `invalid_input` envelope listing the offending field and type. AND push-down lands in both the pgvector path (additional `c.file_path::jsonb->'x'->>'<key>' = $<n>` clauses in `_search_pg`) and the naive non-pg path (`_matches_filters` post-filter).
 
 #### When
 1. `knowledge_search(query="x", filters={"banana": "yellow"})`.
 
 #### Then
-- Server picks ONE behavior and pins to it: either silently ignore unknown keys (and document so) or reject with `invalid_input`. Test asserts the pinned choice.
+- Server returns zero hits with no exception (the pinned "silently ignore via literal-equality" behaviour). Filter values that aren't `str` / `int` / `bool` / `None` (e.g. `{"nested": {"a": "b"}}`) are rejected with the MET-385 `invalid_input` envelope.
 
 ---
 

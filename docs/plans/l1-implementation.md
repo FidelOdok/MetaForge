@@ -117,7 +117,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-B2 | Streaming progress on multi-file ingest | MET-388 | M | — | ✅ | feat/met-388-knowledge-progress | [#170](https://github.com/FidelOdok/MetaForge/pull/170) | multi-file batch + supports_progress on ToolManifest; 6 tests; 246 passed broader |
 | L1-B3 | Per-call context propagation | MET-387 | S | — | ✅ | feat/met-387-context-propagation | [#171](https://github.com/FidelOdok/MetaForge/pull/171) | actor_id forwarding + OTel span attrs; 7 tests, 60 passed |
 | L1-B4 | Malformed knowledge_type → MET-385 envelope | MET-385 | XS | — | ✅ | fix/met-385-knowledge-type-envelope | [#172](https://github.com/FidelOdok/MetaForge/pull/172) | enum validation at adapter layer; 13 tests, 65 passed |
-| L1-B5 | Compound filter semantics pinned | MET-417 | XS | — | ⏳ | — | — | AND vs OR; pin behavior |
+| L1-B5 | Compound filter semantics pinned | MET-417 | XS | — | ✅ | feat/met-417-compound-filters | [#173](https://github.com/FidelOdok/MetaForge/pull/173) | AND-across-keys equality; str/int/bool/None values; dict/list rejected; 10 tests, 75 passed |
 | L1-C1 | `forge sources list/show/delete` | MET-411 | S | L1-A8, L1-B1 | ⏳ | — | — | CLI sources management |
 | L1-C2 | CLI error reporting on bad input | MET-411 | XS | — | ⏳ | — | — | KB-CLI-005, KB-CLI-006 |
 | L1-C3 | CLI PDF walker integration | MET-399 | XS | L1-A3 | ⏳ | — | — | end-to-end forge ingest *.pdf |
