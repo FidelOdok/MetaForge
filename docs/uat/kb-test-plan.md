@@ -791,10 +791,10 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 
 ---
 
-### KB-CTX-003 — actor_id propagates to span attributes  🔄 NEW
+### KB-CTX-003 — actor_id propagates to span attributes  ✅ PASS
 **Validates:** MET-387
 **Tier:** 2
-**Status:** 🔄 NEW.
+**Status:** ✅ PASS (L1-B3, MET-387). Verified by `tests/unit/test_knowledge_call_context.py::TestOtelSpanAttributes`.
 
 #### When
 1. Call `knowledge_ingest` with header `X-Actor-Id: claude-uat-runner`.
@@ -802,12 +802,13 @@ Source: `mcp_core/` call-context plumbing (MET-401, MET-387).
 
 #### Then
 - The span attribute `mcp.actor_id == "claude-uat-runner"` is present on the ingest span.
+- The same attribute appears on the search span when the same actor calls `knowledge_search`.
 
 ---
 
-### KB-CTX-004 — missing project_id falls back to default tenant  🔄 NEW
+### KB-CTX-004 — missing project_id falls back to default tenant  ✅ PASS
 **Validates:** MET-401
-**Status:** 🔄 NEW.
+**Status:** ✅ PASS (L1-A1 + L1-B3). Adapter forwards `current_context().project_id` (None when unset) and the LightRAG service scopes to the `"default"` tenant on both ingest and search.
 
 #### When
 1. Ingest with no `project_id` in the per-call context.

@@ -255,6 +255,8 @@ class _FakeKnowledgeService:
         knowledge_type: KnowledgeType,
         source_work_product_id: object | None = None,
         metadata: dict[str, object] | None = None,
+        project_id: object | None = None,
+        actor_id: str | None = None,
     ) -> object:
         from digital_twin.knowledge.service import IngestResult
 

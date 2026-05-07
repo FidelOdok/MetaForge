@@ -459,6 +459,7 @@ class LightRAGKnowledgeService:
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        actor_id: str | None = None,
     ) -> IngestResult:
         """Ingest a document.
 
@@ -468,6 +469,11 @@ class LightRAGKnowledgeService:
         explicitly. An explicit ``project_id`` argument wins over any
         existing ``metadata["project_id"]`` so the multi-tenant isolation
         contract is unambiguous at the storage layer.
+
+        ``actor_id`` (MET-387) is an attribution signal — who initiated
+        the ingest (e.g. ``agent:claude_code``, ``user:fidel``). When set
+        it lands in ``metadata["actor_id"]`` and on the OTel span so log
+        / trace consumers can correlate the chunk back to its caller.
         """
         await self._ensure_initialized()
         with tracer.start_as_current_span("lightrag.ingest") as span:
@@ -475,12 +481,15 @@ class LightRAGKnowledgeService:
             span.set_attribute("knowledge.type", str(knowledge_type))
             if project_id is not None:
                 span.set_attribute("knowledge.project_id", str(project_id))
+            if actor_id is not None:
+                span.set_attribute("knowledge.actor_id", actor_id)
 
             if not content or not content.strip():
                 logger.info(
                     "lightrag_ingest_empty",
                     source_path=source_path,
                     project_id=str(project_id) if project_id is not None else None,
+                    actor_id=actor_id,
                 )
                 raise ValueError("content is empty or whitespace")
 
@@ -490,6 +499,12 @@ class LightRAGKnowledgeService:
             metadata = dict(metadata or {})
             if project_id is not None:
                 metadata["project_id"] = str(project_id)
+            # MET-387: stamp actor_id into the chunk metadata so the
+            # source -> actor attribution survives a round-trip through
+            # the store. Search hits surface it via metadata; we never
+            # use it for filtering.
+            if actor_id is not None:
+                metadata["actor_id"] = actor_id
 
             # MET-307: hash the raw content so we can detect edits to
             # the same source_path. Two outcomes:
@@ -610,6 +625,7 @@ class LightRAGKnowledgeService:
                 chunks=len(chunks),
                 knowledge_type=str(knowledge_type),
                 project_id=str(project_id) if project_id is not None else None,
+                actor_id=actor_id,
             )
             return IngestResult(
                 entry_ids=entry_ids,
@@ -625,6 +641,7 @@ class LightRAGKnowledgeService:
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
         rerank: bool = False,
+        actor_id: str | None = None,
     ) -> list[SearchHit]:
         """Vector search with optional cross-encoder reranking.
 
@@ -656,12 +673,19 @@ class LightRAGKnowledgeService:
         instantiates the cross-encoder model. The reranker model load
         is ~440 MB so callers should not flip this on per-call without
         considering startup cost on the first request.
+
+        ``actor_id`` (MET-387) is an attribution signal: it lands on
+        the OTel span and the structured search log line. It is not
+        used to filter hits — actor is *who's asking*, not a property
+        of the indexed chunks themselves.
         """
         await self._ensure_initialized()
         with tracer.start_as_current_span("lightrag.search") as span:
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
             span.set_attribute("knowledge.rerank", bool(rerank))
+            if actor_id is not None:
+                span.set_attribute("knowledge.actor_id", actor_id)
 
             # MET-401: resolve the effective project scope.
             # - explicit ``project_id`` argument always wins
@@ -714,6 +738,7 @@ class LightRAGKnowledgeService:
                 result_count=len(hits),
                 project_id=scope_project_id,
                 rerank=bool(rerank),
+                actor_id=actor_id,
             )
             return hits
 

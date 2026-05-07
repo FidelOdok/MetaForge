@@ -78,6 +78,7 @@ class _FakeService:
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        actor_id: str | None = None,
     ) -> IngestResult:
         self.ingest_calls.append(
             {
@@ -85,6 +86,7 @@ class _FakeService:
                 "source_path": source_path,
                 "knowledge_type": knowledge_type,
                 "project_id": project_id,
+                "actor_id": actor_id,
             }
         )
         return IngestResult(
@@ -100,6 +102,7 @@ class _FakeService:
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        actor_id: str | None = None,
     ) -> list[SearchHit]:
         self.search_calls.append(
             {
@@ -108,6 +111,7 @@ class _FakeService:
                 "knowledge_type": knowledge_type,
                 "filters": filters,
                 "project_id": project_id,
+                "actor_id": actor_id,
             }
         )
         return list(self._search_hits)
