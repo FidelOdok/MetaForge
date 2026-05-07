@@ -46,6 +46,7 @@ from digital_twin.knowledge.service import (
 from digital_twin.knowledge.types import KnowledgeType
 from mcp_core.context import current_context
 from mcp_core.errors import ErrorCode, make_tool_error
+from mcp_core.progress import emit_progress
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
@@ -181,9 +182,11 @@ class KnowledgeServer(McpToolServer):
                 adapter_id="knowledge",
                 name="Ingest Knowledge",
                 description=(
-                    "Ingest a document (markdown / plain text) into the L1 "
-                    "knowledge layer. Heading-aware chunking and citation "
-                    "metadata are handled by the underlying provider."
+                    "Ingest one document (single-payload mode) or a batch of "
+                    "documents (``files: [...]`` mode) into the L1 knowledge "
+                    "layer. Heading-aware chunking and citation metadata are "
+                    "handled by the underlying provider. Batch mode emits a "
+                    "``notifications/progress`` event after each file."
                 ),
                 capability="knowledge_ingest",
                 input_schema={
@@ -191,7 +194,10 @@ class KnowledgeServer(McpToolServer):
                     "properties": {
                         "content": {
                             "type": "string",
-                            "description": "Document content as a single string.",
+                            "description": (
+                                "Single-payload mode: document content as a "
+                                "string. Mutually exclusive with ``files``."
+                            ),
                         },
                         "source_path": {
                             "type": "string",
@@ -214,7 +220,46 @@ class KnowledgeServer(McpToolServer):
                             "type": "object",
                             "description": "Arbitrary metadata round-tripped on search hits.",
                         },
+                        "files": {
+                            "type": "array",
+                            "description": (
+                                "Multi-file mode (MET-388, L1-B2): each entry is "
+                                "an object with ``content``, ``source_path``, "
+                                "``knowledge_type``, optional ``source_work_product_id`` "
+                                "and ``metadata``. The handler emits a progress "
+                                "notification after each file is ingested."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {"type": "string"},
+                                    "source_path": {"type": "string"},
+                                    "knowledge_type": {
+                                        "type": "string",
+                                        "enum": _KNOWLEDGE_TYPE_VALUES,
+                                    },
+                                    "source_work_product_id": {
+                                        "type": ["string", "null"],
+                                    },
+                                    "metadata": {"type": "object"},
+                                },
+                                "required": ["content", "source_path", "knowledge_type"],
+                            },
+                        },
+                        "request_id": {
+                            "type": "string",
+                            "description": (
+                                "Optional client-supplied request id stamped on "
+                                "progress notifications so callers can correlate "
+                                "them with the originating tool/call."
+                            ),
+                        },
                     },
+                    # ``required`` documents the legacy single-payload
+                    # shape. Multi-file callers pass ``files`` instead;
+                    # the handler enforces per-entry required keys at
+                    # runtime so the discovery shape stays stable for
+                    # existing consumers.
                     "required": ["content", "source_path", "knowledge_type"],
                 },
                 output_schema={
@@ -223,10 +268,27 @@ class KnowledgeServer(McpToolServer):
                         "entry_ids": {"type": "array", "items": {"type": "string"}},
                         "chunks_indexed": {"type": "integer"},
                         "source_path": {"type": "string"},
+                        "files_ingested": {"type": "integer"},
+                        "files": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "entry_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "chunks_indexed": {"type": "integer"},
+                                    "source_path": {"type": "string"},
+                                },
+                            },
+                        },
                     },
                 },
                 phase=1,
                 resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=120),
+                # MET-388 (L1-B2): batch mode emits notifications/progress.
+                supports_progress=True,
             ),
             handler=self.handle_ingest,
         )
@@ -428,6 +490,16 @@ class KnowledgeServer(McpToolServer):
             return {"hits": [_hit_to_dict(h) for h in hits]}
 
     async def handle_ingest(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        # MET-388 (L1-B2): batch mode short-circuits when ``files`` is set.
+        # Single-payload mode stays silent (no progress) for back-compat.
+        files = arguments.get("files")
+        if files is not None:
+            if not isinstance(files, list):
+                raise ValueError("knowledge.ingest: 'files' must be a list when provided")
+            return await self._handle_ingest_batch(files, arguments)
+        return await self._handle_ingest_single(arguments)
+
+    async def _handle_ingest_single(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("knowledge.mcp.ingest") as span:
             content = arguments.get("content")
             source_path = arguments.get("source_path")
@@ -462,6 +534,117 @@ class KnowledgeServer(McpToolServer):
                 project_id=project_id,
             )
             return _ingest_result_to_dict(result)
+
+    async def _handle_ingest_batch(
+        self,
+        files: list[Any],
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Batch ingest with per-file ``notifications/progress`` (MET-388).
+
+        Each entry must be an object with ``content``, ``source_path``,
+        ``knowledge_type`` (and optional ``source_work_product_id`` /
+        ``metadata``). After every file lands the handler emits one
+        progress event whose ``progress`` value advances monotonically
+        from ``1/total`` toward ``1.0`` and ``message`` carries the
+        source path. Single-payload callers (no ``files`` key) keep the
+        legacy silent behaviour for back-compat.
+        """
+        with tracer.start_as_current_span("knowledge.mcp.ingest.batch") as span:
+            total = len(files)
+            span.set_attribute("knowledge.batch_size", total)
+            if total == 0:
+                # Empty batches are a no-op rather than a hard error so
+                # callers can pass through whatever the file walk
+                # produced without first checking length.
+                return {
+                    "files_ingested": 0,
+                    "chunks_indexed": 0,
+                    "files": [],
+                }
+
+            project_id = current_context().project_id
+            if project_id is not None:
+                span.set_attribute("knowledge.project_id", str(project_id))
+
+            # Caller-supplied id correlates progress events with the
+            # originating ``tool/call``. When absent we synthesise one
+            # tied to the source set so the contextvar-based emitter
+            # doesn't drop the events.
+            request_id = arguments.get("request_id")
+            if not isinstance(request_id, str) or not request_id:
+                request_id = f"knowledge.ingest.batch.{id(arguments)}"
+
+            per_file_results: list[dict[str, Any]] = []
+            total_chunks = 0
+            all_entry_ids: list[str] = []
+
+            for index, raw_entry in enumerate(files):
+                if not isinstance(raw_entry, dict):
+                    raise ValueError(f"knowledge.ingest: files[{index}] must be an object")
+                content = raw_entry.get("content")
+                source_path = raw_entry.get("source_path")
+                kt_raw = raw_entry.get("knowledge_type")
+                if not content or not isinstance(content, str):
+                    raise ValueError(
+                        f"knowledge.ingest: files[{index}].content is required and must be a string"
+                    )
+                if not source_path or not isinstance(source_path, str):
+                    raise ValueError(
+                        f"knowledge.ingest: files[{index}].source_path is required "
+                        "and must be a string"
+                    )
+                knowledge_type = self._coerce_knowledge_type(kt_raw)
+                if knowledge_type is None:
+                    raise ValueError(
+                        f"knowledge.ingest: files[{index}].knowledge_type must be one of "
+                        f"{_KNOWLEDGE_TYPE_VALUES}"
+                    )
+                wp_id = self._coerce_uuid(raw_entry.get("source_work_product_id"))
+                metadata = raw_entry.get("metadata") or None
+
+                span.set_attribute("knowledge.batch_index", index)
+
+                result = await self.service.ingest(
+                    content=content,
+                    source_path=source_path,
+                    knowledge_type=knowledge_type,
+                    source_work_product_id=wp_id,
+                    metadata=metadata,
+                    project_id=project_id,
+                )
+
+                serialised = _ingest_result_to_dict(result)
+                per_file_results.append(serialised)
+                total_chunks += int(serialised.get("chunks_indexed", 0) or 0)
+                all_entry_ids.extend(serialised.get("entry_ids", []) or [])
+
+                current = index + 1
+                # ``progress`` is a fraction in [0, 1]; one event per
+                # file keeps the cadence predictable for harnesses that
+                # assert a per-file count.
+                progress_value = current / total
+                message = f"ingested {current}/{total}: {source_path}"
+                emitted = await emit_progress(
+                    request_id=request_id,
+                    progress=progress_value,
+                    message=message,
+                )
+                logger.info(
+                    "knowledge_ingest_progress",
+                    batch_index=index,
+                    batch_size=total,
+                    source_path=source_path,
+                    progress=progress_value,
+                    emitted=emitted,
+                )
+
+            return {
+                "files_ingested": total,
+                "chunks_indexed": total_chunks,
+                "entry_ids": all_entry_ids,
+                "files": per_file_results,
+            }
 
     # ------------------------------------------------------------------
     # Helpers

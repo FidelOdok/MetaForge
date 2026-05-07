@@ -719,9 +719,9 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 Source: just-shipped commit `cc0db58`.
 Capability: progress notifications on long-running tools (e.g. multi-file ingest).
 
-### KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification  🔄 NEW
+### KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification  ✅ PASS
 **Validates:** MET-388
-**Status:** 🔄 NEW.
+**Status:** ✅ PASS — covered by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_knowledge_ingest_emits_progress_per_file` (L1-B2).
 
 #### Given
 - ≥ 5 distinct source paths and inline content.
@@ -736,18 +736,18 @@ Capability: progress notifications on long-running tools (e.g. multi-file ingest
 
 ---
 
-### KB-PRG-002 — progress notifications carry the request id  🔄 NEW
+### KB-PRG-002 — progress notifications carry the request id  ✅ PASS
 **Validates:** MET-388
-**Status:** 🔄 NEW.
+**Status:** ✅ PASS — covered by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_progress_carries_request_id` (L1-B2).
 
 #### Then
 - Every progress notification includes the originating tool-call id so the client can correlate them.
 
 ---
 
-### KB-PRG-003 — capability advertised in tools/list  🔄 NEW
+### KB-PRG-003 — capability advertised in tools/list  ✅ PASS
 **Validates:** MET-388
-**Status:** 🔄 NEW.
+**Status:** ✅ PASS — covered by `tests/integration/test_knowledge_streaming_progress.py::TestProgressCapabilityAdvertised::test_progress_capability_advertised_for_knowledge_ingest` (L1-B2).
 
 #### When
 1. `tools/list` at session start; inspect the `knowledge_ingest` tool entry.

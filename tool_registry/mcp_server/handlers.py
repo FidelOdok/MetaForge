@@ -32,6 +32,11 @@ class ToolManifest(BaseModel):
     output_schema: dict[str, Any] = Field(default_factory=dict)
     phase: int = 1
     resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
+    # MET-388 (L1-B2): tools that emit ``notifications/progress`` during a
+    # long-running ``tool/call`` advertise this so clients can wire a
+    # progress sink before invocation. Defaults to False so the field is
+    # backward-compatible with every existing manifest.
+    supports_progress: bool = False
 
 
 # Type alias for tool handler functions
