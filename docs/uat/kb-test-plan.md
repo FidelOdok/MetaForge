@@ -71,14 +71,14 @@
 | 2 | `knowledge_search` MCP tool | 14 | 10 | 0 | 1 | 3 | 0 | MET-293, MET-335, MET-417 |
 | 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | MET-336, MET-399 |
 | 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | MET-307 |
-| 5 | Resources surface | 4 | 3 | 0 | 0 | 1 | 0 | MET-384 |
+| 5 | Resources surface | 4 | 4 | 0 | 0 | 0 | 0 | MET-384 |
 | 6 | Streaming progress | 3 | 0 | 0 | 0 | 3 | 0 | MET-388 |
 | 7 | Per-call context / isolation | 4 | 2 | 0 | 0 | 2 | 0 | MET-401, MET-387 |
 | 8 | Error envelope | 3 | 1 | 0 | 0 | 2 | 0 | MET-385 |
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
 | 11 | Real-datasheet retrieval QA | 30 | 0 | 0 | 0 | 30 | 0 | MET-346, MET-293, MET-335 |
-| | **Totals** | **86** | **31** | **0** | **4** | **51** | **0** | |
+| | **Totals** | **86** | **32** | **0** | **4** | **50** | **0** | |
 
 > **Read.** 86 distinct trackable tests. 31 already pass. 51 are
 > 🔄 NEW (the 24 cross-cutting gap-fills in §1–§10 plus the 30
@@ -279,10 +279,11 @@ Surface: `mcp__metaforge__knowledge_ingest`.
 
 ---
 
-### KB-ING-010 — malformed knowledge_type returns MET-385 envelope  ✅ COVERED
+### KB-ING-010 — malformed knowledge_type returns MET-385 envelope  ✅
 **Validates:** MET-385, MET-307
 **Tier:** 2
-**Status:** ✅ COVERED — `tests/unit/test_knowledge_tool_errors.py` (L1-B4, MET-385). The knowledge MCP adapter validates `knowledge_type` against the `KnowledgeType` enum at request-decode time on both `knowledge.ingest` and `knowledge.search`; on mismatch (or empty string) it raises `McpToolError(code=invalid_input, ...)` with `data.field`, `data.value`, and `data.allowed` populated, and the recovery probe (Step 2) confirms the adapter remains responsive after the rejection.
+**Existing scenario:** `tier2/error-envelope-probe.md` → "KB-ING-010 — malformed knowledge_type returns MET-385 envelope" (L1-F1c).
+**Verdict:** ✅ PASS — backed by `tests/unit/test_knowledge_tool_errors.py` (L1-B4, MET-385). The knowledge MCP adapter validates `knowledge_type` against the `KnowledgeType` enum at request-decode time on both `knowledge.ingest` and `knowledge.search`; on mismatch (or empty string) it raises `McpToolError(code=invalid_input, ...)` with `data.field`, `data.value`, and `data.allowed` populated, and the recovery probe (Step 2) confirms the adapter remains responsive after the rejection.
 
 #### Given
 - (none)
@@ -504,9 +505,11 @@ Surface: `mcp__metaforge__knowledge_search`.
 
 ---
 
-### KB-SRC-014 — unknown filter key is silently ignored OR rejected (pinned)  ✅ COVERED
+### KB-SRC-014 — unknown filter key is silently ignored OR rejected (pinned)  ✅
 **Validates:** MET-346, MET-385, MET-417
-**Status:** ✅ COVERED — `tests/unit/test_knowledge_filters.py` (L1-B5, MET-417). The pinned contract is documented in `docs/architecture/knowledge-ingestion-playbook.md#search-filters`: filters are AND-across-keys equality match; unknown keys pass through as literal metadata-key equality and naturally yield zero hits (no exception). Filter values are restricted to `str` / `int` / `bool` / `None`; `dict` and `list` values are rejected at the adapter boundary with the MET-385 `invalid_input` envelope listing the offending field and type. AND push-down lands in both the pgvector path (additional `c.file_path::jsonb->'x'->>'<key>' = $<n>` clauses in `_search_pg`) and the naive non-pg path (`_matches_filters` post-filter).
+**Tier:** 2
+**Existing scenario:** `tier2/error-envelope-probe.md` → "KB-SRC-014 — unknown filter key behaviour pinned" (L1-F1c).
+**Verdict:** ✅ PASS — backed by `tests/unit/test_knowledge_filters.py` (L1-B5, MET-417). The pinned contract is documented in `docs/architecture/knowledge-ingestion-playbook.md#search-filters`: filters are AND-across-keys equality match; unknown keys pass through as literal metadata-key equality and naturally yield zero hits (no exception). Filter values are restricted to `str` / `int` / `bool` / `None`; `dict` and `list` values are rejected at the adapter boundary with the MET-385 `invalid_input` envelope listing the offending field and type. AND push-down lands in both the pgvector path (additional `c.file_path::jsonb->'x'->>'<key>' = $<n>` clauses in `_search_pg`) and the naive non-pg path (`_matches_filters` post-filter).
 
 #### When
 1. `knowledge_search(query="x", filters={"banana": "yellow"})`.
@@ -705,9 +708,11 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 
 ---
 
-### KB-RES-004 — resources/read of unknown URI is structured error  🔄 NEW
+### KB-RES-004 — resources/read of unknown URI is structured error  ✅
 **Validates:** MET-384, MET-385
-**Status:** 🔄 NEW.
+**Tier:** 2
+**Existing scenario:** `tier2/error-envelope-probe.md` → "KB-RES-004 — resources/read of unknown URI is structured error" (L1-F1c).
+**Verdict:** ✅ PASS — `metaforge://knowledge/sources/{id}` URI registered in L1-B1 (MET-384, PR #169); unknown source ids resolve to a structured `not_found` MET-385 envelope referencing the offending URI. No transport-level crash; recovery probe via `resources/read("metaforge://knowledge/sources")` confirms the surface stays responsive.
 
 #### When
 1. `resources/read("metaforge://knowledge/sources/00000000-not-real-0000")`.
