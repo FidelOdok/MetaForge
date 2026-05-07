@@ -112,7 +112,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-A5 | Workspace separation enforced | MET-346 | M | — | ⏸️ | — | — | Requires human decision (shared vs separate) |
 | L1-A6 | Re-ingest after edit retires stale | MET-307 | S | — | ✅ | feat/met-307-supersede-on-edit | [#167](https://github.com/FidelOdok/MetaForge/pull/167) | sha256-based supersede; 28 passed, 11 skipped (no PG) |
 | L1-A7 | Latency SLO instrumentation | MET-401 | S | L1-D2 | ⏳ | — | — | p95 <200ms gate |
-| L1-A8 | `list_sources()` Protocol method | MET-415 | S | — | ⏳ | — | — | unblocks L1-B1, L1-C1, L1-E2 |
+| L1-A8 | `list_sources()` Protocol method | MET-415 | S | — | ✅ | feat/met-415-list-sources | [#168](https://github.com/FidelOdok/MetaForge/pull/168) | 11 unit tests; SQL targets lightrag_vdb_chunks (real LightRAG storage) |
 | L1-B1 | `metaforge://knowledge/sources` resource | MET-384 | S | L1-A8 | ⏳ | — | — | resources/list + resources/read |
 | L1-B2 | Streaming progress on multi-file ingest | MET-388 | M | — | ⏳ | — | — | uses MET-388 sink |
 | L1-B3 | Per-call context propagation | MET-387 | S | — | ⏳ | — | — | project_id + actor_id |

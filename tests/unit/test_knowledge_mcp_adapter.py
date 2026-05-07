@@ -19,7 +19,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from digital_twin.knowledge.service import IngestResult, KnowledgeService, SearchHit
+from digital_twin.knowledge.service import (
+    IngestResult,
+    KnowledgeService,
+    SearchHit,
+    SourceSummary,
+)
 from digital_twin.knowledge.types import KnowledgeType
 from tool_registry.tools.knowledge.adapter import KnowledgeServer
 
@@ -89,6 +94,15 @@ class _FakeService:
 
     async def delete_by_source(self, source_path: str) -> int:
         return 0
+
+    async def list_sources(
+        self,
+        project_id: UUID | None = None,
+        knowledge_type: KnowledgeType | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[SourceSummary]:
+        return []
 
     async def health_check(self) -> dict[str, Any]:
         return {"status": "ok", "backend": "fake"}

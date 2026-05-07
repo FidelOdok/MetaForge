@@ -5,15 +5,16 @@ Defines the framework-agnostic contract that all knowledge backends
 is the swap-out clause: callers depend on this Protocol, never on the
 concrete implementation.
 
-The dataclasses (``IngestResult``, ``SearchHit``) are deliberately plain
-``@dataclass`` rather than Pydantic models so the public contract stays
-free of any Pydantic-version coupling and is trivially constructible
-from any backend.
+The dataclasses (``IngestResult``, ``SearchHit``, ``SourceSummary``) are
+deliberately plain ``@dataclass`` rather than Pydantic models so the
+public contract stays free of any Pydantic-version coupling and is
+trivially constructible from any backend.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
@@ -23,6 +24,7 @@ __all__ = [
     "IngestResult",
     "KnowledgeService",
     "SearchHit",
+    "SourceSummary",
 ]
 
 
@@ -57,6 +59,31 @@ class SearchHit:
     metadata: dict[str, Any] = field(default_factory=dict)
     knowledge_type: KnowledgeType | None = None
     source_work_product_id: UUID | None = None
+
+
+@dataclass
+class SourceSummary:
+    """Aggregated row returned by ``list_sources()``.
+
+    One ``SourceSummary`` per ``(source_path, knowledge_type)`` pair —
+    chunks of a multi-chunk source roll up into a single row whose
+    ``fragment_count`` reports the chunk total. ``indexed_at`` is the
+    most-recent ``created_at`` across all chunks of the source so the
+    default ordering (newest first) reflects the last edit, not the
+    initial ingest.
+
+    Unblocks the ``metaforge://knowledge/sources`` MCP resource (L1-B1)
+    and the ``forge sources list/show/delete`` CLI (L1-C1) — both call
+    ``list_sources`` and project this dataclass directly into their
+    output shape, which is why it lives in ``service.py`` (the public
+    contract module) rather than the LightRAG adapter.
+    """
+
+    source_path: str
+    knowledge_type: KnowledgeType | str | None
+    fragment_count: int
+    indexed_at: datetime
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -95,5 +122,13 @@ class KnowledgeService(Protocol):
     ) -> list[SearchHit]: ...
 
     async def delete_by_source(self, source_path: str) -> int: ...
+
+    async def list_sources(
+        self,
+        project_id: UUID | None = None,
+        knowledge_type: KnowledgeType | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[SourceSummary]: ...
 
     async def health_check(self) -> dict[str, Any]: ...
