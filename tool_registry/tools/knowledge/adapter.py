@@ -69,6 +69,100 @@ tracer = get_tracer("tool_registry.tools.knowledge.adapter")
 _KNOWLEDGE_TYPE_VALUES = sorted(kt.value for kt in KnowledgeType)
 
 
+class McpToolError(ValueError):
+    """Adapter-side raise form of the MET-385 ``McpToolError`` envelope.
+
+    The wire-level envelope (``mcp_core.errors.McpToolError``) is a
+    Pydantic ``BaseModel`` and cannot be raised directly — Python's
+    ``raise`` statement only accepts ``BaseException`` subclasses. This
+    exception is the raise-form companion: it carries the canonical
+    ``ErrorCode``, the human-readable message, and the structured
+    ``data`` payload (the ``details`` field on the wire envelope) so
+    transports can serialise it back into the standard envelope shape
+    when bubbling the error up to the JSON-RPC boundary.
+
+    Subclassing ``ValueError`` keeps backwards compatibility with
+    existing handler tests that assert ``pytest.raises(ValueError, ...)``
+    against the legacy ad-hoc validation messages — the new exception
+    transparently satisfies both contracts at once.
+    """
+
+    def __init__(
+        self,
+        *,
+        code: ErrorCode,
+        message: str,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        self.code: ErrorCode = code
+        self.message: str = message
+        self.data: dict[str, Any] = dict(data) if data else {}
+        # Stash the canonical envelope so transports / tests can reach
+        # the wire-shape directly without re-deriving ``retryable`` from
+        # the code class.
+        self.envelope = make_tool_error(code, message, details=self.data)
+        super().__init__(message)
+
+
+def _validate_knowledge_type(
+    raw: Any,
+    *,
+    field: str,
+    required: bool,
+) -> KnowledgeType | None:
+    """Validate ``knowledge_type`` against the documented enum (MET-385).
+
+    Returns the parsed ``KnowledgeType`` on success. Raises
+    ``McpToolError`` with ``code=invalid_input`` carrying the rejected
+    value and the allowed members on mismatch — including empty
+    strings, which the legacy ``_coerce_knowledge_type`` silently
+    treated as "no filter". When ``required`` is False (search), a
+    bare ``None`` returns ``None`` so the optional-filter contract
+    survives unchanged.
+    """
+    if raw is None:
+        if required:
+            error = McpToolError(
+                code=ErrorCode.INVALID_INPUT,
+                message=(f"'{field}' is required and must be one of {_KNOWLEDGE_TYPE_VALUES}"),
+                data={
+                    "field": field,
+                    "value": None,
+                    "allowed": list(_KNOWLEDGE_TYPE_VALUES),
+                },
+            )
+            logger.info(
+                "knowledge_invalid_input",
+                field=field,
+                value=None,
+                allowed=list(_KNOWLEDGE_TYPE_VALUES),
+            )
+            raise error
+        return None
+    if isinstance(raw, KnowledgeType):
+        return raw
+    try:
+        return KnowledgeType(str(raw))
+    except ValueError:
+        rejected = str(raw) if not isinstance(raw, str) else raw
+        error = McpToolError(
+            code=ErrorCode.INVALID_INPUT,
+            message=(f"'{field}' must be one of {_KNOWLEDGE_TYPE_VALUES}; got {rejected!r}"),
+            data={
+                "field": field,
+                "value": rejected,
+                "allowed": list(_KNOWLEDGE_TYPE_VALUES),
+            },
+        )
+        logger.info(
+            "knowledge_invalid_input",
+            field=field,
+            value=rejected,
+            allowed=list(_KNOWLEDGE_TYPE_VALUES),
+        )
+        raise error from None
+
+
 class KnowledgeServer(McpToolServer):
     """MCP server adapter around ``KnowledgeService``.
 
@@ -466,9 +560,19 @@ class KnowledgeServer(McpToolServer):
             query = arguments.get("query")
             if not query or not isinstance(query, str):
                 raise ValueError("knowledge.search: 'query' is required and must be a string")
-            top_k = int(arguments.get("top_k", 5))
+            # MET-385 (L1-B4): validate knowledge_type at request-decode
+            # time. Empty string is rejected (a leftover from the legacy
+            # ``_coerce_knowledge_type`` that silently treated it as
+            # "no filter"); only an explicit ``None`` / missing key
+            # bypasses the enum check on the search side.
             kt_raw = arguments.get("knowledge_type")
-            knowledge_type = self._coerce_knowledge_type(kt_raw)
+            if "knowledge_type" in arguments and kt_raw is not None:
+                knowledge_type = _validate_knowledge_type(
+                    kt_raw, field="knowledge_type", required=True
+                )
+            else:
+                knowledge_type = None
+            top_k = int(arguments.get("top_k", 5))
             filters = arguments.get("filters") or None
             # MET-401 / MET-387: forward project_id and actor_id from the
             # active call-context. project_id scopes retrieval (search
@@ -521,16 +625,19 @@ class KnowledgeServer(McpToolServer):
         with tracer.start_as_current_span("knowledge.mcp.ingest") as span:
             content = arguments.get("content")
             source_path = arguments.get("source_path")
-            kt_raw = arguments.get("knowledge_type")
             if not content or not isinstance(content, str):
                 raise ValueError("knowledge.ingest: 'content' is required and must be a string")
             if not source_path or not isinstance(source_path, str):
                 raise ValueError("knowledge.ingest: 'source_path' is required and must be a string")
-            knowledge_type = self._coerce_knowledge_type(kt_raw)
-            if knowledge_type is None:
-                raise ValueError(
-                    f"knowledge.ingest: 'knowledge_type' must be one of {_KNOWLEDGE_TYPE_VALUES}"
-                )
+            # MET-385 (L1-B4): validate at request-decode time and surface
+            # the standard MET-385 envelope on mismatch (empty + missing
+            # both rejected — knowledge_type is required for ingest).
+            knowledge_type = _validate_knowledge_type(
+                arguments.get("knowledge_type"),
+                field="knowledge_type",
+                required=True,
+            )
+            assert knowledge_type is not None  # narrow for mypy — required=True
             wp_id = self._coerce_uuid(arguments.get("source_work_product_id"))
             metadata = arguments.get("metadata") or None
             # MET-401 / MET-387: stamp the active call-context's
@@ -622,7 +729,6 @@ class KnowledgeServer(McpToolServer):
                     raise ValueError(f"knowledge.ingest: files[{index}] must be an object")
                 content = raw_entry.get("content")
                 source_path = raw_entry.get("source_path")
-                kt_raw = raw_entry.get("knowledge_type")
                 if not content or not isinstance(content, str):
                     raise ValueError(
                         f"knowledge.ingest: files[{index}].content is required and must be a string"
@@ -632,12 +738,16 @@ class KnowledgeServer(McpToolServer):
                         f"knowledge.ingest: files[{index}].source_path is required "
                         "and must be a string"
                     )
-                knowledge_type = self._coerce_knowledge_type(kt_raw)
-                if knowledge_type is None:
-                    raise ValueError(
-                        f"knowledge.ingest: files[{index}].knowledge_type must be one of "
-                        f"{_KNOWLEDGE_TYPE_VALUES}"
-                    )
+                # MET-385 (L1-B4): per-entry enum validation surfaces the
+                # canonical envelope at the offending batch index so
+                # callers can locate the bad row in mixed-payload
+                # uploads.
+                knowledge_type = _validate_knowledge_type(
+                    raw_entry.get("knowledge_type"),
+                    field=f"files[{index}].knowledge_type",
+                    required=True,
+                )
+                assert knowledge_type is not None  # narrow for mypy — required=True
                 wp_id = self._coerce_uuid(raw_entry.get("source_work_product_id"))
                 metadata = raw_entry.get("metadata") or None
 
