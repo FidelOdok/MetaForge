@@ -13,6 +13,20 @@ Behaviour summary::
     forge ingest docs/ --no-recursive         # only top-level files
     forge ingest README.md --type session     # override knowledge type
     forge ingest docs/ --dry-run              # list files; no HTTP calls
+
+Error reporting (MET-411 L1-C2):
+
+* A missing input path is surfaced as a single actionable line on
+  stderr and the CLI exits with status code 2 — never as a Python
+  traceback.
+* Empty files emit a per-file warning on stderr and the run continues;
+  the file is recorded in ``skipped`` and the overall exit code stays 0
+  if other files succeed.
+* Binary files that slip past the extension filter (e.g. a ``.txt``
+  whose content is non-text) are warned and skipped rather than
+  failing the whole batch.
+* Permission denied / unreadable files are surfaced cleanly with the
+  offending path and no stack trace.
 """
 
 from __future__ import annotations
@@ -47,6 +61,20 @@ _PATH_TYPE_HINTS: list[tuple[str, str]] = [
 ]
 
 
+class IngestInputError(Exception):
+    """User-facing input error.
+
+    Raised by ``handle_ingest`` for problems we want to surface on
+    stderr without a traceback (missing path, unreadable target, etc.).
+    The CLI dispatcher catches this and exits with status 2.
+    """
+
+
+def _warn(message: str) -> None:
+    """Emit a per-file warning to stderr without aborting the run."""
+    print(f"warning: {message}", file=sys.stderr)
+
+
 def _infer_knowledge_type(path: Path) -> str:
     """Infer ``knowledge_type`` from a file path's directory components."""
     parts = [p.lower() for p in path.parts]
@@ -54,6 +82,17 @@ def _infer_knowledge_type(path: Path) -> str:
         if any(needle in p for p in parts):
             return kt
     return DEFAULT_KNOWLEDGE_TYPE
+
+
+def _looks_binary(sample: bytes) -> bool:
+    """Heuristic: does this byte sample look like a binary file?
+
+    A file with an embedded NUL byte is treated as binary — text files
+    almost never contain NULs, while every common binary container
+    (images, archives, executables) does. The check runs on the first
+    few KB only so we don't pay a full read for large files.
+    """
+    return b"\x00" in sample
 
 
 def _read_file_content(path: Path) -> str:
@@ -144,13 +183,41 @@ def ingest_path(
             )
             continue
 
+        # Pre-flight binary sniff for non-PDF supported extensions. PDFs
+        # are expected binary and have a dedicated latin-1 path; .md /
+        # .markdown / .txt should be text — if a user names a binary
+        # blob ``notes.txt``, warn and skip instead of mangling the
+        # batch. We sniff the first 8 KB which is plenty for a NUL.
+        if path.suffix.lower() != ".pdf":
+            try:
+                with open(path, "rb") as fh:
+                    sample = fh.read(8192)
+            except PermissionError as exc:
+                _warn(f"cannot read {path}: permission denied")
+                failed.append({"path": str(path), "error": f"permission denied: {exc}"})
+                continue
+            except OSError as exc:
+                _warn(f"cannot read {path}: {exc}")
+                failed.append({"path": str(path), "error": f"read failed: {exc}"})
+                continue
+            if _looks_binary(sample):
+                _warn(f"skipping binary file {path.name} (non-text content under text extension)")
+                skipped.append({"path": str(path), "reason": "binary content"})
+                continue
+
         try:
             content = _read_file_content(path)
-        except Exception as exc:  # pragma: no cover — IO edge cases
+        except PermissionError as exc:
+            _warn(f"cannot read {path}: permission denied")
+            failed.append({"path": str(path), "error": f"permission denied: {exc}"})
+            continue
+        except (UnicodeDecodeError, OSError) as exc:
+            _warn(f"cannot read {path}: {exc}")
             failed.append({"path": str(path), "error": f"read failed: {exc}"})
             continue
 
         if not content.strip():
+            _warn(f"skipping empty file {path}")
             skipped.append({"path": str(path), "reason": "empty file"})
             continue
 
@@ -186,36 +253,54 @@ def ingest_path(
 
 
 def handle_ingest(args: Any, client: ForgeClient) -> dict[str, Any]:
-    """argparse handler for ``forge ingest``."""
-    target = Path(args.path)
-    if not target.exists() and not args.dry_run:
-        # Surface a clean error before HTTP setup.
-        print(f"Error: path does not exist: {target}", file=sys.stderr)
-        sys.exit(1)
+    """argparse handler for ``forge ingest``.
 
-    metadata: dict[str, Any] | None = None
-    if getattr(args, "metadata", None):
-        import json
+    Catches user-input errors (missing path, unreadable target, bad
+    --metadata JSON) and surfaces them as single stderr lines + exit
+    code 2. Per-file issues during the directory walk are warned but
+    don't terminate the batch — see ``ingest_path`` for that path.
+    """
+    target = Path(args.path)
+    try:
+        if not target.exists():
+            raise IngestInputError(f"path does not exist: {target}")
+
+        metadata: dict[str, Any] | None = None
+        if getattr(args, "metadata", None):
+            import json
+
+            try:
+                metadata = json.loads(args.metadata)
+            except json.JSONDecodeError as exc:
+                raise IngestInputError(f"invalid JSON in --metadata: {exc}") from exc
+            if not isinstance(metadata, dict):
+                raise IngestInputError("--metadata must be a JSON object")
 
         try:
-            metadata = json.loads(args.metadata)
-        except json.JSONDecodeError as exc:
-            print(f"Error: invalid JSON in --metadata: {exc}", file=sys.stderr)
-            sys.exit(1)
-        if not isinstance(metadata, dict):
-            print("Error: --metadata must be a JSON object", file=sys.stderr)
-            sys.exit(1)
+            result = ingest_path(
+                target,
+                client=client,
+                knowledge_type=getattr(args, "knowledge_type", None),
+                recursive=not getattr(args, "no_recursive", False),
+                dry_run=getattr(args, "dry_run", False),
+                source_work_product_id=getattr(args, "work_product", None),
+                metadata=metadata,
+                request_timeout=float(
+                    os.environ.get("METAFORGE_INGEST_TIMEOUT", str(getattr(args, "timeout", 300.0)))
+                ),
+            )
+        except FileNotFoundError as exc:
+            # Race: target vanished between exists() and walk.
+            raise IngestInputError(str(exc)) from exc
+        except PermissionError as exc:
+            raise IngestInputError(f"permission denied: {exc}") from exc
+        except IsADirectoryError as exc:
+            raise IngestInputError(f"unexpected directory: {exc}") from exc
+        except ValueError as exc:
+            # Single-file with unsupported extension surfaces here.
+            raise IngestInputError(str(exc)) from exc
+    except IngestInputError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
-    result = ingest_path(
-        target,
-        client=client,
-        knowledge_type=getattr(args, "knowledge_type", None),
-        recursive=not getattr(args, "no_recursive", False),
-        dry_run=getattr(args, "dry_run", False),
-        source_work_product_id=getattr(args, "work_product", None),
-        metadata=metadata,
-        request_timeout=float(
-            os.environ.get("METAFORGE_INGEST_TIMEOUT", str(getattr(args, "timeout", 300.0)))
-        ),
-    )
     return result

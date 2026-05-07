@@ -566,31 +566,32 @@ row, content rendered as `col=val; col=val`, `row_index` + `columns`
 
 ---
 
-### KB-CLI-005 — CLI rejects nonexistent path  🔄 NEW
-**Validates:** MET-385 (CLI surface)
-**Status:** 🔄 NEW.
+### KB-CLI-005 — CLI rejects nonexistent path  ✅
+**Validates:** MET-385 (CLI surface), MET-411 (L1-C2)
+**Status:** ✅ PASS — pinned by `tests/unit/test_forge_ingest_errors.py::TestNonexistentPath`.
 
 #### When
 1. `forge ingest /does/not/exist` (subprocess, non-interactive).
 
 #### Then
-- Exit code is non-zero.
-- stderr contains an actionable message naming the missing path.
+- Exit code is `2` (CLI input error).
+- stderr carries `Error: path does not exist: /does/not/exist` and no Python traceback.
 - No partial ingest committed.
 
 ---
 
-### KB-CLI-006 — CLI handles binary file gracefully  🔄 NEW
-**Validates:** MET-336, MET-385
-**Status:** 🔄 NEW.
+### KB-CLI-006 — CLI handles binary file gracefully  ✅
+**Validates:** MET-336, MET-385, MET-411 (L1-C2)
+**Status:** ✅ PASS — pinned by `tests/unit/test_forge_ingest_errors.py::TestBinaryFile` and `TestUnsupportedExtensionFiltered`.
 
 #### When
-1. `forge ingest tests/fixtures/knowledge/binary.bin` (a non-text fixture).
+1. `forge ingest tests/fixtures/knowledge/binary.bin` (or any directory with a binary blob and a valid `.md`).
 
 #### Then
-- Either: file skipped with a per-file warning and the CLI exit code is still 0 (continue-on-error).
-- Or: file produces a clean per-file error in the summary, no crash.
-- The CLI does NOT emit a Python traceback to stderr.
+- Files with unsupported extensions (`.bin`, `.jpg`, `.zip`, …) are silently filtered by `SUPPORTED_EXTENSIONS` — never attempted.
+- Files with a text-ish extension whose content is binary (e.g. a `.txt` containing NUL bytes) emit a `warning: skipping binary file …` line on stderr, are recorded in `skipped`, and the run continues.
+- Empty files produce a `warning: skipping empty file …` line and are recorded in `skipped`.
+- The CLI never emits a Python traceback to stderr.
 
 ---
 
