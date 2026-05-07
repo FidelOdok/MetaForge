@@ -43,6 +43,7 @@ from digital_twin.knowledge.service import (
     IngestResult,
     KnowledgeService,
     SearchHit,
+    SourceSummary,
 )
 from digital_twin.knowledge.types import KnowledgeType
 from observability.tracing import get_tracer
@@ -804,6 +805,281 @@ class LightRAGKnowledgeService:
         self._content_sha_index.pop(source_path, None)
         logger.info("lightrag_deleted_source", source_path=source_path, deleted=deleted)
         return deleted
+
+    async def list_sources(
+        self,
+        project_id: UUID | None = None,
+        knowledge_type: KnowledgeType | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[SourceSummary]:
+        """Aggregate ingested chunks into one row per (source_path, type).
+
+        Surfaces what the legacy ``KnowledgeStore.list()`` did but at the
+        source granularity callers actually want — the
+        ``metaforge://knowledge/sources`` MCP resource (L1-B1) and the
+        ``forge sources list/show/delete`` CLI (L1-C1) both project this
+        directly.
+
+        ``project_id is None`` falls back to the documented "default
+        tenant only" behaviour pinned in L1-A1: we scope to
+        ``metadata.project_id == "default"`` rather than returning rows
+        across every tenant. Cross-tenant admin listings are an explicit
+        out-of-band concern; this method is the safe-by-default surface.
+
+        ``knowledge_type`` filters by stored type (e.g. ``COMPONENT``).
+
+        ``limit`` / ``offset`` paginate over the aggregated rows in
+        ``indexed_at DESC`` order (most recently ingested source first).
+
+        Two execution paths:
+
+        * **Postgres** — runs a single GROUP-BY query against
+          ``lightrag_vdb_chunks`` extracting ``src``, ``kt``, ``x`` from
+          the JSON in ``file_path``. Connection acquisition mirrors
+          ``_search_pg``.
+        * **In-memory / NanoVectorDB** — falls back to the
+          ``_source_index`` we keep on the service instance (the same
+          structure ``delete_by_source`` uses). Lets unit tests exercise
+          the public API without spinning up a real Postgres.
+        """
+        await self._ensure_initialized()
+        with tracer.start_as_current_span("knowledge.list_sources") as span:
+            scope_project_id: str = str(project_id) if project_id is not None else "default"
+            kt_value = str(knowledge_type) if knowledge_type is not None else None
+            span.set_attribute("knowledge.project_id", scope_project_id)
+            if kt_value is not None:
+                span.set_attribute("knowledge.type", kt_value)
+            span.set_attribute("knowledge.limit", limit)
+            span.set_attribute("knowledge.offset", offset)
+
+            if self._cfg.postgres_dsn:
+                summaries = await self._list_sources_pg(
+                    project_scope=scope_project_id,
+                    knowledge_type=kt_value,
+                    limit=limit,
+                    offset=offset,
+                )
+            else:
+                summaries = self._list_sources_in_memory(
+                    project_scope=scope_project_id,
+                    knowledge_type=kt_value,
+                    limit=limit,
+                    offset=offset,
+                )
+
+            span.set_attribute("knowledge.result_count", len(summaries))
+            logger.info(
+                "knowledge_list_sources",
+                project_id=scope_project_id,
+                knowledge_type=kt_value,
+                result_count=len(summaries),
+                limit=limit,
+                offset=offset,
+            )
+            return summaries
+
+    async def _list_sources_pg(
+        self,
+        *,
+        project_scope: str,
+        knowledge_type: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[SourceSummary]:
+        """GROUP BY against ``lightrag_vdb_chunks`` for the PG path.
+
+        Why this shape:
+        * source_path lives at ``file_path::jsonb->>'src'``
+        * knowledge_type lives at ``file_path::jsonb->>'kt'``
+        * project_id lives at ``file_path::jsonb->'x'->>'project_id'``
+        * ``x`` (user metadata) lives at ``file_path::jsonb->'x'``
+
+        We aggregate ``COUNT(*)`` for fragment_count, ``MAX(create_time)``
+        for indexed_at, and pluck the first ``x`` blob via
+        ``(array_agg(...))[1]`` so callers see at least one round-tripped
+        metadata snapshot per source. Connection acquisition mirrors
+        ``_search_pg``: a one-shot ``asyncpg.connect`` (we don't run a
+        long-lived pool).
+        """
+        chunks_vdb = getattr(self._rag, "chunks_vdb", None)
+        if chunks_vdb is None:
+            return []
+        table = getattr(chunks_vdb, "table_name", "lightrag_vdb_chunks")
+        workspace = getattr(chunks_vdb, "workspace", self._cfg.namespace_prefix)
+
+        params: list[Any] = [workspace, project_scope]
+        kt_clause = ""
+        if knowledge_type is not None:
+            params.append(knowledge_type)
+            kt_clause = "  AND c.file_path::jsonb->>'kt' = $3\n"
+            limit_param_idx = 4
+            offset_param_idx = 5
+        else:
+            limit_param_idx = 3
+            offset_param_idx = 4
+        params.append(limit)
+        params.append(offset)
+
+        sql = (
+            f"SELECT c.file_path::jsonb->>'src' AS source_path, "
+            f"       c.file_path::jsonb->>'kt' AS knowledge_type, "
+            f"       COUNT(*) AS fragment_count, "
+            f"       MAX(c.create_time) AS indexed_at, "
+            f"       (array_agg(c.file_path::jsonb->'x'))[1] AS metadata "
+            f"FROM {table} c "
+            f"WHERE c.workspace = $1 "
+            f"  AND COALESCE((c.file_path::jsonb->'x'->>'project_id'), 'default') = $2 "
+            f"{kt_clause}"
+            f"  AND c.file_path::jsonb->>'src' IS NOT NULL "
+            f"GROUP BY source_path, knowledge_type "
+            f"ORDER BY indexed_at DESC "
+            f"LIMIT ${limit_param_idx} OFFSET ${offset_param_idx};"
+        )
+
+        import asyncpg  # type: ignore[import-untyped]
+
+        assert self._cfg.postgres_dsn is not None
+        conn = await asyncpg.connect(self._cfg.postgres_dsn)
+        try:
+            rows = await conn.fetch(sql, *params)
+        finally:
+            await conn.close()
+
+        summaries: list[SourceSummary] = []
+        for row in rows:
+            kt_raw = row["knowledge_type"]
+            kt: KnowledgeType | str | None
+            if kt_raw is None:
+                kt = None
+            else:
+                try:
+                    kt = KnowledgeType(kt_raw)
+                except ValueError:
+                    kt = kt_raw
+            metadata_raw = row["metadata"]
+            metadata: dict[str, Any]
+            if metadata_raw is None:
+                metadata = {}
+            elif isinstance(metadata_raw, str):
+                import json
+
+                try:
+                    parsed = json.loads(metadata_raw)
+                except json.JSONDecodeError:
+                    parsed = {}
+                metadata = parsed if isinstance(parsed, dict) else {}
+            elif isinstance(metadata_raw, dict):
+                metadata = metadata_raw
+            else:
+                metadata = {}
+            summaries.append(
+                SourceSummary(
+                    source_path=row["source_path"],
+                    knowledge_type=kt,
+                    fragment_count=int(row["fragment_count"]),
+                    indexed_at=row["indexed_at"],
+                    metadata=metadata,
+                )
+            )
+        return summaries
+
+    def _list_sources_in_memory(
+        self,
+        *,
+        project_scope: str,
+        knowledge_type: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[SourceSummary]:
+        """Fallback path when no Postgres DSN is configured.
+
+        Reads the in-process state we already maintain for
+        ``delete_by_source`` (``_source_index``) plus whatever metadata
+        the underlying NanoVectorDB ``client_storage`` retained, so
+        deployments running LightRAG on its default JSON storage still
+        get a non-empty answer. Mirrors the shape of
+        ``_naive_search_via_aquery`` — keep the API consistent across
+        both backends.
+        """
+        chunks_vdb = getattr(self._rag, "chunks_vdb", None)
+        if chunks_vdb is None:
+            return []
+        # NanoVectorDBStorage exposes ``client_storage`` as a dict with
+        # ``"data": list[chunk_dict]``. We tolerate any shape that
+        # round-trips ``id`` and our encoded ``file_path``.
+        raw_chunks: list[dict[str, Any]] = []
+        client_storage = getattr(chunks_vdb, "client_storage", None)
+        if isinstance(client_storage, dict):
+            data = client_storage.get("data") or []
+            if isinstance(data, list):
+                raw_chunks = [c for c in data if isinstance(c, dict)]
+        # Group: (source_path, knowledge_type) -> aggregate.
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        groups: dict[tuple[str, str | None], dict[str, Any]] = {}
+        for chunk in raw_chunks:
+            file_path_field = chunk.get("file_path") or chunk.get("file_paths") or ""
+            if isinstance(file_path_field, list):
+                file_path_field = file_path_field[0] if file_path_field else ""
+            meta = _decode_meta(file_path_field)
+            if not meta:
+                continue
+            src = meta.get("src")
+            if not isinstance(src, str) or not src:
+                continue
+            user_meta = meta.get("x") or {}
+            chunk_project = user_meta.get("project_id", "default")
+            if str(chunk_project) != project_scope:
+                continue
+            kt_raw = meta.get("kt")
+            if knowledge_type is not None and kt_raw != knowledge_type:
+                continue
+            indexed_raw = (
+                chunk.get("create_time") or chunk.get("indexed_at") or chunk.get("update_time")
+            )
+            if isinstance(indexed_raw, _dt):
+                indexed = indexed_raw
+            elif isinstance(indexed_raw, (int, float)):
+                indexed = _dt.fromtimestamp(float(indexed_raw), tz=UTC)
+            else:
+                indexed = _dt.now(UTC)
+            key = (src, kt_raw)
+            existing = groups.get(key)
+            if existing is None:
+                groups[key] = {
+                    "fragment_count": 1,
+                    "indexed_at": indexed,
+                    "metadata": dict(user_meta),
+                    "knowledge_type": kt_raw,
+                }
+            else:
+                existing["fragment_count"] += 1
+                if indexed > existing["indexed_at"]:
+                    existing["indexed_at"] = indexed
+
+        summaries: list[SourceSummary] = []
+        for (src, kt_raw), agg in groups.items():
+            kt: KnowledgeType | str | None
+            if kt_raw is None:
+                kt = None
+            else:
+                try:
+                    kt = KnowledgeType(kt_raw)
+                except ValueError:
+                    kt = kt_raw
+            summaries.append(
+                SourceSummary(
+                    source_path=src,
+                    knowledge_type=kt,
+                    fragment_count=int(agg["fragment_count"]),
+                    indexed_at=agg["indexed_at"],
+                    metadata=agg["metadata"],
+                )
+            )
+        summaries.sort(key=lambda s: s.indexed_at, reverse=True)
+        return summaries[offset : offset + limit]
 
     async def _existing_content_sha256(self, source_path: str) -> str | None:
         """Return the stored ``content_sha256`` for ``source_path`` (or None).
