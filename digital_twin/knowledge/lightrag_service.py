@@ -705,9 +705,23 @@ class LightRAGKnowledgeService:
             base_fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
             fetch_k = max(base_fetch_k, top_k * 3) if rerank else base_fetch_k
 
+            # MET-417 (L1-B5): the filter contract is AND-across-keys,
+            # equality match. ``project_id`` is special-cased via
+            # ``project_scope`` (already pushed into SQL); the remaining
+            # keys are forwarded to ``_search_pg`` for SQL push-down so
+            # the LIMIT'd query doesn't starve filter matches out of the
+            # top-k. The same dict is then used for the post-filter pass
+            # below as a defensive double-check (and as the only filter
+            # path on the non-pg / naive backend).
+            extra_filters = {k: v for k, v in (filters or {}).items() if k != "project_id"}
+
             if self._cfg.postgres_dsn:
                 raw_chunks = await self._search_pg(
-                    chunks_vdb, query, fetch_k, project_scope=scope_project_id
+                    chunks_vdb,
+                    query,
+                    fetch_k,
+                    project_scope=scope_project_id,
+                    extra_filters=extra_filters or None,
                 )
             else:
                 raw_chunks = await chunks_vdb.query(query, top_k=fetch_k)
@@ -749,6 +763,7 @@ class LightRAGKnowledgeService:
         top_k: int,
         *,
         project_scope: str | None = None,
+        extra_filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Cosine query straight to ``lightrag_vdb_chunks`` for real scores.
 
@@ -763,6 +778,17 @@ class LightRAGKnowledgeService:
         the LIMIT'd query is required for correctness: if we only
         post-filter, a tenant with many chunks could starve another
         tenant's results out of the top-k.
+
+        ``extra_filters`` (MET-417 / L1-B5) push the rest of the
+        AND-across-keys equality contract into SQL: each key becomes an
+        additional ``AND ...->>'<key>' = $<n>`` clause keyed on either
+        the top-level metadata blob (``src``, ``wp``) or the
+        user-extras sub-object (``$.x.<key>``). Same correctness
+        rationale as ``project_scope``: post-filtering alone would let
+        a chunk-rich tenant starve filter matches off the top-k tail.
+        Values are coerced to strings for literal-string equality (the
+        ``->>'…'`` JSON operator already returns text). Unknown keys
+        simply produce zero hits — exactly the contract we pinned.
         """
         embedder = self._make_embedder()
         emb = await embedder([query])
@@ -783,6 +809,35 @@ class LightRAGKnowledgeService:
                 "  AND COALESCE((c.file_path::jsonb->'x'->>'project_id'), 'default') = $5\n"
             )
 
+        # MET-417 (L1-B5): push down the rest of the AND-equality
+        # contract. ``src`` / ``wp`` live at the top of the encoded
+        # blob; everything else is in ``$.x.<key>`` (user-extras).
+        extra_clauses: list[str] = []
+        if extra_filters:
+            for key, value in extra_filters.items():
+                params.append("" if value is None else str(value))
+                placeholder = f"${len(params)}"
+                if key == "source_path":
+                    json_path = "c.file_path::jsonb->>'src'"
+                elif key == "source_work_product_id":
+                    json_path = "c.file_path::jsonb->>'wp'"
+                else:
+                    # SQL-injection note: ``key`` is interpolated into
+                    # the JSON path, so it must be safe. The MCP
+                    # adapter rejects non-string-keyed dicts, but JSON
+                    # keys may still contain quotes — escape any single
+                    # quote by doubling it (PG SQL string literal rules)
+                    # so a hostile key like ``a' OR 1=1 --`` becomes a
+                    # harmless literal that simply matches nothing.
+                    safe_key = str(key).replace("'", "''")
+                    json_path = f"c.file_path::jsonb->'x'->>'{safe_key}'"
+                # ``IS NOT DISTINCT FROM`` would let us match SQL NULL
+                # against Python ``None``, but the ``->>'…'`` operator
+                # returns text, never NULL, when the key is missing —
+                # we map ``None`` to the empty string above to make the
+                # behaviour deterministic across encoders.
+                extra_clauses.append(f"  AND {json_path} = {placeholder}\n")
+
         sql = (
             f"SELECT c.id, c.content, c.file_path, "
             f"       1 - (c.content_vector <=> $2::vector) AS similarity "
@@ -790,6 +845,7 @@ class LightRAGKnowledgeService:
             f"WHERE c.workspace = $1 "
             f"  AND c.content_vector <=> $2::vector < $3 "
             f"{project_clause}"
+            f"{''.join(extra_clauses)}"
             f"ORDER BY c.content_vector <=> $2::vector "
             f"LIMIT $4;"
         )
