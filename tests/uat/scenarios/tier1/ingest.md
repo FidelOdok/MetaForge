@@ -57,21 +57,28 @@ Tier: 1
 ## Scenario: HP-INGEST-03 — PDF datasheet ingest
 Validates: MET-399 (PDF ingest)
 Tier: 1
+Status: executable (L1-A3 wired pdfplumber as the parser; raganything
+remains the long-term home — see `digital_twin/knowledge/lightrag_service.py`
+`_extract_pdf_text`).
 
 ### Given
-- A 5-10 page PDF datasheet fixture for STM32H7 (or any
-  multi-page PDF) under `tests/fixtures/knowledge/`.
+- A 5-page committed PDF datasheet fixture at
+  `tests/fixtures/knowledge/datasheet_excerpt.pdf` (STM32H743 excerpt).
 
 ### When
 1. Ingest the PDF via `knowledge.ingest` (or CLI) with
-   `knowledge_type="component"`.
-2. Search for a phrase known to live on page ≥ 2.
+   `knowledge_type="component"`. The gateway sniffs the latin-1
+   `%PDF-` magic bytes, runs pdfplumber, prepends each page with a
+   `## Page N` H2 header, and feeds the result into the existing
+   heading-aware chunker.
+2. Search for a phrase known to live on page ≥ 2 (e.g.
+   `industrial grade temperature -40 to +85`, which sits on page 4 of
+   the committed fixture).
 
 ### Then
-- Step 1 returns `chunks_indexed > 0`.
-- Step 2 returns at least one hit whose citation includes a
-  page-derived heading (e.g. `Page 3` or a section heading
-  recovered from the PDF outline).
+- Step 1 returns `chunks_indexed > 1` (multi-page chunking).
+- Step 2 returns at least one hit whose `heading` (or `metadata`)
+  contains `Page N` for some integer `N`.
 
 ---
 

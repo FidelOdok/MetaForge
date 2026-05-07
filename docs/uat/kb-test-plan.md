@@ -543,10 +543,10 @@ Source: `cli/commands/ingest.ts` (calls `knowledge_ingest` under the hood).
 ### KB-CLI-003 — PDF datasheet ingest
 **Validates:** MET-399
 **Existing:** HP-INGEST-03.
-**Verdict:** ⚠️ BLOCKED — PDF parser pending MET-399.
+**Status:** ✅ EXECUTABLE — pdfplumber wired in `LightRAGKnowledgeService.ingest` (L1-A3); raganything remains the long-term home.
 
 #### Then
-- Multi-page PDF: at least one hit with citation including a page-derived heading.
+- Multi-page PDF: `chunks_indexed > 1` and at least one hit with citation including a page-derived heading (e.g. `Page 3`).
 
 ---
 
