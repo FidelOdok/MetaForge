@@ -318,6 +318,8 @@ class _FakeAsyncpgConn:
 class TestListSourcesPostgresPath:
     """Verifies the SQL the PG path issues — without a live Postgres."""
 
+    pytest.importorskip("asyncpg")
+
     def _service_with_pg(self) -> tuple[LightRAGKnowledgeService, MagicMock]:
         svc = LightRAGKnowledgeService(
             working_dir="/tmp/uat-list-sources-pg",
