@@ -57,20 +57,29 @@ Tier: 1
 ## Scenario: HP-INGEST-03 — PDF datasheet ingest
 Validates: MET-399 (PDF ingest)
 Tier: 1
-Status: executable (L1-A3 wired pdfplumber as the parser; raganything
-remains the long-term home — see `digital_twin/knowledge/lightrag_service.py`
-`_extract_pdf_text`).
+Status: executable. L1-A3 wired pdfplumber as the parser inside
+`LightRAGKnowledgeService.ingest` (`digital_twin/knowledge/lightrag_service.py`
+`_extract_pdf_text`); raganything remains the long-term home. L1-C3
+(`tests/integration/test_forge_ingest_pdf.py`) closes the CLI walker
+loop — `forge ingest <directory>` now discovers the committed
+`datasheet_excerpt.pdf`, dispatches its bytes through `ForgeClient`
+with the latin-1 round-trip the gateway expects, and reports per-file
+`chunks_indexed`. The server-side multi-page assertions live in
+`tests/integration/test_pdf_ingest.py` (gated by Postgres+pgvector
+availability).
 
 ### Given
 - A 5-page committed PDF datasheet fixture at
   `tests/fixtures/knowledge/datasheet_excerpt.pdf` (STM32H743 excerpt).
 
 ### When
-1. Ingest the PDF via `knowledge.ingest` (or CLI) with
-   `knowledge_type="component"`. The gateway sniffs the latin-1
-   `%PDF-` magic bytes, runs pdfplumber, prepends each page with a
-   `## Page N` H2 header, and feeds the result into the existing
-   heading-aware chunker.
+1. Ingest the PDF via `knowledge.ingest` (or `forge ingest
+   tests/fixtures/knowledge/datasheet_excerpt.pdf`) with
+   `knowledge_type="component"`. The CLI reads the PDF as latin-1 so
+   the payload survives JSON; the gateway sniffs the `%PDF-` magic
+   bytes, runs pdfplumber, prepends each page with a `## Page N` H2
+   header, and feeds the result into the existing heading-aware
+   chunker.
 2. Search for a phrase known to live on page ≥ 2 (e.g.
    `industrial grade temperature -40 to +85`, which sits on page 4 of
    the committed fixture).
@@ -79,6 +88,10 @@ remains the long-term home — see `digital_twin/knowledge/lightrag_service.py`
 - Step 1 returns `chunks_indexed > 1` (multi-page chunking).
 - Step 2 returns at least one hit whose `heading` (or `metadata`)
   contains `Page N` for some integer `N`.
+- A directory walk via `forge ingest <dir>` over a folder containing
+  the PDF dispatches it exactly once and returns the same
+  `chunks_indexed` value (covered by L1-C3
+  `test_directory_walk_dispatches_each_pdf`).
 
 ---
 
