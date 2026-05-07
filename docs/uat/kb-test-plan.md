@@ -72,13 +72,13 @@
 | 3 | CLI `forge ingest` | 6 | 2 | 0 | 2 | 2 | 0 | MET-336, MET-399 |
 | 4 | Event-driven ingest (Kafka) | 4 | 1 | 0 | 0 | 3 | 0 | MET-307 |
 | 5 | Resources surface | 4 | 4 | 0 | 0 | 0 | 0 | MET-384 |
-| 6 | Streaming progress | 3 | 0 | 0 | 0 | 3 | 0 | MET-388 |
+| 6 | Streaming progress | 3 | 3 | 0 | 0 | 0 | 0 | MET-388 |
 | 7 | Per-call context / isolation | 4 | 2 | 0 | 0 | 2 | 0 | MET-401, MET-387 |
 | 8 | Error envelope | 3 | 1 | 0 | 0 | 2 | 0 | MET-385 |
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
 | 11 | Real-datasheet retrieval QA | 30 | 0 | 0 | 0 | 30 | 0 | MET-346, MET-293, MET-335 |
-| | **Totals** | **86** | **32** | **0** | **4** | **50** | **0** | |
+| | **Totals** | **86** | **35** | **0** | **4** | **47** | **0** | |
 
 > **Read.** 86 distinct trackable tests. 31 already pass. 51 are
 > 🔄 NEW (the 24 cross-cutting gap-fills in §1–§10 plus the 30
@@ -728,9 +728,11 @@ URIs: `metaforge://knowledge/sources`, `metaforge://knowledge/sources/{id}`.
 Source: just-shipped commit `cc0db58`.
 Capability: progress notifications on long-running tools (e.g. multi-file ingest).
 
-### KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification  ✅ PASS
+### KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification  ✅
 **Validates:** MET-388
-**Status:** ✅ PASS — covered by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_knowledge_ingest_emits_progress_per_file` (L1-B2).
+**Tier:** 2
+**Existing scenario:** `tier2/streaming-progress-probe.md` → "KB-PRG-001 — multi-file ingest emits ≥ 1 progress notification" (L1-F1d).
+**Verdict:** ✅ PASS — backed by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_knowledge_ingest_emits_progress_per_file` (L1-B2, PR #170, merged).
 
 #### Given
 - ≥ 5 distinct source paths and inline content.
@@ -745,18 +747,22 @@ Capability: progress notifications on long-running tools (e.g. multi-file ingest
 
 ---
 
-### KB-PRG-002 — progress notifications carry the request id  ✅ PASS
+### KB-PRG-002 — progress notifications carry the request id  ✅
 **Validates:** MET-388
-**Status:** ✅ PASS — covered by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_progress_carries_request_id` (L1-B2).
+**Tier:** 2
+**Existing scenario:** `tier2/streaming-progress-probe.md` → "KB-PRG-002 — progress notifications carry the request id" (L1-F1d).
+**Verdict:** ✅ PASS — backed by `tests/integration/test_knowledge_streaming_progress.py::TestProgressOnMultiFileIngest::test_progress_carries_request_id` (L1-B2, PR #170, merged).
 
 #### Then
 - Every progress notification includes the originating tool-call id so the client can correlate them.
 
 ---
 
-### KB-PRG-003 — capability advertised in tools/list  ✅ PASS
+### KB-PRG-003 — capability advertised in tools/list  ✅
 **Validates:** MET-388
-**Status:** ✅ PASS — covered by `tests/integration/test_knowledge_streaming_progress.py::TestProgressCapabilityAdvertised::test_progress_capability_advertised_for_knowledge_ingest` (L1-B2).
+**Tier:** 2
+**Existing scenario:** `tier2/streaming-progress-probe.md` → "KB-PRG-003 — supports_progress advertised on tools/list" (L1-F1d).
+**Verdict:** ✅ PASS — backed by `tests/integration/test_knowledge_streaming_progress.py::TestProgressCapabilityAdvertised::test_progress_capability_advertised_for_knowledge_ingest` (L1-B2, PR #170, merged); the `knowledge.ingest` tool entry exposes `supports_progress=true` while `knowledge.search` exposes `supports_progress=false`.
 
 #### When
 1. `tools/list` at session start; inspect the `knowledge_ingest` tool entry.
