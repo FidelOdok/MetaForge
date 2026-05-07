@@ -199,7 +199,58 @@ Tier: 1
 
 ---
 
+## Scenario: HP-RETR-11 — multi-filter compound query (AND across keys + type)
+Validates: MET-293, MET-307, MET-417 (KB-SRC-012; pinned AND semantics, L1-B5)
+Tier: 1
+
+### Given
+- Corpus with `{component, design_decision} × {project_A,
+  project_B}` pre-seeded (four logical buckets — e.g. an MCU
+  component chunk under project A, an MCU component chunk under
+  project B, an MCU design_decision under project A, an MCU
+  design_decision under project B).
+
+### When
+1. Call `knowledge.search` with `query="MCU"`, `top_k=5`,
+   `knowledge_type="component"`, and
+   `filters={"project_id": "A"}`.
+
+### Then
+- Every returned hit has `knowledge_type == "component"`.
+- Every returned hit's metadata `project_id == "A"`.
+- No hits leak from project B, and no hits with
+  `knowledge_type == "design_decision"` leak through (filters
+  AND across keys per the pinned contract in
+  `docs/architecture/knowledge-ingestion-playbook.md#search-filters`).
+
+---
+
+## Scenario: HP-RETR-12 — missing project_id falls back to default tenant
+Validates: MET-401 (KB-CTX-004; default-tenant scope, L1-A1 + L1-B3)
+Tier: 1
+
+### Given
+- A clean session in which the per-call MCP context carries no
+  `project_id` (i.e. `current_context().project_id is None`).
+
+### When
+1. Call `knowledge.ingest` with no `project_id` set in the
+   per-call context (ingest a unique seed chunk).
+2. Call `knowledge.search` with no `project_id` set in the
+   per-call context, querying for the seed chunk.
+
+### Then
+- The ingest succeeds and the chunk is scoped to the `"default"`
+  tenant (the documented fallback behavior).
+- The search returns the seed chunk — i.e. it surfaces hits from
+  the `"default"` tenant only.
+- Ingest and search share the same fallback rule (a chunk
+  ingested with no `project_id` is reachable by a search with no
+  `project_id`, and vice versa).
+
+---
+
 ## Acceptance
 
-- All 10 scenarios PASS.
+- All 12 scenarios PASS.
 - Report committed.
