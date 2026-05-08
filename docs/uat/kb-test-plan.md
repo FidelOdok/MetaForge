@@ -77,11 +77,11 @@
 | 8 | Error envelope | 3 | 1 | 0 | 0 | 2 | 0 | MET-385 |
 | 9 | Observability propagation | 3 | 1 | 0 | 0 | 2 | 0 | tier2/otel-continuity-probe |
 | 10 | Versioning / staleness | 3 | 2 | 0 | 0 | 1 | 0 | tier2/staleness-probe, tier2/versioning-probe |
-| 11 | Real-datasheet retrieval QA | 30 | 0 | 0 | 0 | 30 | 0 | MET-346, MET-293, MET-335 |
-| | **Totals** | **86** | **35** | **0** | **4** | **47** | **0** | |
+| 11 | Real-datasheet retrieval QA | 80 | 0 | 0 | 0 | 80 | 0 | MET-346, MET-293, MET-335 |
+| | **Totals** | **136** | **35** | **0** | **4** | **97** | **0** | |
 
-> **Read.** 86 distinct trackable tests. 31 already pass. 51 are
-> 🔄 NEW (the 24 cross-cutting gap-fills in §1–§10 plus the 30
+> **Read.** 136 distinct trackable tests. 31 already pass. 101 are
+> 🔄 NEW (the 24 cross-cutting gap-fills in §1–§10 plus the 80
 > real-datasheet rows in §11 — those have an executable scenario
 > file at `tests/uat/scenarios/tier1/datasheets-real.md` and become
 > ✅ PASS the moment the first `/uat-cycle12` run records the
@@ -998,13 +998,18 @@ datasheet contributes one question per applicable category:
 9. **Errata** — known bugs by silicon revision
 10. **Models** — IBIS, SPICE, STEP, BSDL availability
 
-### Datasheet starter set
+### Datasheet corpus (8 parts × 10 queries = 80 rows)
 
 | MPN | Vendor | Family | Fixture text | gt.yaml |
 |---|---|---|---|---|
 | RP2040 | Raspberry Pi | MCU | `tests/fixtures/datasheets/rp2040.txt` | `rp2040.gt.yaml` |
 | BME280 | Bosch Sensortec | Sensor (T/P/H) | `tests/fixtures/datasheets/bme280.txt` | `bme280.gt.yaml` |
 | TPS62840 | Texas Instruments | Power (low-Iq buck) | `tests/fixtures/datasheets/tps62840.txt` | `tps62840.gt.yaml` |
+| STM32H723VGT6 | STMicroelectronics | MCU (flagship) | `tests/fixtures/datasheets/stm32h723vgt6.txt` | `stm32h723vgt6.gt.yaml` |
+| ESP32-WROOM-32 | Espressif | Wireless module | `tests/fixtures/datasheets/esp32-wroom-32.txt` | `esp32-wroom-32.gt.yaml` |
+| nRF52840 | Nordic Semiconductor | BLE SoC | `tests/fixtures/datasheets/nrf52840.txt` | `nrf52840.gt.yaml` |
+| LM2596 | Texas Instruments | Buck regulator | `tests/fixtures/datasheets/lm2596.txt` | `lm2596.gt.yaml` |
+| MCP2515 | Microchip | CAN controller (AEC-Q100) | `tests/fixtures/datasheets/mcp2515.txt` | `mcp2515.gt.yaml` |
 
 Refresh: `python scripts/datasheets/fetch_and_extract.py` (downloads
 the PDFs, re-extracts text, pins sha256s).
@@ -1054,6 +1059,81 @@ Regenerate scenarios: `python scripts/datasheets/generate_scenarios.py`.
 | KB-DS-TPS62840-PKG-001 | package | package option | `SON-8` | 🔄 NEW |
 | KB-DS-TPS62840-APP-001 | application | control architecture | `DCS-Control` | 🔄 NEW |
 | KB-DS-TPS62840-CMP-001 | compliance | RoHS status | `RoHS` | 🔄 NEW |
+
+### Catalog — STM32H723VGT6 (10 rows)
+
+| ID | Category | Question (abridged) | Expected substring | Verdict |
+|---|---|---|---|---|
+| KB-DS-STM32H723VGT6-PWR-001 | power | application supply range | `1.62 V to 3.6 V` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-PERF-001 | performance | maximum CPU clock | `550 MHz` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-PERF-002 | performance | L1 cache size (Cortex-M7) | `32-Kbyte data cache and 32-Kbyte` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-MEM-001 | memory | embedded flash size | `1 Mbyte of embedded flash` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-SIG-001 | signal | 5 V tolerant I/O availability | `FT 5 V tolerant I/O` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-PKG-001 | package | LQFP100 body size | `(14x14 mm)` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-THERM-001 | thermal | ambient operating range | `–40 to +85 °C` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-APP-001 | application | debug interfaces | `SWD and JTAG interfaces` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-CMP-001 | compliance | RoHS / ECOPACK status | `ECOPACK2 compliant` | 🔄 NEW |
+| KB-DS-STM32H723VGT6-ERR-001 | errata | errata sheet identifier | `ES0491` | 🔄 NEW |
+
+### Catalog — ESP32-WROOM-32 (10 rows)
+
+| ID | Category | Question (abridged) | Expected substring | Verdict |
+|---|---|---|---|---|
+| KB-DS-ESP32-WROOM-32-PWR-001 | power | operating supply voltage | `Operatingvoltage/Powersupply: 3.0~3.6V` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-PERF-001 | performance | maximum CPU clock | `32-bitLX6microprocessor,upto240MHz` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-PERF-002 | performance | Wi-Fi standards | `802.11b/g/n` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-PERF-003 | performance | Bluetooth specification | `BluetoothV4.2BR/EDRandBluetoothLE` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-MEM-001 | memory | integrated SPI flash | `4MBSPIflash` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-PKG-001 | package | module dimensions | `18×25.5×3.1` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-THERM-001 | thermal | ambient operating range | `Operatingambienttemperature: –40~85°C` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-REL-001 | reliability | HBM ESD rating | `Humanbodymodel(HBM):±2000V` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-APP-001 | application | antenna option | `On-boardPCBantenna` | 🔄 NEW |
+| KB-DS-ESP32-WROOM-32-CMP-001 | compliance | green certification | `REACH/RoHS` | 🔄 NEW |
+
+### Catalog — nRF52840 (10 rows)
+
+| ID | Category | Question (abridged) | Expected substring | Verdict |
+|---|---|---|---|---|
+| KB-DS-NRF52840-PWR-001 | power | supply voltage range | `1.7 V to 5.5 V supply voltage range` | 🔄 NEW |
+| KB-DS-NRF52840-PWR-002 | power | System OFF current | `0.4 µA at 3 V in System OFF mode` | 🔄 NEW |
+| KB-DS-NRF52840-PERF-001 | performance | core + frequency | `ARM ® Cortex ® -M4 32-bit processor with FPU, 64 MHz` | 🔄 NEW |
+| KB-DS-NRF52840-PERF-002 | performance | 802.15.4 support | `IEEE 802.15.4-2006` | 🔄 NEW |
+| KB-DS-NRF52840-PERF-003 | performance | USB controller | `USB 2.0 full speed` | 🔄 NEW |
+| KB-DS-NRF52840-MEM-001 | memory | flash + RAM size | `1 MB flash and 256 kB RAM` | 🔄 NEW |
+| KB-DS-NRF52840-PKG-001 | package | aQFN73 body size | `aQFN 73 package, 7 x 7 mm` | 🔄 NEW |
+| KB-DS-NRF52840-THERM-001 | thermal | recommended operating temperature | `TA Operating temperature -40 25 85 °C` | 🔄 NEW |
+| KB-DS-NRF52840-REL-001 | reliability | ESD HBM (aQFN73) | `ESD HBM Human Body Model 2 kV` | 🔄 NEW |
+| KB-DS-NRF52840-APP-001 | application | NFC tag interface | `Type 2 near field communication` | 🔄 NEW |
+
+### Catalog — LM2596 (10 rows)
+
+| ID | Category | Question (abridged) | Expected substring | Verdict |
+|---|---|---|---|---|
+| KB-DS-LM2596-PWR-001 | power | maximum input voltage | `Input voltage range up to 40 V` | 🔄 NEW |
+| KB-DS-LM2596-PWR-002 | power | output load current | `3-A output load current` | 🔄 NEW |
+| KB-DS-LM2596-PWR-003 | power | shutdown standby current | `80 μA` | 🔄 NEW |
+| KB-DS-LM2596-PERF-001 | performance | switching frequency | `150-kHz fixed-frequency internal oscillator` | 🔄 NEW |
+| KB-DS-LM2596-PERF-002 | performance | adjustable output range | `37-V ±4%` | 🔄 NEW |
+| KB-DS-LM2596-PKG-001 | package | available packages | `Available in TO-220 and TO-263 packages` | 🔄 NEW |
+| KB-DS-LM2596-THERM-001 | thermal | maximum junction temperature | `Maximum junction temperature 150 °C` | 🔄 NEW |
+| KB-DS-LM2596-THERM-002 | thermal | storage temperature range | `Storage temperature, T –65 150 °C` | 🔄 NEW |
+| KB-DS-LM2596-REL-001 | reliability | HBM ESD rating | `Human-body model (HBM)` | 🔄 NEW |
+| KB-DS-LM2596-APP-001 | application | thermal/current-limit protection | `Thermal shutdown and current-limit protection` | 🔄 NEW |
+
+### Catalog — MCP2515 (10 rows)
+
+| ID | Category | Question (abridged) | Expected substring | Verdict |
+|---|---|---|---|---|
+| KB-DS-MCP2515-PWR-001 | power | supply voltage range | `Operates from 2.7V-5.5V` | 🔄 NEW |
+| KB-DS-MCP2515-PWR-002 | power | typical active current | `5 mA active current (typical)` | 🔄 NEW |
+| KB-DS-MCP2515-PWR-003 | power | sleep-mode current | `1 μA standby current (typical) (Sleep mode)` | 🔄 NEW |
+| KB-DS-MCP2515-PERF-001 | performance | CAN protocol + bit rate | `CAN V2.0B at 1 Mb/s` | 🔄 NEW |
+| KB-DS-MCP2515-PERF-002 | performance | maximum SPI clock | `High-Speed SPI Interface (10 MHz)` | 🔄 NEW |
+| KB-DS-MCP2515-PERF-003 | performance | acceptance filter count | `Six 29-bit filters` | 🔄 NEW |
+| KB-DS-MCP2515-THERM-001 | thermal | industrial-grade temperature range | `Industrial (I): -40°C to +85°C` | 🔄 NEW |
+| KB-DS-MCP2515-THERM-002 | thermal | extended-grade temperature range | `Extended (E): -40°C to +125°C` | 🔄 NEW |
+| KB-DS-MCP2515-PKG-001 | package | available packages | `18-Lead PDIP/SOIC` | 🔄 NEW |
+| KB-DS-MCP2515-CMP-001 | compliance | lead-free / RoHS | `Pb-free` | 🔄 NEW |
 
 ### How a §11 scenario rolls up
 

@@ -1,0 +1,80 @@
+mpn: STM32H723VGT6
+vendor: STMicroelectronics
+family: MCU (flagship)
+source_url: https://www.st.com/resource/en/datasheet/stm32h723vg.pdf
+fixture_text: tests/fixtures/datasheets/stm32h723vgt6.txt
+license_note: |
+  Public datasheet by STMicroelectronics. Excerpt committed for
+  UAT testing under fair-use technical-reference doctrine. Not
+  redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-STM32H723VGT6-PWR-001
+    category: power
+    question: "What is the supply voltage range of the STM32H723VGT6?"
+    expected_substring: "1.62 V to 3.6 V"
+    expected_section: "Features / Clock, reset, and supply management"
+    notes: "Application supply and I/O range."
+
+  - id: KB-DS-STM32H723VGT6-PERF-001
+    category: performance
+    question: "What is the maximum CPU clock frequency of the STM32H723VGT6?"
+    expected_substring: "550 MHz"
+    expected_section: "Features / Core"
+    notes: "Cortex-M7 core max frequency."
+
+  - id: KB-DS-STM32H723VGT6-PERF-002
+    category: performance
+    question: "How much L1 cache is available on the STM32H723VGT6 Cortex-M7 core?"
+    expected_substring: "32-Kbyte data cache and 32-Kbyte"
+    expected_section: "Features / Core"
+    notes: "L1 cache: 32 KB I-cache + 32 KB D-cache."
+
+  - id: KB-DS-STM32H723VGT6-MEM-001
+    category: memory
+    question: "How much embedded flash memory does the STM32H723VGT6 contain?"
+    expected_substring: "1 Mbyte of embedded flash"
+    expected_section: "Features / Memories"
+    notes: "1 MB flash with ECC."
+
+  - id: KB-DS-STM32H723VGT6-SIG-001
+    category: signal
+    question: "Does the STM32H723VGT6 have 5 V tolerant I/Os?"
+    expected_substring: "FT 5 V tolerant I/O"
+    expected_section: "Pinouts and pin descriptions / Legend"
+    notes: "FT-type pin abbreviation."
+
+  - id: KB-DS-STM32H723VGT6-PKG-001
+    category: package
+    question: "What is the LQFP100 package body size for the STM32H723VGT6?"
+    expected_substring: "(14x14 mm)"
+    expected_section: "Features / Packages"
+    notes: "LQFP100 14x14 mm option."
+
+  - id: KB-DS-STM32H723VGT6-THERM-001
+    category: thermal
+    question: "What is the ambient operating temperature range of the STM32H723VGT6?"
+    expected_substring: "–40 to +85 °C"
+    expected_section: "Description"
+    notes: "Industrial-grade ambient temperature range."
+
+  - id: KB-DS-STM32H723VGT6-APP-001
+    category: application
+    question: "Which debug interfaces does the STM32H723VGT6 support?"
+    expected_substring: "SWD and JTAG interfaces"
+    expected_section: "Features / Debug mode"
+    notes: ""
+
+  - id: KB-DS-STM32H723VGT6-CMP-001
+    category: compliance
+    question: "Are STM32H723VGT6 packages RoHS-compliant?"
+    expected_substring: "ECOPACK2 compliant"
+    expected_section: "Features"
+    notes: "ST ECOPACK2 = lead-free + RoHS."
+
+  - id: KB-DS-STM32H723VGT6-ERR-001
+    category: errata
+    question: "Where is the errata sheet for the STM32H723 documented?"
+    expected_substring: "ES0491"
+    expected_section: "Introduction"
+    notes: "STMicroelectronics errata sheet identifier."

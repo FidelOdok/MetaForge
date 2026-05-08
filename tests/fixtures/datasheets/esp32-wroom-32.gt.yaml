@@ -1,0 +1,80 @@
+mpn: ESP32-WROOM-32
+vendor: Espressif
+family: Wireless module
+source_url: https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf
+fixture_text: tests/fixtures/datasheets/esp32-wroom-32.txt
+license_note: |
+  Public datasheet by Espressif Systems. Excerpt committed for
+  UAT testing under fair-use technical-reference doctrine. Not
+  redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-ESP32-WROOM-32-PWR-001
+    category: power
+    question: "What supply voltage range does the ESP32-WROOM-32 require?"
+    expected_substring: "Operatingvoltage/Powersupply: 3.0~3.6V"
+    expected_section: "Features / Operating Conditions"
+    notes: "Module operating supply voltage."
+
+  - id: KB-DS-ESP32-WROOM-32-PERF-001
+    category: performance
+    question: "What is the maximum CPU clock frequency of the ESP32-WROOM-32?"
+    expected_substring: "32-bitLX6microprocessor,upto240MHz"
+    expected_section: "Features / CPU and On-Chip Memory"
+    notes: "Xtensa dual-core LX6 at up to 240 MHz."
+
+  - id: KB-DS-ESP32-WROOM-32-PERF-002
+    category: performance
+    question: "Which Wi-Fi standards does the ESP32-WROOM-32 support?"
+    expected_substring: "802.11b/g/n"
+    expected_section: "Features / Wi-Fi"
+    notes: "Wireless LAN protocols supported."
+
+  - id: KB-DS-ESP32-WROOM-32-PERF-003
+    category: performance
+    question: "Which Bluetooth specification does the ESP32-WROOM-32 implement?"
+    expected_substring: "BluetoothV4.2BR/EDRandBluetoothLE"
+    expected_section: "Features / Bluetooth"
+    notes: "Bluetooth Classic + LE."
+
+  - id: KB-DS-ESP32-WROOM-32-MEM-001
+    category: memory
+    question: "How much SPI flash is integrated on the ESP32-WROOM-32?"
+    expected_substring: "4MBSPIflash"
+    expected_section: "Features / Integrated Components on Module"
+    notes: "External SPI flash bonded into the module."
+
+  - id: KB-DS-ESP32-WROOM-32-PKG-001
+    category: package
+    question: "What are the physical dimensions of the ESP32-WROOM-32 module?"
+    expected_substring: "18×25.5×3.1"
+    expected_section: "Module Overview / Ordering Information"
+    notes: "Module L x W x H in mm."
+
+  - id: KB-DS-ESP32-WROOM-32-THERM-001
+    category: thermal
+    question: "What is the operating ambient temperature range of the ESP32-WROOM-32?"
+    expected_substring: "Operatingambienttemperature: –40~85°C"
+    expected_section: "Features / Operating Conditions"
+    notes: "Industrial range -40 to +85 C."
+
+  - id: KB-DS-ESP32-WROOM-32-REL-001
+    category: reliability
+    question: "What is the human body model ESD rating of the ESP32-WROOM-32?"
+    expected_substring: "Humanbodymodel(HBM):±2000V"
+    expected_section: "Product Handling / Electrostatic Discharge (ESD)"
+    notes: "HBM ESD rating ±2 kV."
+
+  - id: KB-DS-ESP32-WROOM-32-APP-001
+    category: application
+    question: "What antenna option ships on the ESP32-WROOM-32?"
+    expected_substring: "On-boardPCBantenna"
+    expected_section: "Features / Antenna Options"
+    notes: ""
+
+  - id: KB-DS-ESP32-WROOM-32-CMP-001
+    category: compliance
+    question: "Which environmental certifications does the ESP32-WROOM-32 carry?"
+    expected_substring: "REACH/RoHS"
+    expected_section: "Features / Certification"
+    notes: "Green certification (RoHS, REACH)."
