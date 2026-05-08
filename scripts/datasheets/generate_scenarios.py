@@ -18,7 +18,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "datasheets"
 SCENARIO_PATH = REPO_ROOT / "tests" / "uat" / "scenarios" / "tier1" / "datasheets-real.md"
 
-ORDER = ["rp2040", "bme280", "tps62840"]
+ORDER = ["rp2040", "bme280", "tps62840", "stm32h723vgt6", "esp32-wroom-32", "nrf52840", "lm2596", "mcp2515"]
 
 PREAMBLE = """# Tier-1 — real-datasheet retrieval QA (KB-DS)
 
@@ -59,8 +59,8 @@ ACCEPTANCE = """
 
 ## Acceptance
 
-- All 30 scenarios run in a single `/uat-cycle12 --tier 1 --only "KB-DS-"` invocation.
-- Baseline target on first run: ≥ 20 / 30 PASS. Failures are diagnostic
+- All 80 scenarios run in a single `/uat-cycle12 --tier 1 --only "KB-DS-"` invocation.
+- Baseline target on first run: ≥ 53 / 80 PASS. Failures are diagnostic
   signal, not test-harness regressions — capture the top-3 chunk
   contents in the report so the failure mode (retrieval ranking,
   extraction quality, chunk boundary) is immediately diagnosable.

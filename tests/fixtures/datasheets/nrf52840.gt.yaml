@@ -1,0 +1,80 @@
+mpn: nRF52840
+vendor: Nordic Semiconductor
+family: BLE SoC
+source_url: https://web.archive.org/web/2024/https://infocenter.nordicsemi.com/pdf/nRF52840_PS_v1.7.pdf
+fixture_text: tests/fixtures/datasheets/nrf52840.txt
+license_note: |
+  Public datasheet by Nordic Semiconductor ASA. Excerpt committed
+  for UAT testing under fair-use technical-reference doctrine. Not
+  redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-NRF52840-PWR-001
+    category: power
+    question: "What is the supply voltage range of the nRF52840?"
+    expected_substring: "1.7 V to 5.5 V supply voltage range"
+    expected_section: "Feature list / Flexible power management"
+    notes: "VDDH high-voltage supply input range."
+
+  - id: KB-DS-NRF52840-PWR-002
+    category: power
+    question: "What is the System OFF mode current of the nRF52840?"
+    expected_substring: "0.4 µA at 3 V in System OFF mode"
+    expected_section: "Feature list / Flexible power management"
+    notes: "No RAM retention, lowest sleep mode."
+
+  - id: KB-DS-NRF52840-PERF-001
+    category: performance
+    question: "Which CPU core does the nRF52840 use and at what frequency?"
+    expected_substring: "ARM ® Cortex ® -M4 32-bit processor with FPU, 64 MHz"
+    expected_section: "Feature list"
+    notes: "Cortex-M4 with FPU at 64 MHz."
+
+  - id: KB-DS-NRF52840-PERF-002
+    category: performance
+    question: "Does the nRF52840 support IEEE 802.15.4 (Thread/Zigbee)?"
+    expected_substring: "IEEE 802.15.4-2006"
+    expected_section: "Feature list"
+    notes: "Multiprotocol radio supporting BLE, Thread, Zigbee."
+
+  - id: KB-DS-NRF52840-PERF-003
+    category: performance
+    question: "Does the nRF52840 expose a USB controller?"
+    expected_substring: "USB 2.0 full speed"
+    expected_section: "Feature list / Advanced on-chip interfaces"
+    notes: "Full-speed USB 2.0 device controller."
+
+  - id: KB-DS-NRF52840-MEM-001
+    category: memory
+    question: "How much flash and RAM does the nRF52840 have?"
+    expected_substring: "1 MB flash and 256 kB RAM"
+    expected_section: "Feature list"
+    notes: "1 MB embedded flash, 256 KB SRAM."
+
+  - id: KB-DS-NRF52840-PKG-001
+    category: package
+    question: "What is the body size of the nRF52840 aQFN73 package?"
+    expected_substring: "aQFN 73 package, 7 x 7 mm"
+    expected_section: "Feature list / Package variants"
+    notes: ""
+
+  - id: KB-DS-NRF52840-THERM-001
+    category: thermal
+    question: "What is the recommended operating temperature range of the nRF52840?"
+    expected_substring: "TA Operating temperature -40 25 85 °C"
+    expected_section: "Recommended operating conditions"
+    notes: "Operating temperature -40 to 85 °C."
+
+  - id: KB-DS-NRF52840-REL-001
+    category: reliability
+    question: "What is the HBM ESD rating of the nRF52840 in the aQFN73 package?"
+    expected_substring: "ESD HBM Human Body Model 2 kV"
+    expected_section: "Absolute maximum ratings / Environmental aQFN73 package"
+    notes: "Class 2 HBM rating."
+
+  - id: KB-DS-NRF52840-APP-001
+    category: application
+    question: "Does the nRF52840 include an NFC tag interface?"
+    expected_substring: "Type 2 near field communication"
+    expected_section: "Feature list / Advanced on-chip interfaces"
+    notes: "NFC-A tag with wake-on-field."

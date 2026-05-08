@@ -1,0 +1,80 @@
+mpn: LM2596
+vendor: Texas Instruments
+family: Buck regulator
+source_url: https://www.ti.com/lit/ds/symlink/lm2596.pdf
+fixture_text: tests/fixtures/datasheets/lm2596.txt
+license_note: |
+  Public datasheet by Texas Instruments Incorporated. Excerpt
+  committed for UAT testing under fair-use technical-reference
+  doctrine. Not redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-LM2596-PWR-001
+    category: power
+    question: "What is the maximum input voltage of the LM2596?"
+    expected_substring: "Input voltage range up to 40 V"
+    expected_section: "Features"
+    notes: "VIN max recommended is 40 V."
+
+  - id: KB-DS-LM2596-PWR-002
+    category: power
+    question: "What is the maximum output load current the LM2596 can drive?"
+    expected_substring: "3-A output load current"
+    expected_section: "Features"
+    notes: "3 A continuous output."
+
+  - id: KB-DS-LM2596-PWR-003
+    category: power
+    question: "What is the standby (quiescent) current of the LM2596 in shutdown?"
+    expected_substring: "80 μA"
+    expected_section: "Features"
+    notes: "TTL shutdown current."
+
+  - id: KB-DS-LM2596-PERF-001
+    category: performance
+    question: "What is the switching frequency of the LM2596?"
+    expected_substring: "150-kHz fixed-frequency internal oscillator"
+    expected_section: "Features"
+    notes: "Internal fixed-frequency oscillator."
+
+  - id: KB-DS-LM2596-PERF-002
+    category: performance
+    question: "What is the adjustable output voltage range of the LM2596-ADJ?"
+    expected_substring: "37-V ±4%"
+    expected_section: "Features"
+    notes: "Adjustable variant: 1.2 V to 37 V output."
+
+  - id: KB-DS-LM2596-PKG-001
+    category: package
+    question: "Which packages is the LM2596 available in?"
+    expected_substring: "Available in TO-220 and TO-263 packages"
+    expected_section: "Features"
+    notes: "Through-hole TO-220 and surface-mount TO-263."
+
+  - id: KB-DS-LM2596-THERM-001
+    category: thermal
+    question: "What is the maximum junction temperature for the LM2596?"
+    expected_substring: "Maximum junction temperature 150 °C"
+    expected_section: "Specifications / Absolute Maximum Ratings"
+    notes: "TJ-max."
+
+  - id: KB-DS-LM2596-THERM-002
+    category: thermal
+    question: "What is the storage temperature range of the LM2596?"
+    expected_substring: "Storage temperature, T –65 150 °C"
+    expected_section: "Specifications / Absolute Maximum Ratings"
+    notes: "Tstg from -65 to +150 C."
+
+  - id: KB-DS-LM2596-REL-001
+    category: reliability
+    question: "What is the HBM ESD rating of the LM2596?"
+    expected_substring: "Human-body model (HBM)"
+    expected_section: "Specifications / ESD Ratings"
+    notes: "ANSI/ESDA/JEDEC JS-001 HBM ±2 kV."
+
+  - id: KB-DS-LM2596-APP-001
+    category: application
+    question: "Does the LM2596 include thermal shutdown and current-limit protection?"
+    expected_substring: "Thermal shutdown and current-limit protection"
+    expected_section: "Features"
+    notes: "Self-protection features."

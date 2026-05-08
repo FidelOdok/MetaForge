@@ -1,0 +1,80 @@
+mpn: MCP2515
+vendor: Microchip
+family: CAN controller (AEC-Q100)
+source_url: https://ww1.microchip.com/downloads/en/DeviceDoc/MCP2515-Stand-Alone-CAN-Controller-with-SPI-20001801J.pdf
+fixture_text: tests/fixtures/datasheets/mcp2515.txt
+license_note: |
+  Public datasheet by Microchip Technology Inc. Excerpt committed
+  for UAT testing under fair-use technical-reference doctrine. Not
+  redistributed; canonical document at source_url.
+
+queries:
+  - id: KB-DS-MCP2515-PWR-001
+    category: power
+    question: "What is the supply voltage range of the MCP2515?"
+    expected_substring: "Operates from 2.7V-5.5V"
+    expected_section: "Features / Low-Power CMOS Technology"
+    notes: "VDD operating range."
+
+  - id: KB-DS-MCP2515-PWR-002
+    category: power
+    question: "What is the typical active supply current of the MCP2515?"
+    expected_substring: "5 mA active current (typical)"
+    expected_section: "Features / Low-Power CMOS Technology"
+    notes: ""
+
+  - id: KB-DS-MCP2515-PWR-003
+    category: power
+    question: "What is the typical sleep-mode standby current of the MCP2515?"
+    expected_substring: "1 μA standby current (typical) (Sleep mode)"
+    expected_section: "Features / Low-Power CMOS Technology"
+    notes: ""
+
+  - id: KB-DS-MCP2515-PERF-001
+    category: performance
+    question: "Which CAN protocol version does the MCP2515 implement and at what bit rate?"
+    expected_substring: "CAN V2.0B at 1 Mb/s"
+    expected_section: "Features"
+    notes: "Stand-alone CAN 2.0B controller, up to 1 Mb/s."
+
+  - id: KB-DS-MCP2515-PERF-002
+    category: performance
+    question: "What is the maximum SPI clock frequency of the MCP2515?"
+    expected_substring: "High-Speed SPI Interface (10 MHz)"
+    expected_section: "Features"
+    notes: "Modes 0,0 and 1,1; 10 MHz max."
+
+  - id: KB-DS-MCP2515-PERF-003
+    category: performance
+    question: "How many CAN acceptance filters does the MCP2515 provide?"
+    expected_substring: "Six 29-bit filters"
+    expected_section: "Features / Receive Buffers, Masks and Filters"
+    notes: "6 acceptance filters (29-bit) and 2 masks."
+
+  - id: KB-DS-MCP2515-THERM-001
+    category: thermal
+    question: "What is the industrial-grade ambient temperature range of the MCP2515?"
+    expected_substring: "Industrial (I): -40°C to +85°C"
+    expected_section: "Features / Temperature Ranges Supported"
+    notes: ""
+
+  - id: KB-DS-MCP2515-THERM-002
+    category: thermal
+    question: "What is the extended ambient temperature range of the MCP2515?"
+    expected_substring: "Extended (E): -40°C to +125°C"
+    expected_section: "Features / Temperature Ranges Supported"
+    notes: "E-grade for harsher environments."
+
+  - id: KB-DS-MCP2515-PKG-001
+    category: package
+    question: "In which packages is the MCP2515 supplied?"
+    expected_substring: "18-Lead PDIP/SOIC"
+    expected_section: "Package Types"
+    notes: "PDIP/SOIC 18-pin variant."
+
+  - id: KB-DS-MCP2515-CMP-001
+    category: compliance
+    question: "Is the MCP2515 lead-free / RoHS compliant?"
+    expected_substring: "Pb-free"
+    expected_section: "Packaging Information"
+    notes: "JEDEC matte-tin Pb-free designator."

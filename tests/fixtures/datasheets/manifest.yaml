@@ -45,3 +45,75 @@ datasheets:
     source URL above.
 
     '
+- mpn: STM32H723VGT6
+  vendor: STMicroelectronics
+  family: MCU (flagship)
+  source_url: https://www.st.com/resource/en/datasheet/stm32h723vg.pdf
+  pdf_sha256: 0a5bec4bfab75d44768e917943db1ffc8ebf7f291b6cdd2a17b8d1642e210492
+  text_path: tests/fixtures/datasheets/stm32h723vgt6.txt
+  text_sha256: 8611f133ad57c1cb4c69e735b50cbee9ae9c6ef949f3b201b32378125a5d4b1b
+  license_note: 'Public datasheet by STMicroelectronics. Excerpt committed for
+
+    UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
+- mpn: ESP32-WROOM-32
+  vendor: Espressif
+  family: Wireless module
+  source_url: https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf
+  pdf_sha256: d43134d0cd6ffcebe538149009db0875b81d90bc2b9d57d74858c500dbfefa4e
+  text_path: tests/fixtures/datasheets/esp32-wroom-32.txt
+  text_sha256: db49410cae24f083e80fe221e4a95d8f6096d61617cbff5d659283630a780d79
+  license_note: 'Public datasheet by Espressif Systems. Excerpt committed for
+
+    UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
+- mpn: nRF52840
+  vendor: Nordic Semiconductor
+  family: BLE SoC
+  source_url: https://web.archive.org/web/2024/https://infocenter.nordicsemi.com/pdf/nRF52840_PS_v1.7.pdf
+  pdf_sha256: f43354b2be1d5558e9e409787a940b16322d2d560da87b33f6206361bbc1469a
+  text_path: tests/fixtures/datasheets/nrf52840.txt
+  text_sha256: 443f956b1d1da77f5dc606097806f322e170fe1b702325be036ea6dc6b3ad9b9
+  license_note: 'Public datasheet by Nordic Semiconductor ASA. Excerpt committed
+
+    for UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
+- mpn: LM2596
+  vendor: Texas Instruments
+  family: Buck regulator
+  source_url: https://www.ti.com/lit/ds/symlink/lm2596.pdf
+  pdf_sha256: c4cd25b7f4de7b1c98f117c47de28ae5e596a84fc54b1f6d24f9f5adde6fe8ae
+  text_path: tests/fixtures/datasheets/lm2596.txt
+  text_sha256: 422c7aa18864228042bf42ebc24471f8c291566f5b699641573c2354988d80f9
+  license_note: 'Public datasheet by Texas Instruments Incorporated. Excerpt
+
+    committed for UAT testing under fair-use technical-reference
+
+    doctrine. PDF is NOT redistributed; fetched on demand from the
+
+    source URL above.
+
+    '
+- mpn: MCP2515
+  vendor: Microchip
+  family: CAN controller (AEC-Q100)
+  source_url: https://ww1.microchip.com/downloads/en/DeviceDoc/MCP2515-Stand-Alone-CAN-Controller-with-SPI-20001801J.pdf
+  pdf_sha256: f2cf92a2d1ed42b285bf1e2395b859c91114f6a6774d90cf3e4ccda36b840aca
+  text_path: tests/fixtures/datasheets/mcp2515.txt
+  text_sha256: 22accfd2726b5cbba7d40dc902ad096c469c78a9d2445901b88756ab1bf8263b
+  license_note: 'Public datasheet by Microchip Technology Inc. Excerpt committed
+
+    for UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
