@@ -18,7 +18,16 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "datasheets"
 SCENARIO_PATH = REPO_ROOT / "tests" / "uat" / "scenarios" / "tier1" / "datasheets-real.md"
 
-ORDER = ["rp2040", "bme280", "tps62840", "stm32h723vgt6", "esp32-wroom-32", "nrf52840", "lm2596", "mcp2515"]
+ORDER = [
+    "rp2040",
+    "bme280",
+    "tps62840",
+    "stm32h723vgt6",
+    "esp32-wroom-32",
+    "nrf52840",
+    "lm2596",
+    "mcp2515",
+]
 
 PREAMBLE = """# Tier-1 — real-datasheet retrieval QA (KB-DS)
 
