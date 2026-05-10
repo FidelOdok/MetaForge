@@ -100,9 +100,7 @@ class _FakeService:
         )
         return []
 
-    async def delete_by_source(
-        self, source_path: str, project_id: UUID | None = None
-    ) -> int:
+    async def delete_by_source(self, source_path: str, project_id: UUID | None = None) -> int:
         return 0
 
     async def list_sources(
