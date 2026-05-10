@@ -52,9 +52,9 @@ All project tracking lives in **Linear** under the **MetaForge** team:
 
 | Component | Technology |
 |-----------|-----------|
-| Primary Language | Python 3.11+ (Gateway, Agents, Twin, Skills, MCP) |
-| CLI / Dashboard | Node.js / TypeScript (CLI only) |
-| CLI Libraries | Commander.js, Inquirer, Chalk |
+| Primary Language | Python 3.11+ (Gateway, Agents, Twin, Skills, MCP, CLI) |
+| Dashboard | TypeScript / React (`dashboard/`) |
+| CLI Libraries | argparse + httpx (`cli/forge_cli/`) |
 | Gateway | FastAPI + Uvicorn |
 | Agent Framework | PydanticAI + Temporal (ADR-001) |
 | LLM Providers | `openai` + `anthropic` SDKs via unified abstraction |
@@ -74,19 +74,25 @@ MetaForge supports two operational modes:
 ## Build & Development Commands
 
 ```bash
-# Python (platform core)
-pip install -e ".[dev]"   # Install in dev mode
-pytest                    # Run tests
-ruff check .              # Lint
-mypy .                    # Type check
+# Platform core + CLI (Python)
+pip install -e ".[dev]"          # Install in dev mode
+pytest                           # Run tests
+ruff check .                     # Lint
+mypy .                           # Type check
 
-# Node.js (CLI only)
-cd cli && npm install     # Install CLI dependencies
-npm run build             # Compile TypeScript (tsc)
-npm run dev               # Dev mode (ts-node)
+# CLI invocation
+python -m cli.forge_cli --help   # See available subcommands
+
+# Dashboard (TypeScript / React)
+cd dashboard && npm install
+npm run dev                      # Vite dev server
+npm run build                    # Production build
 ```
 
-CLI binary is `forge` (or `metaforge`), entry point at `cli/index.ts`.
+The CLI lives at `cli/forge_cli/` (argparse-based, see `main.py`).
+There is no `forge` binary in `[project.scripts]` yet — invoke via
+`python -m cli.forge_cli`. See [`docs/cli-reference.md`](docs/cli-reference.md)
+for the full command catalog.
 
 ## Git Workflow
 
@@ -126,9 +132,13 @@ This repo follows the canonical layout defined in `FidelOdok/MetaForge-Planner` 
 
 ```
 MetaForge/
-├── cli/                        # CLI commands (forge setup, forge run, etc.)
-│   ├── index.ts                # Main CLI entry point
-│   └── commands/               # Command implementations
+├── cli/                        # CLI commands (Python, argparse-based)
+│   └── forge_cli/
+│       ├── main.py             # Argparse entry — `python -m cli.forge_cli`
+│       ├── client.py           # Gateway HTTP client wrapper
+│       ├── ingest.py           # `ingest` command handler
+│       ├── sources.py          # `sources` subparser handlers
+│       └── formatters.py       # Table / JSON output helpers
 │
 ├── api_gateway/                # Gateway Service — HTTP/WebSocket "front door"
 │   ├── routes/
@@ -203,7 +213,7 @@ MetaForge/
 └── docs/                       # Project-level documentation
 ```
 
-**Note**: The platform core is implemented in Python (`.py`). Only the CLI layer (`cli/`) uses TypeScript (`.ts`).
+**Note**: The platform core, agents, and CLI are all Python (`.py`). Only the dashboard (`dashboard/`) uses TypeScript (`.ts`/`.tsx`).
 
 ## User Project Structure (What MetaForge Manages)
 

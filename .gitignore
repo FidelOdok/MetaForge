@@ -66,6 +66,9 @@ node_modules/
 # the binary PDFs are fetched on demand and never go in git.
 .cache/datasheets/
 
+# MkDocs build output (deployed by .github/workflows/docs.yml).
+site/
+
 # Ripgrep config
 .ripgreprc
 
