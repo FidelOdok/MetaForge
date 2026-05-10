@@ -12,6 +12,8 @@ import { BomPage } from './pages/BomPage';
 import { TwinViewerPage } from './pages/TwinViewerPage';
 import { FilesPage } from './pages/FilesPage';
 import { DesignAssistantPage } from './pages/DesignAssistantPage';
+import { KnowledgePage } from './pages/KnowledgePage';
+import { SourceDetailPage } from './pages/SourceDetailPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -93,6 +95,22 @@ export function App() {
               element={
                 <ErrorBoundary>
                   <DesignAssistantPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="knowledge"
+              element={
+                <ErrorBoundary>
+                  <KnowledgePage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="knowledge/sources/:id"
+              element={
+                <ErrorBoundary>
+                  <SourceDetailPage />
                 </ErrorBoundary>
               }
             />
