@@ -323,6 +323,22 @@ class MetricsRegistry:
         labels=["agent_id", "source_kind"],
     )
 
+    # ── Knowledge service latency (MET-401 / L1-A7) ───────────────────
+    #
+    # HP-RETR-08 SLO: p95 < 200 ms on a 1k-doc corpus. This histogram is
+    # the gating signal — wall-clock probes were the previous proxy.
+    # ``top_k_bucket`` is "small" (top_k <= 5) or "large" (top_k > 5);
+    # the SLO is evaluated at p95 across the whole metric, but the
+    # bucket label lets dashboards split per query shape.
+    KNOWLEDGE_SEARCH_DURATION = MetricDefinition(
+        name="metaforge_knowledge_search_duration_seconds",
+        type="histogram",
+        description="LightRAG knowledge search end-to-end duration in seconds",
+        labels=["top_k_bucket"],
+        unit="s",
+        buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -337,6 +353,7 @@ class MetricsRegistry:
             + cls.telemetry_metrics()
             + cls.constraint_metrics()
             + cls.retrieval_metrics()
+            + cls.knowledge_metrics()
         )
 
     @classmethod
@@ -348,6 +365,13 @@ class MetricsRegistry:
             cls.RETRIEVAL_MRR,
             cls.RETRIEVAL_NDCG_AT_K,
             cls.CONTEXT_TRUNCATED_TOTAL,
+        ]
+
+    @classmethod
+    def knowledge_metrics(cls) -> list[MetricDefinition]:
+        """MET-401 / L1-A7 knowledge-service latency metrics."""
+        return [
+            cls.KNOWLEDGE_SEARCH_DURATION,
         ]
 
     @classmethod
@@ -740,3 +764,18 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONTEXT_TRUNCATED_TOTAL.name)
         if counter is not None:
             counter.add(count, attributes={"agent_id": agent_id, "source_kind": source_kind})
+
+    # ── Knowledge service latency (MET-401 / L1-A7) ───────────────────
+
+    def record_knowledge_search_duration(self, top_k: int, duration: float) -> None:
+        """Observe a ``knowledge_search_duration_seconds`` sample.
+
+        ``top_k`` is bucketed into ``small`` (<=5) or ``large`` (>5) so
+        the SLO can split per query shape. The Prometheus alert in
+        ``observability/alerting/rules.yaml`` evaluates p95 over 5
+        minutes against a 200 ms threshold (HP-RETR-08).
+        """
+        hist = self._instruments.get(MetricsRegistry.KNOWLEDGE_SEARCH_DURATION.name)
+        if hist is not None:
+            bucket = "small" if top_k <= 5 else "large"
+            hist.record(duration, attributes={"top_k_bucket": bucket})
