@@ -1,8 +1,8 @@
 site_name: MetaForge
 site_description: Local-first control plane for hardware design.
-site_url: https://metaforge-ha.github.io/MetaForge/
-repo_url: https://github.com/MetaForge-HA/MetaForge
-repo_name: MetaForge-HA/MetaForge
+site_url: https://fidelodok.github.io/MetaForge/
+repo_url: https://github.com/FidelOdok/MetaForge
+repo_name: FidelOdok/MetaForge
 edit_uri: edit/main/docs/
 
 docs_dir: docs
@@ -88,4 +88,4 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/MetaForge-HA/MetaForge
+      link: https://github.com/FidelOdok/MetaForge

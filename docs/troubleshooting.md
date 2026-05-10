@@ -3,7 +3,7 @@
 > **Status:** Phase 1 (v0.1). Common errors and how to recover.
 > Last verified against `main` on 2026-05-10. If you hit something
 > not listed here, check
-> [`docs/runbooks/`](https://github.com/MetaForge-HA/MetaForge/tree/main/docs/runbooks) for ops-level scenarios or open a Linear
+> [`docs/runbooks/`](https://github.com/FidelOdok/MetaForge/tree/main/docs/runbooks) for ops-level scenarios or open a Linear
 > issue.
 
 ## Postgres or Neo4j unreachable
@@ -211,6 +211,6 @@ If the issue is:
   epic (see [`roadmap.md`](roadmap.md)).
 - a regression — open a Linear ticket and tag it `regression`; the
   bug-hunter agent (`/bug-hunt`) can help triage.
-- an ops-level outage — see [`docs/runbooks/`](https://github.com/MetaForge-HA/MetaForge/tree/main/docs/runbooks) for
+- an ops-level outage — see [`docs/runbooks/`](https://github.com/FidelOdok/MetaForge/tree/main/docs/runbooks) for
   stack-specific runbooks (`gateway-down.md`, `neo4j-unreachable.md`,
   `kafka-consumer-stopped.md`).

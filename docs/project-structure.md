@@ -87,7 +87,7 @@ KiCad tool list.
 ### `bom/`
 
 Bill of materials. The Supply-Chain agent consumes this and the
-[Component-Engineering agent](https://github.com/MetaForge-HA/MetaForge/blob/main/docs/agents/electronics-context-spec.md)
+[Component-Engineering agent](https://github.com/FidelOdok/MetaForge/blob/main/docs/agents/electronics-context-spec.md)
 proposes alternates. Format: `bom.csv` with columns
 `{ref, mpn, manufacturer, qty, alt_mpns}` plus per-part
 sourcing JSON in `bom/sourcing/<mpn>.json`.

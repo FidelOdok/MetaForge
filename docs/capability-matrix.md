@@ -17,25 +17,25 @@ KiCad adapters are opt-in.
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
-| `knowledge` (default) | `knowledge.ingest` | Index a file or text into the LightRAG-backed KB | [`tier1/ingest.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/ingest.md) |
-| `knowledge` | `knowledge.search` | Semantic + fulltext search over indexed sources | [`tier1/retrieval.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/retrieval.md) |
-| `twin` (default) | `twin.get_node` | Fetch a Twin node by id with first-hop neighbors | [`tier1/twin-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.thread_for` | Walk the digital thread for a work product | [`tier1/twin-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.find_by_property` | Find nodes matching a property predicate | [`tier1/twin-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.constraint_violations` | List active constraint violations on a project | [`tier1/twin-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.query_cypher` | Run a read-only Cypher query against the Twin | [`tier1/twin-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |
-| `cadquery` (default) | `cadquery.create_parametric` | Generate a parametric solid (box, cylinder, …) → STEP | [`tier1/cad-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
-| `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
-| `cadquery` | `cadquery.get_properties` | Mass / volume / bounding-box for a STEP file | [`tier1/cad-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
-| `cadquery` | `cadquery.export_geometry` | Convert STEP → GLB (web viewer) or STL | [`tier1/cad-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
-| `cadquery` | `cadquery.execute_script` | Run an inline CadQuery Python script | [`tier1/cad-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
+| `knowledge` (default) | `knowledge.ingest` | Index a file or text into the LightRAG-backed KB | [`tier1/ingest.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/ingest.md) |
+| `knowledge` | `knowledge.search` | Semantic + fulltext search over indexed sources | [`tier1/retrieval.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/retrieval.md) |
+| `twin` (default) | `twin.get_node` | Fetch a Twin node by id with first-hop neighbors | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.thread_for` | Walk the digital thread for a work product | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.find_by_property` | Find nodes matching a property predicate | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.constraint_violations` | List active constraint violations on a project | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.query_cypher` | Run a read-only Cypher query against the Twin | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |
+| `cadquery` (default) | `cadquery.create_parametric` | Generate a parametric solid (box, cylinder, …) → STEP | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
+| `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
+| `cadquery` | `cadquery.get_properties` | Mass / volume / bounding-box for a STEP file | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
+| `cadquery` | `cadquery.export_geometry` | Convert STEP → GLB (web viewer) or STL | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
+| `cadquery` | `cadquery.execute_script` | Run an inline CadQuery Python script | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.create_assembly` | Multi-body assembly (Phase 2 — manifest only) | _Phase 2_ |
 | `cadquery` | `cadquery.generate_enclosure` | Parametric enclosure generator (Phase 2 — manifest only) | _Phase 2_ |
-| `calculix` (default) | `calculix.run_fea` | Linear-static FEA on a meshed solid | [`tier1/fea-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
-| `calculix` | `calculix.run_thermal` | Steady-state thermal analysis | [`tier1/fea-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
-| `calculix` | `calculix.validate_mesh` | Mesh quality and connectivity checks | [`tier1/fea-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
-| `calculix` | `calculix.extract_results` | Pull max-stress / max-displacement from `.frd` | [`tier1/fea-hp.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` (default) | `calculix.run_fea` | Linear-static FEA on a meshed solid | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` | `calculix.run_thermal` | Steady-state thermal analysis | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` | `calculix.validate_mesh` | Mesh quality and connectivity checks | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` | `calculix.extract_results` | Pull max-stress / max-displacement from `.frd` | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
 | `freecad` (opt-in) | `freecad.create_parametric` | FreeCAD-driven parametric solid | _none yet_ |
 | `freecad` | `freecad.boolean_operation` | FreeCAD boolean ops | _none yet_ |
 | `freecad` | `freecad.get_properties` | FreeCAD shape properties | _none yet_ |
@@ -120,7 +120,7 @@ What's deliberately not in scope this phase — see
 ## Where each capability is proven
 
 Every capability above is exercised by at least one Cycle-3 UAT
-scenario in [`tests/uat/scenarios/`](https://github.com/MetaForge-HA/MetaForge/tree/main/tests/uat/scenarios).
+scenario in [`tests/uat/scenarios/`](https://github.com/FidelOdok/MetaForge/tree/main/tests/uat/scenarios).
 The full master plan and verdict tracker is at
-[`docs/uat/kb-test-plan.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/docs/uat/kb-test-plan.md)
+[`docs/uat/kb-test-plan.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/uat/kb-test-plan.md)
 in the repo (kept out of the published site as QA-internal).

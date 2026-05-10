@@ -18,7 +18,7 @@
 ## 2. Install
 
 ```bash
-git clone https://github.com/MetaForge-HA/MetaForge.git
+git clone https://github.com/FidelOdok/MetaForge.git
 cd MetaForge
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,knowledge,cadquery]"
@@ -119,7 +119,7 @@ cd examples/drone_flight_controller
 python demo_validate_stress.py
 ```
 
-Read [`examples/drone_flight_controller/README.md`](https://github.com/MetaForge-HA/MetaForge/tree/main/examples/drone_flight_controller#readme)
+Read [`examples/drone_flight_controller/README.md`](https://github.com/FidelOdok/MetaForge/tree/main/examples/drone_flight_controller#readme)
 for the full walkthrough.
 
 ## Where to next

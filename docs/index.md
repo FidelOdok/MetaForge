@@ -37,7 +37,7 @@ How to drive MetaForge from external harnesses.
 
 ## Reference example
 
-[`examples/drone_flight_controller/`](https://github.com/MetaForge-HA/MetaForge/tree/main/examples/drone_flight_controller#readme) —
+[`examples/drone_flight_controller/`](https://github.com/FidelOdok/MetaForge/tree/main/examples/drone_flight_controller#readme) —
 a 4-layer PCB around the STM32F405RGT6, walked through six
 engineering disciplines. Runs entirely on mock adapters; no Docker
 required.
@@ -57,7 +57,7 @@ using it. Expect specs, ADRs, and architectural diagrams.
   directory ownership
 
 If you're contributing code, start with the repo-root
-[`CLAUDE.md`](https://github.com/MetaForge-HA/MetaForge/blob/main/CLAUDE.md)
+[`CLAUDE.md`](https://github.com/FidelOdok/MetaForge/blob/main/CLAUDE.md)
 file — it covers the development workflow, the observability
 requirements, and the git conventions.
 
@@ -65,7 +65,7 @@ requirements, and the git conventions.
 
 For SREs running a MetaForge deployment:
 
-- [Runbooks (in repo)](https://github.com/MetaForge-HA/MetaForge/tree/main/docs/runbooks) —
+- [Runbooks (in repo)](https://github.com/FidelOdok/MetaForge/tree/main/docs/runbooks) —
   `gateway-down.md`, `neo4j-unreachable.md`,
   `kafka-consumer-stopped.md`, `device-telemetry-stopped.md`,
   `fleet-anomaly-pattern.md`.
@@ -74,6 +74,6 @@ For SREs running a MetaForge deployment:
 
 QA-internal — kept in the repo for traceability, not on this site:
 
-- [KB master test plan](https://github.com/MetaForge-HA/MetaForge/blob/main/docs/uat/kb-test-plan.md)
-- [Cycle 1+2 acceptance matrix](https://github.com/MetaForge-HA/MetaForge/blob/main/docs/uat/cycle-1-2-acceptance-matrix.md)
-- Cycle 3 run reports under [`docs/uat/`](https://github.com/MetaForge-HA/MetaForge/tree/main/docs/uat).
+- [KB master test plan](https://github.com/FidelOdok/MetaForge/blob/main/docs/uat/kb-test-plan.md)
+- [Cycle 1+2 acceptance matrix](https://github.com/FidelOdok/MetaForge/blob/main/docs/uat/cycle-1-2-acceptance-matrix.md)
+- Cycle 3 run reports under [`docs/uat/`](https://github.com/FidelOdok/MetaForge/tree/main/docs/uat).

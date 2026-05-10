@@ -19,7 +19,7 @@ see [`mcp-config-examples.md`](mcp-config-examples.md).
 * This repo cloned and editable-installed:
 
   ```bash
-  git clone https://github.com/MetaForge-HA/MetaForge.git
+  git clone https://github.com/FidelOdok/MetaForge.git
   cd MetaForge
   python -m venv .venv && source .venv/bin/activate
   pip install -e ".[knowledge,cadquery]"

@@ -220,7 +220,7 @@ sequencing:
 
 ## Cross-references
 
-- [ADR-010 — Knowledge Visualization](https://github.com/MetaForge-HA/MetaForge-Planner/blob/main/docs/architecture/adr-010-knowledge-visualization.md) — the architectural decision behind this Phase 1 / Phase 2 split
+- [ADR-010 — Knowledge Visualization](https://github.com/FidelOdok/MetaForge-Planner/blob/main/docs/architecture/adr-010-knowledge-visualization.md) — the architectural decision behind this Phase 1 / Phase 2 split
 - [MET-346](https://linear.app/metaforge/issue/MET-346) — the L1 KnowledgeService spike this UI dogfoods
 - [MET-392](https://linear.app/metaforge/issue/MET-392) — the docker-compose mount task
 - [MET-393](https://linear.app/metaforge/issue/MET-393) — this doc
