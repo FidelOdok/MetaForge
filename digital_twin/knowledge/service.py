@@ -123,7 +123,32 @@ class KnowledgeService(Protocol):
         actor_id: str | None = None,
     ) -> list[SearchHit]: ...
 
-    async def delete_by_source(self, source_path: str) -> int: ...
+    async def delete_by_source(
+        self,
+        source_path: str,
+        project_id: UUID | None = None,
+    ) -> int:
+        """Delete all chunks at ``source_path`` scoped to ``project_id``.
+
+        ``project_id`` (MET-401) scopes the deletion to a single tenant:
+        only chunks whose ``metadata.project_id == str(project_id)`` are
+        retired. Chunks at the same ``source_path`` belonging to other
+        projects must remain untouched — that is the whole point of the
+        L1-A1 isolation contract.
+
+        ``project_id is None`` falls back to the documented "default
+        tenant only" behaviour pinned in L1-A1's ``search`` /
+        ``list_sources``: the call scopes to chunks whose
+        ``metadata.project_id == "default"``. This matches what an
+        unscoped search would see, so a literal
+        ``delete_by_source(source_path)`` cannot evict chunks the same
+        caller could not have seen via search. Cross-tenant admin
+        deletions are an explicit out-of-band concern; this method is
+        the safe-by-default surface.
+
+        Returns the number of chunks actually deleted.
+        """
+        ...
 
     async def list_sources(
         self,

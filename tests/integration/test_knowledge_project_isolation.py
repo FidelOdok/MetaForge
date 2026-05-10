@@ -149,6 +149,138 @@ class TestProjectIsolation:
             "isolation contract violated (MET-401)"
         )
 
+    async def test_delete_by_source_respects_project_scope(
+        self, service: LightRAGKnowledgeService
+    ) -> None:
+        """``delete_by_source(source_path, project_id=A)`` must only retire
+        chunks under project A — project B's chunks at the same
+        ``source_path`` must survive.
+
+        Pre-fix, the in-memory ``_source_index`` keyed on bare
+        ``source_path`` and a literal call walked every project's
+        chunks at that path. This test pins the L1-A1 isolation
+        contract through the deletion path.
+        """
+        marker = uuid.uuid4().hex[:8]
+        # Same source_path under both projects, distinct content.
+        source_path = f"iso://delete/{marker}.md"
+        content_a = (
+            "# Project A Sentinel\n\n"
+            f"MET-401 delete-isolation A {marker}: project A's content "
+            "uses zinc-plated steel fasteners with M5 thread.\n"
+        )
+        content_b = (
+            "# Project B Sentinel\n\n"
+            f"MET-401 delete-isolation B {marker}: project B's content "
+            "uses anodized aluminium fasteners with M4 thread.\n"
+        )
+
+        await service.ingest(
+            content=content_a,
+            source_path=source_path,
+            knowledge_type=KnowledgeType.DESIGN_DECISION,
+            project_id=PROJECT_A,
+        )
+        await service.ingest(
+            content=content_b,
+            source_path=source_path,
+            knowledge_type=KnowledgeType.DESIGN_DECISION,
+            project_id=PROJECT_B,
+        )
+        time.sleep(0.5)
+
+        # Sanity: both projects can find their respective content under
+        # the shared source_path before the delete.
+        pre_a = await service.search("zinc-plated steel fasteners", top_k=10, project_id=PROJECT_A)
+        pre_b = await service.search("anodized aluminium fasteners", top_k=10, project_id=PROJECT_B)
+        assert any(h.source_path == source_path for h in pre_a), (
+            "PROJECT_A pre-delete sanity: expected at least one A hit at the source"
+        )
+        assert any(h.source_path == source_path for h in pre_b), (
+            "PROJECT_B pre-delete sanity: expected at least one B hit at the source"
+        )
+
+        # Delete only under PROJECT_A. PROJECT_B's chunks must remain.
+        await service.delete_by_source(source_path, project_id=PROJECT_A)
+        time.sleep(0.5)
+
+        # After delete: A sees nothing at this source; B still sees its
+        # content. The L1-A1 contract holds across the deletion path.
+        post_a = await service.search("zinc-plated steel fasteners", top_k=10, project_id=PROJECT_A)
+        assert not any(h.source_path == source_path for h in post_a), (
+            "PROJECT_A's chunks still surface after delete_by_source(project_id=A)"
+        )
+        post_b = await service.search(
+            "anodized aluminium fasteners", top_k=10, project_id=PROJECT_B
+        )
+        assert any(h.source_path == source_path for h in post_b), (
+            "PROJECT_B's chunks at the shared source_path were evicted by "
+            "delete_by_source(project_id=A) — isolation contract violated (MET-401)"
+        )
+
+    async def test_supersede_respects_project_scope(
+        self, service: LightRAGKnowledgeService
+    ) -> None:
+        """The MET-307 supersede branch must scope its hash lookup and
+        eviction to ``(source_path, project_id)``.
+
+        Pre-fix, project B re-ingesting at a path already used by
+        project A hashed against A's chunks, mismatched, then evicted
+        A's chunks via the unscoped delete_by_source. This test pins
+        that scenario as a contract violation: A's content must still
+        be searchable under PROJECT_A after B ingests at the same
+        source_path with different content.
+        """
+        marker = uuid.uuid4().hex[:8]
+        source_path = f"iso://supersede/{marker}.md"
+        # Distinct content per project so the supersede hash check fires.
+        content_alpha = (
+            "# Alpha\n\n"
+            f"MET-401 supersede-iso α {marker}: project A documents the "
+            "honeycomb-aluminum structural panel selection.\n"
+        )
+        content_beta = (
+            "# Beta\n\n"
+            f"MET-401 supersede-iso β {marker}: project B documents the "
+            "carbon-fibre sandwich panel selection.\n"
+        )
+
+        # 1. A ingests α under shared source_path.
+        await service.ingest(
+            content=content_alpha,
+            source_path=source_path,
+            knowledge_type=KnowledgeType.DESIGN_DECISION,
+            project_id=PROJECT_A,
+        )
+        time.sleep(0.5)
+
+        # 2. B ingests β under the same source_path, different content,
+        #    different project. With the fix this must NOT trigger a
+        #    cross-project supersede that evicts A's chunks.
+        await service.ingest(
+            content=content_beta,
+            source_path=source_path,
+            knowledge_type=KnowledgeType.DESIGN_DECISION,
+            project_id=PROJECT_B,
+        )
+        time.sleep(0.5)
+
+        # A's α phrase must still surface under PROJECT_A.
+        hits_a = await service.search(
+            "honeycomb-aluminum structural panel", top_k=10, project_id=PROJECT_A
+        )
+        assert any(h.source_path == source_path for h in hits_a), (
+            "PROJECT_A's α content was evicted by PROJECT_B's ingest at the "
+            "same source_path — supersede leaked across projects (MET-401)"
+        )
+
+        # B's β phrase must surface under PROJECT_B.
+        hits_b = await service.search("carbon-fibre sandwich panel", top_k=10, project_id=PROJECT_B)
+        assert any(h.source_path == source_path for h in hits_b), (
+            "PROJECT_B's β content is not searchable after ingest — "
+            "supersede branch broke the project-B write path"
+        )
+
     async def test_unscoped_search_falls_back_to_default_tenant(
         self, service: LightRAGKnowledgeService
     ) -> None:

@@ -48,7 +48,7 @@ class _FakeKnowledge:
     ) -> IngestResult:
         return IngestResult(entry_ids=[], chunks_indexed=0, source_path=source_path)
 
-    async def delete_by_source(self, source_path: str) -> int:
+    async def delete_by_source(self, source_path: str, project_id: UUID | None = None) -> int:
         return 0
 
     async def health_check(self) -> dict[str, Any]:

@@ -228,7 +228,9 @@ class _FakeKnowledge:
     async def search(self, *args: Any, **kwargs: Any) -> list[SearchHit]:  # pragma: no cover
         return []
 
-    async def delete_by_source(self, source_path: str) -> int:  # pragma: no cover
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:  # pragma: no cover
         return 0
 
     async def health_check(self) -> dict[str, Any]:  # pragma: no cover

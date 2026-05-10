@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -132,7 +132,9 @@ class _StubService:
             return [h for h in self._hits if h.knowledge_type == knowledge_type]
         return list(self._hits)
 
-    async def delete_by_source(self, source_path: str) -> int:  # pragma: no cover
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:  # pragma: no cover
         return 0
 
     async def health_check(self) -> dict[str, Any]:  # pragma: no cover
