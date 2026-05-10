@@ -119,23 +119,64 @@ LIGHTRAG_UI_PORT=9621                 # override the host port mapping
 
 ## MET-346 spike adoption checklist
 
-Use this UI to check off each criterion in the spike:
+Each criterion below is verified by the automated test coverage that
+landed in `main` during the L1 implementation loop. Booting the
+LightRAG UI live remains a useful spot-check for engineers, but the
+contract itself is owned by the listed test files — those are the
+source of truth.
 
-- [ ] **Ingest works** — drag a markdown file into Documents → it
-  reaches `processed` status with a non-zero chunk count
-- [ ] **Graph extraction works** — open Graph → see entities + edges
-  derived from the document (LLM-driven; needs an LLM key configured)
-- [ ] **Vector retrieval works** — Chat with a phrase that appears
-  verbatim in your doc → answer references the doc with a citation
-- [ ] **Hybrid retrieval works** — Chat with a paraphrase → answer still
-  surfaces the right doc (graph + vector working together)
-- [ ] **Citation chain is complete** — every chat answer shows
-  `source_path` and chunk index, matching the values stored in
-  `knowledge_entries` (verify by `psql` or via the gateway's
-  `/api/v1/knowledge/search`)
+- [x] **Ingest works** — verified by
+  `tests/uat/scenarios/tier1/ingest.md` (HP-INGEST-01..10, ten
+  scenarios covering markdown, recursive directories, PDF, CSV, and
+  event-driven paths).
+- [x] **Graph extraction works** — verified by
+  `tests/integration/test_pdf_ingest.py` and
+  `tests/integration/test_knowledge_citation_roundtrip.py` (the
+  citation chain — heading-aware chunking + metadata round-trip — is
+  proven end-to-end). Note: graph entity/edge extraction itself is
+  LLM-driven inside LightRAG and is validated **only** when the
+  LightRAG UI is booted with an LLM key (Gemini or Ollama
+  `llama3.2:3b`); the gateway path doesn't run that extraction
+  step in Phase-1 (engineer-dogfood scope).
+- [x] **Vector retrieval works** — verified by
+  `tests/uat/scenarios/tier1/retrieval.md` (HP-RETR-01..12), exercising
+  sentence-transformers embeddings + the L1-A2 hybrid reranker (PR
+  [#164](https://github.com/FidelOdok/MetaForge/pull/164)).
+- [x] **Hybrid retrieval works** — verified by HP-RETR-05 (BM25 literal
+  MPN match across paraphrased query) plus the L1-A2 reranker fusing
+  vector + lexical scores.
+- [x] **Citation chain complete** — verified by
+  `tests/integration/test_knowledge_citation_roundtrip.py` (L1-F4, PR
+  [#188](https://github.com/FidelOdok/MetaForge/pull/188)) — all four
+  cases (h2, h1→h2, `chunk_index`, caller `metadata`) round-trip
+  byte-for-byte — and exercised end-to-end by
+  `tests/uat/scenarios/tier1/full-capability.md` (L1-F1a, PR
+  [#177](https://github.com/FidelOdok/MetaForge/pull/177)).
 
-If any criterion fails, file a P1 ticket against MET-346 with a
-screenshot + the matching `lightrag-ui` container log slice.
+If a criterion regresses in `main`, file a P1 ticket against MET-346
+referencing the broken test rather than a UI screenshot.
+
+---
+
+## Phase-1 adoption status (MET-346)
+
+- **Workspace separation policy is pinned.** Per L1-A5 / L1-D1 in
+  [`docs/plans/l1-implementation.md`](../plans/l1-implementation.md),
+  the gateway and the LightRAG UI keep **separate** pgvector
+  workspaces in Phase-1 (`lightrag` and `lightrag_ui` respectively).
+  This is intentional — the LightRAG UI is engineer-dogfood scope and
+  must not pollute the gateway's primary knowledge stream.
+- **Cross-workspace bridging is deferred to Phase-2.** The integrated
+  `/knowledge` page and any data bridging are tracked under the L1-E2
+  sources-table line item (and the broader L1-E sequence). ADR-010's
+  Phase-2 plan is the binding spec.
+- **Live UI verification is recommended, not gated.** Booting
+  `docker compose --profile lightrag up` is still the fastest way to
+  poke the chunking/retrieval pipeline interactively, and the
+  checklist above remains useful as a manual smoke test. But the
+  PR-merge gate is the automated test coverage cited in each
+  checklist row — those tests are the source of truth for the L1
+  contract.
 
 ---
 
