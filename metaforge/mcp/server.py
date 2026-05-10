@@ -385,6 +385,8 @@ class UnifiedMcpServer:
 async def build_unified_server(
     adapter_ids: list[str] | None = None,
     knowledge_service: Any = None,
+    twin: Any = None,
+    constraint_engine: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -393,10 +395,13 @@ async def build_unified_server(
     (``METAFORGE_ADAPTERS``, ``METAFORGE_ADAPTER_<ID>_ENABLED``) as the
     main gateway. Knowledge adapter is included only when a
     ``KnowledgeService`` instance is supplied (matches the gateway
-    contract from MET-335).
+    contract from MET-335). Twin and constraint adapters are included
+    only when ``twin`` and ``constraint_engine`` are supplied (MET-421).
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
         knowledge_service=knowledge_service,
+        twin=twin,
+        constraint_engine=constraint_engine,
     )
     return UnifiedMcpServer(adapters=registry.list_adapter_servers())
