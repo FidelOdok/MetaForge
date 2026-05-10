@@ -435,6 +435,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # available on app.state.
     tool_registry = await bootstrap_tool_registry(
         knowledge_service=getattr(app.state, "knowledge_service", None),
+        twin=twin,
+        constraint_engine=twin._constraints,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

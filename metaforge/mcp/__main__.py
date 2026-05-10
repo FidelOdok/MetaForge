@@ -344,7 +344,14 @@ def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool
 
 
 async def _bootstrap(args: argparse.Namespace) -> UnifiedMcpServer:
-    return await build_unified_server(adapter_ids=_adapter_ids_from_args(args.adapters))
+    from twin_core.api import InMemoryTwinAPI
+
+    twin = await InMemoryTwinAPI.create_from_env()
+    return await build_unified_server(
+        adapter_ids=_adapter_ids_from_args(args.adapters),
+        twin=twin,
+        constraint_engine=twin._constraints,
+    )
 
 
 def _configure_logging_for_transport(transport: str) -> None:

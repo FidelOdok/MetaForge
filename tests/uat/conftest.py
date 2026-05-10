@@ -84,7 +84,7 @@ async def knowledge_service(tmp_path: Path, postgres_dsn: str) -> AsyncIterator[
 
 async def spawn_metaforge_mcp(
     *,
-    adapters: str = "cadquery,calculix",
+    adapters: str = "knowledge,twin,constraint,cadquery,calculix",
     api_key: str | None = None,
     client_key: str | None = None,
 ) -> tuple[object, object]:
