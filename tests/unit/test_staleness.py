@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -150,7 +151,9 @@ class _StubService:
     ) -> list[SearchHit]:
         return list(self._hits)
 
-    async def delete_by_source(self, source_path: str) -> int:  # pragma: no cover
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:  # pragma: no cover
         return 0
 
     async def health_check(self) -> dict[str, Any]:  # pragma: no cover

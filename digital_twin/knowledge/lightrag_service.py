@@ -342,14 +342,22 @@ class LightRAGKnowledgeService:
         self._rag: Any = None
         self._embedder: Any = None
         self._initialized = False
-        # source_path -> set of LightRAG doc ids for delete_by_source.
-        self._source_index: dict[str, set[str]] = {}
-        # MET-307: source_path -> last-stored content_sha256. Used to
-        # short-circuit identical re-ingests in-process and as a
-        # fast-path before falling back to the PG SELECT for the
-        # cross-process case. Persisted copy lives in chunk metadata
-        # under ``metadata.content_sha256``.
-        self._content_sha_index: dict[str, str] = {}
+        # (project_scope, source_path) -> set of LightRAG doc ids for
+        # delete_by_source. MET-401 keys this on (project, source) so a
+        # literal delete at source_path under one project cannot evict
+        # chunks the same source_path under another project. The
+        # project_scope is always a string ("default" for the
+        # default-tenant fallback, str(UUID) otherwise) — same shape as
+        # the metadata stamp.
+        self._source_index: dict[tuple[str, str], set[str]] = {}
+        # MET-307 + MET-401: (project_scope, source_path) -> last-stored
+        # content_sha256. Used to short-circuit identical re-ingests
+        # in-process and as a fast-path before falling back to the PG
+        # SELECT for the cross-process case. Persisted copy lives in
+        # chunk metadata under ``metadata.content_sha256``. Keyed on the
+        # project so a re-ingest under project B does not see project
+        # A's hash and trigger a (now-cross-project) supersede.
+        self._content_sha_index: dict[tuple[str, str], str] = {}
         # MET-335: hybrid-search reranker. The flag here sets the
         # default policy when ``search(rerank=...)`` is not explicitly
         # supplied; gateway boot reads ``KNOWLEDGE_RERANKER_ENABLED``
@@ -516,7 +524,14 @@ class LightRAGKnowledgeService:
             #     proceed with normal chunking + storage.
             content_sha256 = _hash_content(content)
             metadata["content_sha256"] = content_sha256
-            existing_sha = await self._existing_content_sha256(source_path)
+            # MET-401: scope the supersede hash lookup to (source_path,
+            # project_id). Pre-fix, project B's re-ingest at a path
+            # already used by project A hashed against A's chunks,
+            # mismatched, then evicted A's chunks via the unscoped
+            # delete_by_source. Now the lookup only sees B's prior
+            # chunks at this source — A's chunks are invisible to it.
+            scope_project_id = str(project_id) if project_id is not None else "default"
+            existing_sha = await self._existing_content_sha256(source_path, project_id)
             if existing_sha is not None and existing_sha == content_sha256:
                 logger.info(
                     "lightrag_ingest_dedup",
@@ -530,14 +545,17 @@ class LightRAGKnowledgeService:
                     source_path=source_path,
                 )
             if existing_sha is not None and existing_sha != content_sha256:
-                old_chunk_count = len(self._source_index.get(source_path, set()))
-                deleted = await self.delete_by_source(source_path)
+                old_chunk_count = len(
+                    self._source_index.get((scope_project_id, source_path), set())
+                )
+                deleted = await self.delete_by_source(source_path, project_id=project_id)
                 if deleted > old_chunk_count:
                     old_chunk_count = deleted
                 span.set_attribute("knowledge.supersede", True)
                 logger.info(
                     "knowledge_consumer_predelete",
                     source_path=source_path,
+                    project_id=str(project_id) if project_id is not None else None,
                     old_chunk_count=old_chunk_count,
                 )
 
@@ -615,8 +633,11 @@ class LightRAGKnowledgeService:
 
             await self._rag.ainsert(input=texts, ids=ids, file_paths=file_paths)
 
-            self._source_index.setdefault(source_path, set()).update(ids)
-            self._content_sha_index[source_path] = content_sha256
+            # MET-401: index by (project_scope, source_path) so a
+            # subsequent delete_by_source under one project cannot evict
+            # chunks ingested under another project at the same path.
+            self._source_index.setdefault((scope_project_id, source_path), set()).update(ids)
+            self._content_sha_index[(scope_project_id, source_path)] = content_sha256
             entry_ids = [_uuid_from_chunk_id(cid) for cid in ids]
             span.set_attribute("knowledge.chunks_indexed", len(chunks))
             logger.info(
@@ -860,10 +881,36 @@ class LightRAGKnowledgeService:
             await conn.close()
         return [dict(row) for row in rows]
 
-    async def delete_by_source(self, source_path: str) -> int:
+    async def delete_by_source(
+        self,
+        source_path: str,
+        project_id: UUID | None = None,
+    ) -> int:
+        """Delete every chunk at ``source_path`` belonging to ``project_id``.
+
+        ``project_id`` (MET-401) scopes the deletion: only chunks whose
+        ``metadata.project_id == str(project_id)`` are retired. When
+        ``project_id is None`` the call falls back to the documented
+        default-tenant behaviour pinned in L1-A1 (``"default"`` scope).
+        Chunks at the same ``source_path`` belonging to other projects
+        are left untouched — that is the L1-A1 isolation contract.
+
+        Pre-fix, the in-memory ``_source_index`` keyed on bare
+        ``source_path`` so a literal call would fan out across every
+        project's chunks at that path. The index is now keyed on
+        ``(project_scope, source_path)`` and the supersede path always
+        forwards the active ``project_id`` so the eviction stays inside
+        a single tenant.
+        """
         await self._ensure_initialized()
-        ids = self._source_index.get(source_path, set())
+        scope_project_id = str(project_id) if project_id is not None else "default"
+        ids = self._source_index.get((scope_project_id, source_path), set())
         if not ids:
+            logger.info(
+                "lightrag_delete_source_noop",
+                source_path=source_path,
+                project_id=scope_project_id,
+            )
             return 0
         deleted = 0
         for chunk_id in list(ids):
@@ -880,11 +927,18 @@ class LightRAGKnowledgeService:
                     deleted += 1
             except Exception as exc:  # pragma: no cover — best effort
                 logger.warning("lightrag_delete_failed", chunk_id=chunk_id, error=str(exc))
-        self._source_index.pop(source_path, None)
-        # MET-307: clear the cached content hash so the next ingest
-        # at this source treats it as a fresh insert, not a dedup.
-        self._content_sha_index.pop(source_path, None)
-        logger.info("lightrag_deleted_source", source_path=source_path, deleted=deleted)
+        self._source_index.pop((scope_project_id, source_path), None)
+        # MET-307: clear the cached content hash for THIS project so the
+        # next ingest at (project, source) treats it as a fresh insert,
+        # not a dedup. Other projects' caches at the same source_path
+        # remain intact.
+        self._content_sha_index.pop((scope_project_id, source_path), None)
+        logger.info(
+            "lightrag_deleted_source",
+            source_path=source_path,
+            project_id=scope_project_id,
+            deleted=deleted,
+        )
         return deleted
 
     async def list_sources(
@@ -1162,27 +1216,40 @@ class LightRAGKnowledgeService:
         summaries.sort(key=lambda s: s.indexed_at, reverse=True)
         return summaries[offset : offset + limit]
 
-    async def _existing_content_sha256(self, source_path: str) -> str | None:
-        """Return the stored ``content_sha256`` for ``source_path`` (or None).
+    async def _existing_content_sha256(
+        self,
+        source_path: str,
+        project_id: UUID | None = None,
+    ) -> str | None:
+        """Return the stored ``content_sha256`` for ``(project_id, source_path)``.
 
-        Drives MET-307: identical re-ingests dedup, edited re-ingests
-        supersede. Two lookup tiers:
+        Drives MET-307 (identical re-ingest dedups, edited re-ingest
+        supersedes) and the MET-401 isolation contract: the lookup must
+        only see chunks under the same ``(source_path, project_id)``
+        pair. Pre-MET-401 this keyed on ``source_path`` alone, which
+        meant project B's re-ingest hashed against project A's chunks
+        and triggered a (now-cross-project) supersede.
 
-        1. **In-process cache** (``self._content_sha_index``) — covers
-           the common case of repeat ingests within one gateway
-           lifetime. Fast and avoids a round-trip.
+        ``project_id is None`` falls back to the documented "default
+        tenant" scope, matching ``search`` / ``list_sources``.
+
+        Two lookup tiers:
+
+        1. **In-process cache** (``self._content_sha_index`` keyed on
+           ``(project_scope, source_path)``) — covers the common case
+           of repeat ingests within one gateway lifetime.
         2. **Postgres SELECT** — falls back to one row from the
-           ``lightrag_vdb_chunks`` table when PG is configured, so the
-           supersede decision survives gateway restarts. The column we
-           read is ``file_path`` (plain text holding our JSON metadata
-           blob); the hash is at ``$.x.content_sha256``. ``LIMIT 1`` —
-           we only need one chunk's metadata to know the source's
-           current hash.
+           ``lightrag_vdb_chunks`` table when PG is configured. The
+           ``COALESCE(... ->'x'->>'project_id', 'default')`` predicate
+           mirrors ``_search_pg`` so the SELECT only sees chunks under
+           the active project.
 
-        Returns ``None`` when no prior entry exists, or when the prior
-        entry pre-dates MET-307 (no ``content_sha256`` stamped).
+        Returns ``None`` when no prior entry exists for this
+        ``(project, source)`` pair, or when the prior entry pre-dates
+        MET-307 (no ``content_sha256`` stamped).
         """
-        cached = self._content_sha_index.get(source_path)
+        scope_project_id = str(project_id) if project_id is not None else "default"
+        cached = self._content_sha_index.get((scope_project_id, source_path))
         if cached is not None:
             return cached
         if not self._cfg.postgres_dsn:
@@ -1197,6 +1264,7 @@ class LightRAGKnowledgeService:
             f"FROM {table} c "
             f"WHERE c.workspace = $1 "
             f"  AND c.file_path::jsonb->>'src' = $2 "
+            f"  AND COALESCE(c.file_path::jsonb->'x'->>'project_id', 'default') = $3 "
             f"LIMIT 1;"
         )
         try:
@@ -1205,13 +1273,14 @@ class LightRAGKnowledgeService:
             assert self._cfg.postgres_dsn is not None
             conn = await asyncpg.connect(self._cfg.postgres_dsn)
             try:
-                row = await conn.fetchrow(sql, workspace, source_path)
+                row = await conn.fetchrow(sql, workspace, source_path, scope_project_id)
             finally:
                 await conn.close()
         except Exception as exc:  # pragma: no cover — best effort
             logger.warning(
                 "lightrag_existing_sha_lookup_failed",
                 source_path=source_path,
+                project_id=scope_project_id,
                 error=str(exc),
             )
             return None
@@ -1221,7 +1290,7 @@ class LightRAGKnowledgeService:
         if isinstance(sha, str) and sha:
             # Repopulate the cache so subsequent calls in this process
             # skip the SELECT.
-            self._content_sha_index[source_path] = sha
+            self._content_sha_index[(scope_project_id, source_path)] = sha
             return sha
         return None
 

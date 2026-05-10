@@ -16,6 +16,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -109,7 +110,9 @@ class _RecordingService:
             return [h for h in self._hits if h.knowledge_type == knowledge_type]
         return list(self._hits)
 
-    async def delete_by_source(self, source_path: str) -> int:  # pragma: no cover
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:  # pragma: no cover
         return 0
 
     async def health_check(self) -> dict[str, Any]:  # pragma: no cover

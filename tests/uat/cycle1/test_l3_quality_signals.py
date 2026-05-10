@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -92,7 +92,9 @@ async def test_met326_evaluator_runs_against_fake_service() -> None:
         async def ingest(self, *a: Any, **k: Any) -> IngestResult:  # pragma: no cover
             return IngestResult(entry_ids=[], chunks_indexed=0, source_path="")
 
-        async def delete_by_source(self, source_path: str) -> int:  # pragma: no cover
+        async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:  # pragma: no cover
             return 0
 
         async def health_check(self) -> dict[str, Any]:  # pragma: no cover
@@ -226,7 +228,9 @@ class _NoKnowledge:
     async def search(self, *a: Any, **k: Any) -> list[SearchHit]:
         return []
 
-    async def delete_by_source(self, source_path: str) -> int:
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:
         return 0
 
     async def health_check(self) -> dict[str, Any]:
@@ -268,7 +272,9 @@ async def test_met333_blocking_conflict_flips_response_flag() -> None:
                 ),
             ]
 
-        async def delete_by_source(self, source_path: str) -> int:
+        async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:
             return 0
 
         async def health_check(self) -> dict[str, Any]:
@@ -333,7 +339,9 @@ async def test_met334_truncation_metric_increments_on_drop() -> None:
                 ),
             ]
 
-        async def delete_by_source(self, source_path: str) -> int:
+        async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:
             return 0
 
         async def health_check(self) -> dict[str, Any]:

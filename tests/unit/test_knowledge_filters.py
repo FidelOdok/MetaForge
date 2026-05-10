@@ -134,7 +134,9 @@ class _FakeService:
             )
         return hits[:top_k]
 
-    async def delete_by_source(self, source_path: str) -> int:
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:
         return 0
 
     async def list_sources(

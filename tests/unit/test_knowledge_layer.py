@@ -274,7 +274,9 @@ class _FakeKnowledgeService:
     async def search(self, *args: object, **kwargs: object) -> list[object]:
         return []
 
-    async def delete_by_source(self, source_path: str) -> int:
+    async def delete_by_source(
+        self, source_path: str, project_id: UUID | None = None
+    ) -> int:
         self.deletes.append(source_path)
         return 1
 
