@@ -11,6 +11,23 @@ keeps every step versioned and auditable.
 > **Prime rule:** if it can't be versioned, reviewed, and built —
 > MetaForge doesn't output it.
 
+```mermaid
+flowchart LR
+    intent["Human intent<br/>PRD · Constraints"]
+    mf["MetaForge<br/>control plane"]
+    agents["Specialist agents<br/>per discipline"]
+    tools["Real tools<br/>KiCad · FreeCAD<br/>CalculiX · SPICE"]
+    twin[("Digital Twin<br/>Neo4j · pgvector")]
+    out["Reviewable deliverables<br/>schematics · BOM · Gerbers"]
+
+    intent --> mf
+    mf --> agents
+    agents -->|MCP| tools
+    agents -->|read / propose| twin
+    twin --> out
+    out -.->|approval gate| intent
+```
+
 ## Phase 1 — what works today
 
 - **30 MCP tools** across 7 adapters (knowledge, twin, constraint,
