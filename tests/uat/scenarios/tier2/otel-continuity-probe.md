@@ -8,27 +8,6 @@ Run: `/uat-cycle12 --tier 2 --scenario otel-continuity`
 
 ---
 
-## Scenario
-
-Give Claude a complex prompt that requires 4+ tool calls:
-
-> *"Investigate why STM32H723VGT6 might fail thermal cycling.
-> Use whatever tools you need."*
-
-Claude is expected to (order may vary):
-
-1. `twin.find_by_property` — locate the BOMItem.
-2. `twin.thread_for` — find related TestExecutions.
-3. `knowledge.search` — find prior `failure` chunks for thermal
-   cycling.
-4. `constraint.validate` — check current thermal-margin status.
-5. Synthesize an answer with citations.
-
-After Claude's response, the validator queries Tempo (or Jaeger)
-for the trace tree and verifies properties below.
-
----
-
 ## What's different from synthetic
 
 A synthetic test could fake the trace shape. Claude-driven means:
@@ -43,21 +22,60 @@ A synthetic test could fake the trace shape. Claude-driven means:
 
 ---
 
-## Validator checks
+## Scenario: multi-hop reasoning trace stays intact end-to-end
+Validates: MET-407
+Tier: 2
 
-After Claude completes the prompt:
+### Given
+- The MetaForge gateway is up with OTel enabled and Tempo (or
+  Jaeger) reachable from the validator harness.
+- The knowledge corpus contains at least one prior `failure`
+  chunk for thermal cycling and a BOMItem for the
+  `STM32H723VGT6` MCU (any tier-1 corpus seeded for
+  electronics-vertical scenarios suffices).
+- The Claude session is configured with the standard MetaForge
+  MCP tool set: `twin.find_by_property`, `twin.thread_for`,
+  `knowledge.search`, `constraint.validate`.
 
-- **Single root** — every tool call shares one root
-  `correlation_id` / trace id.
-- **Layer coverage** — for each tool call there are spans at the
-  MCP layer, the adapter layer, and the backend (Postgres /
-  Neo4j / MinIO) layer.
-- **No orphan spans** — every span has a parent in the same
-  trace tree.
-- **Latency contiguity** — child span start times sit inside
-  their parent's `[start, end]` window (no clock-skew breakage).
-- **Attribute coverage** — `actor_id`, `session_id`, `project_id`
-  are populated on the root span and inherited.
+### When
+1. Issue a single complex prompt to the Claude session that
+   requires 4+ tool calls to answer:
+   *"Investigate why STM32H723VGT6 might fail thermal cycling.
+   Use whatever tools you need."*
+2. Let Claude drive the tool sequence end-to-end. The expected
+   shape (order may vary) is:
+   - `twin.find_by_property` to locate the BOMItem.
+   - `twin.thread_for` to find related TestExecutions.
+   - `knowledge.search` to find prior `failure` chunks for
+     thermal cycling.
+   - `constraint.validate` to check the current thermal-margin
+     status.
+   - A synthesized answer with citations.
+3. Capture the root `correlation_id` (or trace id) from the
+   first tool call's response headers / metadata.
+4. Query Tempo (or Jaeger) for the trace tree by that id and
+   collect every span it returns.
+
+### Then
+- **Single root** — every tool call in the conversation shares
+  one root `correlation_id` / trace id; there is no orphaned
+  second root.
+- **Layer coverage** — for each tool call there are spans at
+  the MCP layer, the adapter layer, and the backend layer
+  (Postgres / Neo4j / MinIO as appropriate for that call).
+- **No orphan spans** — every span in the captured tree has a
+  parent within the same trace tree (no `parent_span_id`
+  pointing outside the tree).
+- **Latency contiguity** — every child span's `start_time` sits
+  inside its parent's `[start, end]` window; no clock-skew
+  breakage.
+- **Attribute coverage** — `actor_id`, `session_id`, and
+  `project_id` are populated on the root span and inherited by
+  every descendant (no descendant span is missing these
+  attributes).
+- The user-visible answer is traceable end-to-end — every claim
+  Claude makes can be linked back to a span in the captured
+  tree (no untraced "thinking" call).
 
 ---
 
