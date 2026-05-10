@@ -140,6 +140,19 @@ Every file above shows up as one or more nodes in the Digital Twin:
 - `eda/kicad/*.kicad_pcb` → `PcbLayout` work product.
 - `firmware/src/` → `FirmwareModule` nodes.
 
+```mermaid
+flowchart LR
+    prd["PRD.md"] -->|Requirement| twin[("Digital Twin")]
+    cons["constraints.json"] -->|Constraint| twin
+    bom["bom/bom.csv"] -->|BOMItem| twin
+    pcb["eda/kicad/*.kicad_pcb"] -->|PcbLayout| twin
+    fw["firmware/src/"] -->|FirmwareModule| twin
+    twin --> q1["twin.find_by_property"]
+    twin --> q2["twin.thread_for"]
+    twin --> q3["twin.constraint_violations"]
+    bom -.->|satisfies| prd
+```
+
 Use `twin.find_by_property` or `twin.thread_for` (see
 [`cli-reference.md`](cli-reference.md)) to walk the thread from any
 of these.

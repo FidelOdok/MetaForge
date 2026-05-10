@@ -9,6 +9,33 @@ deliverables by orchestrating specialist AI agents over the
 [Model Context Protocol](https://modelcontextprotocol.io). New
 here? Start with [Getting Started](getting-started.md).
 
+```mermaid
+flowchart TB
+    subgraph clients["Clients you drive"]
+        cli["CLI<br/>python -m cli.forge_cli"]
+        dash["Dashboard<br/>localhost:5173"]
+        cc["Claude Code · Codex<br/>via .mcp.json"]
+    end
+
+    gw["Gateway<br/>FastAPI"]
+    orch["Orchestrator<br/>workflow + DAG"]
+    agents["Domain Agents<br/>per discipline"]
+    skills["Skill Registry<br/>schema-validated units"]
+    mcp["MCP Tool Registry<br/>30 tools · 7 adapters"]
+    tools["Tool Adapters<br/>KiCad · FreeCAD<br/>CalculiX · CadQuery"]
+    twin[("Digital Twin<br/>Neo4j · pgvector")]
+
+    cli --> gw
+    dash --> gw
+    cc --> mcp
+    gw --> orch
+    orch --> agents
+    agents --> skills
+    skills --> mcp
+    mcp --> tools
+    agents <--> twin
+```
+
 ## User Guide
 
 If you're a hardware engineer using MetaForge as a tool, these are

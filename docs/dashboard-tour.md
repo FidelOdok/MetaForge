@@ -29,6 +29,34 @@ Every page renders inside the same shell:
 Sidebar entries map 1-to-1 to the routes below. The default landing
 page is `/projects`.
 
+```mermaid
+flowchart LR
+    home(["/ → /projects"])
+    proj["/projects"]
+    projDetail["/projects/:id"]
+    sess["/sessions"]
+    sessDetail["/sessions/:id"]
+    appr["/approvals"]
+    bom["/bom"]
+    twin["/twin (3D)"]
+    files["/files"]
+    know["/knowledge"]
+    srcDetail["/knowledge/sources/:id"]
+    asst["/assistant"]
+
+    home --> proj
+    proj --> projDetail
+    home --> sess
+    sess --> sessDetail
+    home --> appr
+    home --> bom
+    home --> twin
+    home --> files
+    home --> know
+    know --> srcDetail
+    home --> asst
+```
+
 ## `/projects` — project list
 
 The home of the dashboard. Lists every MetaForge project the gateway

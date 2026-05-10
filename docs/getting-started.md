@@ -57,6 +57,18 @@ back to in-memory mode (data evaporates on restart).
 These are alternatives, not steps. Use whichever matches how you
 like to work.
 
+```mermaid
+flowchart TD
+    start([git clone + pip install]) --> backends["docker compose up<br/>postgres neo4j"]
+    backends --> pick{Pick a track}
+    pick -->|A| cli["CLI<br/>python -m cli.forge_cli ingest<br/>+ sources list"]
+    pick -->|B| mcp["Claude Code<br/>knowledge.ingest tool<br/>via .mcp.json"]
+    pick -->|C| dash["Dashboard<br/>localhost:5173/knowledge"]
+    cli --> demo["Run the drone example<br/>examples/drone_flight_controller/"]
+    mcp --> demo
+    dash --> demo
+```
+
 ### Track A — CLI
 
 The shortest path to "did anything just happen." Boot the gateway,
