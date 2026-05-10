@@ -140,7 +140,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-F2 | Real-content corpus expansion | MET-340 | M | — | ✅ | test/met-340-corpus-expansion | [#184](https://github.com/FidelOdok/MetaForge/pull/184) | 8 parts, 80 scenarios; STM32H723/ESP32/nRF52840/LM2596/MCP2515 added; 3 URL workarounds (MCP2515 to revJ, nRF52840 via web.archive, STM32 via curl headers) |
 | L1-F3 | Dual-project isolation integration test | MET-401 | S | L1-A1 | ⏳ | — | — | end-to-end |
 | L1-F4 | Citation round-trip integration test | MET-389 | S | — | ✅ | test/met-389-citation-roundtrip | [#188](https://github.com/FidelOdok/MetaForge/pull/188) | 4 cases (h2/h1-h2/chunk_index/metadata); 13 passed, 12 skipped (no PG) |
-| L1-F5 | Neo4j ↔ in-memory parity test | new | S | — | ⏳ | — | — | KB queries |
+| L1-F5 | Neo4j ↔ in-memory parity test | new | S | — | ✅ | test/met-knowledge-graph-parity | [#189](https://github.com/FidelOdok/MetaForge/pull/189) | 5 parametrized cases × 2 backends; in-memory PASS, Neo4j SKIP (no driver/server) |
 
 **Total: 29 items.** 3 blocked on human decision (L1-A5, L1-D1, L1-E1).
 **Loop-eligible from kickoff: 26 items.**
