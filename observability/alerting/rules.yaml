@@ -219,3 +219,31 @@ groups:
             for the last 10 minutes. Either the budget is too tight for
             the corpus, or a runaway query is over-fetching.
           runbook_url: "observability/runbooks/context-truncation-spike.md"
+
+      # MET-401 (L1-A7) — HP-RETR-08 SLO: knowledge search p95 must
+      # stay under 200 ms on the 1k-doc corpus. Five-minute window and
+      # 5-minute "for" duration so a single stuck query does not page
+      # but a sustained latency regression does.
+      # severity is "warning" (Sev 3 in the platform mapping — paged
+      # via slack-warning per ``routes.yaml`` at a 1h repeat). The
+      # platform routes only know critical/warning/info; "sev3" would
+      # silently fall through to the default-slack receiver, defeating
+      # the purpose of the SLO alert.
+      - alert: KnowledgeSearchLatencySLO
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le)(rate(metaforge_knowledge_search_duration_seconds_bucket[5m]))
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Knowledge search p95 latency exceeds 200 ms SLO"
+          description: >-
+            p95 of ``metaforge_knowledge_search_duration_seconds`` over
+            the last 5 minutes is above the 200 ms HP-RETR-08 target.
+            Check the LightRAG service, pgvector index health, and the
+            reranker cold-start path before acknowledging.
+          runbook_url: "observability/runbooks/knowledge-search-latency-slo.md"

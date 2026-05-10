@@ -32,6 +32,7 @@ import asyncio
 import hashlib
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
@@ -46,6 +47,7 @@ from digital_twin.knowledge.service import (
     SourceSummary,
 )
 from digital_twin.knowledge.types import KnowledgeType
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -330,6 +332,7 @@ class LightRAGKnowledgeService:
         max_chunk_chars: int = 1500,
         config: LightRAGConfig | None = None,
         reranker_enabled: bool = False,
+        metrics_collector: MetricsCollector | None = None,
     ) -> None:
         self._cfg = config or LightRAGConfig(
             working_dir=working_dir,
@@ -339,6 +342,11 @@ class LightRAGKnowledgeService:
             namespace_prefix=namespace_prefix,
             max_chunk_chars=max_chunk_chars,
         )
+        # MET-401 (L1-A7): optional Prometheus collector for the
+        # ``knowledge_search_duration_seconds`` histogram. When ``None``
+        # the search path stays a strict no-op so unit tests and
+        # CLI-only deployments do not need to bootstrap OTel.
+        self._metrics_collector = metrics_collector
         self._rag: Any = None
         self._embedder: Any = None
         self._initialized = False
@@ -708,74 +716,93 @@ class LightRAGKnowledgeService:
             if actor_id is not None:
                 span.set_attribute("knowledge.actor_id", actor_id)
 
-            # MET-401: resolve the effective project scope.
-            # - explicit ``project_id`` argument always wins
-            # - otherwise scope to the "default" tenant for safety
-            #   (do NOT silently search across all projects)
-            scope_project_id: str = str(project_id) if project_id is not None else "default"
-            span.set_attribute("knowledge.project_id", scope_project_id)
-            filters = dict(filters or {})
-            filters.setdefault("project_id", scope_project_id)
+            # MET-401 (L1-A7): wall-clock duration is observed on every
+            # search — both as a span attribute (``knowledge.duration_ms``
+            # / ``knowledge_search.duration_ms``) and as a sample on the
+            # ``knowledge_search_duration_seconds`` Prometheus histogram.
+            # The HP-RETR-08 SLO (p95 < 200 ms over 5 min) is gated on
+            # the histogram; the span attribute keeps per-trace context
+            # for slow queries surfaced via Tempo.
+            t_start = time.perf_counter()
+            try:
+                # MET-401: resolve the effective project scope.
+                # - explicit ``project_id`` argument always wins
+                # - otherwise scope to the "default" tenant for safety
+                #   (do NOT silently search across all projects)
+                scope_project_id: str = str(project_id) if project_id is not None else "default"
+                span.set_attribute("knowledge.project_id", scope_project_id)
+                filters = dict(filters or {})
+                filters.setdefault("project_id", scope_project_id)
 
-            chunks_vdb = getattr(self._rag, "chunks_vdb", None)
-            if chunks_vdb is None:
-                raise RuntimeError("LightRAG instance has no chunks_vdb storage.")
-            # MET-335: when reranking we widen the candidate pool so the
-            # cross-encoder has more chunks to choose from before we
-            # truncate to top_k. The 3x multiplier matches the spec.
-            base_fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
-            fetch_k = max(base_fetch_k, top_k * 3) if rerank else base_fetch_k
+                chunks_vdb = getattr(self._rag, "chunks_vdb", None)
+                if chunks_vdb is None:
+                    raise RuntimeError("LightRAG instance has no chunks_vdb storage.")
+                # MET-335: when reranking we widen the candidate pool so
+                # the cross-encoder has more chunks to choose from before
+                # we truncate to top_k. The 3x multiplier matches the spec.
+                base_fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
+                fetch_k = max(base_fetch_k, top_k * 3) if rerank else base_fetch_k
 
-            # MET-417 (L1-B5): the filter contract is AND-across-keys,
-            # equality match. ``project_id`` is special-cased via
-            # ``project_scope`` (already pushed into SQL); the remaining
-            # keys are forwarded to ``_search_pg`` for SQL push-down so
-            # the LIMIT'd query doesn't starve filter matches out of the
-            # top-k. The same dict is then used for the post-filter pass
-            # below as a defensive double-check (and as the only filter
-            # path on the non-pg / naive backend).
-            extra_filters = {k: v for k, v in (filters or {}).items() if k != "project_id"}
+                # MET-417 (L1-B5): the filter contract is AND-across-keys,
+                # equality match. ``project_id`` is special-cased via
+                # ``project_scope`` (already pushed into SQL); the remaining
+                # keys are forwarded to ``_search_pg`` for SQL push-down so
+                # the LIMIT'd query doesn't starve filter matches out of the
+                # top-k. The same dict is then used for the post-filter pass
+                # below as a defensive double-check (and as the only filter
+                # path on the non-pg / naive backend).
+                extra_filters = {k: v for k, v in (filters or {}).items() if k != "project_id"}
 
-            if self._cfg.postgres_dsn:
-                raw_chunks = await self._search_pg(
-                    chunks_vdb,
-                    query,
-                    fetch_k,
-                    project_scope=scope_project_id,
-                    extra_filters=extra_filters or None,
+                if self._cfg.postgres_dsn:
+                    raw_chunks = await self._search_pg(
+                        chunks_vdb,
+                        query,
+                        fetch_k,
+                        project_scope=scope_project_id,
+                        extra_filters=extra_filters or None,
+                    )
+                else:
+                    raw_chunks = await chunks_vdb.query(query, top_k=fetch_k)
+
+                hits: list[SearchHit] = []
+                for chunk in raw_chunks or []:
+                    hit = self._chunk_to_hit(chunk)
+                    if hit is None:
+                        continue
+                    if knowledge_type is not None and hit.knowledge_type != knowledge_type:
+                        continue
+                    if filters and not _matches_filters(hit, filters):
+                        continue
+                    hits.append(hit)
+
+                hits.sort(key=lambda h: h.similarity_score, reverse=True)
+
+                if rerank and hits:
+                    reranker = self._get_reranker()
+                    hits = await reranker.rerank(query, hits)
+
+                hits = hits[:top_k]
+                span.set_attribute("knowledge.result_count", len(hits))
+                logger.info(
+                    "lightrag_search",
+                    query_length=len(query),
+                    top_k=top_k,
+                    result_count=len(hits),
+                    project_id=scope_project_id,
+                    rerank=bool(rerank),
+                    actor_id=actor_id,
                 )
-            else:
-                raw_chunks = await chunks_vdb.query(query, top_k=fetch_k)
-
-            hits: list[SearchHit] = []
-            for chunk in raw_chunks or []:
-                hit = self._chunk_to_hit(chunk)
-                if hit is None:
-                    continue
-                if knowledge_type is not None and hit.knowledge_type != knowledge_type:
-                    continue
-                if filters and not _matches_filters(hit, filters):
-                    continue
-                hits.append(hit)
-
-            hits.sort(key=lambda h: h.similarity_score, reverse=True)
-
-            if rerank and hits:
-                reranker = self._get_reranker()
-                hits = await reranker.rerank(query, hits)
-
-            hits = hits[:top_k]
-            span.set_attribute("knowledge.result_count", len(hits))
-            logger.info(
-                "lightrag_search",
-                query_length=len(query),
-                top_k=top_k,
-                result_count=len(hits),
-                project_id=scope_project_id,
-                rerank=bool(rerank),
-                actor_id=actor_id,
-            )
-            return hits
+                return hits
+            finally:
+                duration_seconds = time.perf_counter() - t_start
+                # Record on the span first — this also runs on the error
+                # path so slow failures are visible in Tempo.
+                span.set_attribute("knowledge_search.duration_ms", duration_seconds * 1000.0)
+                span.set_attribute("knowledge.duration_ms", duration_seconds * 1000.0)
+                if self._metrics_collector is not None:
+                    self._metrics_collector.record_knowledge_search_duration(
+                        top_k, duration_seconds
+                    )
 
     async def _search_pg(
         self,
