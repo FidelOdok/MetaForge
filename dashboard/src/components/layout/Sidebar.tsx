@@ -10,8 +10,8 @@ const NAV_ITEMS = [
   { to: '/approvals', icon: 'task_alt',     title: 'Approvals'            },
   { to: '/bom',       icon: 'inventory_2',  title: 'BOM'                  },
   { to: '/twin',      icon: 'hub',          title: 'Digital Twin'         },
-  { to: '/files',     icon: 'psychology',   title: 'Knowledge'            },
-  { to: '/knowledge', icon: 'menu_book',    title: 'Knowledge Sources'    },
+  { to: '/files',     icon: 'folder',       title: 'Files'                },
+  { to: '/knowledge', icon: 'psychology',   title: 'Knowledge'            },
   { to: '/assistant', icon: 'auto_awesome', title: 'Design Assistant'     },
 ] as const;
 

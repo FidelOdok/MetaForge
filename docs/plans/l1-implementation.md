@@ -126,9 +126,9 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-D3 | Phase-1 docs final pass | MET-346 | XS | L1-D2 | ✅ | docs/met-346-phase-1-final | [#195](https://github.com/FidelOdok/MetaForge/pull/195) | status → Phase 1 (adopted); Migration-to-Phase-2 section added |
 | L1-E1 | ADR-010 Phase-2 spec finalized | new | S | — | ✅ | (policy pin) | — | Pinned v1 scope: SOURCES TABLE only (L1-E2). Search bar (L1-E3) and graph embed (L1-E4) deferred to v2. Sidebar relabel (L1-E5) included. Drill-in deferred. |
 | L1-E2 | `/knowledge` page — sources table | new | M | L1-B1, L1-E1 | ✅ | feat/met-409-knowledge-sources-page | [#193](https://github.com/FidelOdok/MetaForge/pull/193) | 4 vitest specs; tsc PASS; sort + chip filter + empty state + drill-in stub |
-| L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | ⏳ | — | — | citations + snippet highlight |
-| L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | ⏳ | — | — | Sigma.js, multi-iteration allowed |
-| L1-E5 | Sidebar relabel | new | XS | L1-E2 | ⏳ | — | — | Knowledge → /knowledge; Files → /files |
+| L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | 🚫 | — | — | DEFERRED to v2 per L1-E1 pin (PR #191) |
+| L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | 🚫 | — | — | DEFERRED to v2 per L1-E1 pin (PR #191) |
+| L1-E5 | Sidebar relabel | new | XS | L1-E2 | ✅ | chore/dashboard-sidebar-knowledge-relabel | [#196](https://github.com/FidelOdok/MetaForge/pull/196) | Sidebar split (Files/folder + Knowledge/psychology); Topbar SEGMENT_LABELS updated; 128 tests pass |
 | L1-F1 | Author 26 NEW kb-test-plan rows | MET-410 | L | — | ✅ | (parent of F1a–F1g) | (PRs #177, #178, #179, #180, #181, #182, #183) | all 7 sub-iterations merged |
 | L1-F1a | full-capability.md (7 scenarios) | MET-410 | S | — | ✅ | test/met-410-full-capability | [#177](https://github.com/FidelOdok/MetaForge/pull/177) | 7 scenarios; master plan Verdicts flipped for 4 already-implemented rows |
 | L1-F1b | cli-error-paths.md (2 scenarios) | MET-410 | XS | — | ✅ | test/met-410-cli-errors | [#178](https://github.com/FidelOdok/MetaForge/pull/178) | KB-CLI-005, KB-CLI-006 already ✅ from L1-C2; just adds executable scenarios |

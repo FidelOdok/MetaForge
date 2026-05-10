@@ -13,7 +13,8 @@ const SEGMENT_LABELS: Record<string, string> = {
   approvals: 'Approvals',
   bom:       'BOM',
   twin:      'Digital Twin',
-  files:     'Knowledge',
+  files:     'Files',
+  knowledge: 'Knowledge',
   assistant: 'Design Assistant',
 };
 
