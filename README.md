@@ -30,7 +30,7 @@ Full inventory: **[`docs/capability-matrix.md`](docs/capability-matrix.md)**.
 ## Quickstart
 
 ```bash
-git clone https://github.com/MetaForge-HA/MetaForge.git
+git clone https://github.com/FidelOdok/MetaForge.git
 cd MetaForge
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,knowledge,cadquery]"
@@ -67,7 +67,7 @@ Five-minute walkthrough: **[`docs/getting-started.md`](docs/getting-started.md)*
 - **Architecture & roadmap:** [architecture](docs/architecture.md) ·
   [roadmap](docs/roadmap.md)
 - **Hosted docs site:** _coming once `.github/workflows/docs.yml` runs_ —
-  will be at `https://metaforge-ha.github.io/MetaForge/`.
+  will be at `https://fidelodok.github.io/MetaForge/`.
 
 ## Local docs preview
 

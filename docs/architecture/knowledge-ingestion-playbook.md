@@ -290,7 +290,7 @@ toggle.
 
 - [`docs/architecture/context-engineering.md`](context-engineering.md)
   — the consuming layer.
-- [`docs/architecture/adr-008-external-harness-and-l1-framework.md`](https://github.com/MetaForge-HA/MetaForge-Planner/blob/main/docs/architecture/adr-008-external-harness-and-l1-framework.md)
+- [`docs/architecture/adr-008-external-harness-and-l1-framework.md`](https://github.com/FidelOdok/MetaForge-Planner/blob/main/docs/architecture/adr-008-external-harness-and-l1-framework.md)
   — why LightRAG is the L1 backend.
 - [`docs/agents/mechanical-context-spec.md`](../agents/mechanical-context-spec.md)
   / [`electronics-context-spec.md`](../agents/electronics-context-spec.md)
