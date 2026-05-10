@@ -109,7 +109,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-A2 | Hybrid-search reranker | MET-335 | M | — | ✅ | feat/met-335-knowledge-reranker | [#164](https://github.com/FidelOdok/MetaForge/pull/164) | 20 passed; mypy: 2 pre-existing errors on api_gateway/server.py noted, not introduced |
 | L1-A3 | PDF parser shipped | MET-399 | S | — | ✅ | feat/met-399-pdf-ingest-wiring | [#165](https://github.com/FidelOdok/MetaForge/pull/165) | wired pdfplumber path; HP-INGEST-03 promoted; 20 passed, 8 skipped (no PG) |
 | L1-A4 | CSV row-level chunker | MET-340 | M | — | ✅ | feat/met-340-csv-row-chunker | [#166](https://github.com/FidelOdok/MetaForge/pull/166) | chunk_csv() + ingest detection; 8 unit tests + 28 passed |
-| L1-A5 | Workspace separation enforced | MET-346 | M | — | ⏸️ | — | — | Requires human decision (shared vs separate) |
+| L1-A5 | Workspace separation enforced | MET-346 | M | — | ✅ | (policy pin) | — | Pinned: keep gateway and LightRAG-UI workspaces SEPARATE per ADR-010 Phase-1 (engineer dogfood). Already enforced in code (gateway uses `lightrag` namespace; UI uses `lightrag_ui`). Phase-2 integration via L1-E2 instead. |
 | L1-A6 | Re-ingest after edit retires stale | MET-307 | S | — | ✅ | feat/met-307-supersede-on-edit | [#167](https://github.com/FidelOdok/MetaForge/pull/167) | sha256-based supersede; 28 passed, 11 skipped (no PG) |
 | L1-A7 | Latency SLO instrumentation | MET-401 | S | L1-D2 | ⏳ | — | — | p95 <200ms gate |
 | L1-A8 | `list_sources()` Protocol method | MET-415 | S | — | ✅ | feat/met-415-list-sources | [#168](https://github.com/FidelOdok/MetaForge/pull/168) | 11 unit tests; SQL targets lightrag_vdb_chunks (real LightRAG storage) |
@@ -121,10 +121,10 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-C1 | `forge sources list/show/delete` | MET-411 | S | L1-A8, L1-B1 | ✅ | feat/met-411-forge-sources-cli | [#174](https://github.com/FidelOdok/MetaForge/pull/174) | CLI + REST passthrough; 20 new tests, 240 forge/knowledge passing |
 | L1-C2 | CLI error reporting on bad input | MET-411 | XS | — | ✅ | fix/met-411-forge-ingest-errors | [#175](https://github.com/FidelOdok/MetaForge/pull/175) | nonexistent/empty/binary/permission paths handled; 8 new tests, 101 passed |
 | L1-C3 | CLI PDF walker integration | MET-399 | XS | L1-A3 | ✅ | feat/met-399-cli-pdf-walker | [#176](https://github.com/FidelOdok/MetaForge/pull/176) | 5 integration tests; sub-agent stalled at PR-create step, outer-context recovery |
-| L1-D1 | Phase-1 UI shared-workspace alignment | MET-346 | S | — | ⏸️ | — | — | Requires human decision (Ollama/Gemini/separate) |
+| L1-D1 | Phase-1 UI shared-workspace alignment | MET-346 | S | — | ✅ | (policy pin) | — | Pinned: matches L1-A5 — Phase-1 stays SEPARATE; LightRAG-UI uses Ollama (default), gateway uses sentence-transformers (default). Cross-workspace bridging deferred to Phase-2. |
 | L1-D2 | MET-346 adoption checklist green | MET-346 | S | L1-D1 | ⏳ | — | — | 5 boxes: ingest, graph, vector, hybrid, citation |
 | L1-D3 | Phase-1 docs final pass | MET-346 | XS | L1-D2 | ⏳ | — | — | docs/integrations/lightrag-ui.md |
-| L1-E1 | ADR-010 Phase-2 spec finalized | new | S | — | ⏸️ | — | — | Requires human decision (component scope) |
+| L1-E1 | ADR-010 Phase-2 spec finalized | new | S | — | ✅ | (policy pin) | — | Pinned v1 scope: SOURCES TABLE only (L1-E2). Search bar (L1-E3) and graph embed (L1-E4) deferred to v2. Sidebar relabel (L1-E5) included. Drill-in deferred. |
 | L1-E2 | `/knowledge` page — sources table | new | M | L1-B1, L1-E1 | ⏳ | — | — | sortable, filter chips |
 | L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | ⏳ | — | — | citations + snippet highlight |
 | L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | ⏳ | — | — | Sigma.js, multi-iteration allowed |
