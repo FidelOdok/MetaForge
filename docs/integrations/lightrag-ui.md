@@ -1,6 +1,6 @@
 # LightRAG Web UI — Operator Guide
 
-**Status**: Phase 1 (engineer dogfood) · ADR-010 · MET-392 / MET-393
+**Status**: Phase 1 (adopted) · ADR-010 · MET-392 / MET-393
 
 The LightRAG Web UI is a standalone React + Sigma.js single-page app
 served by LightRAG's own FastAPI backend. We mount it via
@@ -177,6 +177,44 @@ referencing the broken test rather than a UI screenshot.
   PR-merge gate is the automated test coverage cited in each
   checklist row — those tests are the source of truth for the L1
   contract.
+
+---
+
+## Migration to Phase 2
+
+L1-D2 (PR [#192](https://github.com/FidelOdok/MetaForge/pull/192))
+flipped every MET-346 adoption-checklist row to ✅, which means the
+standalone `localhost:9621` UI has done its Phase-1 job. The Phase-2
+surface for sources browsing now lives in the Kinetic Console:
+
+- **L1-E2 — integrated `/knowledge` page (PR
+  [#193](https://github.com/FidelOdok/MetaForge/pull/193), just merged)
+  supersedes the standalone `localhost:9621` UI for sources browsing.**
+  The integrated page reads from the gateway's
+  `metaforge://knowledge/sources` resource (L1-B1) and is the canonical
+  v1 sources surface going forward. The LightRAG UI stays in place as
+  an engineer-only debugging tool for the chunking/extraction pipeline,
+  but day-to-day "what sources does my project have?" lives in
+  `/knowledge`.
+- **L1-E3 (search bar) and L1-E4 (graph embed) are deferred** per the
+  L1-E1 v1 pin — the v1 `/knowledge` page is intentionally **sources
+  table only**. Search and the Sigma.js graph embed move to v2; in the
+  meantime, the LightRAG UI's Chat and Graph tabs remain the way to
+  exercise those flows interactively.
+- **L1-E5 (sidebar relabel) is the final cleanup** that retires the
+  legacy `/files` "Knowledge" mislabel: the sidebar entry currently
+  pointing at `/files` will be renamed back to "Files," and the new
+  "Knowledge" entry will point at `/knowledge`. After L1-E5 lands, the
+  sidebar matches the routing, and the LightRAG UI is no longer
+  referenced from the dashboard chrome.
+
+See the L1 status board and the MET-346 adoption record for the full
+sequencing:
+
+- [`docs/plans/l1-implementation.md`](../plans/l1-implementation.md) —
+  L1 status board (L1-D / L1-E rows)
+- [`docs/uat/met-346-adoption-checklist-2026-05-10.md`](../uat/met-346-adoption-checklist-2026-05-10.md)
+  — the L1-D2 adoption-checklist run report
 
 ---
 
