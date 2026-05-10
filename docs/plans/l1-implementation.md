@@ -138,7 +138,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-F1f | event-ingest.md (3) | MET-410 | S | — | ✅ | test/met-410-event-ingest | [#182](https://github.com/FidelOdok/MetaForge/pull/182) | 3 Kafka-gated scenarios; report BLOCKED if broker absent |
 | L1-F1g | retrieval.md extend (2) | MET-410 | XS | — | ✅ | test/met-410-retrieval-extend | [#183](https://github.com/FidelOdok/MetaForge/pull/183) | HP-RETR-11/12; KB-SRC-012, KB-CTX-004 flipped ✅ |
 | L1-F2 | Real-content corpus expansion | MET-340 | M | — | ✅ | test/met-340-corpus-expansion | [#184](https://github.com/FidelOdok/MetaForge/pull/184) | 8 parts, 80 scenarios; STM32H723/ESP32/nRF52840/LM2596/MCP2515 added; 3 URL workarounds (MCP2515 to revJ, nRF52840 via web.archive, STM32 via curl headers) |
-| L1-F3 | Dual-project isolation integration test | MET-401 | S | L1-A1 | ⏳ | — | — | end-to-end |
+| L1-F3 | Dual-project isolation integration test | MET-401 | S | L1-A1 | ✅ | test/met-401-project-isolation + fix/met-401-project-scoped-delete-supersede | [#186](https://github.com/FidelOdok/MetaForge/pull/186) + [#190](https://github.com/FidelOdok/MetaForge/pull/190) | 4 tests; #190 also ships the production fix that #186's sub-agent identified |
 | L1-F4 | Citation round-trip integration test | MET-389 | S | — | ✅ | test/met-389-citation-roundtrip | [#188](https://github.com/FidelOdok/MetaForge/pull/188) | 4 cases (h2/h1-h2/chunk_index/metadata); 13 passed, 12 skipped (no PG) |
 | L1-F5 | Neo4j ↔ in-memory parity test | new | S | — | ⏳ | — | — | KB queries |
 
