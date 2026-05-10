@@ -1,0 +1,91 @@
+site_name: MetaForge
+site_description: Local-first control plane for hardware design.
+site_url: https://metaforge-ha.github.io/MetaForge/
+repo_url: https://github.com/MetaForge-HA/MetaForge
+repo_name: MetaForge-HA/MetaForge
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+# Hide contributor / QA / ops material from the published engineer-user
+# site. These dirs stay in-repo (rendered by GitHub when contributors
+# browse them) but aren't shipped on the docs site.
+exclude_docs: |
+  agents/
+  architecture/context-engineering.md
+  architecture/knowledge-ingestion-playbook.md
+  architecture/neo4j-migration.md
+  plans/
+  runbooks/
+  uat/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.instant
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - include-markdown
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Getting Started: getting-started.md
+      - CLI Reference: cli-reference.md
+      - Dashboard Tour: dashboard-tour.md
+      - Project Structure: project-structure.md
+      - Capability Matrix: capability-matrix.md
+      - Troubleshooting: troubleshooting.md
+  - Integrations:
+      - Claude Code: integrations/claude-code.md
+      - Codex: integrations/codex.md
+      - MCP Config Examples: integrations/mcp-config-examples.md
+      - LightRAG UI: integrations/lightrag-ui.md
+  - Architecture (Contributors):
+      - Overview: architecture.md
+      - Roadmap: roadmap.md
+      - Skill Spec: skill_spec.md
+      - MCP Spec: mcp_spec.md
+      - Twin Schema: twin_schema.md
+      - Testing Strategy: testing-strategy.md
+      - Governance: governance.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/MetaForge-HA/MetaForge

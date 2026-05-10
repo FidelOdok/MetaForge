@@ -65,6 +65,11 @@ dev = [
     # under tests/fixtures/datasheets/. Decoupled from the production
     # PDF ingest path (MET-399) — fixture prep only.
     "pdfplumber>=0.10",
+    # Documentation site (docs/ -> https://metaforge-ha.github.io/MetaForge/).
+    # Built locally with `mkdocs serve` and on push-to-main by
+    # .github/workflows/docs.yml.
+    "mkdocs-material>=9.5",
+    "mkdocs-include-markdown-plugin>=6.0",
 ]
 temporal = [
     "temporalio>=1.5",
