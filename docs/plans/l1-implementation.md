@@ -941,3 +941,73 @@ When the loop stops (any reason), it appends a section to this file:
 ```
 
 The user reads this section to decide what to merge / re-trigger.
+
+---
+
+## Run history
+
+### Run 2026-05-06T13:00:00Z → 2026-05-10T11:00:00Z (4 days, ~30 cron+manual fires)
+
+**Stop reason:** all-done — every L1 plan row is ✅ (29) / 🚫 (2 v2-deferred) / 🔧 (1 PR open · #189 long unit-test runtime, no further loop work).
+
+**Items processed: 31** (29 implementations + 2 cancellations)
+
+**✅ shipped (PR merged into main, in plan-file order):**
+- L1-A1 (#163) project isolation enforcement
+- L1-A2 (#164) hybrid-search reranker
+- L1-A3 (#165) PDF parser wiring verified
+- L1-A4 (#166) CSV row-level chunker
+- L1-A5 (#191 plan-pin) workspace separation policy
+- L1-A6 (#167) supersede stale fragments on edit
+- L1-A7 (#194) knowledge search latency SLO
+- L1-A8 (#168) `list_sources()` Protocol method
+- L1-B1 (#169) `metaforge://knowledge/sources` MCP resource
+- L1-B2 (#170) streaming progress on knowledge ingest
+- L1-B3 (#171) per-call context propagation (actor_id + OTel)
+- L1-B4 (#172) malformed `knowledge_type` → MET-385 envelope
+- L1-B5 (#173) compound-filter AND semantics pinned
+- L1-C1 (#174) `forge sources list/show/delete` CLI
+- L1-C2 (#175) actionable errors on bad ingest input
+- L1-C3 (#176) PDF directory ingest tests
+- L1-D1 (#191 plan-pin) Phase-1 UI shared-workspace alignment
+- L1-D2 (#192) MET-346 adoption checklist green
+- L1-D3 (#195) Phase-1 LightRAG UI adopted
+- L1-E1 (#191 plan-pin) ADR-010 Phase-2 v1 scope
+- L1-E2 (#193) `/knowledge` sources table page
+- L1-E5 (#196) sidebar relabel — Files / Knowledge split
+- L1-F1a..F1g (#177–#183) 26 NEW kb-test-plan rows authored
+- L1-F2 (#184) datasheet corpus expansion to 8 parts
+- L1-F3 (#190) project-scoped delete + supersede prod fix
+- L1-F4 (#188) citation round-trip integration test
+- L1-F5 (#189) graph-engine parity test [PR open, unit tests still IN_PROGRESS at run end — NOT counted as merged]
+
+**🚫 cancelled (deferred to v2 per L1-E1 v1 pin):**
+- L1-E3 `/knowledge` page search bar
+- L1-E4 `/knowledge` page graph embed (Sigma.js)
+
+**🔧 still open at run end:**
+- #186 — L1-F3 partial (3-way isolation + list_sources scope tests). DIRTY plan-file conflict; supersede-style follow-up because #190 absorbed the production-fix path. Manual rebase needed if the 2 supplemental tests are wanted.
+- #189 — L1-F5 graph-engine parity. CI's Unit & Contract Tests step has been IN_PROGRESS for several fires (long-running parametrized tests). No code action needed; merge once CI clears.
+
+**PRs opened during this run:** #161, #162, #163, #164, #165, #166, #167, #168, #169, #170, #171, #172, #173, #174, #175, #176, #177, #178, #179, #180, #181, #182, #183, #184, #186, #187, #188, #189, #190, #191, #192, #193, #194, #195, #196 — **35 PRs**, of which **33 merged** at run end, **2 still open** (#186, #189).
+
+**Bonus PR:** #187 (MET-421) — wire twin and constraint adapters into MCP tool registry. Surfaced mid-loop; not part of the L1 plan but blocked Claude's MCP visibility into 6 twin/constraint tools.
+
+**Cron job ID** for reference: `50d5ec70` (`7,27,47 * * * *`, recurring, session-only). Cancelled with `CronDelete` at end of this run.
+
+**Acceptance vs. plan goal**
+
+| Goal | Result |
+|---|---|
+| Every L1 backlog item resolved | ✅ 29/29 shipped, 2/2 cancelled, 1/1 PR open with no-loop-action-needed |
+| `/uat-cycle12 --tier 1` covers full L1 surface | ✅ `tests/uat/scenarios/tier1/{datasheets-real,full-capability,cli-error-paths,event-ingest,retrieval}.md` + tier2 probes all on main |
+| `docs/uat/kb-test-plan.md` reaches ≥ 75 / 86 PASS | ⚠️ Catalog has 86 trackable rows; ~50 ✅ explicitly via this loop's PRs. Remaining ~30 are tier-2 probes whose backing impls landed but the catalog Verdict columns weren't all flipped. Follow-up sweep needed. |
+| Loop convention (one PR per item, sub-agent fresh context, plan-file as authority) | ✅ Held throughout. 2 deviations documented: #168 asyncpg-importorskip CI hotfix; #190 sub-agent extended `_FakeService` test stubs Protocol-conformingly. |
+
+**What's still loose for a future cycle**
+
+1. **Merge #189** when its long unit-test run completes.
+2. **Decide #186** — rebase its 2 supplemental project-isolation tests, or close as superseded by #190.
+3. **Sweep `docs/uat/kb-test-plan.md` Verdict columns** — many catalog rows are now backed by merged impls but their Verdict cell wasn't flipped row-by-row.
+4. **Run a real `/uat-cycle12 --tier 1`** end-to-end against the live MetaForge MCP. Requires gateway up + docker.sock access (blocked from the WSL shell that drove this loop).
+5. **Phase-2 work** (L1-E3 search bar, L1-E4 graph embed) — start a fresh planning pass when v1 has shipped to engineers and you've got a real signal on which components are next.
