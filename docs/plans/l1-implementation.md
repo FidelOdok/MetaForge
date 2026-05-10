@@ -125,7 +125,7 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 | L1-D2 | MET-346 adoption checklist green | MET-346 | S | L1-D1 | ✅ | chore/met-346-adoption-checklist | [#192](https://github.com/FidelOdok/MetaForge/pull/192) | 5 items marked [x] with evidence pointers; run report committed |
 | L1-D3 | Phase-1 docs final pass | MET-346 | XS | L1-D2 | ⏳ | — | — | docs/integrations/lightrag-ui.md |
 | L1-E1 | ADR-010 Phase-2 spec finalized | new | S | — | ✅ | (policy pin) | — | Pinned v1 scope: SOURCES TABLE only (L1-E2). Search bar (L1-E3) and graph embed (L1-E4) deferred to v2. Sidebar relabel (L1-E5) included. Drill-in deferred. |
-| L1-E2 | `/knowledge` page — sources table | new | M | L1-B1, L1-E1 | ⏳ | — | — | sortable, filter chips |
+| L1-E2 | `/knowledge` page — sources table | new | M | L1-B1, L1-E1 | ✅ | feat/met-409-knowledge-sources-page | [#193](https://github.com/FidelOdok/MetaForge/pull/193) | 4 vitest specs; tsc PASS; sort + chip filter + empty state + drill-in stub |
 | L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | ⏳ | — | — | citations + snippet highlight |
 | L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | ⏳ | — | — | Sigma.js, multi-iteration allowed |
 | L1-E5 | Sidebar relabel | new | XS | L1-E2 | ⏳ | — | — | Knowledge → /knowledge; Files → /files |

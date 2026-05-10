@@ -5,13 +5,14 @@ import { NavLink } from 'react-router-dom';
 // ---------------------------------------------------------------------------
 
 const NAV_ITEMS = [
-  { to: '/projects',  icon: 'grid_view',    title: 'Platform'         },
-  { to: '/sessions',  icon: 'account_tree', title: 'Orchestrator'     },
-  { to: '/approvals', icon: 'task_alt',     title: 'Approvals'        },
-  { to: '/bom',       icon: 'inventory_2',  title: 'BOM'              },
-  { to: '/twin',      icon: 'hub',          title: 'Digital Twin'     },
-  { to: '/files',     icon: 'psychology',   title: 'Knowledge'        },
-  { to: '/assistant', icon: 'auto_awesome', title: 'Design Assistant' },
+  { to: '/projects',  icon: 'grid_view',    title: 'Platform'             },
+  { to: '/sessions',  icon: 'account_tree', title: 'Orchestrator'         },
+  { to: '/approvals', icon: 'task_alt',     title: 'Approvals'            },
+  { to: '/bom',       icon: 'inventory_2',  title: 'BOM'                  },
+  { to: '/twin',      icon: 'hub',          title: 'Digital Twin'         },
+  { to: '/files',     icon: 'psychology',   title: 'Knowledge'            },
+  { to: '/knowledge', icon: 'menu_book',    title: 'Knowledge Sources'    },
+  { to: '/assistant', icon: 'auto_awesome', title: 'Design Assistant'     },
 ] as const;
 
 // ---------------------------------------------------------------------------
