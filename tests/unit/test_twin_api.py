@@ -63,6 +63,45 @@ class TestSubsystemAccessors:
         assert api.constraints is api.constraints
 
 
+# --- Lifecycle (MET-425) ---
+
+
+class TestLifecycle:
+    async def test_aclose_in_memory_is_a_noop(self):
+        """In-memory graph has no ``close`` — aclose must not raise."""
+        twin = InMemoryTwinAPI.create()
+        await twin.aclose()
+
+    async def test_aclose_invokes_graph_close(self):
+        """When the graph exposes ``close()``, aclose awaits it.
+
+        Regression for MET-425 — the stdio entrypoint must close the
+        Neo4j driver on exit to avoid dangling bolt connections across
+        subprocess respawns.
+        """
+        import asyncio
+
+        from twin_core.constraint_engine.validator import InMemoryConstraintEngine
+        from twin_core.graph_engine import InMemoryGraphEngine
+        from twin_core.versioning.branch import InMemoryVersionEngine
+
+        graph = InMemoryGraphEngine()
+        closed = asyncio.Event()
+
+        async def _fake_close() -> None:
+            closed.set()
+
+        graph.close = _fake_close  # type: ignore[attr-defined]
+
+        twin = InMemoryTwinAPI(
+            graph=graph,
+            version=InMemoryVersionEngine(graph),
+            constraints=InMemoryConstraintEngine(graph),
+        )
+        await twin.aclose()
+        assert closed.is_set()
+
+
 # --- WorkProduct operations ---
 
 
