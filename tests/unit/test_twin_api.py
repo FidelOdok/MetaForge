@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from twin_core.api import InMemoryTwinAPI
+from twin_core.constraint_engine.validator import ConstraintEngine
 from twin_core.models import (
     Component,
     Constraint,
@@ -44,6 +45,22 @@ def _make_constraint(
         domain=domain,
         source="user",
     )
+
+
+# --- Subsystem accessors (MET-424) ---
+
+
+class TestSubsystemAccessors:
+    def test_constraints_returns_engine(self, api):
+        """``twin.constraints`` exposes the live ``ConstraintEngine``.
+
+        Regression for MET-424 — the MCP / gateway bootstrap previously
+        reached into ``twin._constraints`` to wire the constraint adapter
+        because no public accessor existed.
+        """
+        assert isinstance(api.constraints, ConstraintEngine)
+        # Same instance every call — accessor must not allocate.
+        assert api.constraints is api.constraints
 
 
 # --- WorkProduct operations ---
@@ -133,8 +150,7 @@ class TestConstraintOperations:
         await api.create_work_product(a)
 
         c = _make_constraint(expression="True")
-        # Use the constraint engine directly to bind constraint to work_product
-        await api._constraints.add_constraint(c, [a.id])
+        await api.constraints.add_constraint(c, [a.id])
 
         result = await api.evaluate_constraints()
         assert result.passed is True
@@ -145,7 +161,7 @@ class TestConstraintOperations:
         await api.create_work_product(a)
 
         c = _make_constraint(expression="False")
-        await api._constraints.add_constraint(c, [a.id])
+        await api.constraints.add_constraint(c, [a.id])
 
         result = await api.evaluate_constraints()
         assert result.passed is False

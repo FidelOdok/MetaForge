@@ -197,8 +197,7 @@ class TestConstraintEvaluation:
             source="test",
             cross_domain=False,
         )
-        # Use the constraint engine directly via twin's internal graph
-        await twin._constraints.add_constraint(constraint, [mech_work_product.id])
+        await twin.constraints.add_constraint(constraint, [mech_work_product.id])
 
         result = await twin.evaluate_constraints()
         assert result.passed is True
@@ -214,7 +213,7 @@ class TestConstraintEvaluation:
             source="test",
             cross_domain=False,
         )
-        await twin._constraints.add_constraint(constraint, [mech_work_product.id])
+        await twin.constraints.add_constraint(constraint, [mech_work_product.id])
 
         result = await twin.evaluate_constraints()
         assert result.passed is False

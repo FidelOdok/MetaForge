@@ -350,7 +350,7 @@ async def _bootstrap(args: argparse.Namespace) -> UnifiedMcpServer:
     return await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         twin=twin,
-        constraint_engine=twin._constraints,
+        constraint_engine=twin.constraints,
     )
 
 
