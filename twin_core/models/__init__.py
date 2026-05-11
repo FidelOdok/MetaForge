@@ -5,6 +5,7 @@ from twin_core.models.base import EdgeBase, NodeBase
 from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
+from twin_core.models.datasheet import Datasheet
 from twin_core.models.design_element import DesignElement
 from twin_core.models.device_instance import DeviceInstance
 from twin_core.models.enums import (
@@ -46,6 +47,7 @@ __all__ = [
     "DeviceInstance",
     "TwinModel",
     "DesignElement",
+    "Datasheet",
     # Typed edges
     "DependsOnEdge",
     "UsesComponentEdge",
