@@ -95,6 +95,7 @@ class TwinAPI(ABC):
         branch: str = "main",
         domain: str | None = None,
         work_product_type: WorkProductType | None = None,
+        project_id: UUID | None = None,
     ) -> list[WorkProduct]: ...
 
     # --- Constraints ---
@@ -355,12 +356,18 @@ class InMemoryTwinAPI(TwinAPI):
         branch: str = "main",
         domain: str | None = None,
         work_product_type: WorkProductType | None = None,
+        project_id: UUID | None = None,
     ) -> list[WorkProduct]:
         filters: dict[str, Any] = {}
         if domain is not None:
             filters["domain"] = domain
         if work_product_type is not None:
             filters["type"] = work_product_type
+        # MET-428: tenant scoping. The underlying graph engine's filter
+        # already does equality match on any attribute, so forwarding
+        # ``project_id`` here is a one-line plumb-through.
+        if project_id is not None:
+            filters["project_id"] = project_id
         nodes = await self._graph.list_nodes(
             node_type=NodeType.WORK_PRODUCT, filters=filters if filters else None
         )

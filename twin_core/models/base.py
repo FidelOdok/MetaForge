@@ -13,6 +13,10 @@ class NodeBase(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     node_type: NodeType
+    # MET-428: tenant / project partitioning. ``None`` = unscoped legacy
+    # node (Phase 1 dev databases). Once the migration backfills, every
+    # new node carries a project_id and read paths filter on it.
+    project_id: UUID | None = None
 
 
 class EdgeBase(BaseModel):
