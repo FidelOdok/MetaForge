@@ -27,9 +27,12 @@ import logging
 import os
 import sys
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+if TYPE_CHECKING:
+    from twin_core.api import InMemoryTwinAPI
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -343,15 +346,25 @@ def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool
 # ---------------------------------------------------------------------------
 
 
-async def _bootstrap(args: argparse.Namespace) -> UnifiedMcpServer:
+async def _bootstrap(
+    args: argparse.Namespace,
+) -> tuple[UnifiedMcpServer, InMemoryTwinAPI]:
+    """Return the unified MCP server **and** the twin that backs it.
+
+    Callers must close the twin (``await twin.aclose()``) when the
+    transport loop exits — otherwise the Neo4j driver and any aiohttp
+    sessions opened during bootstrap leak across subprocess restarts
+    (MET-425).
+    """
     from twin_core.api import InMemoryTwinAPI
 
     twin = await InMemoryTwinAPI.create_from_env()
-    return await build_unified_server(
+    server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         twin=twin,
         constraint_engine=twin.constraints,
     )
+    return server, twin
 
 
 def _configure_logging_for_transport(transport: str) -> None:
@@ -389,16 +402,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.transport == "stdio":
 
         async def _stdio() -> None:
-            server = await _bootstrap(args)
-            await run_stdio(server)
+            server, twin = await _bootstrap(args)
+            try:
+                await run_stdio(server)
+            finally:
+                # MET-425: release the Neo4j driver / backing-store
+                # resources so subprocess respawns from the UAT harness
+                # don't see "address in use" or ResourceWarning leaks.
+                await twin.aclose()
 
         asyncio.run(_stdio())
     else:
         # HTTP path keeps the two-step flow: ``run_http`` runs uvicorn
         # which manages its own loop and only consumes the bootstrapped
         # server's introspection surface.
-        server = asyncio.run(_bootstrap(args))
-        run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
+        server, twin = asyncio.run(_bootstrap(args))
+        try:
+            run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
+        finally:
+            # MET-425: best-effort teardown after uvicorn returns. The
+            # neo4j async driver tolerates cross-loop close in practice.
+            asyncio.run(twin.aclose())
     return 0
 
 
