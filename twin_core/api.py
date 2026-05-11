@@ -143,6 +143,18 @@ class TwinAPI(ABC):
     @abstractmethod
     async def log(self, branch: str = "main", limit: int = 50) -> list[Version]: ...
 
+    # --- Subsystem accessors ---
+
+    @property
+    @abstractmethod
+    def constraints(self) -> ConstraintEngine:
+        """The live constraint engine.
+
+        Exposed so MCP / orchestrator / gateway bootstrap can wire the
+        engine into ``ToolRegistry`` without reaching into private state.
+        """
+        ...
+
 
 class InMemoryTwinAPI(TwinAPI):
     """In-memory implementation of the Twin API facade.
@@ -160,6 +172,10 @@ class InMemoryTwinAPI(TwinAPI):
         self._graph = graph
         self._version = version
         self._constraints = constraints
+
+    @property
+    def constraints(self) -> ConstraintEngine:
+        return self._constraints
 
     @classmethod
     def create(cls) -> InMemoryTwinAPI:
