@@ -10,6 +10,7 @@ from twin_core.models import (
     Component,
     Constraint,
     ConstraintSeverity,
+    Datasheet,
     EdgeType,
     WorkProduct,
     WorkProductType,
@@ -19,6 +20,22 @@ from twin_core.models import (
 @pytest.fixture
 def api():
     return InMemoryTwinAPI.create()
+
+
+def _make_datasheet(
+    mpn: str = "STM32H745ZIT6",
+    manufacturer: str = "STMicroelectronics",
+    revision: str = "rev1",
+    file_hash: str | None = None,
+) -> Datasheet:
+    return Datasheet(
+        mpn=mpn,
+        manufacturer=manufacturer,
+        revision=revision,
+        file_hash=file_hash or f"hash-{mpn}-{revision}",
+        source_path=f"datasheets/{mpn.lower()}_{revision}.pdf",
+        page_count=200,
+    )
 
 
 def _make_work_product(name: str = "test", domain: str = "mechanical") -> WorkProduct:
@@ -61,6 +78,84 @@ class TestSubsystemAccessors:
         assert isinstance(api.constraints, ConstraintEngine)
         # Same instance every call — accessor must not allocate.
         assert api.constraints is api.constraints
+
+
+# --- Datasheets (MET-430) ---
+
+
+class TestDatasheetIngest:
+    """`TwinAPI.ingest_datasheet` — versioning + idempotency."""
+
+    async def test_first_ingest_persists(self, api):
+        ds = _make_datasheet(revision="rev1")
+        result = await api.ingest_datasheet(ds)
+        assert result.id == ds.id
+        assert result.revision == "rev1"
+
+    async def test_idempotent_on_same_file_hash(self, api):
+        ds_a = _make_datasheet(revision="rev1", file_hash="sha-shared")
+        ds_b = _make_datasheet(revision="rev2-different", file_hash="sha-shared")
+
+        first = await api.ingest_datasheet(ds_a)
+        second = await api.ingest_datasheet(ds_b)
+        # Same file_hash → second call is a no-op, returns the original.
+        assert second.id == first.id
+        assert second.revision == "rev1"
+
+    async def test_new_revision_supersedes_old(self, api):
+        old = _make_datasheet(revision="rev1", file_hash="sha-old")
+        new = _make_datasheet(revision="rev2", file_hash="sha-new")
+
+        await api.ingest_datasheet(old)
+        await api.ingest_datasheet(new)
+
+        # The new revision has an outgoing SUPERSEDES edge pointing at old.
+        edges = await api._graph.get_edges(
+            new.id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert len(edges) == 1
+        assert edges[0].target_id == old.id
+
+    async def test_current_datasheet_follows_supersedes_chain(self, api):
+        v1 = _make_datasheet(revision="rev1", file_hash="sha-1")
+        v2 = _make_datasheet(revision="rev2", file_hash="sha-2")
+        v3 = _make_datasheet(revision="rev3", file_hash="sha-3")
+        await api.ingest_datasheet(v1)
+        await api.ingest_datasheet(v2)
+        await api.ingest_datasheet(v3)
+
+        current = await api.get_current_datasheet(v1.mpn)
+        assert current is not None
+        assert current.id == v3.id
+
+    async def test_find_datasheets_returns_all_revisions(self, api):
+        await api.ingest_datasheet(_make_datasheet(revision="rev1", file_hash="a"))
+        await api.ingest_datasheet(_make_datasheet(revision="rev2", file_hash="b"))
+        await api.ingest_datasheet(_make_datasheet(revision="rev3", file_hash="c"))
+
+        all_revs = await api.find_datasheets_by_mpn("STM32H745ZIT6")
+        revisions = {d.revision for d in all_revs}
+        assert revisions == {"rev1", "rev2", "rev3"}
+
+    async def test_get_current_returns_none_for_unknown_mpn(self, api):
+        result = await api.get_current_datasheet("NOT-A-REAL-MPN")
+        assert result is None
+
+    async def test_different_mpns_are_independent(self, api):
+        a = _make_datasheet(mpn="STM32H745ZIT6", revision="rev1", file_hash="a")
+        b = _make_datasheet(mpn="ESP32-WROOM-32E", revision="rev1", file_hash="b")
+        await api.ingest_datasheet(a)
+        await api.ingest_datasheet(b)
+
+        current_a = await api.get_current_datasheet("STM32H745ZIT6")
+        current_b = await api.get_current_datasheet("ESP32-WROOM-32E")
+        assert current_a is not None and current_a.id == a.id
+        assert current_b is not None and current_b.id == b.id
+        # Crucially — no SUPERSEDES edge was created between unrelated MPNs.
+        edges = await api._graph.get_edges(
+            b.id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert edges == []
 
 
 # --- Project partitioning (MET-428) ---
