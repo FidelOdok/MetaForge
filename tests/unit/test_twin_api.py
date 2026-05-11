@@ -141,6 +141,30 @@ class TestDatasheetIngest:
         result = await api.get_current_datasheet("NOT-A-REAL-MPN")
         assert result is None
 
+    async def test_describes_edge_links_to_matching_component(self, api):
+        """Ingesting a Datasheet links it to every Component sharing its MPN."""
+        comp = Component(part_number="STM32H745ZIT6", manufacturer="STMicroelectronics")
+        await api.add_component(comp)
+
+        ds = _make_datasheet(mpn="STM32H745ZIT6")
+        await api.ingest_datasheet(ds)
+
+        edges = await api._graph.get_edges(
+            ds.id, direction="outgoing", edge_type=EdgeType.DESCRIBES
+        )
+        assert len(edges) == 1
+        assert edges[0].target_id == comp.id
+
+    async def test_describes_edge_skipped_when_no_component(self, api):
+        """No Component exists yet → no auto-edge (no node auto-creation)."""
+        ds = _make_datasheet(mpn="UNKNOWN-MPN")
+        await api.ingest_datasheet(ds)
+
+        edges = await api._graph.get_edges(
+            ds.id, direction="outgoing", edge_type=EdgeType.DESCRIBES
+        )
+        assert edges == []
+
     async def test_different_mpns_are_independent(self, api):
         a = _make_datasheet(mpn="STM32H745ZIT6", revision="rev1", file_hash="a")
         b = _make_datasheet(mpn="ESP32-WROOM-32E", revision="rev1", file_hash="b")
