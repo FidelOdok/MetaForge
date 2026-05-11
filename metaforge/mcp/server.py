@@ -387,6 +387,7 @@ async def build_unified_server(
     knowledge_service: Any = None,
     twin: Any = None,
     constraint_engine: Any = None,
+    project_backend: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -403,5 +404,6 @@ async def build_unified_server(
         knowledge_service=knowledge_service,
         twin=twin,
         constraint_engine=constraint_engine,
+        project_backend=project_backend,
     )
     return UnifiedMcpServer(adapters=registry.list_adapter_servers())

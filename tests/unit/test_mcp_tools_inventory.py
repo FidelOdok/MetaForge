@@ -88,6 +88,28 @@ class TestToolsListInventory:
             f"constraint.validate missing from tools/list; present: {sorted(names)}"
         )
 
+    async def test_project_tools_registered_when_backend_supplied(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """With a project backend wired (MET-427), the three project.* tools appear.
+
+        Mirrors the twin/constraint regression — if a future bootstrap
+        change forgets the ``project_backend`` kwarg, this catches it.
+        """
+        from api_gateway.projects.backend import InMemoryProjectBackend
+
+        server = await build_unified_server(
+            twin=twin,
+            constraint_engine=twin.constraints,
+            project_backend=InMemoryProjectBackend.create(),
+        )
+        names = await _tools_list(server)
+        required = {"project.create", "project.list", "project.get"}
+        missing = required - names
+        assert not missing, f"project tools missing from tools/list: {missing}"
+        # 22 baseline + 3 project = 25 floor with backend supplied.
+        assert len(names) >= 25, f"surface shrank to {len(names)}: {sorted(names)}"
+
     async def test_no_twin_yields_smaller_surface(self) -> None:
         """Omitting twin/constraint drops them — the regression test must
         actually catch the contrapositive, otherwise it's tautological.

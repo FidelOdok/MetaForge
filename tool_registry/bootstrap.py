@@ -163,6 +163,7 @@ async def bootstrap_tool_registry(
     constraint_engine: Any = None,
     twin: Any = None,
     twin_allow_mutations: bool = False,
+    project_backend: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -339,6 +340,35 @@ async def bootstrap_tool_registry(
             logger.info(
                 "twin_mcp_adapter_skipped",
                 reason=("no twin supplied" if twin is None else "disabled via config"),
+            )
+
+        # ----- Project MCP adapter (MET-427) -----
+        # Same runtime-injection pattern as knowledge / twin: depends
+        # on a ProjectBackend the gateway holds, not a static factory.
+        if project_backend is not None and _is_adapter_enabled("project"):
+            try:
+                from tool_registry.tools.project.adapter import ProjectServer
+
+                server = ProjectServer(backend=project_backend)
+                await registry.register_adapter(server)
+                registered.append("project")
+                logger.info(
+                    "project_mcp_adapter_registered",
+                    backend=type(project_backend).__name__,
+                )
+            except Exception as exc:
+                logger.error("project_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("project")
+        else:
+            skipped.append("project")
+            logger.info(
+                "project_mcp_adapter_skipped",
+                reason=(
+                    "no project_backend supplied"
+                    if project_backend is None
+                    else "disabled via config"
+                ),
             )
 
         span.set_attribute("adapters.registered", len(registered))
