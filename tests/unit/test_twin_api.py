@@ -1,6 +1,6 @@
 """Unit tests for the TwinAPI facade (InMemoryTwinAPI)."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -61,6 +61,85 @@ class TestSubsystemAccessors:
         assert isinstance(api.constraints, ConstraintEngine)
         # Same instance every call — accessor must not allocate.
         assert api.constraints is api.constraints
+
+
+# --- Project partitioning (MET-428) ---
+
+
+class TestProjectPartitioning:
+    """``list_work_products`` filters by ``project_id`` (MET-428).
+
+    This is the Phase 1 in-memory slice. Neo4j-side index + Cypher
+    safety + MCP context forwarding ship as follow-ups under the same
+    ticket.
+    """
+
+    async def test_list_returns_all_when_no_filter(self, api):
+        project_a = uuid4()
+        project_b = uuid4()
+        wp_a = _make_work_product_in_project(project_a, name="wp-a")
+        wp_b = _make_work_product_in_project(project_b, name="wp-b")
+        await api.create_work_product(wp_a)
+        await api.create_work_product(wp_b)
+
+        all_wps = await api.list_work_products()
+        ids = {wp.id for wp in all_wps}
+        assert wp_a.id in ids
+        assert wp_b.id in ids
+
+    async def test_list_filters_to_project(self, api):
+        project_a = uuid4()
+        project_b = uuid4()
+        wp_a = _make_work_product_in_project(project_a, name="wp-a")
+        wp_b = _make_work_product_in_project(project_b, name="wp-b")
+        await api.create_work_product(wp_a)
+        await api.create_work_product(wp_b)
+
+        scoped = await api.list_work_products(project_id=project_a)
+        assert [wp.id for wp in scoped] == [wp_a.id]
+
+    async def test_cross_project_read_is_impossible(self, api):
+        """The headline isolation guarantee from MET-428.
+
+        Ingest under project A, then query under project B → must
+        return zero rows from A.
+        """
+        project_a = uuid4()
+        project_b = uuid4()
+        wp = _make_work_product_in_project(project_a, name="secret-a")
+        await api.create_work_product(wp)
+
+        under_b = await api.list_work_products(project_id=project_b)
+        assert under_b == []
+
+    async def test_project_id_combines_with_domain_filter(self, api):
+        project_a = uuid4()
+        mech = _make_work_product_in_project(project_a, name="mech-wp", domain="mechanical")
+        ee = _make_work_product_in_project(project_a, name="ee-wp", domain="electronics")
+        await api.create_work_product(mech)
+        await api.create_work_product(ee)
+
+        scoped = await api.list_work_products(project_id=project_a, domain="mechanical")
+        assert [wp.id for wp in scoped] == [mech.id]
+
+
+def _make_work_product_in_project(
+    project_id: UUID,
+    *,
+    name: str = "test",
+    domain: str = "mechanical",
+) -> WorkProduct:
+    """Like ``_make_work_product`` but pinned to a project (MET-428)."""
+    return WorkProduct(
+        name=name,
+        type=WorkProductType.CAD_MODEL,
+        domain=domain,
+        file_path=f"models/{name}.step",
+        content_hash="hash123",
+        format="step",
+        created_by="human",
+        project_id=project_id,
+    )
 
 
 # --- Graph hygiene (MET-429) ---
