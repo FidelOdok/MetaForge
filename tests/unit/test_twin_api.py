@@ -63,6 +63,86 @@ class TestSubsystemAccessors:
         assert api.constraints is api.constraints
 
 
+# --- Graph hygiene (MET-429) ---
+
+
+class TestFindOrphans:
+    """`TwinAPI.find_orphans()` surfaces dependent nodes with zero edges."""
+
+    async def test_empty_graph_is_clean(self, api):
+        report = await api.find_orphans()
+        assert report.total == 0
+        assert report.is_clean
+        assert report.orphan_constraints == []
+        assert report.orphan_bom_items == []
+        assert report.orphan_design_elements == []
+        assert report.orphan_components == []
+
+    async def test_isolated_constraint_is_orphan(self, api):
+        c = _make_constraint()
+        await api.create_constraint(c)
+        # No bindings created — the constraint floats with zero edges.
+
+        report = await api.find_orphans()
+        assert report.orphan_constraints == [c.id]
+        assert report.total == 1
+        assert report.is_clean is False
+
+    async def test_bound_constraint_is_not_orphan(self, api):
+        wp = _make_work_product()
+        await api.create_work_product(wp)
+        c = _make_constraint()
+        await api.constraints.add_constraint(c, [wp.id])
+
+        report = await api.find_orphans()
+        assert report.orphan_constraints == []
+        assert report.total == 0
+
+    async def test_isolated_component_is_orphan(self, api):
+        comp = Component(part_number="STM32-X", manufacturer="ST")
+        await api.add_component(comp)
+
+        report = await api.find_orphans()
+        assert report.orphan_components == [comp.id]
+
+    async def test_orphan_survives_work_product_delete(self, api):
+        """The headline use case: deleting a WP leaves its Constraint dangling.
+
+        ``delete_work_product`` prunes the connecting edges, but the
+        Constraint node itself stays in the graph. ``find_orphans()``
+        catches it on the next sweep.
+        """
+        wp = _make_work_product()
+        await api.create_work_product(wp)
+        c = _make_constraint()
+        await api.constraints.add_constraint(c, [wp.id])
+
+        # Sanity: not an orphan before delete.
+        pre = await api.find_orphans()
+        assert c.id not in pre.orphan_constraints
+
+        # Delete the parent work product.
+        deleted = await api.delete_work_product(wp.id)
+        assert deleted
+
+        # Now the constraint is orphaned.
+        post = await api.find_orphans()
+        assert c.id in post.orphan_constraints
+
+    async def test_work_products_are_not_dependents(self, api):
+        """WorkProduct nodes are not orphans even when they have no edges.
+
+        WorkProducts are roots — they don't need an incoming reference
+        to be valid. Only dependent types (Constraint, BOMItem,
+        DesignElement, Component) are flagged.
+        """
+        wp = _make_work_product()
+        await api.create_work_product(wp)
+
+        report = await api.find_orphans()
+        assert report.is_clean
+
+
 # --- Lifecycle (MET-425) ---
 
 

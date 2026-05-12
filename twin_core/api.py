@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -25,6 +26,35 @@ from twin_core.models.relationship import SubGraph
 from twin_core.models.version import Version, VersionDiff
 from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
+
+
+@dataclass
+class OrphanReport:
+    """Result of ``TwinAPI.find_orphans()`` (MET-429).
+
+    Each list holds node UUIDs of the matching orphan category. A node
+    is considered orphaned when **no edges** (incoming or outgoing)
+    connect it to the rest of the graph — i.e. it is unreachable from
+    its parent work product.
+    """
+
+    orphan_constraints: list[UUID] = field(default_factory=list)
+    orphan_bom_items: list[UUID] = field(default_factory=list)
+    orphan_design_elements: list[UUID] = field(default_factory=list)
+    orphan_components: list[UUID] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return (
+            len(self.orphan_constraints)
+            + len(self.orphan_bom_items)
+            + len(self.orphan_design_elements)
+            + len(self.orphan_components)
+        )
+
+    @property
+    def is_clean(self) -> bool:
+        return self.total == 0
 
 
 class TwinAPI(ABC):
@@ -167,6 +197,22 @@ class TwinAPI(ABC):
         """
         ...
 
+    # --- Graph hygiene ---
+
+    @abstractmethod
+    async def find_orphans(self) -> OrphanReport:
+        """Find dependent nodes with zero edges (MET-429).
+
+        Constraint / BOMItem / DesignElement / Component nodes are
+        "dependent" — they should always be reachable from some parent
+        work product. When ``delete_work_product`` removes a parent,
+        the dependent's edges are pruned but the node itself remains;
+        this scan surfaces those leftovers.
+
+        Returns an :class:`OrphanReport` with one list per node type.
+        """
+        ...
+
 
 class InMemoryTwinAPI(TwinAPI):
     """In-memory implementation of the Twin API facade.
@@ -193,6 +239,27 @@ class InMemoryTwinAPI(TwinAPI):
         close = getattr(self._graph, "close", None)
         if close is not None and callable(close):
             await close()
+
+    async def find_orphans(self) -> OrphanReport:
+        report = OrphanReport()
+        # Match each dependent node type to the field on OrphanReport
+        # it populates. The pairing here is the only place we encode
+        # "which node types are considered dependents" — kept inline
+        # so a new dependent type is one entry, not a refactor.
+        dependents = (
+            (NodeType.CONSTRAINT, report.orphan_constraints),
+            (NodeType.BOM_ITEM, report.orphan_bom_items),
+            (NodeType.DESIGN_ELEMENT, report.orphan_design_elements),
+            (NodeType.COMPONENT, report.orphan_components),
+        )
+        for node_type, bucket in dependents:
+            nodes = await self._graph.list_nodes(node_type=node_type)
+            for node in nodes:
+                outgoing = await self._graph.get_edges(node.id, direction="outgoing")
+                incoming = await self._graph.get_edges(node.id, direction="incoming")
+                if not outgoing and not incoming:
+                    bucket.append(node.id)
+        return report
 
     @classmethod
     def create(cls) -> InMemoryTwinAPI:
