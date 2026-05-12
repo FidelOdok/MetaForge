@@ -430,6 +430,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
     await _init_database()
     await _init_knowledge_store(app)
 
+    # MET-427: instantiate the project backend *before* the tool registry
+    # boots so the `project.*` MCP adapter can be wired with the same
+    # backend the gateway HTTP routes use. The backend is set on the
+    # routes initialiser further down.
+    from api_gateway.projects.backend import create_project_backend as _create_pb
+
+    project_backend = await _create_pb()
+
     # Bootstrap tool adapters into the registry and create real MCP bridge.
     # The knowledge MCP adapter is included only when a KnowledgeService is
     # available on app.state.
@@ -437,6 +445,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         knowledge_service=getattr(app.state, "knowledge_service", None),
         twin=twin,
         constraint_engine=twin.constraints,
+        project_backend=project_backend,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -461,10 +470,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         bridge_type=type(active_bridge).__name__,
     )
 
-    # Initialize chat and project backends (PG or in-memory)
+    # Initialize chat backend (PG or in-memory). Project backend is
+    # already initialised above (before the tool registry) so the
+    # project MCP adapter can pick it up.
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
-    from api_gateway.projects.backend import create_project_backend
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
     from api_gateway.twin.routes import init_twin as init_twin_viewer
@@ -476,7 +486,6 @@ async def _init_orchestrator(app: FastAPI) -> None:
         backend="postgres" if type(chat_backend).__name__ == "PgChatBackend" else "in_memory",
     )
 
-    project_backend = await create_project_backend()
     init_project_backend(project_backend)
     logger.info(
         "project_backend_selected",

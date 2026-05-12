@@ -356,13 +356,19 @@ async def _bootstrap(
     sessions opened during bootstrap leak across subprocess restarts
     (MET-425).
     """
+    from api_gateway.projects.backend import create_project_backend
     from twin_core.api import InMemoryTwinAPI
 
     twin = await InMemoryTwinAPI.create_from_env()
+    # MET-427: bring up the same project backend the gateway uses so
+    # `project.*` MCP tools see / write the same store. Falls back to
+    # in-memory when DATABASE_URL is not set, matching the gateway.
+    project_backend = await create_project_backend()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         twin=twin,
         constraint_engine=twin.constraints,
+        project_backend=project_backend,
     )
     return server, twin
 
