@@ -281,9 +281,7 @@ class ProjectServer(McpToolServer):
 # ---------------------------------------------------------------------------
 
 
-async def _find_by_name(
-    backend: ProjectBackendLike, name: str
-) -> ProjectLike | None:
+async def _find_by_name(backend: ProjectBackendLike, name: str) -> ProjectLike | None:
     """Linear scan over ``list_projects`` for an exact-name match.
 
     Acceptable for Phase 1 (project counts are O(10s), not O(10ks)).
