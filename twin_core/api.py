@@ -461,6 +461,24 @@ class InMemoryTwinAPI(TwinAPI):
                     edge_type=EdgeType.SUPERSEDES,
                 )
             )
+
+        # MET-430: link the datasheet to every Component that shares
+        # its MPN. Auto-creation of the Component when none exists is
+        # intentionally **not** done here — that would silently inject
+        # nodes the user didn't author. Once a Component exists for
+        # the MPN (via the supply chain agent or manual entry), the
+        # next datasheet ingest connects them.
+        components = await self._graph.list_nodes(
+            node_type=NodeType.COMPONENT, filters={"part_number": datasheet.mpn}
+        )
+        for component in components:
+            await self._graph.add_edge(
+                EdgeBase(
+                    source_id=datasheet.id,
+                    target_id=component.id,
+                    edge_type=EdgeType.DESCRIBES,
+                )
+            )
         return result  # type: ignore[return-value]
 
     async def find_datasheets_by_mpn(self, mpn: str) -> list[Datasheet]:
