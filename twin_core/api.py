@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -20,11 +21,41 @@ from twin_core.graph_engine import GraphEngine, InMemoryGraphEngine
 from twin_core.models.base import EdgeBase
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
+from twin_core.models.datasheet import Datasheet
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.relationship import SubGraph
 from twin_core.models.version import Version, VersionDiff
 from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
+
+
+@dataclass
+class OrphanReport:
+    """Result of ``TwinAPI.find_orphans()`` (MET-429).
+
+    Each list holds node UUIDs of the matching orphan category. A node
+    is considered orphaned when **no edges** (incoming or outgoing)
+    connect it to the rest of the graph — i.e. it is unreachable from
+    its parent work product.
+    """
+
+    orphan_constraints: list[UUID] = field(default_factory=list)
+    orphan_bom_items: list[UUID] = field(default_factory=list)
+    orphan_design_elements: list[UUID] = field(default_factory=list)
+    orphan_components: list[UUID] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return (
+            len(self.orphan_constraints)
+            + len(self.orphan_bom_items)
+            + len(self.orphan_design_elements)
+            + len(self.orphan_components)
+        )
+
+    @property
+    def is_clean(self) -> bool:
+        return self.total == 0
 
 
 class TwinAPI(ABC):
@@ -65,6 +96,7 @@ class TwinAPI(ABC):
         branch: str = "main",
         domain: str | None = None,
         work_product_type: WorkProductType | None = None,
+        project_id: UUID | None = None,
     ) -> list[WorkProduct]: ...
 
     # --- Constraints ---
@@ -88,6 +120,36 @@ class TwinAPI(ABC):
 
     @abstractmethod
     async def find_components(self, query: dict[str, Any]) -> list[Component]: ...
+
+    # --- Datasheets (MET-430) ---
+
+    @abstractmethod
+    async def ingest_datasheet(self, datasheet: Datasheet) -> Datasheet:
+        """Ingest a datasheet idempotently by ``file_hash``.
+
+        Behaviour:
+        - If a ``Datasheet`` with the same ``file_hash`` already exists,
+          return the existing node unchanged (no-op).
+        - Otherwise, persist the node. When a prior revision of the
+          same MPN exists, automatically link the new node to it with
+          a ``SUPERSEDES`` edge (new → old).
+        """
+        ...
+
+    @abstractmethod
+    async def find_datasheets_by_mpn(self, mpn: str) -> list[Datasheet]:
+        """All ingested datasheets for an MPN, every revision."""
+        ...
+
+    @abstractmethod
+    async def get_current_datasheet(self, mpn: str) -> Datasheet | None:
+        """The "current" revision for an MPN.
+
+        Defined as the datasheet that is **not** superseded by any
+        other datasheet (i.e. has no incoming ``SUPERSEDES`` edge).
+        Returns ``None`` when no datasheet exists for the MPN.
+        """
+        ...
 
     # --- Relationships ---
 
@@ -167,6 +229,22 @@ class TwinAPI(ABC):
         """
         ...
 
+    # --- Graph hygiene ---
+
+    @abstractmethod
+    async def find_orphans(self) -> OrphanReport:
+        """Find dependent nodes with zero edges (MET-429).
+
+        Constraint / BOMItem / DesignElement / Component nodes are
+        "dependent" — they should always be reachable from some parent
+        work product. When ``delete_work_product`` removes a parent,
+        the dependent's edges are pruned but the node itself remains;
+        this scan surfaces those leftovers.
+
+        Returns an :class:`OrphanReport` with one list per node type.
+        """
+        ...
+
 
 class InMemoryTwinAPI(TwinAPI):
     """In-memory implementation of the Twin API facade.
@@ -193,6 +271,27 @@ class InMemoryTwinAPI(TwinAPI):
         close = getattr(self._graph, "close", None)
         if close is not None and callable(close):
             await close()
+
+    async def find_orphans(self) -> OrphanReport:
+        report = OrphanReport()
+        # Match each dependent node type to the field on OrphanReport
+        # it populates. The pairing here is the only place we encode
+        # "which node types are considered dependents" — kept inline
+        # so a new dependent type is one entry, not a refactor.
+        dependents = (
+            (NodeType.CONSTRAINT, report.orphan_constraints),
+            (NodeType.BOM_ITEM, report.orphan_bom_items),
+            (NodeType.DESIGN_ELEMENT, report.orphan_design_elements),
+            (NodeType.COMPONENT, report.orphan_components),
+        )
+        for node_type, bucket in dependents:
+            nodes = await self._graph.list_nodes(node_type=node_type)
+            for node in nodes:
+                outgoing = await self._graph.get_edges(node.id, direction="outgoing")
+                incoming = await self._graph.get_edges(node.id, direction="incoming")
+                if not outgoing and not incoming:
+                    bucket.append(node.id)
+        return report
 
     @classmethod
     def create(cls) -> InMemoryTwinAPI:
@@ -288,12 +387,18 @@ class InMemoryTwinAPI(TwinAPI):
         branch: str = "main",
         domain: str | None = None,
         work_product_type: WorkProductType | None = None,
+        project_id: UUID | None = None,
     ) -> list[WorkProduct]:
         filters: dict[str, Any] = {}
         if domain is not None:
             filters["domain"] = domain
         if work_product_type is not None:
             filters["type"] = work_product_type
+        # MET-428: tenant scoping. The underlying graph engine's filter
+        # already does equality match on any attribute, so forwarding
+        # ``project_id`` here is a one-line plumb-through.
+        if project_id is not None:
+            filters["project_id"] = project_id
         nodes = await self._graph.list_nodes(
             node_type=NodeType.WORK_PRODUCT, filters=filters if filters else None
         )
@@ -330,6 +435,69 @@ class InMemoryTwinAPI(TwinAPI):
     async def find_components(self, query: dict[str, Any]) -> list[Component]:
         nodes = await self._graph.list_nodes(node_type=NodeType.COMPONENT, filters=query)
         return nodes  # type: ignore[return-value]
+
+    # --- Datasheets (MET-430) ---
+
+    async def ingest_datasheet(self, datasheet: Datasheet) -> Datasheet:
+        # Idempotency: same file_hash → return the existing node.
+        existing = await self._graph.list_nodes(
+            node_type=NodeType.DATASHEET, filters={"file_hash": datasheet.file_hash}
+        )
+        if existing:
+            return existing[0]  # type: ignore[return-value]
+
+        # Capture the prior current datasheet for this MPN *before* the
+        # new node is inserted — otherwise it becomes its own ancestor.
+        prior = await self.get_current_datasheet(datasheet.mpn)
+
+        result = await self._graph.add_node(datasheet)
+
+        if prior is not None and prior.id != datasheet.id:
+            # SUPERSEDES points from the new revision to the old one.
+            await self._graph.add_edge(
+                EdgeBase(
+                    source_id=datasheet.id,
+                    target_id=prior.id,
+                    edge_type=EdgeType.SUPERSEDES,
+                )
+            )
+
+        # MET-430: link the datasheet to every Component that shares
+        # its MPN. Auto-creation of the Component when none exists is
+        # intentionally **not** done here — that would silently inject
+        # nodes the user didn't author. Once a Component exists for
+        # the MPN (via the supply chain agent or manual entry), the
+        # next datasheet ingest connects them.
+        components = await self._graph.list_nodes(
+            node_type=NodeType.COMPONENT, filters={"part_number": datasheet.mpn}
+        )
+        for component in components:
+            await self._graph.add_edge(
+                EdgeBase(
+                    source_id=datasheet.id,
+                    target_id=component.id,
+                    edge_type=EdgeType.DESCRIBES,
+                )
+            )
+        return result  # type: ignore[return-value]
+
+    async def find_datasheets_by_mpn(self, mpn: str) -> list[Datasheet]:
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DATASHEET, filters={"mpn": mpn}
+        )
+        return nodes  # type: ignore[return-value]
+
+    async def get_current_datasheet(self, mpn: str) -> Datasheet | None:
+        candidates = await self.find_datasheets_by_mpn(mpn)
+        for ds in candidates:
+            # "Current" = no other datasheet supersedes this one (no
+            # incoming SUPERSEDES edge).
+            incoming = await self._graph.get_edges(
+                ds.id, direction="incoming", edge_type=EdgeType.SUPERSEDES
+            )
+            if not incoming:
+                return ds
+        return None
 
     # --- Relationships ---
 

@@ -117,3 +117,20 @@ datasheets:
     NOT redistributed; fetched on demand from the source URL above.
 
     '
+# MET-431: ESP32 is the proof point for the datasheet ingestion pipeline.
+# Pinned hashes are populated on first ``fetch_and_extract.py --only ESP32``
+# run; commit the resulting manifest update with the .txt excerpt.
+- mpn: ESP32-WROOM-32E
+  vendor: Espressif
+  family: MCU (Wi-Fi/Bluetooth SoC)
+  source_url: https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32e_esp32-wroom-32ue_datasheet_en.pdf
+  pdf_sha256: ''
+  text_path: tests/fixtures/datasheets/esp32-wroom-32e.txt
+  text_sha256: ''
+  license_note: 'Public datasheet by Espressif Systems. Excerpt committed for
+
+    UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
