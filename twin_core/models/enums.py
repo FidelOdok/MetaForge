@@ -15,6 +15,8 @@ class NodeType(StrEnum):
     DEVICE_INSTANCE = "device_instance"
     TWIN_MODEL = "twin_model"
     DESIGN_ELEMENT = "design_element"
+    # MET-430: structured manufacturer datasheet (PDF + extracted rows)
+    DATASHEET = "datasheet"
 
 
 class WorkProductType(StrEnum):
@@ -79,3 +81,6 @@ class EdgeType(StrEnum):
     PARENT_OF = "parent_of"
     CONFLICTS_WITH = "conflicts_with"
     SUPERSEDES = "supersedes"
+    # MET-430: a Datasheet describes a Component by MPN. Edges are
+    # Datasheet --DESCRIBES--> Component.
+    DESCRIBES = "describes"
