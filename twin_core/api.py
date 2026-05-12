@@ -155,6 +155,18 @@ class TwinAPI(ABC):
         """
         ...
 
+    # --- Lifecycle ---
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        """Release any backing-store resources (Neo4j driver, sessions).
+
+        Idempotent — calling more than once is a no-op. Callers that
+        bootstrap a Twin (MCP entrypoint, gateway lifespan, tests) must
+        await this in a ``finally`` block to avoid dangling drivers.
+        """
+        ...
+
 
 class InMemoryTwinAPI(TwinAPI):
     """In-memory implementation of the Twin API facade.
@@ -176,6 +188,11 @@ class InMemoryTwinAPI(TwinAPI):
     @property
     def constraints(self) -> ConstraintEngine:
         return self._constraints
+
+    async def aclose(self) -> None:
+        close = getattr(self._graph, "close", None)
+        if close is not None and callable(close):
+            await close()
 
     @classmethod
     def create(cls) -> InMemoryTwinAPI:
