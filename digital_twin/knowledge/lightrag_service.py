@@ -671,6 +671,7 @@ class LightRAGKnowledgeService:
         project_id: UUID | None = None,
         rerank: bool = False,
         actor_id: str | None = None,
+        include_historical: bool = False,
     ) -> list[SearchHit]:
         """Vector search with optional cross-encoder reranking.
 
@@ -772,6 +773,10 @@ class LightRAGKnowledgeService:
                     if knowledge_type is not None and hit.knowledge_type != knowledge_type:
                         continue
                     if filters and not _matches_filters(hit, filters):
+                        continue
+                    # MET-447: drop chunks marked as superseded unless the
+                    # caller explicitly opts into historical revisions.
+                    if not _hit_is_visible(hit, include_historical):
                         continue
                     hits.append(hit)
 
@@ -1539,6 +1544,20 @@ def _uuid_from_chunk_id(chunk_id: str) -> UUID:
         return UUID(hex=chunk_id[:32])
     except ValueError:
         return uuid4()
+
+
+def _hit_is_visible(hit: SearchHit, include_historical: bool) -> bool:
+    """Return False when ``hit`` is marked superseded and the caller didn't opt in.
+
+    MET-447: chunks whose parent Datasheet has been superseded carry
+    ``metadata["superseded"] = True`` (set by the ingest path that
+    consumes the Twin's SUPERSEDES chain). Default search excludes
+    them; ``include_historical=True`` bypasses the filter for audit /
+    citation queries.
+    """
+    if include_historical:
+        return True
+    return not bool(hit.metadata.get("superseded"))
 
 
 def _matches_filters(hit: SearchHit, filters: dict[str, Any]) -> bool:

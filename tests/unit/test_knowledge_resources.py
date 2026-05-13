@@ -103,6 +103,7 @@ class _FakeService:
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
         actor_id: str | None = None,
+        include_historical: bool = False,
     ) -> list[SearchHit]:
         self.search_calls.append(
             {

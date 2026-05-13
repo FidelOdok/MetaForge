@@ -308,6 +308,16 @@ class KnowledgeServer(McpToolServer):
                                 "source_path / source_work_product_id / arbitrary keys."
                             ),
                         },
+                        "include_historical": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "MET-447: when False (default), drop chunks whose "
+                                "parent Datasheet has been superseded by a newer "
+                                "revision. Set True for audit / citation queries "
+                                "that need to see historical revisions."
+                            ),
+                        },
                     },
                     "required": ["query"],
                 },
@@ -671,6 +681,13 @@ class KnowledgeServer(McpToolServer):
             if actor_id is not None:
                 span.set_attribute("mcp.actor_id", actor_id)
 
+            # MET-447: default to current-revision results. Callers
+            # pass ``include_historical=true`` to see chunks whose
+            # parent Datasheet has been superseded.
+            include_historical = bool(arguments.get("include_historical", False))
+            if include_historical:
+                span.set_attribute("knowledge.include_historical", True)
+
             hits = await self.service.search(
                 query=query,
                 top_k=top_k,
@@ -678,6 +695,7 @@ class KnowledgeServer(McpToolServer):
                 filters=filters,
                 project_id=project_id,
                 actor_id=actor_id,
+                include_historical=include_historical,
             )
             span.set_attribute("knowledge.result_count", len(hits))
             logger.info(

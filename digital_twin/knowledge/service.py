@@ -121,7 +121,19 @@ class KnowledgeService(Protocol):
         project_id: UUID | None = None,
         rerank: bool = False,
         actor_id: str | None = None,
-    ) -> list[SearchHit]: ...
+        include_historical: bool = False,
+    ) -> list[SearchHit]:
+        """Search the knowledge base.
+
+        ``include_historical`` (MET-447): when False (default), drop
+        any hit whose ``metadata["superseded"]`` is truthy. Used to
+        keep search results scoped to the **current** datasheet revision
+        per the MET-430 supersedes chain. Ingest paths mark chunks as
+        ``superseded=True`` when their parent ``Datasheet`` gains an
+        incoming SUPERSEDES edge; admin / audit queries pass True to
+        bypass the filter and see historical revisions too.
+        """
+        ...
 
     async def delete_by_source(
         self,
