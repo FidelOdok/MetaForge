@@ -96,6 +96,7 @@ class _FakeService:
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
         actor_id: str | None = None,
+        include_historical: bool = False,
     ) -> list[SearchHit]:
         self.search_calls.append(
             {
@@ -105,6 +106,7 @@ class _FakeService:
                 "filters": filters,
                 "project_id": project_id,
                 "actor_id": actor_id,
+                "include_historical": include_historical,
             }
         )
         # Mirror the AND-across-keys, equality-match contract from
