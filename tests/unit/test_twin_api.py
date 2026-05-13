@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from twin_core.api import InMemoryTwinAPI
+from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
 from twin_core.constraint_engine.validator import ConstraintEngine
 from twin_core.models import (
     Component,
@@ -122,29 +122,71 @@ class TestFindOrphans:
         report = await api.find_orphans()
         assert report.orphan_components == [comp.id]
 
-    async def test_orphan_survives_work_product_delete(self, api):
-        """The headline use case: deleting a WP leaves its Constraint dangling.
+    async def test_default_delete_blocks_when_would_create_orphan(self, api):
+        """MET-438: default-deny — delete_work_product without cascade refuses
+        to leave dependent nodes dangling.
 
-        ``delete_work_product`` prunes the connecting edges, but the
-        Constraint node itself stays in the graph. ``find_orphans()``
-        catches it on the next sweep.
+        Pre-MET-438 behaviour would silently orphan the Constraint and
+        rely on find_orphans() to catch it later. The block makes the
+        problem visible at the delete call.
         """
         wp = _make_work_product()
         await api.create_work_product(wp)
         c = _make_constraint()
         await api.constraints.add_constraint(c, [wp.id])
 
-        # Sanity: not an orphan before delete.
-        pre = await api.find_orphans()
-        assert c.id not in pre.orphan_constraints
+        with pytest.raises(OrphanWouldBeCreatedError) as exc:
+            await api.delete_work_product(wp.id)
 
-        # Delete the parent work product.
+        assert exc.value.work_product_id == wp.id
+        assert c.id in exc.value.orphans.orphan_constraints
+        # WorkProduct was NOT deleted (atomic rejection).
+        assert await api.get_work_product(wp.id) is not None
+
+    async def test_cascade_delete_removes_dependents_and_target(self, api):
+        """MET-438: explicit cascade=True wipes the dependents that would orphan."""
+        wp = _make_work_product()
+        await api.create_work_product(wp)
+        c = _make_constraint()
+        await api.constraints.add_constraint(c, [wp.id])
+
+        deleted = await api.delete_work_product(wp.id, cascade=True)
+        assert deleted is True
+
+        assert await api.get_work_product(wp.id) is None
+        # Constraint also gone.
+        report = await api.find_orphans()
+        assert c.id not in report.orphan_constraints
+        assert await api._graph.get_node(c.id) is None
+
+    async def test_delete_with_no_dependents_unchanged_by_cascade_flag(self, api):
+        """No dependents → both cascade=False and True are simple deletes."""
+        wp = _make_work_product()
+        await api.create_work_product(wp)
+
+        # Default still works when no dependents would orphan.
         deleted = await api.delete_work_product(wp.id)
-        assert deleted
+        assert deleted is True
+        assert await api.get_work_product(wp.id) is None
 
-        # Now the constraint is orphaned.
-        post = await api.find_orphans()
-        assert c.id in post.orphan_constraints
+    async def test_dependent_with_other_edges_is_not_blocking(self, api):
+        """A Constraint bound to two WPs survives one WP delete without cascade.
+
+        Only dependents whose **only** neighbour is the target work
+        product are considered "would orphan". When a Constraint has
+        edges to other WPs, deleting one doesn't endanger it.
+        """
+        wp_a = _make_work_product(name="a")
+        wp_b = _make_work_product(name="b")
+        await api.create_work_product(wp_a)
+        await api.create_work_product(wp_b)
+        c = _make_constraint()
+        await api.constraints.add_constraint(c, [wp_a.id, wp_b.id])
+
+        # Delete wp_a — Constraint still bound to wp_b, no orphan risk.
+        deleted = await api.delete_work_product(wp_a.id)
+        assert deleted is True
+        assert await api._graph.get_node(c.id) is not None
 
     async def test_work_products_are_not_dependents(self, api):
         """WorkProduct nodes are not orphans even when they have no edges.

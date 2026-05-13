@@ -58,6 +58,28 @@ class OrphanReport:
         return self.total == 0
 
 
+class OrphanWouldBeCreatedError(ValueError):
+    """Raised by ``delete_work_product`` when the delete would orphan dependents (MET-438).
+
+    Default-deny: callers must opt into ``cascade=True`` to remove
+    dependent BOMItem / Constraint / DesignElement / Component nodes
+    that would lose their last edge to the deleted work product.
+    """
+
+    def __init__(self, work_product_id: UUID, orphans: OrphanReport) -> None:
+        self.work_product_id = work_product_id
+        self.orphans = orphans
+        super().__init__(
+            f"Deleting WorkProduct {work_product_id} would orphan "
+            f"{orphans.total} dependent node(s): "
+            f"constraints={len(orphans.orphan_constraints)}, "
+            f"bom_items={len(orphans.orphan_bom_items)}, "
+            f"design_elements={len(orphans.orphan_design_elements)}, "
+            f"components={len(orphans.orphan_components)}. "
+            f"Pass cascade=True to remove the dependents along with the work product."
+        )
+
+
 class TwinAPI(ABC):
     """Abstract facade for all Digital Twin operations.
 
@@ -88,7 +110,20 @@ class TwinAPI(ABC):
     ) -> WorkProduct: ...
 
     @abstractmethod
-    async def delete_work_product(self, work_product_id: UUID, branch: str = "main") -> bool: ...
+    async def delete_work_product(
+        self,
+        work_product_id: UUID,
+        branch: str = "main",
+        cascade: bool = False,
+    ) -> bool:
+        """Delete a WorkProduct; opt-in cascade removes orphaned dependents.
+
+        Default (``cascade=False``) raises :class:`OrphanWouldBeCreatedError`
+        when any Constraint / BOMItem / DesignElement / Component would
+        lose its last edge to the rest of the graph. ``cascade=True``
+        deletes those dependents along with the WorkProduct.
+        """
+        ...
 
     @abstractmethod
     async def list_work_products(
@@ -388,8 +423,67 @@ class InMemoryTwinAPI(TwinAPI):
         result = await self._graph.update_node(work_product_id, updates)
         return result  # type: ignore[return-value]
 
-    async def delete_work_product(self, work_product_id: UUID, branch: str = "main") -> bool:
+    async def delete_work_product(
+        self,
+        work_product_id: UUID,
+        branch: str = "main",
+        cascade: bool = False,
+    ) -> bool:
+        # Identify dependents whose only edge points to the work_product
+        # being deleted — they would orphan as a side effect.
+        would_orphan = await self._dependents_that_would_orphan(work_product_id)
+
+        if would_orphan.total > 0 and not cascade:
+            raise OrphanWouldBeCreatedError(work_product_id, would_orphan)
+
+        if cascade:
+            for dep_id in (
+                would_orphan.orphan_constraints
+                + would_orphan.orphan_bom_items
+                + would_orphan.orphan_design_elements
+                + would_orphan.orphan_components
+            ):
+                await self._graph.delete_node(dep_id)
+
         return await self._graph.delete_node(work_product_id)
+
+    async def _dependents_that_would_orphan(
+        self, work_product_id: UUID
+    ) -> OrphanReport:
+        """Find dependents whose *only* neighbour is the target work product.
+
+        Returns an :class:`OrphanReport` listing the IDs by category.
+        A dependent with edges to other nodes is NOT included — its
+        connection survives the delete.
+        """
+        report = OrphanReport()
+        candidate_types = (
+            (NodeType.CONSTRAINT, report.orphan_constraints),
+            (NodeType.BOM_ITEM, report.orphan_bom_items),
+            (NodeType.DESIGN_ELEMENT, report.orphan_design_elements),
+            (NodeType.COMPONENT, report.orphan_components),
+        )
+        for node_type, bucket in candidate_types:
+            nodes = await self._graph.list_nodes(node_type=node_type)
+            for node in nodes:
+                outgoing = await self._graph.get_edges(node.id, direction="outgoing")
+                incoming = await self._graph.get_edges(node.id, direction="incoming")
+                edges = outgoing + incoming
+                if not edges:
+                    continue  # already orphan — unrelated to this delete
+                touches_target = any(
+                    e.source_id == work_product_id or e.target_id == work_product_id
+                    for e in edges
+                )
+                other_endpoints = {
+                    e.source_id if e.source_id != node.id else e.target_id
+                    for e in edges
+                }
+                # Would orphan if removing the work_product clears every
+                # neighbour — i.e. the only neighbour is the target.
+                if touches_target and other_endpoints == {work_product_id}:
+                    bucket.append(node.id)
+        return report
 
     async def list_work_products(
         self,
