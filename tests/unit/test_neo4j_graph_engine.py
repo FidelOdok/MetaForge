@@ -633,3 +633,60 @@ class TestSerialization:
         assert restored.source_id == edge.source_id
         assert restored.target_id == edge.target_id
         assert restored.edge_type == EdgeType.DEPENDS_ON
+
+
+# ---------------------------------------------------------------------------
+# Project_id partitioning (MET-440)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureIndexesProjectId:
+    async def test_includes_project_id_index_statement(self, engine, mock_session) -> None:
+        """``_ensure_indexes`` issues the project_id index CREATE."""
+        mock_session.run = AsyncMock()
+        await engine._ensure_indexes()
+        statements = [call.args[0] for call in mock_session.run.call_args_list]
+        assert any("node_project_id_index" in s and "n.project_id" in s for s in statements), (
+            f"project_id index missing from: {statements}"
+        )
+
+
+class TestQueryCypherProjectScopeEnforcement:
+    """MET-440: ``query_cypher`` rejects unscoped queries when ctx is set."""
+
+    async def test_rejects_when_ctx_scoped_and_no_param(self, engine) -> None:
+        from uuid import uuid4
+
+        from mcp_core.context import McpCallContext, with_context
+        from twin_core.neo4j_graph_engine import UnscopedCypherError
+
+        with with_context(McpCallContext(project_id=uuid4())):
+            with pytest.raises(UnscopedCypherError):
+                await engine.query_cypher("MATCH (n) RETURN n", {})
+
+    async def test_accepts_when_ctx_scoped_and_param_bound(self, engine, mock_session) -> None:
+        from uuid import uuid4
+
+        from mcp_core.context import McpCallContext, with_context
+
+        proj = uuid4()
+        mock_result = MagicMock()
+        mock_result.data = AsyncMock(return_value=[])
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        with with_context(McpCallContext(project_id=proj)):
+            rows = await engine.query_cypher(
+                "MATCH (n) WHERE n.project_id = $project_id RETURN n",
+                {"project_id": str(proj)},
+            )
+        assert rows == []
+
+    async def test_accepts_when_ctx_unscoped(self, engine, mock_session) -> None:
+        """Admin path: no ctx project_id → no enforcement."""
+        mock_result = MagicMock()
+        mock_result.data = AsyncMock(return_value=[])
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        # Default ctx has project_id=None.
+        rows = await engine.query_cypher("MATCH (n) RETURN n", {})
+        assert rows == []
