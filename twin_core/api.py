@@ -258,10 +258,15 @@ class InMemoryTwinAPI(TwinAPI):
         graph: GraphEngine,
         version: VersionEngine,
         constraints: ConstraintEngine,
+        collector: MetricsCollector | None = None,
     ) -> None:
         self._graph = graph
         self._version = version
         self._constraints = constraints
+        # MET-439: optional metrics collector for the orphan gauge. When
+        # None, metric emission is a no-op so unit tests don't need a
+        # full OTel stack.
+        self._collector = collector
 
     @property
     def constraints(self) -> ConstraintEngine:
@@ -275,22 +280,26 @@ class InMemoryTwinAPI(TwinAPI):
     async def find_orphans(self) -> OrphanReport:
         report = OrphanReport()
         # Match each dependent node type to the field on OrphanReport
-        # it populates. The pairing here is the only place we encode
-        # "which node types are considered dependents" — kept inline
-        # so a new dependent type is one entry, not a refactor.
+        # and to the metric label used by ``twin_orphans``. Adding a
+        # new dependent type is one entry here, not a refactor.
         dependents = (
-            (NodeType.CONSTRAINT, report.orphan_constraints),
-            (NodeType.BOM_ITEM, report.orphan_bom_items),
-            (NodeType.DESIGN_ELEMENT, report.orphan_design_elements),
-            (NodeType.COMPONENT, report.orphan_components),
+            (NodeType.CONSTRAINT, report.orphan_constraints, "constraint"),
+            (NodeType.BOM_ITEM, report.orphan_bom_items, "bom_item"),
+            (NodeType.DESIGN_ELEMENT, report.orphan_design_elements, "design_element"),
+            (NodeType.COMPONENT, report.orphan_components, "component"),
         )
-        for node_type, bucket in dependents:
+        for node_type, bucket, _kind in dependents:
             nodes = await self._graph.list_nodes(node_type=node_type)
             for node in nodes:
                 outgoing = await self._graph.get_edges(node.id, direction="outgoing")
                 incoming = await self._graph.get_edges(node.id, direction="incoming")
                 if not outgoing and not incoming:
                     bucket.append(node.id)
+        # MET-439: surface the per-kind counts to Prometheus so a
+        # regression that re-introduces orphans paged automatically.
+        if self._collector is not None:
+            for _node_type, bucket, kind in dependents:
+                self._collector.set_twin_orphans(kind, len(bucket))
         return report
 
     @classmethod
@@ -303,12 +312,12 @@ class InMemoryTwinAPI(TwinAPI):
 
     @classmethod
     def create_with_collector(cls, collector: MetricsCollector | None = None) -> InMemoryTwinAPI:
-        """Factory that passes a MetricsCollector to graph and constraint engines."""
+        """Factory that passes a MetricsCollector to graph, constraint engines, and the TwinAPI."""
 
         graph = InMemoryGraphEngine(collector=collector)
         version = InMemoryVersionEngine(graph)
         constraints = InMemoryConstraintEngine(graph, collector=collector)
-        return cls(graph=graph, version=version, constraints=constraints)
+        return cls(graph=graph, version=version, constraints=constraints, collector=collector)
 
     @classmethod
     async def create_from_env(cls, collector: MetricsCollector | None = None) -> InMemoryTwinAPI:
@@ -355,7 +364,7 @@ class InMemoryTwinAPI(TwinAPI):
 
         version = InMemoryVersionEngine(graph)
         constraints = InMemoryConstraintEngine(graph, collector=collector)
-        return cls(graph=graph, version=version, constraints=constraints)
+        return cls(graph=graph, version=version, constraints=constraints, collector=collector)
 
     # --- Artifacts ---
 
