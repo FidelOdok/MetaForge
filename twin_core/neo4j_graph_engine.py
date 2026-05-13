@@ -38,6 +38,29 @@ class Neo4jQueryError(Exception):
     """Raised when a Neo4j query fails."""
 
 
+class UnscopedCypherError(ValueError):
+    """Raised by ``query_cypher`` when the call context names a project
+    but the caller's parameters don't bind ``project_id`` (MET-440).
+
+    Wrapping arbitrary user Cypher to inject a tenant filter is unsafe
+    (subqueries, OPTIONAL MATCH, UNION, etc. defeat naive prefix-and-AND
+    rewrites). The conservative default is to reject queries that don't
+    explicitly pass the scoping parameter, leaving the caller to either
+    add ``WHERE n.project_id = $project_id`` themselves or invoke
+    without a project context.
+    """
+
+    def __init__(self, project_id: Any) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"query_cypher refused: call context is scoped to project "
+            f"{project_id} but no 'project_id' parameter was bound. "
+            f"Add ``WHERE n.project_id = $project_id`` to the query and "
+            f"pass {{'project_id': str(ctx.project_id)}} in params, "
+            f"or run the query outside a scoped context."
+        )
+
+
 class Neo4jGraphEngine(GraphEngine):
     """Neo4j-backed implementation of the Digital Twin graph engine.
 
@@ -122,6 +145,11 @@ class Neo4jGraphEngine(GraphEngine):
             "CREATE CONSTRAINT node_id_unique IF NOT EXISTS FOR (n:Node) REQUIRE n.id IS UNIQUE",
             "CREATE INDEX node_type_index IF NOT EXISTS FOR (n:Node) ON (n.node_type)",
             "CREATE INDEX edge_type_index IF NOT EXISTS FOR ()-[r:EDGE]-() ON (r.edge_type)",
+            # MET-440: project_id partitioning. Every scoped read filters
+            # on this field, so an index keeps the partitioning cost off
+            # the hot path. ``IF NOT EXISTS`` makes the bootstrap
+            # idempotent across multiple gateway restarts.
+            "CREATE INDEX node_project_id_index IF NOT EXISTS FOR (n:Node) ON (n.project_id)",
         ]
         async with self._driver.session(database=self._database) as session:
             for stmt in statements:
@@ -139,6 +167,24 @@ class Neo4jGraphEngine(GraphEngine):
         """Raise if not connected."""
         if not self._connected or self._driver is None:
             raise Neo4jConnectionError("Not connected to Neo4j. Call connect() first.")
+
+    @staticmethod
+    def _enforce_project_scope(params: dict[str, Any]) -> None:
+        """Reject ``query_cypher`` when ctx is scoped but params aren't (MET-440).
+
+        Lazy-imports the context module so ``mcp_core`` stays a soft
+        dependency of ``twin_core`` — the engine works fine in tests
+        and offline tools where no MCP context has been installed.
+        """
+        try:
+            from mcp_core.context import current_context
+        except ImportError:  # pragma: no cover — defensive
+            return
+        ctx_project_id = current_context().project_id
+        if ctx_project_id is None:
+            return
+        if "project_id" not in params:
+            raise UnscopedCypherError(ctx_project_id)
 
     # ------------------------------------------------------------------
     # Serialization helpers
@@ -728,8 +774,16 @@ class Neo4jGraphEngine(GraphEngine):
         query: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Execute a raw Cypher query and return results as list of dicts."""
+        """Execute a raw Cypher query and return results as list of dicts.
+
+        MET-440 safety: when the active MCP call context names a
+        project_id, the caller MUST bind a ``project_id`` parameter so
+        the query is scoped. Without that binding we raise
+        :class:`UnscopedCypherError` rather than letting an unscoped
+        query leak rows from other tenants.
+        """
         self._assert_connected()
+        self._enforce_project_scope(params or {})
         t0 = time.monotonic()
         with tracer.start_as_current_span("neo4j.query") as span:
             span.set_attribute("db.statement", query)
