@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -183,6 +184,32 @@ class TwinAPI(ABC):
         Defined as the datasheet that is **not** superseded by any
         other datasheet (i.e. has no incoming ``SUPERSEDES`` edge).
         Returns ``None`` when no datasheet exists for the MPN.
+        """
+        ...
+
+    @abstractmethod
+    async def is_datasheet_stale(self, mpn: str, against: datetime) -> bool:
+        """Return True when the current datasheet for ``mpn`` is newer than ``against``.
+
+        ``against`` is typically the timestamp of a derived artifact
+        (extracted property, BOM entry, constraint value) — when the
+        upstream datasheet has been republished since, the derived
+        artifact's source is stale and should be re-extracted.
+
+        Returns False when no datasheet exists for the MPN or when the
+        current revision predates ``against``.
+        """
+        ...
+
+    @abstractmethod
+    async def list_stale_datasheets(self, since: datetime) -> list[Datasheet]:
+        """Every current datasheet whose ``published_at`` is after ``since``.
+
+        Returns the head-of-chain datasheet per MPN (the same set
+        ``get_current_datasheet`` walks per MPN) filtered to those
+        published more recently than the cutoff. Datasheets with a
+        null ``published_at`` are excluded — comparison is only
+        meaningful when both sides have timestamps.
         """
         ...
 
@@ -595,6 +622,31 @@ class InMemoryTwinAPI(TwinAPI):
             if not incoming:
                 return ds
         return None
+
+    async def is_datasheet_stale(self, mpn: str, against: datetime) -> bool:
+        current = await self.get_current_datasheet(mpn)
+        if current is None or current.published_at is None:
+            return False
+        return current.published_at > against
+
+    async def list_stale_datasheets(self, since: datetime) -> list[Datasheet]:
+        # Walk every MPN with at least one ingested datasheet and pull
+        # the head of its supersedes chain. Cheaper than re-running
+        # get_current_datasheet over candidates we've already seen.
+        all_datasheets = await self._graph.list_nodes(node_type=NodeType.DATASHEET)
+        seen_mpns: set[str] = set()
+        stale: list[Datasheet] = []
+        for ds in all_datasheets:
+            mpn = getattr(ds, "mpn", None)
+            if mpn is None or mpn in seen_mpns:
+                continue
+            seen_mpns.add(mpn)
+            current = await self.get_current_datasheet(mpn)
+            if current is None or current.published_at is None:
+                continue
+            if current.published_at > since:
+                stale.append(current)
+        return stale
 
     # --- Relationships ---
 
