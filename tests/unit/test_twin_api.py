@@ -396,6 +396,122 @@ class TestDatasheetIngest:
         )
         assert edges == []
 
+    async def test_is_stale_false_when_no_datasheet(self, api):
+        from datetime import UTC, datetime
+
+        assert await api.is_datasheet_stale("UNKNOWN-MPN", datetime.now(UTC)) is False
+
+    async def test_is_stale_false_when_published_at_missing(self, api):
+        from datetime import UTC, datetime
+
+        ds = _make_datasheet()
+        await api.ingest_datasheet(ds)
+        # _make_datasheet leaves published_at = None; comparison is
+        # not meaningful, so result is False (not stale).
+        assert await api.is_datasheet_stale(ds.mpn, datetime.now(UTC)) is False
+
+    async def test_is_stale_true_when_current_newer_than_against(self, api):
+        from datetime import UTC, datetime, timedelta
+
+        from twin_core.models.datasheet import Datasheet
+
+        # Datasheet published TODAY; agent extracted properties YESTERDAY.
+        published = datetime.now(UTC)
+        ds = Datasheet(
+            mpn="STM32-X",
+            manufacturer="ST",
+            revision="rev1",
+            file_hash="hash-stale",
+            page_count=1,
+            published_at=published,
+        )
+        await api.ingest_datasheet(ds)
+
+        against = published - timedelta(days=1)
+        assert await api.is_datasheet_stale("STM32-X", against) is True
+
+    async def test_is_stale_false_when_current_older_than_against(self, api):
+        from datetime import UTC, datetime, timedelta
+
+        from twin_core.models.datasheet import Datasheet
+
+        published = datetime.now(UTC) - timedelta(days=30)
+        ds = Datasheet(
+            mpn="STM32-Y",
+            manufacturer="ST",
+            revision="rev1",
+            file_hash="hash-fresh",
+            page_count=1,
+            published_at=published,
+        )
+        await api.ingest_datasheet(ds)
+
+        against = datetime.now(UTC)
+        assert await api.is_datasheet_stale("STM32-Y", against) is False
+
+    async def test_list_stale_returns_only_recent_revisions(self, api):
+        from datetime import UTC, datetime, timedelta
+
+        from twin_core.models.datasheet import Datasheet
+
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        fresh = Datasheet(
+            mpn="A",
+            manufacturer="X",
+            revision="rev1",
+            file_hash="ha",
+            page_count=1,
+            published_at=datetime.now(UTC),
+        )
+        old = Datasheet(
+            mpn="B",
+            manufacturer="X",
+            revision="rev1",
+            file_hash="hb",
+            page_count=1,
+            published_at=cutoff - timedelta(days=30),
+        )
+        await api.ingest_datasheet(fresh)
+        await api.ingest_datasheet(old)
+
+        stale = await api.list_stale_datasheets(since=cutoff)
+        ids = {d.id for d in stale}
+        assert fresh.id in ids
+        assert old.id not in ids
+
+    async def test_list_stale_returns_head_of_supersedes_chain(self, api):
+        """Only the *current* revision per MPN is considered, not historical."""
+        from datetime import UTC, datetime, timedelta
+
+        from twin_core.models.datasheet import Datasheet
+
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        v1 = Datasheet(
+            mpn="C",
+            manufacturer="X",
+            revision="rev1",
+            file_hash="hc1",
+            page_count=1,
+            published_at=cutoff - timedelta(days=30),
+        )
+        v2 = Datasheet(
+            mpn="C",
+            manufacturer="X",
+            revision="rev2",
+            file_hash="hc2",
+            page_count=1,
+            published_at=datetime.now(UTC),
+        )
+        await api.ingest_datasheet(v1)
+        await api.ingest_datasheet(v2)
+
+        stale = await api.list_stale_datasheets(since=cutoff)
+        # Only the head (v2) is reported, not v1, even though v1 is
+        # before cutoff. The list is purely about *current* freshness.
+        ids = {d.id for d in stale}
+        assert v2.id in ids
+        assert v1.id not in ids
+
     async def test_different_mpns_are_independent(self, api):
         a = _make_datasheet(mpn="STM32H745ZIT6", revision="rev1", file_hash="a")
         b = _make_datasheet(mpn="ESP32-WROOM-32E", revision="rev1", file_hash="b")
