@@ -138,10 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     touched = asyncio.run(_run(args, default_project_id))
 
     verb = "Would update" if args.dry_run else "Updated"
-    print(
-        f"{verb} {touched} node(s) with project_id={default_project_id} "
-        f"({args.graph_engine})."
-    )
+    print(f"{verb} {touched} node(s) with project_id={default_project_id} ({args.graph_engine}).")
     return 0
 
 
