@@ -447,9 +447,7 @@ class InMemoryTwinAPI(TwinAPI):
 
         return await self._graph.delete_node(work_product_id)
 
-    async def _dependents_that_would_orphan(
-        self, work_product_id: UUID
-    ) -> OrphanReport:
+    async def _dependents_that_would_orphan(self, work_product_id: UUID) -> OrphanReport:
         """Find dependents whose *only* neighbour is the target work product.
 
         Returns an :class:`OrphanReport` listing the IDs by category.
@@ -472,12 +470,10 @@ class InMemoryTwinAPI(TwinAPI):
                 if not edges:
                     continue  # already orphan — unrelated to this delete
                 touches_target = any(
-                    e.source_id == work_product_id or e.target_id == work_product_id
-                    for e in edges
+                    e.source_id == work_product_id or e.target_id == work_product_id for e in edges
                 )
                 other_endpoints = {
-                    e.source_id if e.source_id != node.id else e.target_id
-                    for e in edges
+                    e.source_id if e.source_id != node.id else e.target_id for e in edges
                 }
                 # Would orphan if removing the work_product clears every
                 # neighbour — i.e. the only neighbour is the target.
