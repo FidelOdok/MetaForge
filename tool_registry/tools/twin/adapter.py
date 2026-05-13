@@ -17,6 +17,7 @@ from uuid import UUID
 
 import structlog
 
+from mcp_core.context import current_context
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -349,8 +350,25 @@ class TwinServer(McpToolServer):
             span.set_attribute("twin.property", prop)
             span.set_attribute("twin.limit", limit)
 
-            cypher = f"MATCH (n:`{node_type}` {{`{prop}`: $value}}) RETURN n LIMIT $limit"
-            rows = await self._twin.query_cypher(cypher, {"value": value, "limit": limit})
+            # MET-441: when the call context names a project, inject a
+            # project_id binding so the Cypher only returns rows in
+            # that tenant. Safe because `project_id` is a parameter, not
+            # interpolated text. Without a context, no filter is added
+            # (admin path).
+            ctx_project_id = current_context().project_id
+            params: dict[str, Any] = {"value": value, "limit": limit}
+            if ctx_project_id is not None:
+                cypher = (
+                    f"MATCH (n:`{node_type}` "
+                    f"{{`{prop}`: $value, project_id: $project_id}}) "
+                    f"RETURN n LIMIT $limit"
+                )
+                params["project_id"] = str(ctx_project_id)
+                span.set_attribute("mcp.project_id", str(ctx_project_id))
+            else:
+                cypher = f"MATCH (n:`{node_type}` {{`{prop}`: $value}}) RETURN n LIMIT $limit"
+
+            rows = await self._twin.query_cypher(cypher, params)
             nodes: list[dict[str, Any]] = []
             for row in rows or []:
                 # Neo4j returns each row as a dict with the bound name.

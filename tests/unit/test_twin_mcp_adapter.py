@@ -278,6 +278,45 @@ class TestFindByProperty:
         )
         assert "error" in json.loads(raw)
 
+    async def test_cypher_injects_project_id_when_ctx_scoped(self) -> None:
+        """MET-441: when ctx.project_id is set, the generated Cypher
+        binds project_id alongside the user's property.
+        """
+        from uuid import uuid4
+
+        from mcp_core.context import McpCallContext, with_context
+
+        twin = _FakeTwin()
+        srv = TwinServer(twin=twin)
+        proj = uuid4()
+
+        with with_context(McpCallContext(project_id=proj)):
+            await srv.handle_request(
+                _request(
+                    "twin.find_by_property",
+                    {"node_type": "BOMItem", "property": "mpn", "value": "STM32"},
+                )
+            )
+
+        cypher, params = twin.cypher_calls[0]
+        assert "project_id: $project_id" in cypher
+        assert params["project_id"] == str(proj)
+        assert params["value"] == "STM32"
+
+    async def test_cypher_unscoped_when_ctx_has_no_project_id(self) -> None:
+        """Default ctx (no project_id) → no project_id filter injected."""
+        twin = _FakeTwin()
+        srv = TwinServer(twin=twin)
+        await srv.handle_request(
+            _request(
+                "twin.find_by_property",
+                {"node_type": "BOMItem", "property": "mpn", "value": "STM32"},
+            )
+        )
+        cypher, params = twin.cypher_calls[0]
+        assert "project_id" not in cypher
+        assert "project_id" not in params
+
 
 # ---------------------------------------------------------------------------
 # constraint_violations
