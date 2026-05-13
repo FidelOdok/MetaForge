@@ -77,18 +77,33 @@ def parse_datasheet_pdf(
     manufacturer: str,
     revision: str,
     source_url: str | None = None,
+    extract_tables: bool = True,
 ) -> Datasheet:
     """Build a populated :class:`Datasheet` model from a PDF on disk.
 
-    Reads the bytes, computes the file hash, counts pages via
-    pdfplumber, and returns a ``Datasheet`` ready to be passed to
-    :meth:`TwinAPI.ingest_datasheet`. The TwinAPI handles idempotency
-    and ``SUPERSEDES`` linking — this function is purely the PDF →
-    model transform.
+    Reads the bytes, computes the file hash, counts pages, and (when
+    ``extract_tables`` is True — the default) extracts structured table
+    rows into ``datasheet.metadata["tables"]`` so MET-445's typed
+    property extraction can read them directly. The TwinAPI handles
+    idempotency and ``SUPERSEDES`` linking — this function is purely
+    the PDF → model transform.
+
+    Pass ``extract_tables=False`` to skip the table pass (faster, e.g.
+    when ingesting a PDF that has no useful tables or when the caller
+    runs the extractor separately).
     """
+    from digital_twin.datasheets.tables import extract_tables as _extract_tables
+
     path = Path(pdf_path)
     pdf_bytes = path.read_bytes()
     pages = extract_pages(pdf_bytes)
+
+    metadata: dict = {}
+    if extract_tables:
+        tables = _extract_tables(pdf_bytes)
+        if tables:
+            metadata["tables"] = [_table_to_dict(t) for t in tables]
+            metadata["table_count"] = len(tables)
 
     return Datasheet(
         mpn=mpn,
@@ -98,4 +113,20 @@ def parse_datasheet_pdf(
         source_path=str(path),
         source_url=source_url,
         page_count=len(pages),
+        metadata=metadata,
     )
+
+
+def _table_to_dict(table) -> dict:  # type: ignore[no-untyped-def]
+    """Serialise a ``Table`` into a dict for round-trip through the Twin.
+
+    The Twin's ``Datasheet.metadata`` is schemaless. Keeping the shape
+    explicit here means MET-445's reader can rely on the keys without
+    importing the ``Table`` dataclass.
+    """
+    return {
+        "page": table.page,
+        "rows": table.rows,
+        "columns": table.columns,
+        "heading": table.heading,
+    }
