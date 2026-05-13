@@ -244,9 +244,24 @@ class ProjectServer(McpToolServer):
 
     async def handle_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.list") as span:
+            ctx_project_id = current_context().project_id
             projects = await self.backend.list_projects()
+
+            # MET-441: when the call context names a project, scope the
+            # list to that project only. Defaults to "no filter" so
+            # admin-style callers (no ctx) still see everything.
+            if ctx_project_id is not None:
+                ctx_id_str = str(ctx_project_id)
+                projects = [p for p in projects if p.id == ctx_id_str]
+                span.set_attribute("mcp.project_id", ctx_id_str)
+                span.set_attribute("project.scoped", True)
+
             span.set_attribute("project.result_count", len(projects))
-            logger.info("project_mcp_list", result_count=len(projects))
+            logger.info(
+                "project_mcp_list",
+                result_count=len(projects),
+                scoped_to=str(ctx_project_id) if ctx_project_id else None,
+            )
             return {
                 "projects": [_project_to_dict(p) for p in projects],
                 "total": len(projects),
@@ -269,6 +284,21 @@ class ProjectServer(McpToolServer):
                 project = await _find_by_name(self.backend, project_name)
             else:
                 raise ValueError("project.get: either 'id' or 'name' must be provided")
+
+            # MET-441: enforce the call context's project boundary. When
+            # the looked-up project is not the same as ctx.project_id we
+            # treat it as "not found" — leaking the id of an out-of-scope
+            # project via a hit/miss difference would be a side-channel.
+            if project is not None:
+                ctx_project_id = current_context().project_id
+                if ctx_project_id is not None and project.id != str(ctx_project_id):
+                    span.set_attribute("project.scoped_blocked", True)
+                    logger.info(
+                        "project_mcp_get_scoped_out",
+                        looked_up=project_id or project_name,
+                        ctx_project_id=str(ctx_project_id),
+                    )
+                    return None
 
             if project is None:
                 logger.info("project_mcp_get_not_found", lookup=project_id or project_name)

@@ -136,6 +136,67 @@ class TestLateBinding:
         assert server.backend is backend
 
 
+class TestProjectIdScoping:
+    """MET-441: ``current_context().project_id`` scopes list/get."""
+
+    async def test_list_unscoped_when_no_ctx_project_id(self, server: ProjectServer) -> None:
+        """Default ctx has no project_id → list returns everything."""
+        await _call(server, "project.create", {"name": "alpha"})
+        await _call(server, "project.create", {"name": "beta"})
+        result = await _call(server, "project.list", {})
+        assert result["total"] == 2
+        names = {p["name"] for p in result["projects"]}
+        assert names == {"alpha", "beta"}
+
+    async def test_list_scopes_to_ctx_project(self, server: ProjectServer) -> None:
+        """MET-441: when ctx.project_id is set, list returns only that project."""
+        from uuid import UUID
+
+        from mcp_core.context import McpCallContext, with_context
+
+        a = await _call(server, "project.create", {"name": "alpha"})
+        await _call(server, "project.create", {"name": "beta"})
+
+        ctx = McpCallContext(project_id=UUID(a["id"]))
+        with with_context(ctx):
+            result = await _call(server, "project.list", {})
+
+        assert result["total"] == 1
+        assert result["projects"][0]["name"] == "alpha"
+
+    async def test_get_returns_none_when_ctx_project_mismatch(self, server: ProjectServer) -> None:
+        """MET-441: project.get respects ctx.project_id boundary."""
+        import json
+        from uuid import UUID
+
+        from mcp_core.context import McpCallContext, with_context
+
+        a = await _call(server, "project.create", {"name": "alpha"})
+        b = await _call(server, "project.create", {"name": "beta"})
+
+        ctx = McpCallContext(project_id=UUID(a["id"]))
+        with with_context(ctx):
+            # Use raw call so we can see the unwrapped data=None envelope.
+            raw = await server.handle_request(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "1",
+                        "method": "tool/call",
+                        "params": {"tool_id": "project.get", "arguments": {"id": b["id"]}},
+                    }
+                )
+            )
+            response = json.loads(raw)
+            assert "error" not in response, response
+            assert response["result"]["data"] is None
+
+        # Same lookup without ctx scoping returns the project.
+        result = await _call(server, "project.get", {"id": b["id"]})
+        assert result is not None
+        assert result["name"] == "beta"
+
+
 class TestProtocolDuckTyping:
     """A duck-typed backend without inheriting ProjectBackend still works.
 
