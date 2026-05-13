@@ -90,8 +90,9 @@ class TestTelemetryMetricsGroupAccess:
         assert len(MetricsRegistry.telemetry_metrics()) == 5
 
     def test_all_metrics_returns_32(self) -> None:
-        # 32 originally; +5 retrieval metrics in MET-326; +1 knowledge in MET-401.
-        assert len(MetricsRegistry.all_metrics()) == 38
+        # 32 originally; +5 retrieval metrics in MET-326; +1 knowledge in MET-401;
+        # +1 twin in MET-439.
+        assert len(MetricsRegistry.all_metrics()) == 39
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -104,6 +105,7 @@ class TestTelemetryMetricsGroupAccess:
             + len(MetricsRegistry.constraint_metrics())
             + len(MetricsRegistry.retrieval_metrics())
             + len(MetricsRegistry.knowledge_metrics())
+            + len(MetricsRegistry.twin_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
