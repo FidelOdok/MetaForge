@@ -12,10 +12,13 @@ from digital_twin.datasheets.parser import (
     extract_pages,
     parse_datasheet_pdf,
 )
+from digital_twin.datasheets.tables import Table, extract_tables
 
 __all__ = [
     "PdfDependencyError",
+    "Table",
     "compute_file_hash",
     "extract_pages",
+    "extract_tables",
     "parse_datasheet_pdf",
 ]
