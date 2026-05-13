@@ -46,9 +46,7 @@ class TestSupersededRevision:
     def test_returns_none_for_single_history(self) -> None:
         from datetime import UTC, datetime
 
-        ds = _StubDatasheet(
-            "id1", "MPN", "X", "rev1", 1, "h" * 20, datetime.now(UTC)
-        )
+        ds = _StubDatasheet("id1", "MPN", "X", "rev1", 1, "h" * 20, datetime.now(UTC))
         assert _superseded_revision(ds, [ds]) is None
 
     def test_returns_prior_revision_label(self) -> None:
@@ -87,18 +85,14 @@ class TestFormatSummary:
     def test_idempotent_shape(self) -> None:
         from datetime import UTC, datetime
 
-        ds = _StubDatasheet(
-            "id1", "MPN", "X", "rev1", 1, "x" * 20, datetime.now(UTC)
-        )
+        ds = _StubDatasheet("id1", "MPN", "X", "rev1", 1, "x" * 20, datetime.now(UTC))
         out = _format_summary(ds, idempotent=True, superseded_revision=None)
         assert out["status"] == "already-ingested"
 
     def test_supersedes_shape(self) -> None:
         from datetime import UTC, datetime
 
-        ds = _StubDatasheet(
-            "id2", "MPN", "X", "rev2", 1, "y" * 20, datetime.now(UTC)
-        )
+        ds = _StubDatasheet("id2", "MPN", "X", "rev2", 1, "y" * 20, datetime.now(UTC))
         out = _format_summary(ds, idempotent=False, superseded_revision="rev1")
         assert out["supersedes"] == "rev1"
 
