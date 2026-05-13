@@ -247,3 +247,22 @@ groups:
             Check the LightRAG service, pgvector index health, and the
             reranker cold-start path before acknowledging.
           runbook_url: "observability/runbooks/knowledge-search-latency-slo.md"
+
+      # MET-439 — Twin graph hygiene. The orphan scan (MET-429) emits
+      # a per-kind gauge after every find_orphans() call. Any sustained
+      # non-zero value means an agent or migration left dependent nodes
+      # dangling — visible as cryptic None returns from get_work_product
+      # deep in agent reasoning, so paging here heads off the confusion.
+      - alert: TwinOrphansDetected
+        expr: metaforge_twin_orphans{kind=~".+"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Twin has dangling dependent nodes"
+          description: >-
+            {{ $labels.kind }} orphan count: {{ $value }}. Run
+            ``TwinAPI.find_orphans()`` to enumerate and either rebind or
+            cascade-delete via ``delete_work_product(id, cascade=True)``.
+          runbook_url: "observability/runbooks/twin-orphans.md"

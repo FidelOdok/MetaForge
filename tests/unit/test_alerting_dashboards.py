@@ -84,10 +84,11 @@ class TestAlertingRules:
         assert "metaforge_warning" in group_names
 
     def test_total_alert_rules_count(self) -> None:
-        """16 total alert rules (8 original + 5 anomaly + 2 retrieval-quality + 1 latency-SLO)."""
+        # 17 total: 8 original + 5 anomaly + 2 retrieval-quality
+        # + 1 latency-SLO + 1 twin-orphans (MET-439).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 16
+        assert len(rules) == 17
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -112,11 +113,12 @@ class TestAlertingRules:
         assert len(critical) == 6
 
     def test_seven_warning_rules(self) -> None:
-        """10 warning rules (5 original + 2 fleet + 2 retrieval-quality + 1 latency-SLO)."""
+        # 11 warning: 5 original + 2 fleet + 2 retrieval-quality
+        # + 1 latency-SLO + 1 twin-orphans (MET-439).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 10
+        assert len(warnings) == 11
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -151,6 +153,7 @@ class TestAlertingRules:
                 "OscillationDetected",
                 "RetrievalPrecisionRegression",
                 "SensorOutOfRange",
+                "TwinOrphansDetected",
             ]
         )
 

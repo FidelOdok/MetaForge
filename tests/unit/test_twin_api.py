@@ -159,6 +159,36 @@ class TestFindOrphans:
         report = await api.find_orphans()
         assert report.is_clean
 
+    async def test_find_orphans_emits_metrics_per_kind(self):
+        """MET-439: ``find_orphans`` calls ``set_twin_orphans`` once per kind.
+
+        The collector is optional. When supplied, every scan reports
+        the per-kind count so the ``metaforge_twin_orphans`` gauge
+        reflects the most recent state.
+        """
+        recorded: list[tuple[str, int]] = []
+
+        class _StubCollector:
+            def set_twin_orphans(self, kind: str, count: int) -> None:
+                recorded.append((kind, count))
+
+        api = InMemoryTwinAPI.create()
+        api._collector = _StubCollector()  # type: ignore[assignment]
+
+        # 1 orphan constraint, 0 of every other kind.
+        c = _make_constraint()
+        await api.create_constraint(c)
+
+        await api.find_orphans()
+
+        # One entry per dependent kind, with the right counts.
+        assert recorded == [
+            ("constraint", 1),
+            ("bom_item", 0),
+            ("design_element", 0),
+            ("component", 0),
+        ]
+
 
 # --- Project partitioning (MET-428) ---
 

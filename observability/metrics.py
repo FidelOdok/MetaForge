@@ -215,6 +215,18 @@ class MetricsRegistry:
         labels=["operation", "status"],
     )
 
+    # ── Twin graph hygiene metrics (MET-439) ─────────────────────────
+    TWIN_ORPHANS = MetricDefinition(
+        name="metaforge_twin_orphans",
+        type="gauge",
+        description=(
+            "Count of dangling dependent nodes (Constraint / BOMItem / "
+            "DesignElement / Component) with zero edges. Set by "
+            "TwinAPI.find_orphans() on every scan."
+        ),
+        labels=["kind"],
+    )
+
     # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
     MQTT_MESSAGES_RECEIVED_TOTAL = MetricDefinition(
         name="metaforge_mqtt_messages_received_total",
@@ -354,7 +366,13 @@ class MetricsRegistry:
             + cls.constraint_metrics()
             + cls.retrieval_metrics()
             + cls.knowledge_metrics()
+            + cls.twin_metrics()
         )
+
+    @classmethod
+    def twin_metrics(cls) -> list[MetricDefinition]:
+        """MET-439 twin graph hygiene metrics."""
+        return [cls.TWIN_ORPHANS]
 
     @classmethod
     def retrieval_metrics(cls) -> list[MetricDefinition]:
@@ -525,6 +543,19 @@ class MetricsCollector:
         gauge = self._instruments.get(MetricsRegistry.GATEWAY_ACTIVE_SESSIONS.name)
         if gauge is not None:
             gauge.add(count, attributes={"status": status})
+
+    # ── Twin graph hygiene (MET-439) ──────────────────────────────────
+
+    def set_twin_orphans(self, kind: str, count: int) -> None:
+        """Record the current orphan count for a dependent node kind.
+
+        ``kind`` is one of ``constraint``, ``bom_item``, ``design_element``,
+        ``component``. Called by ``TwinAPI.find_orphans()`` after every
+        scan so the gauge reflects the most recent state.
+        """
+        gauge = self._instruments.get(MetricsRegistry.TWIN_ORPHANS.name)
+        if gauge is not None:
+            gauge.add(count, attributes={"kind": kind})
 
     # ── Agent ──────────────────────────────────────────────────────────
 
