@@ -164,9 +164,7 @@ class TestProjectIdScoping:
         assert result["total"] == 1
         assert result["projects"][0]["name"] == "alpha"
 
-    async def test_get_returns_none_when_ctx_project_mismatch(
-        self, server: ProjectServer
-    ) -> None:
+    async def test_get_returns_none_when_ctx_project_mismatch(self, server: ProjectServer) -> None:
         """MET-441: project.get respects ctx.project_id boundary."""
         import json
         from uuid import UUID
