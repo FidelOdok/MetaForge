@@ -646,9 +646,9 @@ class TestEnsureIndexesProjectId:
         mock_session.run = AsyncMock()
         await engine._ensure_indexes()
         statements = [call.args[0] for call in mock_session.run.call_args_list]
-        assert any(
-            "node_project_id_index" in s and "n.project_id" in s for s in statements
-        ), f"project_id index missing from: {statements}"
+        assert any("node_project_id_index" in s and "n.project_id" in s for s in statements), (
+            f"project_id index missing from: {statements}"
+        )
 
 
 class TestQueryCypherProjectScopeEnforcement:
@@ -664,9 +664,7 @@ class TestQueryCypherProjectScopeEnforcement:
             with pytest.raises(UnscopedCypherError):
                 await engine.query_cypher("MATCH (n) RETURN n", {})
 
-    async def test_accepts_when_ctx_scoped_and_param_bound(
-        self, engine, mock_session
-    ) -> None:
+    async def test_accepts_when_ctx_scoped_and_param_bound(self, engine, mock_session) -> None:
         from uuid import uuid4
 
         from mcp_core.context import McpCallContext, with_context
