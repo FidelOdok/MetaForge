@@ -22,6 +22,8 @@ from typing import Any
 
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.formatters import format_output
+from cli.forge_cli.knowledge import handle_knowledge
+from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
 
@@ -144,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
     # -- sources -----------------------------------------------------------
     register_sources_subparser(subparsers)
 
+    # -- knowledge (MET-443) ----------------------------------------------
+    register_knowledge_subparser(subparsers)
+
     return parser
 
 
@@ -235,6 +240,7 @@ _HANDLERS = {
     "reject": handle_reject,
     "ingest": handle_ingest,
     "sources": handle_sources,
+    "knowledge": handle_knowledge,
 }
 
 
