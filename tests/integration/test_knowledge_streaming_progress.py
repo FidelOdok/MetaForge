@@ -62,6 +62,7 @@ class _FakeService:
         source_work_product_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        actor_id: str | None = None,
     ) -> IngestResult:
         self.ingest_calls.append(
             {
@@ -71,6 +72,7 @@ class _FakeService:
                 "source_work_product_id": source_work_product_id,
                 "metadata": metadata,
                 "project_id": project_id,
+                "actor_id": actor_id,
             }
         )
         return IngestResult(
@@ -86,6 +88,8 @@ class _FakeService:
         knowledge_type: KnowledgeType | None = None,
         filters: dict[str, Any] | None = None,
         project_id: UUID | None = None,
+        actor_id: str | None = None,
+        include_historical: bool = False,
     ) -> list[Any]:
         return []
 
