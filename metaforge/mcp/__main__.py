@@ -427,6 +427,14 @@ async def _bootstrap(
     # ``build_unified_server`` already accepts the kwarg — until now
     # only the gateway wired it.
     knowledge_service = await _build_knowledge_service()
+    # MET-433: bind the twin so ``knowledge.extract`` can resolve MPN
+    # → current Datasheet. ``set_twin`` is duck-typed (only the
+    # production LightRAG impl needs it); the unit-test fakes used
+    # in ``test_mcp_entrypoint`` mock it out.
+    if knowledge_service is not None:
+        set_twin = getattr(knowledge_service, "set_twin", None)
+        if set_twin is not None:
+            set_twin(twin)
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,

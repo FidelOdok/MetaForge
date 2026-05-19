@@ -41,6 +41,7 @@ import structlog
 
 from digital_twin.knowledge.chunker import chunk_csv
 from digital_twin.knowledge.service import (
+    ExtractedProperties,
     IngestResult,
     KnowledgeService,
     SearchHit,
@@ -374,10 +375,26 @@ class LightRAGKnowledgeService:
         # cross-encoder weights.
         self._reranker_enabled = reranker_enabled
         self._reranker: Any = None
+        # MET-433: optional Twin reference for ``extract_properties``.
+        # Late-bound via ``set_twin`` because the gateway constructs
+        # the service before the twin exists in the lifespan order.
+        # ``extract_properties`` raises ``RuntimeError`` if called
+        # before set_twin lands.
+        self._twin: Any = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def set_twin(self, twin: Any) -> None:
+        """Bind a ``TwinAPI`` after construction (MET-433).
+
+        Required for ``extract_properties`` — that method looks up the
+        current ``Datasheet`` for an MPN to read its
+        ``metadata["tables"]``. ``search`` and ``ingest`` are unaffected.
+        """
+        self._twin = twin
+        logger.info("knowledge_service_twin_bound", twin=type(twin).__name__)
 
     async def initialize(self) -> None:
         """Set up the LightRAG instance + pgvector backends.
@@ -1325,6 +1342,62 @@ class LightRAGKnowledgeService:
             self._content_sha_index[(scope_project_id, source_path)] = sha
             return sha
         return None
+
+    async def extract_properties(
+        self,
+        mpn: str,
+        properties: list[str],
+        *,
+        aliases: dict[str, list[str]] | None = None,
+    ) -> ExtractedProperties:
+        """Tier-1 typed-property extraction for the current datasheet of ``mpn`` (MET-433).
+
+        Thin wrapper around ``extract_properties_for_mpn``: looks up
+        the head-of-supersedes-chain datasheet via the bound
+        ``TwinAPI``, reads its ``metadata["tables"]``, and runs each
+        requested property through Tier-1 matching. Span attributes
+        include the MPN, requested property count, and the hit/miss
+        per property so dashboards can show extraction success rates.
+
+        Raises ``RuntimeError`` when ``set_twin`` hasn't been called —
+        callers in the gateway and the standalone MCP entrypoint are
+        responsible for binding the twin before serving requests.
+        """
+        from digital_twin.knowledge.property_extractor import (
+            extract_properties_for_mpn,
+        )
+
+        if self._twin is None:
+            raise RuntimeError(
+                "LightRAGKnowledgeService.extract_properties was called "
+                "before set_twin(); ensure the gateway / MCP entrypoint "
+                "wires the twin in after bootstrap."
+            )
+
+        with tracer.start_as_current_span("lightrag.extract_properties") as span:
+            span.set_attribute("knowledge.mpn", mpn)
+            span.set_attribute("knowledge.property_count", len(properties))
+            result = await extract_properties_for_mpn(
+                self._twin, mpn, properties, aliases=aliases
+            )
+            span.set_attribute("knowledge.mpn_found", result.mpn_found)
+            if result.mpn_found:
+                span.set_attribute(
+                    "knowledge.properties_found",
+                    sum(1 for item in result.items if item.found),
+                )
+            logger.info(
+                "lightrag_extract_properties",
+                mpn=mpn,
+                requested=len(properties),
+                mpn_found=result.mpn_found,
+                found=(
+                    sum(1 for item in result.items if item.found)
+                    if result.mpn_found
+                    else 0
+                ),
+            )
+            return result
 
     async def health_check(self) -> dict[str, Any]:
         if not self._initialized:

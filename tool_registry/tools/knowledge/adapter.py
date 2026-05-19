@@ -38,6 +38,7 @@ import structlog
 
 # L1 contract import — see module docstring for the layer-rule rationale.
 from digital_twin.knowledge.service import (
+    ExtractedProperties,
     IngestResult,
     KnowledgeService,
     SearchHit,
@@ -466,6 +467,97 @@ class KnowledgeServer(McpToolServer):
             handler=self.handle_ingest,
         )
 
+        # MET-433: typed-property extraction surface. Wraps the
+        # service-side ``extract_properties`` (LightRAG impl) which
+        # itself walks the head-of-supersedes-chain datasheet for the
+        # MPN and runs Tier-1 table-cell matching per requested
+        # property. Returns one entry per property in input order.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="knowledge.extract",
+                adapter_id="knowledge",
+                name="Extract Typed Properties",
+                description=(
+                    "Look up the current datasheet for ``mpn`` and "
+                    "extract typed values for the named ``properties``. "
+                    "Each result carries a value/unit, confidence, "
+                    "extraction_method (verbatim/llm_inferred/derived/"
+                    "not_found), and citation chain "
+                    "(source / revision / page / table / row). Used by "
+                    "the constraint engine and agent workflows that "
+                    "need typed answers rather than text chunks."
+                ),
+                capability="knowledge_extract",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mpn": {
+                            "type": "string",
+                            "description": (
+                                "Manufacturer Part Number. The current "
+                                "(head-of-supersedes-chain) Datasheet "
+                                "for this MPN is the extraction source."
+                            ),
+                        },
+                        "properties": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "description": (
+                                "Property names to extract. Matched "
+                                "case-insensitively against table cells; "
+                                "see ``aliases`` for widening the match set."
+                            ),
+                        },
+                        "aliases": {
+                            "type": "object",
+                            "description": (
+                                "Optional alias map. Maps a requested "
+                                "property name to a list of alternative "
+                                "labels Tier-1 should also accept "
+                                '(e.g. ``{"supply_voltage": ["VCC", "VDD"]}``). '
+                                "Aliases widen matches without changing scoring."
+                            ),
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                    },
+                    "required": ["mpn", "properties"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "mpn": {"type": "string"},
+                        "mpn_found": {"type": "boolean"},
+                        "datasheet_revision": {"type": ["string", "null"]},
+                        "datasheet_published_at": {"type": ["string", "null"]},
+                        "datasheet_source_path": {"type": ["string", "null"]},
+                        "properties": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "value": {"type": ["string", "null"]},
+                                    "unit": {"type": ["string", "null"]},
+                                    "confidence": {"type": "number"},
+                                    "extraction_method": {"type": "string"},
+                                    "page": {"type": ["integer", "null"]},
+                                    "heading": {"type": ["string", "null"]},
+                                    "table_row": {"type": ["integer", "null"]},
+                                    "conditions": {"type": "object"},
+                                },
+                            },
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=30),
+            ),
+            handler=self.handle_extract,
+        )
+
     # ------------------------------------------------------------------
     # Resource registration (MET-384)
     # ------------------------------------------------------------------
@@ -716,6 +808,76 @@ class KnowledgeServer(McpToolServer):
                     result_count=len(hits),
                 )
             return {"hits": [_hit_to_dict(h) for h in hits]}
+
+    async def handle_extract(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """MET-433: knowledge.extract — typed properties from current datasheet."""
+        with tracer.start_as_current_span("knowledge.mcp.extract") as span:
+            mpn = arguments.get("mpn")
+            if not mpn or not isinstance(mpn, str):
+                raise ValueError(
+                    "knowledge.extract: 'mpn' is required and must be a string"
+                )
+            properties = arguments.get("properties")
+            if not isinstance(properties, list) or not properties:
+                raise ValueError(
+                    "knowledge.extract: 'properties' is required and must be "
+                    "a non-empty array of strings"
+                )
+            for name in properties:
+                if not isinstance(name, str):
+                    raise ValueError(
+                        "knowledge.extract: every entry in 'properties' must "
+                        "be a string"
+                    )
+
+            raw_aliases = arguments.get("aliases")
+            aliases: dict[str, list[str]] | None = None
+            if raw_aliases is not None:
+                if not isinstance(raw_aliases, dict):
+                    raise ValueError(
+                        "knowledge.extract: 'aliases' must be an object "
+                        "mapping property name → list of alternative labels"
+                    )
+                aliases = {}
+                for prop_name, labels in raw_aliases.items():
+                    if not isinstance(labels, list) or not all(
+                        isinstance(label, str) for label in labels
+                    ):
+                        raise ValueError(
+                            "knowledge.extract: each aliases value must be a "
+                            "list of strings"
+                        )
+                    aliases[prop_name] = list(labels)
+
+            span.set_attribute("knowledge.mpn", mpn)
+            span.set_attribute("knowledge.property_count", len(properties))
+            ctx = current_context()
+            if ctx.project_id is not None:
+                span.set_attribute("knowledge.project_id", str(ctx.project_id))
+                span.set_attribute("mcp.project_id", str(ctx.project_id))
+            actor_id = _resolve_actor_id(ctx.actor_id)
+            if actor_id is not None:
+                span.set_attribute("mcp.actor_id", actor_id)
+
+            result = await self.service.extract_properties(
+                mpn=mpn,
+                properties=properties,
+                aliases=aliases,
+            )
+            span.set_attribute("knowledge.mpn_found", result.mpn_found)
+            logger.info(
+                "knowledge_extract",
+                mpn=mpn,
+                requested=len(properties),
+                mpn_found=result.mpn_found,
+                found=(
+                    sum(1 for item in result.items if item.found)
+                    if result.mpn_found
+                    else 0
+                ),
+                actor_id=actor_id,
+            )
+            return _extracted_properties_to_dict(result)
 
     async def handle_ingest(self, arguments: dict[str, Any]) -> dict[str, Any]:
         # MET-388 (L1-B2): batch mode short-circuits when ``files`` is set.
@@ -973,6 +1135,40 @@ def _ingest_result_to_dict(result: IngestResult) -> dict[str, Any]:
         "entry_ids": [str(eid) for eid in result.entry_ids],
         "chunks_indexed": result.chunks_indexed,
         "source_path": result.source_path,
+    }
+
+
+def _extracted_properties_to_dict(result: ExtractedProperties) -> dict[str, Any]:
+    """Wire-safe serialization of an ``ExtractedProperties`` (MET-433).
+
+    The Protocol returns ``items: list[ExtractedProperty]`` (input order
+    preserved). The MCP wire shape projects this to a ``properties`` dict
+    keyed by ``property_name`` so clients can do ``response["properties"]
+    ["operating_temperature_max_c"]`` without scanning a list. Datasheet
+    metadata rides at the top level so callers building a citation chain
+    don't have to repeat it per-property.
+    """
+    published = result.datasheet_published_at
+    published_str = published.isoformat() if isinstance(published, datetime) else None
+    properties_dict: dict[str, dict[str, Any]] = {}
+    for item in result.items:
+        properties_dict[item.property_name] = {
+            "value": item.value,
+            "unit": item.unit,
+            "confidence": item.confidence,
+            "extraction_method": str(item.extraction_method),
+            "page": item.page,
+            "heading": item.heading,
+            "table_row": item.table_row,
+            "conditions": dict(item.conditions or {}),
+        }
+    return {
+        "mpn": result.mpn,
+        "mpn_found": result.mpn_found,
+        "datasheet_revision": result.datasheet_revision,
+        "datasheet_published_at": published_str,
+        "datasheet_source_path": result.datasheet_source_path,
+        "properties": properties_dict,
     }
 
 
