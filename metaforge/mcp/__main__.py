@@ -346,15 +346,73 @@ def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool
 # ---------------------------------------------------------------------------
 
 
+async def _build_knowledge_service() -> Any:
+    """Mirror ``api_gateway/server.py``'s ``create_knowledge_service`` wiring.
+
+    Returns ``None`` when ``DATABASE_URL`` is unset — the L1 knowledge
+    layer requires Postgres + pgvector, and the rest of the MCP surface
+    (cadquery / freecad / calculix / twin / project) must stay usable
+    in that mode. Errors during init are logged and swallowed for the
+    same reason.
+
+    When the service is returned, ``initialize()`` has already been
+    called — callers register it directly into ``build_unified_server``.
+    Teardown is the caller's responsibility (see ``main`` below).
+    """
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return None
+    try:
+        from digital_twin.knowledge import create_knowledge_service
+
+        # LightRAG's pgvector client wants ``postgresql://``; the gateway
+        # publishes the asyncpg URL because SQLAlchemy needs that prefix.
+        dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        reranker_enabled = os.environ.get(
+            "KNOWLEDGE_RERANKER_ENABLED", "false"
+        ).lower() in ("1", "true", "yes")
+        service = create_knowledge_service(
+            "lightrag",
+            working_dir=os.environ.get(
+                "METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"
+            ),
+            postgres_dsn=dsn,
+            reranker_enabled=reranker_enabled,
+        )
+        await service.initialize()  # type: ignore[attr-defined]
+        logger.info(
+            "mcp_knowledge_service_initialised",
+            reranker_enabled=reranker_enabled,
+        )
+        return service
+    except Exception as exc:
+        logger.warning("mcp_knowledge_service_init_failed", error=str(exc))
+        return None
+
+
+async def _close_knowledge_service(service: Any) -> None:
+    """Best-effort teardown — mirrors twin.aclose() semantics."""
+    if service is None:
+        return
+    close = getattr(service, "close", None)
+    if close is None:
+        return
+    try:
+        await close()
+    except Exception as exc:
+        logger.warning("mcp_knowledge_service_close_failed", error=str(exc))
+
+
 async def _bootstrap(
     args: argparse.Namespace,
-) -> tuple[UnifiedMcpServer, InMemoryTwinAPI]:
-    """Return the unified MCP server **and** the twin that backs it.
+) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any]:
+    """Return the unified MCP server, the twin, and the knowledge service.
 
-    Callers must close the twin (``await twin.aclose()``) when the
-    transport loop exits — otherwise the Neo4j driver and any aiohttp
-    sessions opened during bootstrap leak across subprocess restarts
-    (MET-425).
+    Callers must close the twin (``await twin.aclose()``) and the
+    knowledge service (``await _close_knowledge_service(svc)``) when
+    the transport loop exits — otherwise the Neo4j driver, aiohttp
+    sessions, and the LightRAG pgvector pool leak across subprocess
+    restarts (MET-425).
     """
     from api_gateway.projects.backend import create_project_backend
     from twin_core.api import InMemoryTwinAPI
@@ -364,13 +422,19 @@ async def _bootstrap(
     # `project.*` MCP tools see / write the same store. Falls back to
     # in-memory when DATABASE_URL is not set, matching the gateway.
     project_backend = await create_project_backend()
+    # MET-433: close the bootstrap gap so ``python -m metaforge.mcp``
+    # exposes ``knowledge.*`` tools when ``DATABASE_URL`` is set.
+    # ``build_unified_server`` already accepts the kwarg — until now
+    # only the gateway wired it.
+    knowledge_service = await _build_knowledge_service()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
+        knowledge_service=knowledge_service,
         twin=twin,
         constraint_engine=twin.constraints,
         project_backend=project_backend,
     )
-    return server, twin
+    return server, twin, knowledge_service
 
 
 def _configure_logging_for_transport(transport: str) -> None:
@@ -408,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.transport == "stdio":
 
         async def _stdio() -> None:
-            server, twin = await _bootstrap(args)
+            server, twin, knowledge_service = await _bootstrap(args)
             try:
                 await run_stdio(server)
             finally:
@@ -416,19 +480,22 @@ def main(argv: list[str] | None = None) -> int:
                 # resources so subprocess respawns from the UAT harness
                 # don't see "address in use" or ResourceWarning leaks.
                 await twin.aclose()
+                # MET-433: same hygiene for the LightRAG pgvector pool.
+                await _close_knowledge_service(knowledge_service)
 
         asyncio.run(_stdio())
     else:
         # HTTP path keeps the two-step flow: ``run_http`` runs uvicorn
         # which manages its own loop and only consumes the bootstrapped
         # server's introspection surface.
-        server, twin = asyncio.run(_bootstrap(args))
+        server, twin, knowledge_service = asyncio.run(_bootstrap(args))
         try:
             run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
         finally:
             # MET-425: best-effort teardown after uvicorn returns. The
             # neo4j async driver tolerates cross-loop close in practice.
             asyncio.run(twin.aclose())
+            asyncio.run(_close_knowledge_service(knowledge_service))
     return 0
 
 
