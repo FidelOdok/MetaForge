@@ -540,6 +540,18 @@ async def _init_orchestrator(app: FastAPI) -> None:
     app.state.event_bus = event_bus
     app.state.action_workflows = ACTION_WORKFLOWS
 
+    # MET-433: late-bind the twin into the knowledge service so
+    # ``knowledge.extract`` can resolve MPN → current Datasheet. The
+    # knowledge service is initialised in ``_init_knowledge_store``
+    # which runs *before* the twin exists in the lifespan order, so
+    # the binding has to happen here.
+    knowledge_service = getattr(app.state, "knowledge_service", None)
+    if knowledge_service is not None:
+        set_twin = getattr(knowledge_service, "set_twin", None)
+        if set_twin is not None:
+            set_twin(twin)
+            logger.info("knowledge_service_twin_late_bound")
+
     # Register Neo4j health check if using Neo4j backend
     _graph_engine = twin._graph  # noqa: SLF001
     if hasattr(_graph_engine, "health_check"):

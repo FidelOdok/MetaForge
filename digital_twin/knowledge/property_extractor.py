@@ -37,7 +37,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from digital_twin.knowledge.service import ExtractedProperties
 
 
 class ExtractionMethod(StrEnum):
@@ -135,6 +138,58 @@ def extract_property_from_tables(
         value=None,
         confidence=0.0,
         extraction_method=ExtractionMethod.NOT_FOUND,
+    )
+
+
+async def extract_properties_for_mpn(
+    twin: Any,
+    mpn: str,
+    properties: list[str],
+    *,
+    aliases: dict[str, list[str]] | None = None,
+) -> ExtractedProperties:
+    """Resolve ``mpn`` to its current datasheet and extract typed values.
+
+    Wires the MET-446 head-of-supersedes-chain lookup
+    (``twin.get_current_datasheet``) into MET-445's
+    ``extract_property_from_tables``. Used by ``knowledge.extract``
+    (MET-433) and the constraint engine's elec-power-budget rule.
+
+    ``aliases`` maps a requested property name to alternative labels
+    the same Tier-1 matcher should accept.
+
+    Returns an ``ExtractedProperties`` with one ``ExtractedProperty``
+    per input property name (input order preserved). When no current
+    datasheet exists for ``mpn``, ``mpn_found=False`` and ``items``
+    is empty.
+    """
+    from digital_twin.knowledge.service import ExtractedProperties
+
+    datasheet = await twin.get_current_datasheet(mpn)
+    if datasheet is None:
+        return ExtractedProperties(
+            mpn=mpn,
+            mpn_found=False,
+            datasheet_revision=None,
+            datasheet_published_at=None,
+            datasheet_source_path=None,
+            items=[],
+        )
+
+    tables = (datasheet.metadata or {}).get("tables") or []
+    alias_map = aliases or {}
+    items = [
+        extract_property_from_tables(tables, name, aliases=alias_map.get(name))
+        for name in properties
+    ]
+
+    return ExtractedProperties(
+        mpn=mpn,
+        mpn_found=True,
+        datasheet_revision=datasheet.revision,
+        datasheet_published_at=datasheet.published_at,
+        datasheet_source_path=datasheet.source_url or datasheet.source_path or None,
+        items=items,
     )
 
 

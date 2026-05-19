@@ -15,12 +15,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from digital_twin.knowledge.types import KnowledgeType
 
+if TYPE_CHECKING:
+    from digital_twin.knowledge.property_extractor import ExtractedProperty
+
 __all__ = [
+    "ExtractedProperties",
     "IngestResult",
     "KnowledgeService",
     "SearchHit",
@@ -59,6 +63,30 @@ class SearchHit:
     metadata: dict[str, Any] = field(default_factory=dict)
     knowledge_type: KnowledgeType | None = None
     source_work_product_id: UUID | None = None
+
+
+@dataclass
+class ExtractedProperties:
+    """Outcome of an ``extract_properties()`` call (MET-433).
+
+    One ``ExtractedProperty`` per requested property name, in input
+    order. ``mpn_found`` distinguishes "no current datasheet ingested
+    for this MPN yet" (``False`` — ``items`` is empty) from "datasheet
+    found but the requested properties weren't located in it" (``True``
+    — ``items`` contains ``NOT_FOUND`` entries). Lets callers branch on
+    a single field instead of inspecting the item list.
+
+    The four ``datasheet_*`` fields ride along so callers building a
+    citation chain don't have to round-trip back to the Twin for the
+    source path / revision / publication date.
+    """
+
+    mpn: str
+    mpn_found: bool
+    datasheet_revision: str | None
+    datasheet_published_at: datetime | None
+    datasheet_source_path: str | None
+    items: list[ExtractedProperty] = field(default_factory=list)
 
 
 @dataclass
@@ -169,5 +197,33 @@ class KnowledgeService(Protocol):
         limit: int = 100,
         offset: int = 0,
     ) -> list[SourceSummary]: ...
+
+    async def extract_properties(
+        self,
+        mpn: str,
+        properties: list[str],
+        *,
+        aliases: dict[str, list[str]] | None = None,
+    ) -> ExtractedProperties:
+        """Typed-property extraction from the current datasheet for ``mpn`` (MET-433).
+
+        Tier 1: literal table-cell lookup (MET-445) — confidence 1.0,
+        ``extraction_method="verbatim"``. Tier 2 (LLM-inferred) and
+        Tier 3 (derived from related fields) land in follow-ups under
+        MET-422; the return shape stays the same, only the per-item
+        ``extraction_method`` and ``confidence`` change.
+
+        ``aliases`` maps a requested property name to alternative
+        labels Tier 1 should also accept (e.g.
+        ``{"supply_voltage": ["VCC", "VDD", "Supply Voltage"]}``).
+        Aliases widen the match set without altering scoring.
+
+        Returns an ``ExtractedProperties`` with one entry per requested
+        property, in input order, even when the property isn't found
+        (``value=None``, ``extraction_method=NOT_FOUND``). When no
+        current datasheet exists for ``mpn``, ``mpn_found`` is False
+        and ``items`` is empty — distinct from "all not found".
+        """
+        ...
 
     async def health_check(self) -> dict[str, Any]: ...
