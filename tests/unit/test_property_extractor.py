@@ -45,6 +45,7 @@ class _StubDatasheet:
         self.source_url = source_url
         self.metadata: dict[str, Any] = {"tables": tables or []}
 
+
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
@@ -203,9 +204,7 @@ class TestExtractPropertiesForMpn:
         the property wasn't in any table" — both are valid states.
         """
         twin = _StubTwin(datasheet=None)
-        result = await extract_properties_for_mpn(
-            twin, "ESP32-WROOM-32", ["operating_voltage"]
-        )
+        result = await extract_properties_for_mpn(twin, "ESP32-WROOM-32", ["operating_voltage"])
         assert twin.calls == ["ESP32-WROOM-32"]
         assert result.mpn_found is False
         assert result.items == []

@@ -1377,9 +1377,7 @@ class LightRAGKnowledgeService:
         with tracer.start_as_current_span("lightrag.extract_properties") as span:
             span.set_attribute("knowledge.mpn", mpn)
             span.set_attribute("knowledge.property_count", len(properties))
-            result = await extract_properties_for_mpn(
-                self._twin, mpn, properties, aliases=aliases
-            )
+            result = await extract_properties_for_mpn(self._twin, mpn, properties, aliases=aliases)
             span.set_attribute("knowledge.mpn_found", result.mpn_found)
             if result.mpn_found:
                 span.set_attribute(
@@ -1391,11 +1389,7 @@ class LightRAGKnowledgeService:
                 mpn=mpn,
                 requested=len(properties),
                 mpn_found=result.mpn_found,
-                found=(
-                    sum(1 for item in result.items if item.found)
-                    if result.mpn_found
-                    else 0
-                ),
+                found=(sum(1 for item in result.items if item.found) if result.mpn_found else 0),
             )
             return result
 

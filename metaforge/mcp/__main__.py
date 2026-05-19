@@ -368,14 +368,14 @@ async def _build_knowledge_service() -> Any:
         # LightRAG's pgvector client wants ``postgresql://``; the gateway
         # publishes the asyncpg URL because SQLAlchemy needs that prefix.
         dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
-        reranker_enabled = os.environ.get(
-            "KNOWLEDGE_RERANKER_ENABLED", "false"
-        ).lower() in ("1", "true", "yes")
+        reranker_enabled = os.environ.get("KNOWLEDGE_RERANKER_ENABLED", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         service = create_knowledge_service(
             "lightrag",
-            working_dir=os.environ.get(
-                "METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"
-            ),
+            working_dir=os.environ.get("METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"),
             postgres_dsn=dsn,
             reranker_enabled=reranker_enabled,
         )

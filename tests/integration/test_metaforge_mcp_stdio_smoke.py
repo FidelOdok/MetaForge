@@ -60,9 +60,7 @@ def _start_subprocess() -> subprocess.Popen[str]:
         if not line:
             if proc.poll() is not None:
                 stdout = proc.stdout.read() if proc.stdout else ""
-                pytest.fail(
-                    f"metaforge.mcp exited before ready. stdout={stdout!r}"
-                )
+                pytest.fail(f"metaforge.mcp exited before ready. stdout={stdout!r}")
             continue
         if _READY_LINE in line:
             return proc
@@ -119,8 +117,7 @@ def test_tools_list_lists_core_adapters() -> None:
         }
         missing = required - names
         assert not missing, (
-            f"core adapter tools missing from stdio surface: {missing}; "
-            f"present: {sorted(names)}"
+            f"core adapter tools missing from stdio surface: {missing}; present: {sorted(names)}"
         )
     finally:
         if proc.stdin is not None:
@@ -149,8 +146,7 @@ def test_knowledge_search_round_trip() -> None:
         list_response = _call(proc, "tools/list")
         names = {t["name"] for t in list_response["result"]["tools"]}
         assert "knowledge.search" in names, (
-            "knowledge.search missing — bootstrap gap re-opened. "
-            f"Present: {sorted(names)}"
+            f"knowledge.search missing — bootstrap gap re-opened. Present: {sorted(names)}"
         )
 
         call_response = _call(

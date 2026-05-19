@@ -814,9 +814,7 @@ class KnowledgeServer(McpToolServer):
         with tracer.start_as_current_span("knowledge.mcp.extract") as span:
             mpn = arguments.get("mpn")
             if not mpn or not isinstance(mpn, str):
-                raise ValueError(
-                    "knowledge.extract: 'mpn' is required and must be a string"
-                )
+                raise ValueError("knowledge.extract: 'mpn' is required and must be a string")
             properties = arguments.get("properties")
             if not isinstance(properties, list) or not properties:
                 raise ValueError(
@@ -826,8 +824,7 @@ class KnowledgeServer(McpToolServer):
             for name in properties:
                 if not isinstance(name, str):
                     raise ValueError(
-                        "knowledge.extract: every entry in 'properties' must "
-                        "be a string"
+                        "knowledge.extract: every entry in 'properties' must be a string"
                     )
 
             raw_aliases = arguments.get("aliases")
@@ -844,8 +841,7 @@ class KnowledgeServer(McpToolServer):
                         isinstance(label, str) for label in labels
                     ):
                         raise ValueError(
-                            "knowledge.extract: each aliases value must be a "
-                            "list of strings"
+                            "knowledge.extract: each aliases value must be a list of strings"
                         )
                     aliases[prop_name] = list(labels)
 
@@ -870,11 +866,7 @@ class KnowledgeServer(McpToolServer):
                 mpn=mpn,
                 requested=len(properties),
                 mpn_found=result.mpn_found,
-                found=(
-                    sum(1 for item in result.items if item.found)
-                    if result.mpn_found
-                    else 0
-                ),
+                found=(sum(1 for item in result.items if item.found) if result.mpn_found else 0),
                 actor_id=actor_id,
             )
             return _extracted_properties_to_dict(result)

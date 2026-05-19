@@ -32,9 +32,7 @@ class TestBuildKnowledgeService:
         client speaks raw libpq. Same translation MET-433 needs the
         standalone MCP to perform.
         """
-        monkeypatch.setenv(
-            "DATABASE_URL", "postgresql+asyncpg://u:p@db:5432/forge"
-        )
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@db:5432/forge")
         monkeypatch.delenv("KNOWLEDGE_RERANKER_ENABLED", raising=False)
         monkeypatch.delenv("METAFORGE_LIGHTRAG_WORKDIR", raising=False)
 
@@ -75,9 +73,7 @@ class TestBuildKnowledgeService:
         _, kwargs = mock_factory.call_args
         assert kwargs["working_dir"] == "/tmp/custom-rag"
 
-    async def test_swallows_init_failures(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_swallows_init_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A failed init must not take down the rest of the MCP surface.
 
         The standalone MCP serves cadquery/freecad/calculix/twin/project

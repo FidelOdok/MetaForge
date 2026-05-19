@@ -128,9 +128,7 @@ class _FakeService:
         )
         from digital_twin.knowledge.service import ExtractedProperties
 
-        self.extract_calls.append(
-            {"mpn": mpn, "properties": list(properties), "aliases": aliases}
-        )
+        self.extract_calls.append({"mpn": mpn, "properties": list(properties), "aliases": aliases})
         items = [
             ExtractedProperty(
                 property_name=name,
@@ -143,9 +141,7 @@ class _FakeService:
                     else ExtractionMethod.NOT_FOUND
                 ),
                 page=12 if name == "supply_voltage" else None,
-                heading="Electrical Characteristics"
-                if name == "supply_voltage"
-                else None,
+                heading="Electrical Characteristics" if name == "supply_voltage" else None,
                 table_row=4 if name == "supply_voltage" else None,
             )
             for name in properties
@@ -359,10 +355,7 @@ class TestExtractHandler:
         manifest = registration.manifest
         assert manifest.adapter_id == "knowledge"
         assert manifest.input_schema["required"] == ["mpn", "properties"]
-        assert (
-            manifest.input_schema["properties"]["properties"]["items"]["type"]
-            == "string"
-        )
+        assert manifest.input_schema["properties"]["properties"]["items"]["type"] == "string"
 
     async def test_delegates_to_service_and_emits_dict_wire_shape(
         self, server: KnowledgeServer
@@ -417,15 +410,11 @@ class TestExtractHandler:
         with pytest.raises(ValueError, match="'mpn'"):
             await server.handle_extract({"properties": ["x"]})
 
-    async def test_empty_properties_array_raises(
-        self, server: KnowledgeServer
-    ) -> None:
+    async def test_empty_properties_array_raises(self, server: KnowledgeServer) -> None:
         with pytest.raises(ValueError, match="'properties'"):
             await server.handle_extract({"mpn": "X", "properties": []})
 
-    async def test_non_string_property_name_raises(
-        self, server: KnowledgeServer
-    ) -> None:
+    async def test_non_string_property_name_raises(self, server: KnowledgeServer) -> None:
         with pytest.raises(ValueError, match="must be a string"):
             await server.handle_extract({"mpn": "X", "properties": [42]})
 
@@ -435,9 +424,7 @@ class TestExtractHandler:
                 {"mpn": "X", "properties": ["x"], "aliases": ["not-a-dict"]}
             )
 
-    async def test_aliases_value_must_be_list_of_strings(
-        self, server: KnowledgeServer
-    ) -> None:
+    async def test_aliases_value_must_be_list_of_strings(self, server: KnowledgeServer) -> None:
         with pytest.raises(ValueError, match="list of strings"):
             await server.handle_extract(
                 {
