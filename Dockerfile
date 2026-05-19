@@ -37,6 +37,7 @@ COPY mcp_core/ ./mcp_core/
 COPY tool_registry/ ./tool_registry/
 COPY domain_agents/ ./domain_agents/
 COPY observability/ ./observability/
+COPY metaforge/ ./metaforge/
 COPY pyproject.toml ./
 
 # Install the package itself (editable not needed in container)
