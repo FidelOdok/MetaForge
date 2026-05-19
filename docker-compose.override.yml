@@ -34,6 +34,7 @@ services:
       - ./tool_registry:/app/tool_registry
       - ./domain_agents:/app/domain_agents
       - ./observability:/app/observability
+      - ./metaforge:/app/metaforge
       - ./pyproject.toml:/app/pyproject.toml:ro
       - adapter-workspace:/workspace:ro
 
