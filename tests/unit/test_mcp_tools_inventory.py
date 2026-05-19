@@ -38,8 +38,10 @@ class TestToolsListInventory:
         """With twin + constraint wired, the surface is ≥ 22 tools.
 
         Baseline (April 2026): cadquery=7 + freecad=5 + calculix=4
-        + twin=5 + constraint=1 = 22. When MET-422 (knowledge.extract)
-        lands the floor moves to 23+, and this assert will still hold.
+        + twin=5 + constraint=1 = 22. The knowledge-tools-with-service
+        case is covered separately in
+        ``test_knowledge_tools_registered_when_service_supplied`` so a
+        regression in either path is caught independently.
         """
         server = await build_unified_server(
             twin=twin,
@@ -108,6 +110,31 @@ class TestToolsListInventory:
         missing = required - names
         assert not missing, f"project tools missing from tools/list: {missing}"
         # 22 baseline + 3 project = 25 floor with backend supplied.
+        assert len(names) >= 25, f"surface shrank to {len(names)}: {sorted(names)}"
+
+    async def test_knowledge_tools_registered_when_service_supplied(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """With a knowledge_service wired (MET-433), all three knowledge
+        tools appear on ``tools/list``.
+
+        Same pattern as the twin + constraint + project regressions —
+        if a future bootstrap change forgets the ``knowledge_service``
+        kwarg, the standalone MCP loses ``knowledge.search`` /
+        ``knowledge.ingest`` / ``knowledge.extract`` and this catches it.
+        """
+        from tests.unit._mcp_inventory_helpers import StubKnowledgeService
+
+        server = await build_unified_server(
+            twin=twin,
+            constraint_engine=twin.constraints,
+            knowledge_service=StubKnowledgeService(),
+        )
+        names = await _tools_list(server)
+        required = {"knowledge.search", "knowledge.ingest", "knowledge.extract"}
+        missing = required - names
+        assert not missing, f"knowledge tools missing from tools/list: {missing}"
+        # 22 baseline + 3 knowledge = 25 floor with knowledge supplied.
         assert len(names) >= 25, f"surface shrank to {len(names)}: {sorted(names)}"
 
     async def test_no_twin_yields_smaller_surface(self) -> None:
