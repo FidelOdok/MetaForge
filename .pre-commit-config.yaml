@@ -1,0 +1,83 @@
+repos:
+  # Ruff: fast Python linter and formatter
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.4.0
+    hooks:
+      - id: ruff-check
+        name: "ruff check"
+        args: ["--fix"]
+        stages: [commit]
+
+      - id: ruff-format
+        name: "ruff format"
+        stages: [commit]
+
+  # MyPy: static type checker (gradual rollout)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        name: "mypy"
+        args: ["--follow-imports=silent", "shared/"]
+        additional_dependencies:
+          - pydantic
+          - neo4j
+          - aiohttp
+          - pydantic-ai-slim
+        stages: [commit]
+
+  # Trailing whitespace cleanup
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: "trim trailing whitespace"
+        args: [--markdown-args=--ignore-code-blocks]
+        stages: [commit]
+
+      - id: end-of-file-fixer
+        name: "fix end of file"
+        stages: [commit]
+
+      - id: debug-statements
+        name: "check for debugger imports and py37+ breakpoint()"
+        stages: [commit]
+
+      - id: detect-private-key
+        name: "detect private keys"
+        stages: [commit]
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        name: "bandit security check"
+        args: ["-ll", "--skip=B101"]  # Skip assert checks in tests
+        stages: [commit]
+        exclude: ^tests/
+
+# Configuration
+default_language_version:
+  python: python3.12
+
+# Skip stages for CI
+default_stages: [commit]
+
+# Don't run on certain files
+exclude: |
+  (?x)^(
+      \.venv/|
+      venv/|
+      __pycache__/|
+      \.git/|
+      \.mypy_cache/|
+      dist/|
+      build/|
+      \.egg-info/|
+      node_modules/|
+      dashboard/
+  )
+
+# Run on all commits by default
+fail_fast: false
