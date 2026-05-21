@@ -1,6 +1,8 @@
 """Knowledge API routes for semantic search and ingestion.
 
-Endpoints live under ``/api/v1/knowledge``.
+Endpoints live under ``/v1/knowledge`` (MET-451 — was ``/api/v1/knowledge``,
+moved to align with the rest of the gateway and so dashboard's nginx
+proxy that strips ``/api/`` from inbound requests reaches us).
 
 When ``app.state.knowledge_service`` is wired (production gateway —
 LightRAG via ``digital_twin.knowledge``), every read and write routes
@@ -31,7 +33,7 @@ _ENTRY_ID_NAMESPACE = UUID("4f3c4f0a-1ae6-4b9c-a4a3-0e2c4d3a1b2f")
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.knowledge")
 
-router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/v1/knowledge", tags=["knowledge"])
 
 
 # ---------------------------------------------------------------------------

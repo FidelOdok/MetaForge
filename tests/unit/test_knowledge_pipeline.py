@@ -437,7 +437,7 @@ class TestKnowledgeSearchEndpoint:
         return TestClient(app)
 
     def test_search_valid_query(self, client: Any) -> None:
-        resp = client.get("/api/v1/knowledge/search?query=test")
+        resp = client.get("/v1/knowledge/search?query=test")
         assert resp.status_code == 200
         data = resp.json()
         assert data["query"] == "test"
@@ -445,16 +445,14 @@ class TestKnowledgeSearchEndpoint:
         assert data["results"] == []
 
     def test_search_with_type_filter(self, client: Any) -> None:
-        resp = client.get(
-            "/api/v1/knowledge/search?query=stress&knowledgeType=design_decision&limit=3"
-        )
+        resp = client.get("/v1/knowledge/search?query=stress&knowledgeType=design_decision&limit=3")
         assert resp.status_code == 200
 
     def test_search_missing_query(self, client: Any) -> None:
-        resp = client.get("/api/v1/knowledge/search")
+        resp = client.get("/v1/knowledge/search")
         assert resp.status_code == 422  # Validation error
 
     def test_get_entry_not_found(self, client: Any) -> None:
         uid = str(uuid4())
-        resp = client.get(f"/api/v1/knowledge/{uid}")
+        resp = client.get(f"/v1/knowledge/{uid}")
         assert resp.status_code == 404
