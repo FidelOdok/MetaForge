@@ -500,7 +500,7 @@ class TestKnowledgeAPI:
         return TestClient(app)
 
     def test_search_empty(self, client: TestClient) -> None:
-        resp = client.get("/api/v1/knowledge/search", params={"query": "test"})
+        resp = client.get("/v1/knowledge/search", params={"query": "test"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["totalFound"] == 0
@@ -509,7 +509,7 @@ class TestKnowledgeAPI:
     def test_ingest_and_search(self, client: TestClient) -> None:
         # Ingest
         resp = client.post(
-            "/api/v1/knowledge/ingest",
+            "/v1/knowledge/ingest",
             json={
                 "content": "Use aluminum for the bracket",
                 "knowledgeType": "design_decision",
@@ -521,23 +521,23 @@ class TestKnowledgeAPI:
         entry_id = data["entryId"]
 
         # Search
-        resp = client.get("/api/v1/knowledge/search", params={"query": "bracket material"})
+        resp = client.get("/v1/knowledge/search", params={"query": "bracket material"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["totalFound"] == 1
 
         # Get by ID
-        resp = client.get(f"/api/v1/knowledge/{entry_id}")
+        resp = client.get(f"/v1/knowledge/{entry_id}")
         assert resp.status_code == 200
         assert resp.json()["content"] == "Use aluminum for the bracket"
 
     def test_get_nonexistent(self, client: TestClient) -> None:
-        resp = client.get(f"/api/v1/knowledge/{uuid4()}")
+        resp = client.get(f"/v1/knowledge/{uuid4()}")
         assert resp.status_code == 404
 
     def test_ingest_with_metadata(self, client: TestClient) -> None:
         resp = client.post(
-            "/api/v1/knowledge/ingest",
+            "/v1/knowledge/ingest",
             json={
                 "content": "Component spec",
                 "knowledgeType": "component",
@@ -547,24 +547,24 @@ class TestKnowledgeAPI:
         assert resp.status_code == 201
         entry_id = resp.json()["entryId"]
 
-        resp = client.get(f"/api/v1/knowledge/{entry_id}")
+        resp = client.get(f"/v1/knowledge/{entry_id}")
         assert resp.status_code == 200
         assert resp.json()["metadata"]["datasheet"] == "DS-001"
 
     def test_search_with_type_filter(self, client: TestClient) -> None:
         # Ingest two different types
         client.post(
-            "/api/v1/knowledge/ingest",
+            "/v1/knowledge/ingest",
             json={"content": "Decision A", "knowledgeType": "design_decision"},
         )
         client.post(
-            "/api/v1/knowledge/ingest",
+            "/v1/knowledge/ingest",
             json={"content": "Component B", "knowledgeType": "component"},
         )
 
         # Search with filter
         resp = client.get(
-            "/api/v1/knowledge/search",
+            "/v1/knowledge/search",
             params={"query": "test", "knowledgeType": "component"},
         )
         assert resp.status_code == 200
@@ -579,5 +579,5 @@ class TestKnowledgeAPI:
         app.include_router(router)
         client = TestClient(app)
 
-        resp = client.get("/api/v1/knowledge/search", params={"query": "test"})
+        resp = client.get("/v1/knowledge/search", params={"query": "test"})
         assert resp.status_code == 503

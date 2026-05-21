@@ -194,11 +194,16 @@ class ForgeClient:
         metadata: dict[str, Any] | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Ingest a document via ``POST /api/v1/knowledge/documents``.
+        """Ingest a document via ``POST /v1/knowledge/documents``.
 
         Larger payloads need a longer timeout than the 30s default
         because LightRAG's ingest pipeline runs synchronously inside
         the request — pass ``timeout=120`` for big PDFs.
+
+        MET-451: knowledge routes moved off the ``/api/v1/`` prefix to
+        align with the rest of the gateway, so this method hard-codes
+        ``/v1/knowledge/...`` instead of going through ``self._url``
+        (which still prepends ``/api/v1`` for legacy callers).
         """
         payload: dict[str, Any] = {
             "content": content,
@@ -210,7 +215,7 @@ class ForgeClient:
             payload["sourceWorkProductId"] = source_work_product_id
         eff_timeout = timeout if timeout is not None else self.timeout
         with httpx.Client(base_url=self.base_url, timeout=eff_timeout) as client:
-            resp = client.post(self._url("/knowledge/documents"), json=payload)
+            resp = client.post("/v1/knowledge/documents", json=payload)
             resp.raise_for_status()
             return resp.json()
 
@@ -225,7 +230,7 @@ class ForgeClient:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """List ingested knowledge sources via ``GET /api/v1/knowledge/sources``.
+        """List ingested knowledge sources via ``GET /v1/knowledge/sources`` (MET-451).
 
         Returns the raw response envelope ``{"sources": [...], "total": N}``.
         """
@@ -235,32 +240,32 @@ class ForgeClient:
         if project_id:
             params["projectId"] = project_id
         with self._client() as client:
-            resp = client.get(self._url("/knowledge/sources"), params=params)
+            resp = client.get("/v1/knowledge/sources", params=params)
             resp.raise_for_status()
             return resp.json()
 
     def get_source(self, source_path: str) -> dict[str, Any]:
-        """Fetch one source via ``GET /api/v1/knowledge/sources/{path}``.
+        """Fetch one source via ``GET /v1/knowledge/sources/{path}`` (MET-451).
 
         Raises ``ForgeClientNotFound`` on 404 so the CLI can surface a
         clean message instead of a stack trace.
         """
         encoded = quote(source_path, safe="")
         with self._client() as client:
-            resp = client.get(self._url(f"/knowledge/sources/{encoded}"))
+            resp = client.get(f"/v1/knowledge/sources/{encoded}")
             if resp.status_code == 404:
                 raise ForgeClientNotFound(f"No knowledge source registered for {source_path!r}")
             resp.raise_for_status()
             return resp.json()
 
     def delete_source(self, source_path: str) -> dict[str, Any]:
-        """Delete a source via ``DELETE /api/v1/knowledge/sources/{path}``.
+        """Delete a source via ``DELETE /v1/knowledge/sources/{path}`` (MET-451).
 
         Returns ``{"sourcePath": ..., "deletedChunks": N}``.
         """
         encoded = quote(source_path, safe="")
         with self._client() as client:
-            resp = client.delete(self._url(f"/knowledge/sources/{encoded}"))
+            resp = client.delete(f"/v1/knowledge/sources/{encoded}")
             if resp.status_code == 404:
                 raise ForgeClientNotFound(f"No knowledge source registered for {source_path!r}")
             resp.raise_for_status()
