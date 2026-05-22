@@ -11,6 +11,17 @@ vi.mock('../api/endpoints/knowledge', () => ({
   listSources: vi.fn(),
 }));
 
+// MET-452: KnowledgePage now reads ``useProjects`` to populate the
+// project dropdown + auto-select the newest project on first load.
+// Default mock returns "no projects exist" so existing tests keep the
+// pre-MET-452 behaviour (projectId stays ``''``, auto-select is a
+// no-op). Individual tests override via ``mockUseProjects.mockReturnValue(...)``
+// to exercise the dropdown / auto-select path.
+const mockUseProjects = vi.fn(() => ({ data: [] as unknown[], isLoading: false }));
+vi.mock('../hooks/use-projects', () => ({
+  useProjects: () => mockUseProjects(),
+}));
+
 // Mock useNavigate so we can assert the row click without a real router.
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -136,5 +147,104 @@ describe('KnowledgePage', () => {
     expect(mockNavigate).toHaveBeenCalledWith(
       `/knowledge/sources/${encodeURIComponent(SOURCE_COMPONENT.source_path)}`,
     );
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // MET-452: project dropdown + auto-select
+  // ──────────────────────────────────────────────────────────────────────
+
+  it('auto-selects the most-recently-updated project on first load', async () => {
+    // Two projects, newer one last in array — auto-select should still
+    // pick the newest by lastUpdated, not the array order.
+    mockUseProjects.mockReturnValue({
+      data: [
+        {
+          id: '11111111-1111-1111-1111-111111111111',
+          name: 'Older Project',
+          description: '',
+          status: 'active',
+          work_products: [],
+          agentCount: 0,
+          lastUpdated: '2026-01-01T00:00:00Z',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: '22222222-2222-2222-2222-222222222222',
+          name: 'Newer Drone Kit',
+          description: '',
+          status: 'active',
+          work_products: [],
+          agentCount: 0,
+          lastUpdated: '2026-05-22T00:00:00Z',
+          createdAt: '2026-05-22T00:00:00Z',
+        },
+      ],
+      isLoading: false,
+    });
+    mockListSources.mockResolvedValue([SOURCE_COMPONENT]);
+
+    render(<KnowledgePage />);
+
+    // After auto-select runs, listSources should have been called with
+    // the newer project's UUID. Earlier "default tenant" call (project_id
+    // undefined) may also have fired during the initial render; we just
+    // assert the auto-selected call exists.
+    await waitFor(() => {
+      const calls = mockListSources.mock.calls;
+      const sawAutoSelect = calls.some(
+        (callArgs) =>
+          callArgs[0]?.project_id === '22222222-2222-2222-2222-222222222222',
+      );
+      expect(sawAutoSelect).toBe(true);
+    });
+
+    // The dropdown's current value reflects the auto-selected project.
+    const select = screen.getByLabelText(/^project$/i) as HTMLSelectElement;
+    expect(select.value).toBe('22222222-2222-2222-2222-222222222222');
+
+    // "All projects" option is still reachable as the first option.
+    const allOption = Array.from(select.options).find((o) => o.value === '');
+    expect(allOption).toBeDefined();
+    expect(allOption?.textContent).toMatch(/all projects/i);
+  });
+
+  it('selecting "All projects" returns the picker to the default-tenant view', async () => {
+    mockUseProjects.mockReturnValue({
+      data: [
+        {
+          id: '33333333-3333-3333-3333-333333333333',
+          name: 'Some Project',
+          description: '',
+          status: 'active',
+          work_products: [],
+          agentCount: 0,
+          lastUpdated: '2026-05-22T00:00:00Z',
+          createdAt: '2026-05-22T00:00:00Z',
+        },
+      ],
+      isLoading: false,
+    });
+    mockListSources.mockResolvedValue([SOURCE_COMPONENT]);
+
+    render(<KnowledgePage />);
+
+    const select = (await screen.findByLabelText(/^project$/i)) as HTMLSelectElement;
+    // Wait for auto-select to land — the test before this one already
+    // covers that path; here we just need a known starting state.
+    await waitFor(() => {
+      expect(select.value).toBe('33333333-3333-3333-3333-333333333333');
+    });
+
+    fireEvent.change(select, { target: { value: '' } });
+
+    // Visual-state assertion: the dropdown is back on "All projects".
+    // We don't assert listSources call order because react-query's
+    // refetch ordering after a queryKey change is timing-sensitive in
+    // jsdom; the wire contract (project_id passed through unchanged
+    // from state) is covered by ``filter chip narrows by knowledge_type``
+    // and the auto-select test above.
+    await waitFor(() => {
+      expect(select.value).toBe('');
+    });
   });
 });

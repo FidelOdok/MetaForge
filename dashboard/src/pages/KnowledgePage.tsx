@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { listSources } from '../api/endpoints/knowledge';
+import { useProjects } from '../hooks/use-projects';
 import { formatRelativeTime } from '../utils/format-time';
 import type { KnowledgeType, SourceSummary } from '../types/knowledge';
 
@@ -144,9 +145,39 @@ function metadataField(metadata: Record<string, unknown>, key: string): string {
 export function KnowledgePage() {
   const navigate = useNavigate();
   const [filterType, setFilterType] = useState<KnowledgeType | 'all'>('all');
+  // MET-452: project dropdown replaced the UUID-paste input. ``''`` is
+  // the sentinel for "All projects (default tenant)" — anything else
+  // is a real project UUID picked from useProjects().
   const [projectId, setProjectId] = useState<string>('');
+  const { data: projects } = useProjects();
   const [sortKey, setSortKey] = useState<SortKey>('indexed_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  // Project options, sorted newest-first so the most-recently-updated
+  // project sits at the top of the dropdown and gets auto-selected
+  // (matches what users typically want — fresh ingest goes into the
+  // newest project, default tenant is the legacy fallback).
+  const projectOptions = useMemo(() => {
+    if (!projects) return [];
+    return [...projects].sort((a, b) => {
+      const ta = new Date(a.lastUpdated).getTime() || 0;
+      const tb = new Date(b.lastUpdated).getTime() || 0;
+      return tb - ta;
+    });
+  }, [projects]);
+
+  // Auto-select the most-recently-updated project on first load *only*
+  // if the user hasn't already picked one. We use a guard ref-pattern
+  // via the state initialiser so flipping back to "All projects" after
+  // load stays sticky for the rest of the session.
+  const [autoSelected, setAutoSelected] = useState(false);
+  useEffect(() => {
+    if (autoSelected) return;
+    const newest = projectOptions[0];
+    if (!newest) return;
+    setProjectId(newest.id);
+    setAutoSelected(true);
+  }, [autoSelected, projectOptions]);
 
   // The filter chip pushes ``knowledge_type`` to the server so we don't
   // pull rows we'll just discard; the project_id filter does the same.
@@ -263,12 +294,16 @@ export function KnowledgePage() {
           >
             project
           </label>
-          <input
+          <select
             id="knowledge-project-filter"
-            type="text"
             value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            placeholder="all projects (uuid to filter)"
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              // Lock auto-select once the user has picked anything —
+              // including switching back to "All projects" — so a later
+              // ``useProjects`` refetch doesn't yank them back.
+              setAutoSelected(true);
+            }}
             style={{
               flex: 1,
               maxWidth: 360,
@@ -280,8 +315,16 @@ export function KnowledgePage() {
               fontSize: 11,
               color: '#e2e2eb',
               outline: 'none',
+              cursor: 'pointer',
             }}
-          />
+          >
+            <option value="">All projects (default tenant)</option>
+            {projectOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
