@@ -180,3 +180,121 @@ def test_handle_memory_500_raises_client_error(monkeypatch):
     with pytest.raises(ForgeClientError) as excinfo:
         handle_memory(args, ForgeClient(base_url="http://x"))
     assert excinfo.value.status_code == 500
+
+
+def test_consolidate_subcommand_defaults_to_on_demand():
+    args = _build_args(["memory", "consolidate"])
+    assert args.memory_command == "consolidate"
+    assert args.mode == "on_demand"
+    assert args.project_id is None
+
+
+def test_consolidate_subcommand_accepts_mode_and_filters():
+    args = _build_args(
+        [
+            "memory",
+            "consolidate",
+            "--mode",
+            "proactive",
+            "--project-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--theme",
+            "power_analysis",
+            "--min-importance",
+            "0.5",
+            "--limit",
+            "100",
+        ]
+    )
+    assert args.mode == "proactive"
+    assert args.project_id == "11111111-1111-1111-1111-111111111111"
+    assert args.theme == "power_analysis"
+    assert args.min_importance == 0.5
+    assert args.fetch_limit == 100
+
+
+def test_consolidate_rejects_unknown_mode(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["memory", "consolidate", "--mode", "bogus"])
+    captured = capsys.readouterr()
+    assert "invalid choice" in captured.err
+
+
+def test_handle_memory_consolidate_dispatches(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return {
+                "mode": "on_demand",
+                "fetchedCount": 5,
+                "groupCount": 2,
+                "synthesizedCount": 2,
+                "acceptedCount": 1,
+                "rejectedCount": 1,
+                "revalidatedCount": 0,
+                "newlyFailedCount": 0,
+                "rejectedReasons": ["theme=misc reason=confidence 0.40 < threshold 0.70"],
+            }
+
+    class _FakeHttpClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> _FakeHttpClient:
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+        def post(self, url: str, json: dict[str, Any]) -> _FakeResponse:
+            captured["url"] = url
+            captured["payload"] = json
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeHttpClient)
+
+    args = _build_args(
+        ["memory", "consolidate", "--mode", "background", "--limit", "50"]
+    )
+    result = handle_memory(args, ForgeClient(base_url="http://x"))
+
+    assert captured["url"] == "/v1/memory/consolidate"
+    assert captured["payload"] == {"mode": "background", "fetchLimit": 50}
+    assert result is not None
+    assert result["accepted_count"] == 1
+    assert result["rejected_count"] == 1
+
+
+def test_handle_memory_consolidate_422_exits_4(monkeypatch):
+    class _FakeResponse:
+        status_code = 422
+        text = '{"detail":"PROACTIVE mode requires a project_id"}'
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return {"detail": "PROACTIVE mode requires a project_id"}
+
+    class _FakeHttpClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> _FakeHttpClient:
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+        def post(self, url: str, json: dict[str, Any]) -> _FakeResponse:
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeHttpClient)
+
+    args = _build_args(["memory", "consolidate", "--mode", "proactive"])
+    with pytest.raises(SystemExit) as excinfo:
+        handle_memory(args, ForgeClient(base_url="http://x"))
+    assert excinfo.value.code == 4
