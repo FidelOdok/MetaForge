@@ -14,6 +14,11 @@ Synthesizer / validator / writer / archiver land in subsequent commits
 once the deterministic backbone is testable end-to-end.
 """
 
+from digital_twin.memory.consolidation.contradiction_detector import (
+    MAX_COMPARISON_INSIGHTS,
+    ContradictionDetector,
+    ContradictionResult,
+)
 from digital_twin.memory.consolidation.decay import (
     DEFAULT_HALF_LIFE_DAYS,
     ConfidenceDecay,
@@ -85,6 +90,8 @@ from digital_twin.memory.consolidation.writer import (
 
 __all__ = [
     "ConfidenceDecay",
+    "ContradictionDetector",
+    "ContradictionResult",
     "ConsolidationMode",
     "ConsolidationModeError",
     "ConsolidationOrchestrator",
@@ -106,6 +113,7 @@ __all__ = [
     "InsightSynthesizer",
     "InsightValidator",
     "LLMClient",
+    "MAX_COMPARISON_INSIGHTS",
     "MAX_EXAMPLES_PER_GROUP",
     "OpenRouterConfig",
     "OpenRouterError",
