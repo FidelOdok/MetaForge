@@ -164,6 +164,7 @@ async def bootstrap_tool_registry(
     twin: Any = None,
     twin_allow_mutations: bool = False,
     project_backend: Any = None,
+    memory_client: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -367,6 +368,35 @@ async def bootstrap_tool_registry(
                 reason=(
                     "no project_backend supplied"
                     if project_backend is None
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Memory MCP adapter (MET-453) -----
+        # Runtime-injected like knowledge / twin: the gateway holds the
+        # MemoryClient on app.state.memory_client.
+        if memory_client is not None and _is_adapter_enabled("memory"):
+            try:
+                from tool_registry.tools.memory.adapter import MemoryServer
+
+                server = MemoryServer(client=memory_client)
+                await registry.register_adapter(server)
+                registered.append("memory")
+                logger.info(
+                    "memory_mcp_adapter_registered",
+                    client=type(memory_client).__name__,
+                )
+            except Exception as exc:
+                logger.error("memory_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("memory")
+        else:
+            skipped.append("memory")
+            logger.info(
+                "memory_mcp_adapter_skipped",
+                reason=(
+                    "no memory_client supplied"
+                    if memory_client is None
                     else "disabled via config"
                 ),
             )

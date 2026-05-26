@@ -24,6 +24,8 @@ from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.formatters import format_output
 from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
+from cli.forge_cli.memory import handle_memory
+from cli.forge_cli.memory import register_subparser as register_memory_subparser
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
 
@@ -149,6 +151,9 @@ def build_parser() -> argparse.ArgumentParser:
     # -- knowledge (MET-443) ----------------------------------------------
     register_knowledge_subparser(subparsers)
 
+    # -- memory (MET-453) -------------------------------------------------
+    register_memory_subparser(subparsers)
+
     return parser
 
 
@@ -241,6 +246,7 @@ _HANDLERS = {
     "ingest": handle_ingest,
     "sources": handle_sources,
     "knowledge": handle_knowledge,
+    "memory": handle_memory,
 }
 
 
