@@ -14,6 +14,12 @@ Synthesizer / validator / writer / archiver land in subsequent commits
 once the deterministic backbone is testable end-to-end.
 """
 
+from digital_twin.memory.consolidation.decay import (
+    DEFAULT_HALF_LIFE_DAYS,
+    ConfidenceDecay,
+    is_stale,
+)
+from digital_twin.memory.consolidation.dual_write import DualWriteInsightStore
 from digital_twin.memory.consolidation.fetcher import (
     EventFetcher,
     InMemoryEventFetcher,
@@ -30,6 +36,10 @@ from digital_twin.memory.consolidation.modes import (
     ConsolidationModeError,
     ConsolidationRunRequest,
 )
+from digital_twin.memory.consolidation.neo4j_insight_store import (
+    Neo4jInsightStore,
+    Neo4jInsightStoreError,
+)
 from digital_twin.memory.consolidation.openrouter import (
     DEFAULT_FALLBACK_MODEL,
     DEFAULT_PRIMARY_MODEL,
@@ -41,23 +51,8 @@ from digital_twin.memory.consolidation.orchestrator import (
     ConsolidationOrchestrator,
     ConsolidationReport,
 )
-from digital_twin.memory.consolidation.dual_write import DualWriteInsightStore
-from digital_twin.memory.consolidation.neo4j_insight_store import (
-    Neo4jInsightStore,
-    Neo4jInsightStoreError,
-)
 from digital_twin.memory.consolidation.pgvector_insight_store import (
     PgVectorInsightStore,
-)
-from digital_twin.memory.consolidation.workflow import (
-    DEFAULT_INTERVAL_SECONDS,
-    ConsolidationActivities,
-    ConsolidationActivityInput,
-    ConsolidationActivityOutput,
-    ConsolidationWorkflow,
-    ConsolidationWorkflowInput,
-    ConsolidationWorkflowOutput,
-    register_consolidation_activities,
 )
 from digital_twin.memory.consolidation.synthesizer import (
     MAX_EXAMPLES_PER_GROUP,
@@ -72,6 +67,16 @@ from digital_twin.memory.consolidation.validator import (
     InsightValidator,
     ValidationResult,
 )
+from digital_twin.memory.consolidation.workflow import (
+    DEFAULT_INTERVAL_SECONDS,
+    ConsolidationActivities,
+    ConsolidationActivityInput,
+    ConsolidationActivityOutput,
+    ConsolidationWorkflow,
+    ConsolidationWorkflowInput,
+    ConsolidationWorkflowOutput,
+    register_consolidation_activities,
+)
 from digital_twin.memory.consolidation.writer import (
     InMemoryInsightStore,
     InsightStore,
@@ -79,6 +84,7 @@ from digital_twin.memory.consolidation.writer import (
 )
 
 __all__ = [
+    "ConfidenceDecay",
     "ConsolidationMode",
     "ConsolidationModeError",
     "ConsolidationOrchestrator",
@@ -86,6 +92,7 @@ __all__ = [
     "ConsolidationRunRequest",
     "ConsolidationTheme",
     "DEFAULT_FALLBACK_MODEL",
+    "DEFAULT_HALF_LIFE_DAYS",
     "DEFAULT_MIN_CONFIDENCE",
     "DEFAULT_PRIMARY_MODEL",
     "EventFetcher",
@@ -119,5 +126,6 @@ __all__ = [
     "StubLLMClient",
     "ValidationResult",
     "classify_theme",
+    "is_stale",
     "parse_strict_json",
 ]
