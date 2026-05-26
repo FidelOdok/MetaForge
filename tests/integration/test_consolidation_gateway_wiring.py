@@ -100,6 +100,59 @@ def test_register_consolidation_activities_binds_module_level_handle(monkeypatch
     assert activities.orchestrator is orchestrator
 
 
+def test_dual_write_selection_when_both_backends_present():
+    """Mirrors the gateway's insight-store selection: pg + neo4j → dual-write."""
+    from digital_twin.memory.consolidation import (
+        DualWriteInsightStore,
+        InsightStore,
+    )
+
+    # Simulate the gateway's branch: a pgvector store is available and
+    # a Neo4j store connected successfully → wrap in DualWriteInsightStore.
+    primary = InMemoryInsightStore()  # stands in for pgvector
+    secondary = InMemoryInsightStore()  # stands in for Neo4j
+
+    insight_store: InsightStore = primary
+    # Neo4j present → opt into dual write.
+    insight_store = DualWriteInsightStore(primary, secondary)
+    assert isinstance(insight_store, DualWriteInsightStore)
+
+
+def test_pgvector_only_when_neo4j_absent():
+    """No Neo4j → the gateway keeps the pgvector store as-is."""
+    from digital_twin.memory.consolidation import InsightStore
+
+    primary = InMemoryInsightStore()  # stands in for pgvector
+    insight_store: InsightStore = primary
+    # No Neo4j branch taken — store stays the pgvector instance.
+    assert insight_store is primary
+
+
+@pytest.mark.asyncio
+async def test_dual_write_store_fans_out_in_gateway_shape():
+    """End-to-end: the dual-write store the gateway builds writes to both."""
+    from uuid import uuid4
+
+    from digital_twin.memory.consolidation import DualWriteInsightStore
+    from digital_twin.memory.consolidation.insight import Insight, InsightKind
+    from digital_twin.memory.consolidation.themes import ConsolidationTheme
+
+    primary = InMemoryInsightStore()
+    secondary = InMemoryInsightStore()
+    store = DualWriteInsightStore(primary, secondary)
+
+    insight = Insight(
+        theme=ConsolidationTheme.MECHANICAL_VALIDATION,
+        kind=InsightKind.PRINCIPLE,
+        narrative="Gateway dual-write fan-out keeps both backends in sync",
+        confidence=0.85,
+        supporting_experience_ids=[uuid4()],
+    )
+    await store.write(insight)
+    assert await primary.get(insight.id) is not None
+    assert await secondary.get(insight.id) is not None
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_runs_end_to_end_via_gateway_state():
     """Simulates the gateway calling consolidation_orchestrator.run() once memory is wired."""

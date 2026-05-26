@@ -392,11 +392,14 @@ async def _init_knowledge_store(app: FastAPI) -> None:
         try:
             from digital_twin.memory.consolidation import (
                 ConsolidationOrchestrator,
+                DualWriteInsightStore,
                 EventGrouper,
                 InMemoryEventFetcher,
                 InMemoryInsightStore,
+                InsightStore,
                 InsightSynthesizer,
                 InsightValidator,
+                Neo4jInsightStore,
                 OpenRouterConfig,
                 OpenRouterError,
                 OpenRouterLLMClient,
@@ -407,23 +410,61 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             )
             from digital_twin.memory.consolidation.llm import LLMClient
 
-            # Insight store — pgvector when available, in-memory otherwise.
-            insight_store: InMemoryInsightStore | PgVectorInsightStore
+            # Insight store — prefer pgvector when DATABASE_URL is set, and
+            # fan out to Neo4j as well (DualWriteInsightStore) when Neo4j
+            # creds are present so the structural graph stays in sync. Falls
+            # back to in-memory when no pgvector backend is available.
+            insight_store: InsightStore
+            pg_insight_store: PgVectorInsightStore | None = None
             if db_url:
                 try:
                     dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
                     pg_insight = PgVectorInsightStore(dsn=dsn)
                     await pg_insight.initialize()
-                    insight_store = pg_insight
+                    pg_insight_store = pg_insight
                     logger.info("consolidation_insight_store_pgvector_initialized")
                 except Exception as exc:
                     logger.warning(
                         "consolidation_insight_store_pgvector_failed", error=str(exc)
                     )
-                    insight_store = InMemoryInsightStore()
-            else:
+
+            if pg_insight_store is None:
                 insight_store = InMemoryInsightStore()
                 logger.info("consolidation_insight_store_in_memory_initialized")
+            else:
+                insight_store = pg_insight_store
+                # Opt into dual-write when Neo4j is configured. pgvector
+                # stays the read source of truth; Neo4j gets the
+                # structural mirror. A Neo4j connect failure degrades to
+                # pgvector-only rather than failing gateway boot.
+                neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get(
+                    "METAFORGE_NEO4J_URI"
+                )
+                if neo4j_uri:
+                    try:
+                        neo4j_insight = Neo4jInsightStore(
+                            uri=neo4j_uri,
+                            user=(
+                                os.environ.get("NEO4J_USER")
+                                or os.environ.get("METAFORGE_NEO4J_USER")
+                                or "neo4j"
+                            ),
+                            password=(
+                                os.environ.get("NEO4J_PASSWORD")
+                                or os.environ.get("METAFORGE_NEO4J_PASSWORD")
+                                or "password"
+                            ),
+                        )
+                        await neo4j_insight.connect()
+                        insight_store = DualWriteInsightStore(
+                            pg_insight_store, neo4j_insight
+                        )
+                        logger.info("consolidation_insight_store_dual_write_initialized")
+                    except Exception as exc:
+                        logger.warning(
+                            "consolidation_insight_store_neo4j_failed",
+                            error=str(exc),
+                        )
 
             # LLM — Open Router when configured, stub otherwise.
             llm_client: LLMClient
