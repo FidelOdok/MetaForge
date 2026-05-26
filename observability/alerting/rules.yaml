@@ -266,3 +266,22 @@ groups:
             ``TwinAPI.find_orphans()`` to enumerate and either rebind or
             cascade-delete via ``delete_work_product(id, cascade=True)``.
           runbook_url: "observability/runbooks/twin-orphans.md"
+
+      # MET-455 — Consolidation contradiction rate. The BACKGROUND
+      # synthesis pass flags newly-synthesized insights that conflict
+      # with the existing corpus. A sustained nonzero rate means the
+      # memory layer is accumulating contradictory lessons faster than
+      # they're being reconciled — agents will get conflicting advice.
+      - alert: ConsolidationContradictionsRising
+        expr: increase(metaforge_consolidation_contradictions_total[1h]) > 5
+        for: 15m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Consolidation is producing contradictory insights"
+          description: >-
+            More than 5 contradictory insights flagged in the last hour.
+            Review GET /v1/memory/insights and the consolidation logs;
+            reconcile or mark the conflicting insights stale.
+          runbook_url: "observability/runbooks/consolidation-contradictions.md"

@@ -351,6 +351,46 @@ class MetricsRegistry:
         buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
     )
 
+    # ── Consolidation / agent-memory metrics (MET-454 / MET-455) ───────
+    CONSOLIDATION_PASS_DURATION = MetricDefinition(
+        name="metaforge_consolidation_pass_duration_seconds",
+        type="histogram",
+        description="Consolidation pass (fetch→group→synth→validate→write) duration",
+        labels=["mode"],
+        unit="s",
+        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+    )
+    CONSOLIDATION_PASS_TOTAL = MetricDefinition(
+        name="metaforge_consolidation_pass_total",
+        type="counter",
+        description="Total consolidation passes by mode",
+        labels=["mode"],
+    )
+    CONSOLIDATION_INSIGHTS_ACCEPTED_TOTAL = MetricDefinition(
+        name="metaforge_consolidation_insights_accepted_total",
+        type="counter",
+        description="Insights synthesized + validated + written, by mode",
+        labels=["mode"],
+    )
+    CONSOLIDATION_INSIGHTS_REJECTED_TOTAL = MetricDefinition(
+        name="metaforge_consolidation_insights_rejected_total",
+        type="counter",
+        description="Insights dropped during a pass (synthesis/validation), by mode",
+        labels=["mode"],
+    )
+    CONSOLIDATION_CONTRADICTIONS_TOTAL = MetricDefinition(
+        name="metaforge_consolidation_contradictions_total",
+        type="counter",
+        description="Synthesized insights flagged as contradicting the existing corpus",
+        labels=[],
+    )
+    CONSOLIDATION_STALE_MARKED_TOTAL = MetricDefinition(
+        name="metaforge_consolidation_stale_marked_total",
+        type="counter",
+        description="Insights durably marked STALE_WARN by a JANITOR pass",
+        labels=[],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -367,7 +407,20 @@ class MetricsRegistry:
             + cls.retrieval_metrics()
             + cls.knowledge_metrics()
             + cls.twin_metrics()
+            + cls.consolidation_metrics()
         )
+
+    @classmethod
+    def consolidation_metrics(cls) -> list[MetricDefinition]:
+        """MET-454 / MET-455 consolidation-pipeline metrics."""
+        return [
+            cls.CONSOLIDATION_PASS_DURATION,
+            cls.CONSOLIDATION_PASS_TOTAL,
+            cls.CONSOLIDATION_INSIGHTS_ACCEPTED_TOTAL,
+            cls.CONSOLIDATION_INSIGHTS_REJECTED_TOTAL,
+            cls.CONSOLIDATION_CONTRADICTIONS_TOTAL,
+            cls.CONSOLIDATION_STALE_MARKED_TOTAL,
+        ]
 
     @classmethod
     def twin_metrics(cls) -> list[MetricDefinition]:
@@ -810,3 +863,51 @@ class MetricsCollector:
         if hist is not None:
             bucket = "small" if top_k <= 5 else "large"
             hist.record(duration, attributes={"top_k_bucket": bucket})
+
+    # ── Consolidation (MET-454 / MET-455) ──────────────────────────────
+
+    def record_consolidation_pass(
+        self,
+        mode: str,
+        duration: float,
+        *,
+        accepted: int = 0,
+        rejected: int = 0,
+        contradictions: int = 0,
+        stale_marked: int = 0,
+    ) -> None:
+        """Record one consolidation pass — duration + per-pass counters.
+
+        ``mode`` is the ConsolidationMode value (background / on_demand /
+        proactive / janitor). Counters are incremented by the per-pass
+        totals from the ConsolidationReport so dashboards can track
+        throughput, rejection rate, contradiction rate, and active-
+        forgetting volume without scraping logs.
+        """
+        attrs = {"mode": mode}
+        hist = self._instruments.get(MetricsRegistry.CONSOLIDATION_PASS_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes=attrs)
+        pass_total = self._instruments.get(MetricsRegistry.CONSOLIDATION_PASS_TOTAL.name)
+        if pass_total is not None:
+            pass_total.add(1, attributes=attrs)
+        accepted_c = self._instruments.get(
+            MetricsRegistry.CONSOLIDATION_INSIGHTS_ACCEPTED_TOTAL.name
+        )
+        if accepted_c is not None and accepted:
+            accepted_c.add(accepted, attributes=attrs)
+        rejected_c = self._instruments.get(
+            MetricsRegistry.CONSOLIDATION_INSIGHTS_REJECTED_TOTAL.name
+        )
+        if rejected_c is not None and rejected:
+            rejected_c.add(rejected, attributes=attrs)
+        contra_c = self._instruments.get(
+            MetricsRegistry.CONSOLIDATION_CONTRADICTIONS_TOTAL.name
+        )
+        if contra_c is not None and contradictions:
+            contra_c.add(contradictions, attributes={})
+        stale_c = self._instruments.get(
+            MetricsRegistry.CONSOLIDATION_STALE_MARKED_TOTAL.name
+        )
+        if stale_c is not None and stale_marked:
+            stale_c.add(stale_marked, attributes={})

@@ -495,6 +495,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 decay=ConfidenceDecay(),
                 janitor_marks_stale=True,
                 contradiction_detector=ContradictionDetector(llm_client),
+                collector=getattr(app.state, "collector", None),
             )
             register_consolidation_activities(orchestrator)
             app.state.consolidation_orchestrator = orchestrator

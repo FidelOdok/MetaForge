@@ -9,6 +9,7 @@ orchestrator stays trivially unit-testable.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -85,12 +86,19 @@ class ConsolidationOrchestrator:
         decay: ConfidenceDecay | None = None,
         janitor_marks_stale: bool = False,
         contradiction_detector: ContradictionDetector | None = None,
+        collector: Any = None,
     ) -> None:
         self._fetcher = fetcher
         self._grouper = grouper
         self._synthesizer = synthesizer
         self._validator = validator
         self._writer = writer
+        # Optional observability.MetricsCollector. Duck-typed (Any) to
+        # keep this module free of a hard observability import; when
+        # supplied, run_request emits the MET-454/455 consolidation
+        # metrics (pass duration + accepted/rejected/contradiction/
+        # stale-marked counters).
+        self._collector = collector
         # JANITOR mode needs to read previously-persisted insights; the
         # writer exposes its own backing store via the public ``store``
         # attribute when supplied. Callers that don't run janitor passes
@@ -145,9 +153,21 @@ class ConsolidationOrchestrator:
         """
         with tracer.start_as_current_span("consolidation.orchestrator.run") as span:
             span.set_attribute("memory.mode", request.mode.value)
+            started = time.monotonic()
             if request.mode == ConsolidationMode.JANITOR:
-                return await self._run_janitor(request)
-            return await self._run_synthesis_pass(request, span)
+                report = await self._run_janitor(request)
+            else:
+                report = await self._run_synthesis_pass(request, span)
+            if self._collector is not None:
+                self._collector.record_consolidation_pass(
+                    request.mode.value,
+                    time.monotonic() - started,
+                    accepted=report.accepted_count,
+                    rejected=report.rejected_count,
+                    contradictions=len(report.contradictions),
+                    stale_marked=report.marked_stale_count,
+                )
+            return report
 
     async def _run_synthesis_pass(
         self,
