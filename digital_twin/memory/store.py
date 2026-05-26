@@ -120,8 +120,15 @@ class InMemoryExperienceStore(ExperienceStore):
                 if exp.embedding
             ]
             scored.sort(key=lambda pair: pair[1], reverse=True)
+            # Clamp similarity to [-1, 1] — float drift can push cosine
+            # past 1.0 by a few ULPs even when the vectors are identical,
+            # and that violates MemorySearchHit's range validator.
             hits = [
-                MemorySearchHit(experience=exp, similarity=sim, rank=rank)
+                MemorySearchHit(
+                    experience=exp,
+                    similarity=max(-1.0, min(1.0, sim)),
+                    rank=rank,
+                )
                 for rank, (exp, sim) in enumerate(scored[:limit])
             ]
 

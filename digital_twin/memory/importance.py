@@ -99,7 +99,7 @@ def _recency_score(event: Event, now: datetime, half_life_hours: float) -> float
     age_hours = age_seconds / 3600.0
     if half_life_hours <= 0:
         return 1.0 if age_hours == 0 else 0.0
-    return 0.5 ** (age_hours / half_life_hours)
+    return float(0.5 ** (age_hours / half_life_hours))
 
 
 def _relevance_score(event: Event) -> float:
