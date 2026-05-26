@@ -47,7 +47,14 @@ def _build_orchestrator(
     memory_store: InMemoryExperienceStore,
     llm: LLMClient,
 ) -> tuple[ConsolidationOrchestrator, InMemoryInsightStore]:
-    """Mirrors the construction block in api_gateway/server.py."""
+    """Mirrors the construction block in api_gateway/server.py — including
+    the MET-455 machinery (decay, janitor mark-stale, contradiction
+    detection) the gateway now activates."""
+    from digital_twin.memory.consolidation import (
+        ConfidenceDecay,
+        ContradictionDetector,
+    )
+
     insight_store = InMemoryInsightStore()
     orchestrator = ConsolidationOrchestrator(
         fetcher=InMemoryEventFetcher(memory_store),
@@ -56,8 +63,22 @@ def _build_orchestrator(
         validator=InsightValidator(),
         writer=SemanticMemoryWriter(insight_store),
         insight_store=insight_store,
+        decay=ConfidenceDecay(),
+        janitor_marks_stale=True,
+        contradiction_detector=ContradictionDetector(llm),
     )
     return orchestrator, insight_store
+
+
+def test_gateway_orchestrator_has_met455_machinery_wired():
+    """The gateway construction wires decay + janitor mark-stale + detector."""
+    memory_store = InMemoryExperienceStore()
+    orchestrator, _store = _build_orchestrator(memory_store, StubLLMClient())
+    # These attributes are private but stable — assert the MET-455
+    # capabilities are active rather than silently dormant.
+    assert orchestrator._decay is not None  # noqa: SLF001
+    assert orchestrator._janitor_marks_stale is True  # noqa: SLF001
+    assert orchestrator._contradiction_detector is not None  # noqa: SLF001
 
 
 def test_orchestrator_construction_without_open_router(monkeypatch):

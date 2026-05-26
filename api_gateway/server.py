@@ -391,7 +391,9 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     else:
         try:
             from digital_twin.memory.consolidation import (
+                ConfidenceDecay,
                 ConsolidationOrchestrator,
+                ContradictionDetector,
                 DualWriteInsightStore,
                 EventGrouper,
                 InMemoryEventFetcher,
@@ -478,6 +480,11 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 )
                 llm_client = StubLLMClient()
 
+            # MET-455: activate the Phase-3 machinery in production —
+            # confidence decay (90-day half-life), JANITOR durable
+            # STALE_WARN marking, and contradiction detection against the
+            # existing corpus during BACKGROUND synthesis. The detector
+            # reuses the same LLM client as the synthesizer.
             orchestrator = ConsolidationOrchestrator(
                 fetcher=InMemoryEventFetcher(app.state.memory_store),
                 grouper=EventGrouper(),
@@ -485,6 +492,9 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 validator=InsightValidator(),
                 writer=SemanticMemoryWriter(insight_store),
                 insight_store=insight_store,
+                decay=ConfidenceDecay(),
+                janitor_marks_stale=True,
+                contradiction_detector=ContradictionDetector(llm_client),
             )
             register_consolidation_activities(orchestrator)
             app.state.consolidation_orchestrator = orchestrator
