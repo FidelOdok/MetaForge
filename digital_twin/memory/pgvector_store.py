@@ -61,7 +61,7 @@ class PgVectorExperienceStore(ExperienceStore):
     async def initialize(self) -> None:
         """Create connection pool + ensure extension and table exist."""
         try:
-            import asyncpg  # type: ignore[import-untyped]
+            import asyncpg
 
             self._pool = await asyncpg.create_pool(
                 self._dsn, min_size=1, max_size=self._pool_size
@@ -274,7 +274,7 @@ class PgVectorExperienceStore(ExperienceStore):
                     "DELETE FROM agent_experiences WHERE id = $1",
                     experience_id,
                 )
-            deleted = result == "DELETE 1"
+            deleted = bool(result == "DELETE 1")
             if deleted:
                 logger.info("pgvector_experience_deleted", experience_id=str(experience_id))
             return deleted
