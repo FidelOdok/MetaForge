@@ -165,6 +165,7 @@ async def bootstrap_tool_registry(
     twin_allow_mutations: bool = False,
     project_backend: Any = None,
     memory_client: Any = None,
+    memory_insight_store: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -379,12 +380,20 @@ async def bootstrap_tool_registry(
             try:
                 from tool_registry.tools.memory.adapter import MemoryServer
 
-                server = MemoryServer(client=memory_client)
+                server = MemoryServer(
+                    client=memory_client,
+                    insight_store=memory_insight_store,
+                )
                 await registry.register_adapter(server)
                 registered.append("memory")
                 logger.info(
                     "memory_mcp_adapter_registered",
                     client=type(memory_client).__name__,
+                    insight_store=(
+                        type(memory_insight_store).__name__
+                        if memory_insight_store is not None
+                        else None
+                    ),
                 )
             except Exception as exc:
                 logger.error("memory_mcp_adapter_failed", error=str(exc))

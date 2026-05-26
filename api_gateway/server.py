@@ -613,6 +613,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         constraint_engine=twin.constraints,
         project_backend=project_backend,
         memory_client=getattr(app.state, "memory_client", None),
+        memory_insight_store=getattr(app.state, "consolidation_insight_store", None),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

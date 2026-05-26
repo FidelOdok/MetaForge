@@ -39,6 +39,20 @@ async def test_bootstrap_registers_memory_adapter_when_client_supplied(memory_cl
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_registers_list_insights_when_insight_store_supplied(memory_client):
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    registry = await bootstrap_tool_registry(
+        adapter_ids=[],
+        memory_client=memory_client,
+        memory_insight_store=InMemoryInsightStore(),
+    )
+    tool_ids = {_tool_id(t) for t in registry.list_tools()}
+    assert "memory.retrieve_similar_experience" in tool_ids
+    assert "memory.list_insights" in tool_ids
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_skips_memory_adapter_without_client():
     registry = await bootstrap_tool_registry(adapter_ids=[])
     tools = registry.list_tools()
