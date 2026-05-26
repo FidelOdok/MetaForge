@@ -8,6 +8,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from digital_twin.memory.client import MAX_RETRIEVAL_LIMIT
+from digital_twin.memory.consolidation.modes import ConsolidationMode
+from digital_twin.memory.consolidation.themes import ConsolidationTheme
 from digital_twin.memory.models import ConfidenceTier
 
 
@@ -71,5 +73,46 @@ class MemoryRetrieveResponse(BaseModel):
     hits: list[MemoryHitResponse]
     query: str
     total_found: int = Field(alias="totalFound")
+
+    model_config = {"populate_by_name": True}
+
+
+class ConsolidationTriggerRequest(BaseModel):
+    """Request body for ``POST /v1/memory/consolidate``."""
+
+    mode: ConsolidationMode = Field(
+        default=ConsolidationMode.ON_DEMAND,
+        description=(
+            "Consolidation mode. Defaults to on_demand since the REST endpoint "
+            "is a manual trigger; the Temporal worker handles background."
+        ),
+    )
+    since: datetime | None = None
+    until: datetime | None = None
+    project_id: UUID | None = Field(default=None, alias="projectId")
+    theme: ConsolidationTheme | None = None
+    min_importance: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        alias="minImportance",
+    )
+    fetch_limit: int | None = Field(default=None, ge=1, alias="fetchLimit")
+
+    model_config = {"populate_by_name": True}
+
+
+class ConsolidationTriggerResponse(BaseModel):
+    """Wire shape of a single consolidation pass result."""
+
+    mode: ConsolidationMode
+    fetched_count: int = Field(alias="fetchedCount")
+    group_count: int = Field(alias="groupCount")
+    synthesized_count: int = Field(alias="synthesizedCount")
+    accepted_count: int = Field(alias="acceptedCount")
+    rejected_count: int = Field(alias="rejectedCount")
+    revalidated_count: int = Field(alias="revalidatedCount")
+    newly_failed_count: int = Field(alias="newlyFailedCount")
+    rejected_reasons: list[str] = Field(default_factory=list, alias="rejectedReasons")
 
     model_config = {"populate_by_name": True}
