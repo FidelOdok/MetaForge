@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from digital_twin.memory.client import MAX_RETRIEVAL_LIMIT
+from digital_twin.memory.consolidation.insight import InsightKind, InsightStatus
 from digital_twin.memory.consolidation.modes import ConsolidationMode
 from digital_twin.memory.consolidation.themes import ConsolidationTheme
 from digital_twin.memory.models import ConfidenceTier
@@ -114,5 +115,32 @@ class ConsolidationTriggerResponse(BaseModel):
     revalidated_count: int = Field(alias="revalidatedCount")
     newly_failed_count: int = Field(alias="newlyFailedCount")
     rejected_reasons: list[str] = Field(default_factory=list, alias="rejectedReasons")
+
+    model_config = {"populate_by_name": True}
+
+
+class InsightResponse(BaseModel):
+    """Wire shape of a single consolidated insight."""
+
+    id: UUID
+    theme: ConsolidationTheme
+    kind: InsightKind
+    narrative: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    confidence_tier: ConfidenceTier = Field(alias="confidenceTier")
+    status: InsightStatus
+    supporting_experience_ids: list[UUID] = Field(alias="supportingExperienceIds")
+    synthesized_at: datetime = Field(alias="synthesizedAt")
+
+    model_config = {"populate_by_name": True}
+
+
+class InsightListResponse(BaseModel):
+    """Response body for ``GET /v1/memory/insights``."""
+
+    insights: list[InsightResponse]
+    total: int
+    theme: ConsolidationTheme | None = None
+    include_stale: bool = Field(alias="includeStale")
 
     model_config = {"populate_by_name": True}
