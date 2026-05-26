@@ -23,7 +23,7 @@ from uuid import UUID
 
 import structlog
 
-from digital_twin.memory.consolidation.insight import Insight, InsightKind
+from digital_twin.memory.consolidation.insight import Insight, InsightKind, InsightStatus
 from digital_twin.memory.consolidation.themes import ConsolidationTheme
 from digital_twin.memory.consolidation.writer import InsightStore
 from digital_twin.memory.models import ConfidenceTier
@@ -191,6 +191,7 @@ def _insight_to_props(insight: Insight) -> dict[str, Any]:
         "supporting_experience_ids": [str(uid) for uid in insight.supporting_experience_ids],
         "confidence": insight.confidence,
         "confidence_tier": insight.confidence_tier.value,
+        "status": insight.status.value,
         "synthesized_at": insight.synthesized_at.isoformat(),
     }
 
@@ -209,6 +210,7 @@ def _node_to_insight(node: dict[str, Any]) -> Insight:
         supporting_experience_ids=supporting,
         confidence=node["confidence"],
         confidence_tier=ConfidenceTier(node["confidence_tier"]),
+        status=InsightStatus(node.get("status") or InsightStatus.ACTIVE.value),
         synthesized_at=_parse_timestamp(node.get("synthesized_at")),
     )
 

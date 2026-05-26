@@ -23,7 +23,7 @@ from digital_twin.memory.consolidation.fetcher import (
     EventFetcher,
 )
 from digital_twin.memory.consolidation.grouper import EventGrouper
-from digital_twin.memory.consolidation.insight import Insight
+from digital_twin.memory.consolidation.insight import Insight, InsightStatus
 from digital_twin.memory.consolidation.modes import (
     ConsolidationMode,
     ConsolidationRunRequest,
@@ -62,6 +62,8 @@ class ConsolidationReport:
     """JANITOR mode only — how many existing insights were re-checked."""
     newly_failed_count: int = 0
     """JANITOR mode only — how many existing insights failed re-validation."""
+    marked_stale_count: int = 0
+    """JANITOR mode only — how many insights were written back as STALE_WARN."""
 
 
 class ConsolidationOrchestrator:
@@ -77,6 +79,7 @@ class ConsolidationOrchestrator:
         writer: SemanticMemoryWriter,
         insight_store: InsightStore | None = None,
         decay: ConfidenceDecay | None = None,
+        janitor_marks_stale: bool = False,
     ) -> None:
         self._fetcher = fetcher
         self._grouper = grouper
@@ -94,6 +97,11 @@ class ConsolidationOrchestrator:
         # stale ("active forgetting"). When None, JANITOR re-validates
         # against the raw stored confidence (drift detection only).
         self._decay = decay
+        # MET-455: when True, JANITOR persists status=STALE_WARN back to
+        # the store for insights that fail re-validation (durable
+        # flagging). When False (default), JANITOR is report-only and
+        # never mutates the store.
+        self._janitor_marks_stale = janitor_marks_stale
 
     async def run(
         self,
@@ -233,6 +241,7 @@ class ConsolidationOrchestrator:
         existing = await self._insight_store.list(theme=request.theme, limit=10_000)
         rejected: list[str] = []
         newly_failed = 0
+        marked_stale = 0
         for insight in existing:
             # MET-455: apply confidence decay (if configured) before
             # re-validating so aged insights surface as stale.
@@ -248,10 +257,31 @@ class ConsolidationOrchestrator:
                     f"insight_id={insight.id} theme={insight.theme.value}"
                     f" reason={verdict.reason}"
                 )
+                # MET-455: durably flag the insight when configured to do
+                # so. Only write back when the status actually changes —
+                # an already-STALE_WARN insight needs no re-write.
+                if (
+                    self._janitor_marks_stale
+                    and insight.status is not InsightStatus.STALE_WARN
+                ):
+                    try:
+                        await self._insight_store.write(
+                            insight.model_copy(
+                                update={"status": InsightStatus.STALE_WARN}
+                            )
+                        )
+                        marked_stale += 1
+                    except Exception as exc:  # pragma: no cover — best effort
+                        logger.warning(
+                            "consolidation_janitor_mark_failed",
+                            insight_id=str(insight.id),
+                            error=str(exc),
+                        )
         report = ConsolidationReport(
             mode=request.mode,
             revalidated_count=len(existing),
             newly_failed_count=newly_failed,
+            marked_stale_count=marked_stale,
             rejected_count=newly_failed,
             rejected_reasons=rejected,
         )
@@ -259,6 +289,7 @@ class ConsolidationOrchestrator:
             "consolidation_janitor_completed",
             revalidated=report.revalidated_count,
             newly_failed=report.newly_failed_count,
+            marked_stale=report.marked_stale_count,
             decay_applied=self._decay is not None,
             project_id=str(request.project_id) if request.project_id else None,
         )

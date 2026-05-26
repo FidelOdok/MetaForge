@@ -21,7 +21,7 @@ from uuid import UUID
 
 import structlog
 
-from digital_twin.memory.consolidation.insight import Insight, InsightKind
+from digital_twin.memory.consolidation.insight import Insight, InsightKind, InsightStatus
 from digital_twin.memory.consolidation.themes import ConsolidationTheme
 from digital_twin.memory.consolidation.writer import InsightStore
 from digital_twin.memory.models import ConfidenceTier
@@ -79,6 +79,7 @@ class PgVectorInsightStore(InsightStore):
                         supporting_experience_ids UUID[] NOT NULL DEFAULT '{{}}',
                         confidence DOUBLE PRECISION NOT NULL,
                         confidence_tier TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'active',
                         synthesized_at TIMESTAMPTZ NOT NULL,
                         narrative_embedding vector({self._embedding_dim})
                     )
@@ -120,9 +121,9 @@ class PgVectorInsightStore(InsightStore):
                         """
                         INSERT INTO consolidation_insights
                             (id, theme, kind, narrative, supporting_experience_ids,
-                             confidence, confidence_tier, synthesized_at,
+                             confidence, confidence_tier, status, synthesized_at,
                              narrative_embedding)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL)
                         ON CONFLICT (id) DO UPDATE SET
                             theme = EXCLUDED.theme,
                             kind = EXCLUDED.kind,
@@ -130,6 +131,7 @@ class PgVectorInsightStore(InsightStore):
                             supporting_experience_ids = EXCLUDED.supporting_experience_ids,
                             confidence = EXCLUDED.confidence,
                             confidence_tier = EXCLUDED.confidence_tier,
+                            status = EXCLUDED.status,
                             synthesized_at = EXCLUDED.synthesized_at
                         """,
                         insight.id,
@@ -139,6 +141,7 @@ class PgVectorInsightStore(InsightStore):
                         list(insight.supporting_experience_ids),
                         insight.confidence,
                         insight.confidence_tier.value,
+                        insight.status.value,
                         insight.synthesized_at,
                     )
                 logger.info(
@@ -175,9 +178,9 @@ class PgVectorInsightStore(InsightStore):
                         """
                         INSERT INTO consolidation_insights
                             (id, theme, kind, narrative, supporting_experience_ids,
-                             confidence, confidence_tier, synthesized_at,
+                             confidence, confidence_tier, status, synthesized_at,
                              narrative_embedding)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector)
                         ON CONFLICT (id) DO UPDATE SET
                             theme = EXCLUDED.theme,
                             kind = EXCLUDED.kind,
@@ -185,6 +188,7 @@ class PgVectorInsightStore(InsightStore):
                             supporting_experience_ids = EXCLUDED.supporting_experience_ids,
                             confidence = EXCLUDED.confidence,
                             confidence_tier = EXCLUDED.confidence_tier,
+                            status = EXCLUDED.status,
                             synthesized_at = EXCLUDED.synthesized_at,
                             narrative_embedding = EXCLUDED.narrative_embedding
                         """,
@@ -195,6 +199,7 @@ class PgVectorInsightStore(InsightStore):
                         list(insight.supporting_experience_ids),
                         insight.confidence,
                         insight.confidence_tier.value,
+                        insight.status.value,
                         insight.synthesized_at,
                         embedding_literal,
                     )
@@ -216,7 +221,7 @@ class PgVectorInsightStore(InsightStore):
                     query = (
                         "SELECT id, theme, kind, narrative, "
                         "supporting_experience_ids, confidence, "
-                        "confidence_tier, synthesized_at "
+                        "confidence_tier, status, synthesized_at "
                         "FROM consolidation_insights "
                         "ORDER BY synthesized_at DESC LIMIT $1"
                     )
@@ -225,7 +230,7 @@ class PgVectorInsightStore(InsightStore):
                     query = (
                         "SELECT id, theme, kind, narrative, "
                         "supporting_experience_ids, confidence, "
-                        "confidence_tier, synthesized_at "
+                        "confidence_tier, status, synthesized_at "
                         "FROM consolidation_insights "
                         "WHERE theme = $1 "
                         "ORDER BY synthesized_at DESC LIMIT $2"
@@ -247,7 +252,7 @@ class PgVectorInsightStore(InsightStore):
                 row = await conn.fetchrow(
                     """
                     SELECT id, theme, kind, narrative, supporting_experience_ids,
-                           confidence, confidence_tier, synthesized_at
+                           confidence, confidence_tier, status, synthesized_at
                     FROM consolidation_insights
                     WHERE id = $1
                     """,
@@ -278,8 +283,18 @@ def _row_to_insight(row: Any) -> Insight:
         supporting_experience_ids=supporting,
         confidence=row["confidence"],
         confidence_tier=ConfidenceTier(row["confidence_tier"]),
+        status=InsightStatus(_row_get(row, "status", InsightStatus.ACTIVE.value)),
         synthesized_at=synthesized_at if synthesized_at is not None else datetime.now(UTC),
     )
+
+
+def _row_get(row: Any, key: str, default: Any) -> Any:
+    """Read a column, tolerating rows from before the column existed."""
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return value if value is not None else default
 
 
 def _experience_ids_json(insight: Insight) -> str:

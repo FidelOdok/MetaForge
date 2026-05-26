@@ -27,6 +27,19 @@ class InsightKind(StrEnum):
     OBSERVATION = "observation"
 
 
+class InsightStatus(StrEnum):
+    """Lifecycle state of a stored insight (MET-455).
+
+    * ``ACTIVE`` — trusted; surfaced to agents normally.
+    * ``STALE_WARN`` — confidence has decayed (or re-validation failed);
+      flagged for review. Still readable, but consumers should treat it
+      with caution / prefer fresher insights.
+    """
+
+    ACTIVE = "active"
+    STALE_WARN = "stale_warn"
+
+
 class Insight(BaseModel):
     """A single synthesized lesson covering an ``ExperienceGroup``."""
 
@@ -47,6 +60,10 @@ class Insight(BaseModel):
         description="LLM-asserted confidence; the validator gates on >= 0.70.",
     )
     confidence_tier: ConfidenceTier = ConfidenceTier.LLM_INFERRED
+    status: InsightStatus = Field(
+        default=InsightStatus.ACTIVE,
+        description="Lifecycle state — STALE_WARN once decayed below the floor.",
+    )
     synthesized_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the LLM synthesized the insight.",

@@ -30,7 +30,11 @@ from digital_twin.memory.consolidation.fetcher import (
     InMemoryEventFetcher,
 )
 from digital_twin.memory.consolidation.grouper import EventGrouper, ExperienceGroup
-from digital_twin.memory.consolidation.insight import Insight, InsightKind
+from digital_twin.memory.consolidation.insight import (
+    Insight,
+    InsightKind,
+    InsightStatus,
+)
 from digital_twin.memory.consolidation.llm import (
     LLMClient,
     StubLLMClient,
@@ -109,6 +113,7 @@ __all__ = [
     "InMemoryInsightStore",
     "Insight",
     "InsightKind",
+    "InsightStatus",
     "InsightStore",
     "InsightSynthesizer",
     "InsightValidator",
