@@ -25,6 +25,11 @@ from digital_twin.memory.consolidation.llm import (
     StubLLMClient,
     parse_strict_json,
 )
+from digital_twin.memory.consolidation.modes import (
+    ConsolidationMode,
+    ConsolidationModeError,
+    ConsolidationRunRequest,
+)
 from digital_twin.memory.consolidation.openrouter import (
     DEFAULT_FALLBACK_MODEL,
     DEFAULT_PRIMARY_MODEL,
@@ -32,12 +37,12 @@ from digital_twin.memory.consolidation.openrouter import (
     OpenRouterError,
     OpenRouterLLMClient,
 )
-from digital_twin.memory.consolidation.pgvector_insight_store import (
-    PgVectorInsightStore,
-)
 from digital_twin.memory.consolidation.orchestrator import (
     ConsolidationOrchestrator,
     ConsolidationReport,
+)
+from digital_twin.memory.consolidation.pgvector_insight_store import (
+    PgVectorInsightStore,
 )
 from digital_twin.memory.consolidation.synthesizer import (
     MAX_EXAMPLES_PER_GROUP,
@@ -59,8 +64,11 @@ from digital_twin.memory.consolidation.writer import (
 )
 
 __all__ = [
+    "ConsolidationMode",
+    "ConsolidationModeError",
     "ConsolidationOrchestrator",
     "ConsolidationReport",
+    "ConsolidationRunRequest",
     "ConsolidationTheme",
     "DEFAULT_FALLBACK_MODEL",
     "DEFAULT_MIN_CONFIDENCE",
