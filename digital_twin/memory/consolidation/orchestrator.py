@@ -16,6 +16,7 @@ from uuid import UUID
 
 import structlog
 
+from digital_twin.memory.consolidation.contradiction_detector import ContradictionDetector
 from digital_twin.memory.consolidation.decay import ConfidenceDecay
 from digital_twin.memory.consolidation.fetcher import (
     DEFAULT_FETCH_LIMIT,
@@ -64,6 +65,9 @@ class ConsolidationReport:
     """JANITOR mode only — how many existing insights failed re-validation."""
     marked_stale_count: int = 0
     """JANITOR mode only — how many insights were written back as STALE_WARN."""
+    contradictions: list[str] = field(default_factory=list)
+    """Human-readable records of synthesized insights that conflict with the
+    existing corpus (populated only when a ContradictionDetector is wired)."""
 
 
 class ConsolidationOrchestrator:
@@ -80,6 +84,7 @@ class ConsolidationOrchestrator:
         insight_store: InsightStore | None = None,
         decay: ConfidenceDecay | None = None,
         janitor_marks_stale: bool = False,
+        contradiction_detector: ContradictionDetector | None = None,
     ) -> None:
         self._fetcher = fetcher
         self._grouper = grouper
@@ -102,6 +107,12 @@ class ConsolidationOrchestrator:
         # flagging). When False (default), JANITOR is report-only and
         # never mutates the store.
         self._janitor_marks_stale = janitor_marks_stale
+        # MET-455: when wired (alongside an insight_store), the BACKGROUND
+        # pass checks each newly-synthesized insight against the existing
+        # same-theme corpus and records conflicts in the report. The new
+        # insight is still written (newest lesson wins); the contradiction
+        # is surfaced for review rather than silently dropped.
+        self._contradiction_detector = contradiction_detector
 
     async def run(
         self,
@@ -174,6 +185,7 @@ class ConsolidationOrchestrator:
         synthesized: list[Insight] = []
         accepted: list[Insight] = []
         rejected: list[str] = []
+        contradictions: list[str] = []
 
         for group in groups:
             insight = await self._synthesizer.synthesize(group)
@@ -189,6 +201,9 @@ class ConsolidationOrchestrator:
                     f"theme={group.theme.value} reason={verdict.reason}"
                 )
                 continue
+            # MET-455: check the candidate against the existing corpus
+            # BEFORE writing it, so it doesn't compare against itself.
+            await self._record_contradictions(insight, contradictions)
             await self._writer.write(insight)
             accepted.append(insight)
 
@@ -202,6 +217,7 @@ class ConsolidationOrchestrator:
             rejected_count=len(rejected),
             written_by_theme=written,
             rejected_reasons=rejected,
+            contradictions=contradictions,
             insights=accepted,
         )
         span.set_attribute("memory.accepted_count", report.accepted_count)
@@ -217,6 +233,34 @@ class ConsolidationOrchestrator:
             project_id=str(request.project_id) if request.project_id else None,
         )
         return report
+
+    async def _record_contradictions(
+        self,
+        candidate: Insight,
+        sink: list[str],
+    ) -> None:
+        """Detect + record conflicts between ``candidate`` and the stored corpus.
+
+        No-op unless both a contradiction detector and an insight store
+        are wired. Best-effort: a detector failure is logged inside the
+        detector (fail-open) and never blocks the write.
+        """
+        if self._contradiction_detector is None or self._insight_store is None:
+            return
+        existing = await self._insight_store.list(theme=candidate.theme, limit=100)
+        result = await self._contradiction_detector.detect(candidate, existing)
+        if result.contradicts:
+            conflict_ids = ", ".join(str(cid) for cid in result.conflicting_insight_ids)
+            sink.append(
+                f"candidate={candidate.id} theme={candidate.theme.value}"
+                f" conflicts_with=[{conflict_ids}] :: {result.explanation}"
+            )
+            logger.info(
+                "consolidation_contradiction_detected",
+                candidate_id=str(candidate.id),
+                theme=candidate.theme.value,
+                conflict_count=len(result.conflicting_insight_ids),
+            )
 
     async def _run_janitor(
         self,
