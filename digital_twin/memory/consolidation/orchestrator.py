@@ -16,6 +16,7 @@ from uuid import UUID
 
 import structlog
 
+from digital_twin.memory.consolidation.decay import ConfidenceDecay
 from digital_twin.memory.consolidation.fetcher import (
     DEFAULT_FETCH_LIMIT,
     DEFAULT_MIN_IMPORTANCE,
@@ -75,6 +76,7 @@ class ConsolidationOrchestrator:
         validator: InsightValidator,
         writer: SemanticMemoryWriter,
         insight_store: InsightStore | None = None,
+        decay: ConfidenceDecay | None = None,
     ) -> None:
         self._fetcher = fetcher
         self._grouper = grouper
@@ -86,6 +88,12 @@ class ConsolidationOrchestrator:
         # attribute when supplied. Callers that don't run janitor passes
         # can leave this None.
         self._insight_store = insight_store
+        # MET-455: when supplied, JANITOR applies time-decay to each
+        # insight's confidence before re-validating, so an insight that
+        # has simply aged past the validator's floor gets flagged as
+        # stale ("active forgetting"). When None, JANITOR re-validates
+        # against the raw stored confidence (drift detection only).
+        self._decay = decay
 
     async def run(
         self,
@@ -226,7 +234,14 @@ class ConsolidationOrchestrator:
         rejected: list[str] = []
         newly_failed = 0
         for insight in existing:
-            verdict = self._validator.validate(insight)
+            # MET-455: apply confidence decay (if configured) before
+            # re-validating so aged insights surface as stale.
+            candidate = (
+                self._decay.with_decayed_confidence(insight)
+                if self._decay is not None
+                else insight
+            )
+            verdict = self._validator.validate(candidate)
             if not verdict.accepted:
                 newly_failed += 1
                 rejected.append(
@@ -244,6 +259,7 @@ class ConsolidationOrchestrator:
             "consolidation_janitor_completed",
             revalidated=report.revalidated_count,
             newly_failed=report.newly_failed_count,
+            decay_applied=self._decay is not None,
             project_id=str(request.project_id) if request.project_id else None,
         )
         return report
