@@ -32,6 +32,9 @@ from digital_twin.memory.consolidation.openrouter import (
     OpenRouterError,
     OpenRouterLLMClient,
 )
+from digital_twin.memory.consolidation.pgvector_insight_store import (
+    PgVectorInsightStore,
+)
 from digital_twin.memory.consolidation.orchestrator import (
     ConsolidationOrchestrator,
     ConsolidationReport,
@@ -77,6 +80,7 @@ __all__ = [
     "OpenRouterConfig",
     "OpenRouterError",
     "OpenRouterLLMClient",
+    "PgVectorInsightStore",
     "SemanticMemoryWriter",
     "StubLLMClient",
     "ValidationResult",
