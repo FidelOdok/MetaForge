@@ -376,6 +376,84 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             app.state.memory_store = None
             app.state.memory_client = None
 
+    # MET-454: consolidation pipeline orchestrator.
+    # Build the full fetcher → grouper → synthesizer → validator → writer
+    # chain so the Temporal worker (or an on-demand REST/CLI trigger) can
+    # invoke it. Synthesis uses Open Router when OPEN_ROUTER_API_KEY is
+    # set; otherwise falls back to StubLLMClient so dev boot stays usable.
+    # Insight store prefers pgvector when DATABASE_URL is available.
+    app.state.consolidation_orchestrator = None
+    app.state.consolidation_insight_store = None
+    if app.state.memory_store is None:
+        logger.warning(
+            "consolidation_orchestrator_init_skipped", reason="no_memory_store"
+        )
+    else:
+        try:
+            from digital_twin.memory.consolidation import (
+                ConsolidationOrchestrator,
+                EventGrouper,
+                InMemoryEventFetcher,
+                InMemoryInsightStore,
+                InsightSynthesizer,
+                InsightValidator,
+                OpenRouterConfig,
+                OpenRouterError,
+                OpenRouterLLMClient,
+                PgVectorInsightStore,
+                SemanticMemoryWriter,
+                StubLLMClient,
+                register_consolidation_activities,
+            )
+            from digital_twin.memory.consolidation.llm import LLMClient
+
+            # Insight store — pgvector when available, in-memory otherwise.
+            insight_store: InMemoryInsightStore | PgVectorInsightStore
+            if db_url:
+                try:
+                    dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                    pg_insight = PgVectorInsightStore(dsn=dsn)
+                    await pg_insight.initialize()
+                    insight_store = pg_insight
+                    logger.info("consolidation_insight_store_pgvector_initialized")
+                except Exception as exc:
+                    logger.warning(
+                        "consolidation_insight_store_pgvector_failed", error=str(exc)
+                    )
+                    insight_store = InMemoryInsightStore()
+            else:
+                insight_store = InMemoryInsightStore()
+                logger.info("consolidation_insight_store_in_memory_initialized")
+
+            # LLM — Open Router when configured, stub otherwise.
+            llm_client: LLMClient
+            try:
+                llm_client = OpenRouterLLMClient(OpenRouterConfig.from_env())
+                logger.info("consolidation_llm_open_router_initialized")
+            except OpenRouterError as exc:
+                logger.warning(
+                    "consolidation_llm_open_router_skipped",
+                    reason=str(exc),
+                )
+                llm_client = StubLLMClient()
+
+            orchestrator = ConsolidationOrchestrator(
+                fetcher=InMemoryEventFetcher(app.state.memory_store),
+                grouper=EventGrouper(),
+                synthesizer=InsightSynthesizer(llm_client),
+                validator=InsightValidator(),
+                writer=SemanticMemoryWriter(insight_store),
+                insight_store=insight_store,
+            )
+            register_consolidation_activities(orchestrator)
+            app.state.consolidation_orchestrator = orchestrator
+            app.state.consolidation_insight_store = insight_store
+            logger.info("consolidation_orchestrator_initialized")
+        except Exception as exc:
+            logger.warning("consolidation_orchestrator_init_failed", error=str(exc))
+            app.state.consolidation_orchestrator = None
+            app.state.consolidation_insight_store = None
+
     # Register pgvector health check
     if pgvector_active:
         from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
