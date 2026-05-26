@@ -403,16 +403,72 @@ async def _close_knowledge_service(service: Any) -> None:
         logger.warning("mcp_knowledge_service_close_failed", error=str(exc))
 
 
+async def _build_memory_client() -> tuple[Any, Any]:
+    """Construct ``MemoryClient`` + experience store for the standalone MCP entrypoint.
+
+    Mirrors ``api_gateway/server.py``'s memory wiring (MET-453). Returns
+    ``(client, store)`` so the caller can close the pgvector pool on
+    shutdown. Returns ``(None, None)`` when no embedding backend is
+    available — the rest of the MCP surface stays usable.
+    """
+    try:
+        from digital_twin.knowledge.embedding_service import create_embedding_service
+        from digital_twin.memory.client import MemoryClient
+        from digital_twin.memory.pgvector_store import PgVectorExperienceStore
+        from digital_twin.memory.store import InMemoryExperienceStore
+
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key:
+            embeddings = create_embedding_service("openai", api_key=openai_key)
+        else:
+            embeddings = create_embedding_service("local")
+
+        db_url = os.environ.get("DATABASE_URL")
+        store: PgVectorExperienceStore | InMemoryExperienceStore | None = None
+        if db_url:
+            try:
+                dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                pg_store = PgVectorExperienceStore(dsn=dsn)
+                await pg_store.initialize()
+                store = pg_store
+                logger.info("mcp_memory_store_pgvector_initialised")
+            except Exception as exc:
+                logger.warning("mcp_memory_store_pgvector_failed", error=str(exc))
+        if store is None:
+            store = InMemoryExperienceStore()
+            logger.info("mcp_memory_store_in_memory_initialised")
+
+        client = MemoryClient(store, embeddings)
+        return client, store
+    except Exception as exc:
+        logger.warning("mcp_memory_client_init_failed", error=str(exc))
+        return None, None
+
+
+async def _close_memory_store(store: Any) -> None:
+    """Best-effort teardown of the pgvector pool."""
+    if store is None:
+        return
+    close = getattr(store, "close", None)
+    if close is None:
+        return
+    try:
+        await close()
+    except Exception as exc:
+        logger.warning("mcp_memory_store_close_failed", error=str(exc))
+
+
 async def _bootstrap(
     args: argparse.Namespace,
-) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any]:
-    """Return the unified MCP server, the twin, and the knowledge service.
+) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any, Any]:
+    """Return the unified MCP server, the twin, knowledge service, memory store.
 
-    Callers must close the twin (``await twin.aclose()``) and the
-    knowledge service (``await _close_knowledge_service(svc)``) when
-    the transport loop exits — otherwise the Neo4j driver, aiohttp
-    sessions, and the LightRAG pgvector pool leak across subprocess
-    restarts (MET-425).
+    Callers must close the twin (``await twin.aclose()``), the
+    knowledge service (``await _close_knowledge_service(svc)``), and
+    the memory store (``await _close_memory_store(store)``) when the
+    transport loop exits — otherwise the Neo4j driver, aiohttp
+    sessions, the LightRAG pgvector pool, and the memory pgvector
+    pool leak across subprocess restarts (MET-425, MET-453).
     """
     from api_gateway.projects.backend import create_project_backend
     from twin_core.api import InMemoryTwinAPI
@@ -435,14 +491,19 @@ async def _bootstrap(
         set_twin = getattr(knowledge_service, "set_twin", None)
         if set_twin is not None:
             set_twin(twin)
+    # MET-453: build the memory client so `memory.retrieve_similar_experience`
+    # is exposed alongside knowledge.* when the standalone stdio MCP
+    # server is the entrypoint (Claude Code / Cursor talking direct).
+    memory_client, memory_store = await _build_memory_client()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
         twin=twin,
         constraint_engine=twin.constraints,
         project_backend=project_backend,
+        memory_client=memory_client,
     )
-    return server, twin, knowledge_service
+    return server, twin, knowledge_service, memory_store
 
 
 def _configure_logging_for_transport(transport: str) -> None:
@@ -480,7 +541,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.transport == "stdio":
 
         async def _stdio() -> None:
-            server, twin, knowledge_service = await _bootstrap(args)
+            server, twin, knowledge_service, memory_store = await _bootstrap(args)
             try:
                 await run_stdio(server)
             finally:
@@ -490,13 +551,15 @@ def main(argv: list[str] | None = None) -> int:
                 await twin.aclose()
                 # MET-433: same hygiene for the LightRAG pgvector pool.
                 await _close_knowledge_service(knowledge_service)
+                # MET-453: same hygiene for the memory pgvector pool.
+                await _close_memory_store(memory_store)
 
         asyncio.run(_stdio())
     else:
         # HTTP path keeps the two-step flow: ``run_http`` runs uvicorn
         # which manages its own loop and only consumes the bootstrapped
         # server's introspection surface.
-        server, twin, knowledge_service = asyncio.run(_bootstrap(args))
+        server, twin, knowledge_service, memory_store = asyncio.run(_bootstrap(args))
         try:
             run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
         finally:
@@ -504,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
             # neo4j async driver tolerates cross-loop close in practice.
             asyncio.run(twin.aclose())
             asyncio.run(_close_knowledge_service(knowledge_service))
+            asyncio.run(_close_memory_store(memory_store))
     return 0
 
 
