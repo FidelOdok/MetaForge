@@ -7,6 +7,11 @@ transforms them into experience records, embeds them, and stores them
 in pgvector for semantic retrieval via ``retrieve_similar_experience``.
 """
 
+from digital_twin.memory.client import MemoryClient
+from digital_twin.memory.consumer import (
+    DEFAULT_MIN_IMPORTANCE,
+    ExperienceConsumer,
+)
 from digital_twin.memory.importance import (
     DEFAULT_RECENCY_HALF_LIFE_HOURS,
     ImportanceScore,
@@ -18,13 +23,22 @@ from digital_twin.memory.models import (
     ExperienceMemory,
     MemorySearchHit,
 )
+from digital_twin.memory.store import (
+    ExperienceStore,
+    InMemoryExperienceStore,
+)
 
 __all__ = [
     "ConfidenceTier",
+    "DEFAULT_MIN_IMPORTANCE",
     "DEFAULT_RECENCY_HALF_LIFE_HOURS",
+    "ExperienceConsumer",
     "ExperienceMemory",
+    "ExperienceStore",
     "ImportanceScore",
     "ImportanceWeights",
+    "InMemoryExperienceStore",
+    "MemoryClient",
     "MemorySearchHit",
     "score_importance",
 ]
