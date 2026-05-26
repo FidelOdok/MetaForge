@@ -341,26 +341,40 @@ async def _init_knowledge_store(app: FastAPI) -> None:
         app.state.embedding_service = None
 
     # MET-453: agent memory layer — experience store + retrieval client.
-    # In-memory backend for now; pgvector adapter lands separately so the
-    # MCP/REST surface can be exercised end-to-end without a live database.
-    try:
-        from digital_twin.memory.client import MemoryClient
-        from digital_twin.memory.store import InMemoryExperienceStore
+    # When DATABASE_URL is set, prefer the pgvector backend so experiences
+    # survive gateway restarts. Fall back to InMemoryExperienceStore for
+    # local dev / test where DATABASE_URL is absent or the pgvector init
+    # fails (extension missing, etc.).
+    app.state.memory_store = None
+    app.state.memory_client = None
+    if app.state.embedding_service is None:
+        logger.warning("memory_client_init_skipped", reason="no_embedding_service")
+    else:
+        try:
+            from digital_twin.memory.client import MemoryClient
+            from digital_twin.memory.pgvector_store import PgVectorExperienceStore
+            from digital_twin.memory.store import InMemoryExperienceStore
 
-        if app.state.embedding_service is not None:
-            app.state.memory_store = InMemoryExperienceStore()
-            app.state.memory_client = MemoryClient(
-                app.state.memory_store, app.state.embedding_service
-            )
-            logger.info("memory_client_in_memory_initialized")
-        else:
+            memory_store: InMemoryExperienceStore | PgVectorExperienceStore | None = None
+            if db_url:
+                try:
+                    dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                    pg_memory = PgVectorExperienceStore(dsn=dsn)
+                    await pg_memory.initialize()
+                    memory_store = pg_memory
+                    logger.info("memory_store_pgvector_initialized")
+                except Exception as exc:
+                    logger.warning("memory_store_pgvector_failed", error=str(exc))
+            if memory_store is None:
+                memory_store = InMemoryExperienceStore()
+                logger.info("memory_store_in_memory_initialized")
+
+            app.state.memory_store = memory_store
+            app.state.memory_client = MemoryClient(memory_store, app.state.embedding_service)
+        except Exception as exc:
+            logger.warning("memory_client_init_failed", error=str(exc))
             app.state.memory_store = None
             app.state.memory_client = None
-            logger.warning("memory_client_init_skipped", reason="no_embedding_service")
-    except Exception as exc:
-        logger.warning("memory_client_init_failed", error=str(exc))
-        app.state.memory_store = None
-        app.state.memory_client = None
 
     # Register pgvector health check
     if pgvector_active:

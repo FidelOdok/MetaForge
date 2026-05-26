@@ -23,6 +23,10 @@ from digital_twin.memory.models import (
     ExperienceMemory,
     MemorySearchHit,
 )
+from digital_twin.memory.pgvector_store import (
+    DEFAULT_EMBEDDING_DIM,
+    PgVectorExperienceStore,
+)
 from digital_twin.memory.store import (
     ExperienceStore,
     InMemoryExperienceStore,
@@ -30,6 +34,7 @@ from digital_twin.memory.store import (
 
 __all__ = [
     "ConfidenceTier",
+    "DEFAULT_EMBEDDING_DIM",
     "DEFAULT_MIN_IMPORTANCE",
     "DEFAULT_RECENCY_HALF_LIFE_HOURS",
     "ExperienceConsumer",
@@ -40,5 +45,6 @@ __all__ = [
     "InMemoryExperienceStore",
     "MemoryClient",
     "MemorySearchHit",
+    "PgVectorExperienceStore",
     "score_importance",
 ]
