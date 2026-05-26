@@ -41,6 +41,10 @@ from digital_twin.memory.consolidation.orchestrator import (
     ConsolidationOrchestrator,
     ConsolidationReport,
 )
+from digital_twin.memory.consolidation.neo4j_insight_store import (
+    Neo4jInsightStore,
+    Neo4jInsightStoreError,
+)
 from digital_twin.memory.consolidation.pgvector_insight_store import (
     PgVectorInsightStore,
 )
@@ -105,6 +109,8 @@ __all__ = [
     "ConsolidationWorkflowInput",
     "ConsolidationWorkflowOutput",
     "DEFAULT_INTERVAL_SECONDS",
+    "Neo4jInsightStore",
+    "Neo4jInsightStoreError",
     "PgVectorInsightStore",
     "register_consolidation_activities",
     "SemanticMemoryWriter",
