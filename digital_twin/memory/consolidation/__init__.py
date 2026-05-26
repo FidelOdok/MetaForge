@@ -44,6 +44,16 @@ from digital_twin.memory.consolidation.orchestrator import (
 from digital_twin.memory.consolidation.pgvector_insight_store import (
     PgVectorInsightStore,
 )
+from digital_twin.memory.consolidation.workflow import (
+    DEFAULT_INTERVAL_SECONDS,
+    ConsolidationActivities,
+    ConsolidationActivityInput,
+    ConsolidationActivityOutput,
+    ConsolidationWorkflow,
+    ConsolidationWorkflowInput,
+    ConsolidationWorkflowOutput,
+    register_consolidation_activities,
+)
 from digital_twin.memory.consolidation.synthesizer import (
     MAX_EXAMPLES_PER_GROUP,
     InsightSynthesizer,
@@ -88,7 +98,15 @@ __all__ = [
     "OpenRouterConfig",
     "OpenRouterError",
     "OpenRouterLLMClient",
+    "ConsolidationActivities",
+    "ConsolidationActivityInput",
+    "ConsolidationActivityOutput",
+    "ConsolidationWorkflow",
+    "ConsolidationWorkflowInput",
+    "ConsolidationWorkflowOutput",
+    "DEFAULT_INTERVAL_SECONDS",
     "PgVectorInsightStore",
+    "register_consolidation_activities",
     "SemanticMemoryWriter",
     "StubLLMClient",
     "ValidationResult",
