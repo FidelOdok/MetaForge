@@ -25,6 +25,10 @@ from digital_twin.memory.consolidation.llm import (
     StubLLMClient,
     parse_strict_json,
 )
+from digital_twin.memory.consolidation.orchestrator import (
+    ConsolidationOrchestrator,
+    ConsolidationReport,
+)
 from digital_twin.memory.consolidation.synthesizer import (
     MAX_EXAMPLES_PER_GROUP,
     InsightSynthesizer,
@@ -38,20 +42,30 @@ from digital_twin.memory.consolidation.validator import (
     InsightValidator,
     ValidationResult,
 )
+from digital_twin.memory.consolidation.writer import (
+    InMemoryInsightStore,
+    InsightStore,
+    SemanticMemoryWriter,
+)
 
 __all__ = [
+    "ConsolidationOrchestrator",
+    "ConsolidationReport",
     "ConsolidationTheme",
     "DEFAULT_MIN_CONFIDENCE",
     "EventFetcher",
     "EventGrouper",
     "ExperienceGroup",
     "InMemoryEventFetcher",
+    "InMemoryInsightStore",
     "Insight",
     "InsightKind",
+    "InsightStore",
     "InsightSynthesizer",
     "InsightValidator",
     "LLMClient",
     "MAX_EXAMPLES_PER_GROUP",
+    "SemanticMemoryWriter",
     "StubLLMClient",
     "ValidationResult",
     "classify_theme",
