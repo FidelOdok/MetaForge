@@ -298,3 +298,103 @@ def test_handle_memory_consolidate_422_exits_4(monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         handle_memory(args, ForgeClient(base_url="http://x"))
     assert excinfo.value.code == 4
+
+
+def test_insights_subcommand_defaults():
+    args = _build_args(["memory", "insights"])
+    assert args.memory_command == "insights"
+    assert args.theme is None
+    assert args.include_stale is False
+    assert args.limit == 50
+
+
+def test_insights_subcommand_flags():
+    args = _build_args(
+        ["memory", "insights", "--theme", "power_analysis", "--include-stale", "--limit", "10"]
+    )
+    assert args.theme == "power_analysis"
+    assert args.include_stale is True
+    assert args.limit == 10
+
+
+def test_handle_memory_insights_dispatches(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return {
+                "total": 1,
+                "theme": "power_analysis",
+                "includeStale": False,
+                "insights": [
+                    {
+                        "id": "11111111-1111-1111-1111-111111111111",
+                        "theme": "power_analysis",
+                        "kind": "principle",
+                        "status": "active",
+                        "confidence": 0.85,
+                        "narrative": "Power budget stays under target",
+                    }
+                ],
+            }
+
+    class _FakeHttpClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> _FakeHttpClient:
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+        def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+            captured["url"] = url
+            captured["params"] = params
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeHttpClient)
+
+    args = _build_args(
+        ["memory", "insights", "--theme", "power_analysis", "--include-stale"]
+    )
+    result = handle_memory(args, ForgeClient(base_url="http://x"))
+
+    assert captured["url"] == "/v1/memory/insights"
+    assert captured["params"] == {"limit": 50, "theme": "power_analysis", "includeStale": "true"}
+    assert result is not None
+    assert result["total"] == 1
+    assert result["insights"][0]["status"] == "active"
+
+
+def test_handle_memory_insights_503_exits_3(monkeypatch):
+    class _FakeResponse:
+        status_code = 503
+        text = '{"detail":"consolidation_insight_store_not_ready"}'
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return {"detail": "consolidation_insight_store_not_ready"}
+
+    class _FakeHttpClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> _FakeHttpClient:
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+        def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeHttpClient)
+
+    args = _build_args(["memory", "insights"])
+    with pytest.raises(SystemExit) as excinfo:
+        handle_memory(args, ForgeClient(base_url="http://x"))
+    assert excinfo.value.code == 3
