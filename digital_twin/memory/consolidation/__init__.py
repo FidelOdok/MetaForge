@@ -63,6 +63,10 @@ from digital_twin.memory.consolidation.orchestrator import (
 from digital_twin.memory.consolidation.pgvector_insight_store import (
     PgVectorInsightStore,
 )
+from digital_twin.memory.consolidation.staleness import (
+    InvalidationResult,
+    StalenessInvalidator,
+)
 from digital_twin.memory.consolidation.synthesizer import (
     MAX_EXAMPLES_PER_GROUP,
     InsightSynthesizer,
@@ -114,6 +118,7 @@ __all__ = [
     "Insight",
     "InsightKind",
     "InsightStatus",
+    "InvalidationResult",
     "InsightStore",
     "InsightSynthesizer",
     "InsightValidator",
@@ -136,6 +141,7 @@ __all__ = [
     "PgVectorInsightStore",
     "register_consolidation_activities",
     "SemanticMemoryWriter",
+    "StalenessInvalidator",
     "StubLLMClient",
     "ValidationResult",
     "classify_theme",
