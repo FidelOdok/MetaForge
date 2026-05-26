@@ -21,6 +21,7 @@ from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.health import health_router
 from api_gateway.knowledge.routes import router as knowledge_router
+from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.twin.routes import router as twin_router
@@ -338,6 +339,28 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     except Exception as exc:
         logger.warning("embedding_service_init_failed", error=str(exc))
         app.state.embedding_service = None
+
+    # MET-453: agent memory layer — experience store + retrieval client.
+    # In-memory backend for now; pgvector adapter lands separately so the
+    # MCP/REST surface can be exercised end-to-end without a live database.
+    try:
+        from digital_twin.memory.client import MemoryClient
+        from digital_twin.memory.store import InMemoryExperienceStore
+
+        if app.state.embedding_service is not None:
+            app.state.memory_store = InMemoryExperienceStore()
+            app.state.memory_client = MemoryClient(
+                app.state.memory_store, app.state.embedding_service
+            )
+            logger.info("memory_client_in_memory_initialized")
+        else:
+            app.state.memory_store = None
+            app.state.memory_client = None
+            logger.warning("memory_client_init_skipped", reason="no_embedding_service")
+    except Exception as exc:
+        logger.warning("memory_client_init_failed", error=str(exc))
+        app.state.memory_store = None
+        app.state.memory_client = None
 
     # Register pgvector health check
     if pgvector_active:
@@ -731,6 +754,7 @@ def create_app(
         pass
 
     app.include_router(knowledge_router)
+    app.include_router(memory_router)
 
     logger.info(
         "gateway_configured",
