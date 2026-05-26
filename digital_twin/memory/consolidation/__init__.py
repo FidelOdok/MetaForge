@@ -19,16 +19,41 @@ from digital_twin.memory.consolidation.fetcher import (
     InMemoryEventFetcher,
 )
 from digital_twin.memory.consolidation.grouper import EventGrouper, ExperienceGroup
+from digital_twin.memory.consolidation.insight import Insight, InsightKind
+from digital_twin.memory.consolidation.llm import (
+    LLMClient,
+    StubLLMClient,
+    parse_strict_json,
+)
+from digital_twin.memory.consolidation.synthesizer import (
+    MAX_EXAMPLES_PER_GROUP,
+    InsightSynthesizer,
+)
 from digital_twin.memory.consolidation.themes import (
     ConsolidationTheme,
     classify_theme,
 )
+from digital_twin.memory.consolidation.validator import (
+    DEFAULT_MIN_CONFIDENCE,
+    InsightValidator,
+    ValidationResult,
+)
 
 __all__ = [
     "ConsolidationTheme",
+    "DEFAULT_MIN_CONFIDENCE",
     "EventFetcher",
     "EventGrouper",
     "ExperienceGroup",
     "InMemoryEventFetcher",
+    "Insight",
+    "InsightKind",
+    "InsightSynthesizer",
+    "InsightValidator",
+    "LLMClient",
+    "MAX_EXAMPLES_PER_GROUP",
+    "StubLLMClient",
+    "ValidationResult",
     "classify_theme",
+    "parse_strict_json",
 ]
