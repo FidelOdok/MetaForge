@@ -25,6 +25,13 @@ from digital_twin.memory.consolidation.llm import (
     StubLLMClient,
     parse_strict_json,
 )
+from digital_twin.memory.consolidation.openrouter import (
+    DEFAULT_FALLBACK_MODEL,
+    DEFAULT_PRIMARY_MODEL,
+    OpenRouterConfig,
+    OpenRouterError,
+    OpenRouterLLMClient,
+)
 from digital_twin.memory.consolidation.orchestrator import (
     ConsolidationOrchestrator,
     ConsolidationReport,
@@ -52,7 +59,9 @@ __all__ = [
     "ConsolidationOrchestrator",
     "ConsolidationReport",
     "ConsolidationTheme",
+    "DEFAULT_FALLBACK_MODEL",
     "DEFAULT_MIN_CONFIDENCE",
+    "DEFAULT_PRIMARY_MODEL",
     "EventFetcher",
     "EventGrouper",
     "ExperienceGroup",
@@ -65,6 +74,9 @@ __all__ = [
     "InsightValidator",
     "LLMClient",
     "MAX_EXAMPLES_PER_GROUP",
+    "OpenRouterConfig",
+    "OpenRouterError",
+    "OpenRouterLLMClient",
     "SemanticMemoryWriter",
     "StubLLMClient",
     "ValidationResult",
