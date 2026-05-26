@@ -674,6 +674,21 @@ async def _init_orchestrator(app: FastAPI) -> None:
         knowledge_service=getattr(app.state, "knowledge_service", None),
     )
 
+    # MET-453: subscribe the ExperienceConsumer so AGENT_TASK_* events
+    # actually flow into the experience store (the rest of the memory
+    # pipeline — retrieval, consolidation — is inert without this). Guarded
+    # on the memory store + embedding service the boot wired earlier.
+    _memory_store = getattr(app.state, "memory_store", None)
+    _embedding_service = getattr(app.state, "embedding_service", None)
+    if _memory_store is not None and _embedding_service is not None:
+        try:
+            from digital_twin.memory.consumer import ExperienceConsumer
+
+            event_bus.subscribe(ExperienceConsumer(_memory_store, _embedding_service))
+            logger.info("experience_consumer_subscribed")
+        except Exception as exc:
+            logger.warning("experience_consumer_subscribe_failed", error=str(exc))
+
     # Register all workflow definitions
     for defn in ACTION_WORKFLOWS.values():
         await workflow_engine.register_workflow(defn)
