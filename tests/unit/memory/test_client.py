@@ -3,13 +3,43 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
+from digital_twin.knowledge.service import SearchHit
+from digital_twin.knowledge.types import KnowledgeType
 from digital_twin.memory.client import MAX_RETRIEVAL_LIMIT, MemoryClient
 from digital_twin.memory.models import ConfidenceTier, ExperienceMemory
 from digital_twin.memory.store import InMemoryExperienceStore
+
+
+class _FakeKnowledgeService:
+    """Records the last search() call and returns a canned hit."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        knowledge_type: KnowledgeType | None = None,
+        **kwargs: Any,
+    ) -> list[SearchHit]:
+        self.calls.append({"query": query, "top_k": top_k, "knowledge_type": knowledge_type})
+        return [
+            SearchHit(
+                content=f"hit for {query}",
+                similarity_score=0.9,
+                source_path="decisions.md",
+                heading=None,
+                chunk_index=0,
+                total_chunks=1,
+                knowledge_type=knowledge_type,
+            )
+        ]
 
 
 async def _seed(store: InMemoryExperienceStore, embedder, *, count: int = 3) -> None:
@@ -134,3 +164,61 @@ async def test_min_similarity_all_filtered_returns_empty(fake_embeddings):
         "task description 1", limit=3, min_similarity=1.0001
     )
     assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# Knowledge-backed SDK convenience methods (MET-464)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_design_rationale_uses_design_decision_type(fake_embeddings):
+    knowledge = _FakeKnowledgeService()
+    client = MemoryClient(InMemoryExperienceStore(), fake_embeddings, knowledge_service=knowledge)
+
+    hits = await client.search_design_rationale("why buck over LDO", limit=3)
+
+    assert len(hits) == 1
+    assert knowledge.calls[0]["knowledge_type"] is KnowledgeType.DESIGN_DECISION
+    assert knowledge.calls[0]["query"] == "why buck over LDO"
+    assert knowledge.calls[0]["top_k"] == 3
+
+
+@pytest.mark.asyncio
+async def test_get_component_context_uses_component_type(fake_embeddings):
+    knowledge = _FakeKnowledgeService()
+    client = MemoryClient(InMemoryExperienceStore(), fake_embeddings, knowledge_service=knowledge)
+
+    hits = await client.get_component_context("STM32H743")
+
+    assert len(hits) == 1
+    assert knowledge.calls[0]["knowledge_type"] is KnowledgeType.COMPONENT
+    assert knowledge.calls[0]["query"] == "STM32H743"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_methods_empty_query_returns_empty(fake_embeddings):
+    knowledge = _FakeKnowledgeService()
+    client = MemoryClient(InMemoryExperienceStore(), fake_embeddings, knowledge_service=knowledge)
+
+    assert await client.search_design_rationale("  ") == []
+    assert await client.get_component_context("") == []
+    assert knowledge.calls == []  # never hit the service
+
+
+@pytest.mark.asyncio
+async def test_knowledge_methods_require_wired_service(fake_embeddings):
+    client = MemoryClient(InMemoryExperienceStore(), fake_embeddings)  # no knowledge_service
+    with pytest.raises(RuntimeError, match="require a knowledge_service"):
+        await client.search_design_rationale("anything")
+    with pytest.raises(RuntimeError, match="require a knowledge_service"):
+        await client.get_component_context("anything")
+
+
+@pytest.mark.asyncio
+async def test_knowledge_methods_cap_limit(fake_embeddings):
+    knowledge = _FakeKnowledgeService()
+    client = MemoryClient(InMemoryExperienceStore(), fake_embeddings, knowledge_service=knowledge)
+
+    await client.search_design_rationale("q", limit=MAX_RETRIEVAL_LIMIT + 500)
+    assert knowledge.calls[0]["top_k"] <= MAX_RETRIEVAL_LIMIT

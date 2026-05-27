@@ -8,14 +8,19 @@ concern that this object owns.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import structlog
 
 from digital_twin.knowledge.embedding_service import EmbeddingService
+from digital_twin.knowledge.types import KnowledgeType
 from digital_twin.memory.models import MemorySearchHit
 from digital_twin.memory.store import ExperienceStore
 from observability.tracing import get_tracer
+
+if TYPE_CHECKING:
+    from digital_twin.knowledge.service import KnowledgeService, SearchHit
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.memory.client")
@@ -25,15 +30,25 @@ MAX_RETRIEVAL_LIMIT = 50
 
 
 class MemoryClient:
-    """Read-side facade over the experience store."""
+    """Read-side facade over the experience store.
+
+    Wraps the experience store + embedder for ``retrieve_similar_experience``.
+    When a ``knowledge_service`` is supplied it also exposes two L1
+    knowledge-backed convenience methods (MET-464): ``search_design_rationale``
+    and ``get_component_context``, which are typed semantic searches over the
+    design-decision and component knowledge respectively.
+    """
 
     def __init__(
         self,
         store: ExperienceStore,
         embeddings: EmbeddingService,
+        *,
+        knowledge_service: KnowledgeService | None = None,
     ) -> None:
         self._store = store
         self._embeddings = embeddings
+        self._knowledge = knowledge_service
 
     async def retrieve_similar_experience(
         self,
@@ -87,5 +102,75 @@ class MemoryClient:
                 project_id=str(project_id) if project_id else None,
                 agent_code=agent_code,
                 min_similarity=min_similarity,
+            )
+            return hits
+
+    async def search_design_rationale(
+        self,
+        query: str,
+        *,
+        limit: int = DEFAULT_RETRIEVAL_LIMIT,
+        project_id: UUID | None = None,
+    ) -> list[SearchHit]:
+        """Semantic search over recorded design decisions / rationale (MET-464).
+
+        A typed convenience over the L1 knowledge base: searches knowledge
+        of type ``DESIGN_DECISION`` so callers can ask "why was X decided?"
+        and get attributable hits. Requires a ``knowledge_service`` wired at
+        construction. Empty query returns ``[]``.
+        """
+        return await self._knowledge_search(
+            query, KnowledgeType.DESIGN_DECISION, limit=limit, project_id=project_id
+        )
+
+    async def get_component_context(
+        self,
+        name: str,
+        *,
+        limit: int = DEFAULT_RETRIEVAL_LIMIT,
+        project_id: UUID | None = None,
+    ) -> list[SearchHit]:
+        """Return component usage / relationship knowledge for ``name`` (MET-464).
+
+        A typed convenience over the L1 knowledge base: searches knowledge of
+        type ``COMPONENT`` for the named part, surfacing its captured usage
+        history and relationships. Requires a ``knowledge_service`` wired at
+        construction. Empty name returns ``[]``.
+        """
+        return await self._knowledge_search(
+            name, KnowledgeType.COMPONENT, limit=limit, project_id=project_id
+        )
+
+    async def _knowledge_search(
+        self,
+        query: str,
+        knowledge_type: KnowledgeType,
+        *,
+        limit: int,
+        project_id: UUID | None,
+    ) -> list[SearchHit]:
+        if not query or not query.strip():
+            return []
+        if self._knowledge is None:
+            raise RuntimeError(
+                "MemoryClient knowledge methods require a knowledge_service; "
+                "construct with MemoryClient(store, embeddings, knowledge_service=...)."
+            )
+        capped_limit = max(1, min(limit, MAX_RETRIEVAL_LIMIT))
+        with tracer.start_as_current_span("memory_client.knowledge_search") as span:
+            span.set_attribute("memory.knowledge_type", knowledge_type.value)
+            span.set_attribute("memory.limit", capped_limit)
+            hits = await self._knowledge.search(
+                query.strip(),
+                top_k=capped_limit,
+                knowledge_type=knowledge_type,
+                project_id=project_id,
+            )
+            span.set_attribute("memory.result_count", len(hits))
+            logger.info(
+                "memory_knowledge_search_completed",
+                knowledge_type=knowledge_type.value,
+                result_count=len(hits),
+                project_id=str(project_id) if project_id else None,
             )
             return hits
