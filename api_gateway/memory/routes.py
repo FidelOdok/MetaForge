@@ -85,6 +85,7 @@ async def retrieve_similar_experience(
             project_id=payload.project_id,
             agent_code=payload.agent_code,
             only_success=payload.only_success,
+            min_similarity=payload.min_similarity,
         )
 
         span.set_attribute("memory.result_count", len(hits))
@@ -95,6 +96,7 @@ async def retrieve_similar_experience(
             result_count=len(hits),
             project_id=str(payload.project_id) if payload.project_id else None,
             agent_code=payload.agent_code,
+            min_similarity=payload.min_similarity,
         )
 
         return MemoryRetrieveResponse(

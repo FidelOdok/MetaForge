@@ -146,6 +146,35 @@ async def test_handler_rejects_non_integer_limit(wired_server):
 
 
 @pytest.mark.asyncio
+async def test_handler_min_similarity_floor_drops_weak_hits(wired_server):
+    server, store, embeddings = wired_server
+    await _seed(store, embeddings, ["alpha one", "beta two", "gamma three"])
+
+    # A near-1.0 floor keeps only the exact-match hit.
+    payload = await server.handle_retrieve_similar_experience(
+        {"goal": "alpha one", "limit": 5, "min_similarity": 0.999}
+    )
+    assert len(payload["hits"]) == 1
+    assert payload["hits"][0]["result_summary"] == "alpha one"
+
+
+@pytest.mark.asyncio
+async def test_handler_min_similarity_none_keeps_all(wired_server):
+    server, store, embeddings = wired_server
+    await _seed(store, embeddings, ["alpha one", "beta two", "gamma three"])
+
+    payload = await server.handle_retrieve_similar_experience({"goal": "alpha one", "limit": 5})
+    assert len(payload["hits"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_non_numeric_min_similarity(wired_server):
+    server, _store, _embeddings = wired_server
+    with pytest.raises(ValueError, match="'min_similarity' must be a number"):
+        await server.handle_retrieve_similar_experience({"goal": "alpha", "min_similarity": "high"})
+
+
+@pytest.mark.asyncio
 async def test_hit_payload_serializes_uuid_and_timestamp(wired_server):
     server, store, embeddings = wired_server
     project_id = UUID("00000000-0000-0000-0000-000000000123")
