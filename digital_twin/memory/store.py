@@ -156,9 +156,7 @@ class InMemoryExperienceStore(ExperienceStore):
     async def delete_by_run(self, run_id: str) -> int:
         with tracer.start_as_current_span("experience_store.delete_by_run") as span:
             span.set_attribute("memory.run_id", run_id)
-            to_delete = [
-                exp.id for exp in self._experiences.values() if exp.run_id == run_id
-            ]
+            to_delete = [exp.id for exp in self._experiences.values() if exp.run_id == run_id]
             for exp_id in to_delete:
                 self._experiences.pop(exp_id, None)
             if to_delete:

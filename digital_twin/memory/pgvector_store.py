@@ -63,9 +63,7 @@ class PgVectorExperienceStore(ExperienceStore):
         try:
             import asyncpg
 
-            self._pool = await asyncpg.create_pool(
-                self._dsn, min_size=1, max_size=self._pool_size
-            )
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=self._pool_size)
             async with self._pool.acquire() as conn:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 await conn.execute(
@@ -328,11 +326,7 @@ def _parse_delete_count(status: str) -> int:
 def _row_to_experience(row: Any) -> ExperienceMemory:
     """Reconstruct an ``ExperienceMemory`` from an asyncpg row."""
     emb_text = row["embedding"]
-    embedding = (
-        [float(v) for v in emb_text.strip("[]").split(",") if v]
-        if emb_text
-        else []
-    )
+    embedding = [float(v) for v in emb_text.strip("[]").split(",") if v] if emb_text else []
     metadata = row["metadata"]
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
