@@ -378,6 +378,8 @@ class LightRAGKnowledgeService:
         # cross-encoder weights.
         self._reranker_enabled = reranker_enabled
         self._reranker: Any = None
+        # MET-465: lazily-built BM25+vector hybrid ranker (dependency-free).
+        self._hybrid_ranker: Any = None
         # MET-433: optional Twin reference for ``extract_properties``.
         # Late-bound via ``set_twin`` because the gateway constructs
         # the service before the twin exists in the lifespan order.
@@ -709,6 +711,7 @@ class LightRAGKnowledgeService:
         rerank: bool = False,
         actor_id: str | None = None,
         include_historical: bool = False,
+        hybrid: bool = False,
     ) -> list[SearchHit]:
         """Vector search with optional cross-encoder reranking.
 
@@ -751,6 +754,7 @@ class LightRAGKnowledgeService:
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
             span.set_attribute("knowledge.rerank", bool(rerank))
+            span.set_attribute("knowledge.hybrid", bool(hybrid))
             if actor_id is not None:
                 span.set_attribute("knowledge.actor_id", actor_id)
 
@@ -779,7 +783,10 @@ class LightRAGKnowledgeService:
                 # the cross-encoder has more chunks to choose from before
                 # we truncate to top_k. The 3x multiplier matches the spec.
                 base_fetch_k = top_k * 4 if (knowledge_type or filters) else top_k
-                fetch_k = max(base_fetch_k, top_k * 3) if rerank else base_fetch_k
+                # Widen the candidate pool when a re-ordering step (cross-encoder
+                # rerank or BM25 hybrid fusion) runs, so it has more chunks to
+                # promote from before we truncate to top_k.
+                fetch_k = max(base_fetch_k, top_k * 3) if (rerank or hybrid) else base_fetch_k
 
                 # MET-417 (L1-B5): the filter contract is AND-across-keys,
                 # equality match. ``project_id`` is special-cased via
@@ -819,6 +826,11 @@ class LightRAGKnowledgeService:
 
                 hits.sort(key=lambda h: h.similarity_score, reverse=True)
 
+                # MET-465: fuse lexical BM25 with the vector ranking before the
+                # (optional) cross-encoder rerank and the top_k truncation.
+                if hybrid and hits:
+                    hits = self._get_hybrid_ranker().fuse(query, hits)
+
                 if rerank and hits:
                     reranker = self._get_reranker()
                     hits = await reranker.rerank(query, hits)
@@ -832,6 +844,7 @@ class LightRAGKnowledgeService:
                     result_count=len(hits),
                     project_id=scope_project_id,
                     rerank=bool(rerank),
+                    hybrid=bool(hybrid),
                     actor_id=actor_id,
                 )
                 return hits
@@ -1468,6 +1481,18 @@ class LightRAGKnowledgeService:
 
             self._reranker = Reranker()
         return self._reranker
+
+    def _get_hybrid_ranker(self) -> Any:
+        """Lazily construct the BM25+vector hybrid ranker (MET-465).
+
+        Dependency-free (no torch / external BM25 lib), so the import is
+        cheap, but we still cache the instance to keep search() tidy.
+        """
+        if self._hybrid_ranker is None:
+            from digital_twin.knowledge.hybrid_search import HybridRanker
+
+            self._hybrid_ranker = HybridRanker()
+        return self._hybrid_ranker
 
     async def _prewarm_embedder(self) -> None:
         """Force the sentence-transformers model to load eagerly.
