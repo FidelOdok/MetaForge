@@ -31,7 +31,7 @@ def _exp(
     *,
     task_type: str = "stress_check",
     importance: float = 0.7,
-    project_id: "UUID | None" = None,
+    project_id: UUID | None = None,
 ) -> ExperienceMemory:
     return ExperienceMemory(
         id=uuid4(),
