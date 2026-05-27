@@ -376,6 +376,128 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             app.state.memory_store = None
             app.state.memory_client = None
 
+    # MET-454: consolidation pipeline orchestrator.
+    # Build the full fetcher → grouper → synthesizer → validator → writer
+    # chain so the Temporal worker (or an on-demand REST/CLI trigger) can
+    # invoke it. Synthesis uses Open Router when OPEN_ROUTER_API_KEY is
+    # set; otherwise falls back to StubLLMClient so dev boot stays usable.
+    # Insight store prefers pgvector when DATABASE_URL is available.
+    app.state.consolidation_orchestrator = None
+    app.state.consolidation_insight_store = None
+    if app.state.memory_store is None:
+        logger.warning("consolidation_orchestrator_init_skipped", reason="no_memory_store")
+    else:
+        try:
+            from digital_twin.memory.consolidation import (
+                ConfidenceDecay,
+                ConsolidationOrchestrator,
+                ContradictionDetector,
+                DualWriteInsightStore,
+                EventGrouper,
+                InMemoryEventFetcher,
+                InMemoryInsightStore,
+                InsightStore,
+                InsightSynthesizer,
+                InsightValidator,
+                Neo4jInsightStore,
+                OpenRouterConfig,
+                OpenRouterError,
+                OpenRouterLLMClient,
+                PgVectorInsightStore,
+                SemanticMemoryWriter,
+                StubLLMClient,
+                register_consolidation_activities,
+            )
+            from digital_twin.memory.consolidation.llm import LLMClient
+
+            # Insight store — prefer pgvector when DATABASE_URL is set, and
+            # fan out to Neo4j as well (DualWriteInsightStore) when Neo4j
+            # creds are present so the structural graph stays in sync. Falls
+            # back to in-memory when no pgvector backend is available.
+            insight_store: InsightStore
+            pg_insight_store: PgVectorInsightStore | None = None
+            if db_url:
+                try:
+                    dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                    pg_insight = PgVectorInsightStore(dsn=dsn)
+                    await pg_insight.initialize()
+                    pg_insight_store = pg_insight
+                    logger.info("consolidation_insight_store_pgvector_initialized")
+                except Exception as exc:
+                    logger.warning("consolidation_insight_store_pgvector_failed", error=str(exc))
+
+            if pg_insight_store is None:
+                insight_store = InMemoryInsightStore()
+                logger.info("consolidation_insight_store_in_memory_initialized")
+            else:
+                insight_store = pg_insight_store
+                # Opt into dual-write when Neo4j is configured. pgvector
+                # stays the read source of truth; Neo4j gets the
+                # structural mirror. A Neo4j connect failure degrades to
+                # pgvector-only rather than failing gateway boot.
+                neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get("METAFORGE_NEO4J_URI")
+                if neo4j_uri:
+                    try:
+                        neo4j_insight = Neo4jInsightStore(
+                            uri=neo4j_uri,
+                            user=(
+                                os.environ.get("NEO4J_USER")
+                                or os.environ.get("METAFORGE_NEO4J_USER")
+                                or "neo4j"
+                            ),
+                            password=(
+                                os.environ.get("NEO4J_PASSWORD")
+                                or os.environ.get("METAFORGE_NEO4J_PASSWORD")
+                                or "password"
+                            ),
+                        )
+                        await neo4j_insight.connect()
+                        insight_store = DualWriteInsightStore(pg_insight_store, neo4j_insight)
+                        logger.info("consolidation_insight_store_dual_write_initialized")
+                    except Exception as exc:
+                        logger.warning(
+                            "consolidation_insight_store_neo4j_failed",
+                            error=str(exc),
+                        )
+
+            # LLM — Open Router when configured, stub otherwise.
+            llm_client: LLMClient
+            try:
+                llm_client = OpenRouterLLMClient(OpenRouterConfig.from_env())
+                logger.info("consolidation_llm_open_router_initialized")
+            except OpenRouterError as exc:
+                logger.warning(
+                    "consolidation_llm_open_router_skipped",
+                    reason=str(exc),
+                )
+                llm_client = StubLLMClient()
+
+            # MET-455: activate the Phase-3 machinery in production —
+            # confidence decay (90-day half-life), JANITOR durable
+            # STALE_WARN marking, and contradiction detection against the
+            # existing corpus during BACKGROUND synthesis. The detector
+            # reuses the same LLM client as the synthesizer.
+            orchestrator = ConsolidationOrchestrator(
+                fetcher=InMemoryEventFetcher(app.state.memory_store),
+                grouper=EventGrouper(),
+                synthesizer=InsightSynthesizer(llm_client),
+                validator=InsightValidator(),
+                writer=SemanticMemoryWriter(insight_store),
+                insight_store=insight_store,
+                decay=ConfidenceDecay(),
+                janitor_marks_stale=True,
+                contradiction_detector=ContradictionDetector(llm_client),
+                collector=getattr(app.state, "collector", None),
+            )
+            register_consolidation_activities(orchestrator)
+            app.state.consolidation_orchestrator = orchestrator
+            app.state.consolidation_insight_store = insight_store
+            logger.info("consolidation_orchestrator_initialized")
+        except Exception as exc:
+            logger.warning("consolidation_orchestrator_init_failed", error=str(exc))
+            app.state.consolidation_orchestrator = None
+            app.state.consolidation_insight_store = None
+
     # Register pgvector health check
     if pgvector_active:
         from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
@@ -484,6 +606,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         constraint_engine=twin.constraints,
         project_backend=project_backend,
         memory_client=getattr(app.state, "memory_client", None),
+        memory_insight_store=getattr(app.state, "consolidation_insight_store", None),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -543,6 +666,21 @@ async def _init_orchestrator(app: FastAPI) -> None:
         collector=_collector,
         knowledge_service=getattr(app.state, "knowledge_service", None),
     )
+
+    # MET-453: subscribe the ExperienceConsumer so AGENT_TASK_* events
+    # actually flow into the experience store (the rest of the memory
+    # pipeline — retrieval, consolidation — is inert without this). Guarded
+    # on the memory store + embedding service the boot wired earlier.
+    _memory_store = getattr(app.state, "memory_store", None)
+    _embedding_service = getattr(app.state, "embedding_service", None)
+    if _memory_store is not None and _embedding_service is not None:
+        try:
+            from digital_twin.memory.consumer import ExperienceConsumer
+
+            event_bus.subscribe(ExperienceConsumer(_memory_store, _embedding_service))
+            logger.info("experience_consumer_subscribed")
+        except Exception as exc:
+            logger.warning("experience_consumer_subscribe_failed", error=str(exc))
 
     # Register all workflow definitions
     for defn in ACTION_WORKFLOWS.values():

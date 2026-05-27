@@ -20,6 +20,9 @@ from uuid import UUID
 import structlog
 
 from digital_twin.memory.client import MAX_RETRIEVAL_LIMIT, MemoryClient
+from digital_twin.memory.consolidation.insight import Insight, InsightStatus
+from digital_twin.memory.consolidation.themes import ConsolidationTheme
+from digital_twin.memory.consolidation.writer import InsightStore
 from digital_twin.memory.models import MemorySearchHit
 from mcp_core.context import current_context
 from observability.tracing import get_tracer
@@ -38,9 +41,14 @@ class MemoryServer(McpToolServer):
     service and experience store.
     """
 
-    def __init__(self, client: MemoryClient | None = None) -> None:
+    def __init__(
+        self,
+        client: MemoryClient | None = None,
+        insight_store: InsightStore | None = None,
+    ) -> None:
         super().__init__(adapter_id="memory", version="0.1.0")
         self._client: MemoryClient | None = client
+        self._insight_store: InsightStore | None = insight_store
         self._register_tools()
 
     # ------------------------------------------------------------------
@@ -52,6 +60,11 @@ class MemoryServer(McpToolServer):
         self._client = client
         logger.info("memory_mcp_client_bound", client=type(client).__name__)
 
+    def set_insight_store(self, store: InsightStore) -> None:
+        """Bind the consolidated-insight store (for ``memory.list_insights``)."""
+        self._insight_store = store
+        logger.info("memory_mcp_insight_store_bound", store=type(store).__name__)
+
     @property
     def client(self) -> MemoryClient:
         if self._client is None:
@@ -60,6 +73,15 @@ class MemoryServer(McpToolServer):
                 "ensure the gateway init wires app.state.memory_client in."
             )
         return self._client
+
+    @property
+    def insight_store(self) -> InsightStore:
+        if self._insight_store is None:
+            raise RuntimeError(
+                "MemoryServer.insight_store was called before set_insight_store(); "
+                "ensure the gateway init wires app.state.consolidation_insight_store in."
+            )
+        return self._insight_store
 
     # ------------------------------------------------------------------
     # Tool registration
@@ -148,6 +170,76 @@ class MemoryServer(McpToolServer):
             handler=self.handle_retrieve_similar_experience,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="memory.list_insights",
+                adapter_id="memory",
+                name="List Consolidated Insights",
+                description=(
+                    "List synthesized consolidation insights (lessons learned "
+                    "across agent-task experiences). Excludes stale (decayed) "
+                    "insights by default; set include_stale=true for the audit "
+                    "view. Optional theme filter."
+                ),
+                capability="memory_insights",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "theme": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Optional consolidation theme filter "
+                                "(e.g. mechanical_validation, power_analysis)."
+                            ),
+                        },
+                        "include_stale": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "When true, include STALE_WARN insights. Default "
+                                "false — agents should act on fresh lessons."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500,
+                            "default": 50,
+                            "description": "Maximum number of insights to return.",
+                        },
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "insights": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "theme": {"type": "string"},
+                                    "kind": {"type": "string"},
+                                    "status": {"type": "string"},
+                                    "narrative": {"type": "string"},
+                                    "confidence": {"type": "number"},
+                                    "confidence_tier": {"type": "string"},
+                                    "supporting_experience_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "synthesized_at": {"type": "string"},
+                                },
+                            },
+                        }
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=10),
+            ),
+            handler=self.handle_list_insights,
+        )
+
     # ------------------------------------------------------------------
     # Tool handler
     # ------------------------------------------------------------------
@@ -206,6 +298,47 @@ class MemoryServer(McpToolServer):
             )
             return {"hits": [_hit_to_dict(h) for h in hits]}
 
+    async def handle_list_insights(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("memory.mcp.list_insights") as span:
+            theme_raw = arguments.get("theme")
+            theme: ConsolidationTheme | None = None
+            if isinstance(theme_raw, str) and theme_raw:
+                try:
+                    theme = ConsolidationTheme(theme_raw)
+                except ValueError as exc:
+                    raise ValueError(f"memory.list_insights: unknown theme {theme_raw!r}") from exc
+
+            include_stale = bool(arguments.get("include_stale", False))
+            limit_raw = arguments.get("limit", 50)
+            try:
+                limit = int(limit_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("memory.list_insights: 'limit' must be an integer") from exc
+            limit = max(1, min(limit, 500))
+
+            span.set_attribute("memory.include_stale", include_stale)
+            span.set_attribute("memory.limit", limit)
+            if theme is not None:
+                span.set_attribute("memory.theme", theme.value)
+
+            # Over-fetch when filtering stale so the page doesn't under-fill.
+            raw = await self.insight_store.list(
+                theme=theme, limit=limit if include_stale else limit * 2
+            )
+            if include_stale:
+                selected = raw[:limit]
+            else:
+                selected = [i for i in raw if i.status is not InsightStatus.STALE_WARN][:limit]
+
+            span.set_attribute("memory.result_count", len(selected))
+            logger.info(
+                "memory_list_insights",
+                theme=theme.value if theme else None,
+                include_stale=include_stale,
+                result_count=len(selected),
+            )
+            return {"insights": [_insight_to_dict(i) for i in selected]}
+
 
 def _project_id_from_context() -> UUID | None:
     project_id = current_context().project_id
@@ -237,4 +370,18 @@ def _hit_to_dict(hit: MemorySearchHit) -> dict[str, Any]:
         "confidence": str(exp.confidence),
         "timestamp": exp.timestamp.isoformat(),
         "project_id": str(exp.project_id) if exp.project_id else None,
+    }
+
+
+def _insight_to_dict(insight: Insight) -> dict[str, Any]:
+    return {
+        "id": str(insight.id),
+        "theme": insight.theme.value,
+        "kind": insight.kind.value,
+        "status": insight.status.value,
+        "narrative": insight.narrative,
+        "confidence": insight.confidence,
+        "confidence_tier": insight.confidence_tier.value,
+        "supporting_experience_ids": [str(eid) for eid in insight.supporting_experience_ids],
+        "synthesized_at": insight.synthesized_at.isoformat(),
     }

@@ -159,3 +159,107 @@ async def test_hit_payload_serializes_uuid_and_timestamp(wired_server):
     assert hit["project_id"] == str(project_id)
     assert isinstance(hit["timestamp"], str)
     assert hit["confidence"] == "verbatim"
+
+
+# --- memory.list_insights (MET-454/455) -------------------------------------
+
+
+def _insight(*, theme=None, status=None, narrative="A long enough insight narrative for tests"):
+    from digital_twin.memory.consolidation.insight import (
+        Insight,
+        InsightKind,
+        InsightStatus,
+    )
+    from digital_twin.memory.consolidation.themes import ConsolidationTheme
+
+    return Insight(
+        id=uuid4(),
+        theme=theme or ConsolidationTheme.MECHANICAL_VALIDATION,
+        kind=InsightKind.PRINCIPLE,
+        narrative=narrative,
+        confidence=0.85,
+        supporting_experience_ids=[uuid4()],
+        status=status or InsightStatus.ACTIVE,
+    )
+
+
+def test_list_insights_tool_registered():
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    server = MemoryServer(insight_store=InMemoryInsightStore())
+    assert "memory.list_insights" in server._tools  # noqa: SLF001
+
+
+def test_list_insights_without_store_raises():
+    server = MemoryServer()
+    with pytest.raises(RuntimeError, match="set_insight_store"):
+        _ = server.insight_store
+
+
+@pytest.mark.asyncio
+async def test_list_insights_excludes_stale_by_default():
+    from digital_twin.memory.consolidation.insight import InsightStatus
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    store = InMemoryInsightStore()
+    await store.write(_insight(status=InsightStatus.ACTIVE, narrative="active lesson ok"))
+    await store.write(_insight(status=InsightStatus.STALE_WARN, narrative="stale lesson ok"))
+    server = MemoryServer(insight_store=store)
+
+    payload = await server.handle_list_insights({})
+    assert len(payload["insights"]) == 1
+    assert payload["insights"][0]["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_list_insights_include_stale():
+    from digital_twin.memory.consolidation.insight import InsightStatus
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    store = InMemoryInsightStore()
+    await store.write(_insight(status=InsightStatus.ACTIVE, narrative="active lesson ok"))
+    await store.write(_insight(status=InsightStatus.STALE_WARN, narrative="stale lesson ok"))
+    server = MemoryServer(insight_store=store)
+
+    payload = await server.handle_list_insights({"include_stale": True})
+    assert len(payload["insights"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_insights_theme_filter():
+    from digital_twin.memory.consolidation.themes import ConsolidationTheme
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    store = InMemoryInsightStore()
+    await store.write(_insight(theme=ConsolidationTheme.MECHANICAL_VALIDATION))
+    await store.write(_insight(theme=ConsolidationTheme.POWER_ANALYSIS))
+    server = MemoryServer(insight_store=store)
+
+    payload = await server.handle_list_insights({"theme": "power_analysis"})
+    assert len(payload["insights"]) == 1
+    assert payload["insights"][0]["theme"] == "power_analysis"
+
+
+@pytest.mark.asyncio
+async def test_list_insights_unknown_theme_raises():
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    server = MemoryServer(insight_store=InMemoryInsightStore())
+    with pytest.raises(ValueError, match="unknown theme"):
+        await server.handle_list_insights({"theme": "not_a_theme"})
+
+
+@pytest.mark.asyncio
+async def test_list_insights_serializes_uuids_and_timestamp():
+    from digital_twin.memory.consolidation.writer import InMemoryInsightStore
+
+    store = InMemoryInsightStore()
+    await store.write(_insight())
+    server = MemoryServer(insight_store=store)
+
+    payload = await server.handle_list_insights({})
+    row = payload["insights"][0]
+    assert isinstance(row["id"], str)
+    assert isinstance(row["synthesized_at"], str)
+    assert all(isinstance(s, str) for s in row["supporting_experience_ids"])
+    assert row["status"] == "active"
