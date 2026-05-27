@@ -119,9 +119,7 @@ async def test_workflow_loops_max_iterations_times(monkeypatch):
     async def _no_sleep(seconds: int) -> None:
         sleep_calls.append(seconds)
 
-    monkeypatch.setattr(
-        "digital_twin.memory.consolidation.workflow._sleep", _no_sleep
-    )
+    monkeypatch.setattr("digital_twin.memory.consolidation.workflow._sleep", _no_sleep)
 
     workflow = ConsolidationWorkflow()
     result = await workflow.run(
@@ -148,21 +146,15 @@ async def test_workflow_aggregates_accepted_and_rejected(monkeypatch):
     async def _fake_pass(_input: ConsolidationActivityInput) -> ConsolidationActivityOutput:
         return fixed_output
 
-    monkeypatch.setattr(
-        "digital_twin.memory.consolidation.workflow._execute_pass", _fake_pass
-    )
+    monkeypatch.setattr("digital_twin.memory.consolidation.workflow._execute_pass", _fake_pass)
 
     async def _no_sleep(_seconds: int) -> None:
         return None
 
-    monkeypatch.setattr(
-        "digital_twin.memory.consolidation.workflow._sleep", _no_sleep
-    )
+    monkeypatch.setattr("digital_twin.memory.consolidation.workflow._sleep", _no_sleep)
 
     workflow = ConsolidationWorkflow()
-    result = await workflow.run(
-        ConsolidationWorkflowInput(interval_seconds=1, max_iterations=4)
-    )
+    result = await workflow.run(ConsolidationWorkflowInput(interval_seconds=1, max_iterations=4))
     assert result.total_accepted == 8
     assert result.total_rejected == 4
 

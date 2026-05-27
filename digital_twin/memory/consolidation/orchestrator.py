@@ -210,16 +210,12 @@ class ConsolidationOrchestrator:
         for group in groups:
             insight = await self._synthesizer.synthesize(group)
             if insight is None:
-                rejected.append(
-                    f"theme={group.theme.value} reason=synthesis_failed"
-                )
+                rejected.append(f"theme={group.theme.value} reason=synthesis_failed")
                 continue
             synthesized.append(insight)
             verdict = self._validator.validate(insight)
             if not verdict.accepted:
-                rejected.append(
-                    f"theme={group.theme.value} reason={verdict.reason}"
-                )
+                rejected.append(f"theme={group.theme.value} reason={verdict.reason}")
                 continue
             # MET-455: check the candidate against the existing corpus
             # BEFORE writing it, so it doesn't compare against itself.
@@ -310,29 +306,21 @@ class ConsolidationOrchestrator:
             # MET-455: apply confidence decay (if configured) before
             # re-validating so aged insights surface as stale.
             candidate = (
-                self._decay.with_decayed_confidence(insight)
-                if self._decay is not None
-                else insight
+                self._decay.with_decayed_confidence(insight) if self._decay is not None else insight
             )
             verdict = self._validator.validate(candidate)
             if not verdict.accepted:
                 newly_failed += 1
                 rejected.append(
-                    f"insight_id={insight.id} theme={insight.theme.value}"
-                    f" reason={verdict.reason}"
+                    f"insight_id={insight.id} theme={insight.theme.value} reason={verdict.reason}"
                 )
                 # MET-455: durably flag the insight when configured to do
                 # so. Only write back when the status actually changes —
                 # an already-STALE_WARN insight needs no re-write.
-                if (
-                    self._janitor_marks_stale
-                    and insight.status is not InsightStatus.STALE_WARN
-                ):
+                if self._janitor_marks_stale and insight.status is not InsightStatus.STALE_WARN:
                     try:
                         await self._insight_store.write(
-                            insight.model_copy(
-                                update={"status": InsightStatus.STALE_WARN}
-                            )
+                            insight.model_copy(update={"status": InsightStatus.STALE_WARN})
                         )
                         marked_stale += 1
                     except Exception as exc:  # pragma: no cover — best effort

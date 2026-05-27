@@ -139,9 +139,7 @@ def test_post_consolidate_503_when_orchestrator_unbound():
 def test_post_consolidate_422_when_proactive_missing_project_id(app_with_orchestrator):
     app, _store, _insight_store, _llm = app_with_orchestrator
     with TestClient(app) as client:
-        response = client.post(
-            "/v1/memory/consolidate", json={"mode": "proactive"}
-        )
+        response = client.post("/v1/memory/consolidate", json={"mode": "proactive"})
     assert response.status_code == 422
     assert "project_id" in response.json()["detail"]
 

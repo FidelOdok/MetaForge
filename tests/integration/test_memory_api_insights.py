@@ -78,9 +78,7 @@ def test_list_insights_theme_filter(app_with_insights):
     anyio.run(store.write, _insight(theme=ConsolidationTheme.POWER_ANALYSIS))
 
     with TestClient(app) as client:
-        response = client.get(
-            "/v1/memory/insights", params={"theme": "power_analysis"}
-        )
+        response = client.get("/v1/memory/insights", params={"theme": "power_analysis"})
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 1

@@ -82,9 +82,7 @@ async def test_janitor_marks_stale_persists_status():
     insight = await _seed_aged(store)
     orchestrator = _orchestrator(store, janitor_marks_stale=True)
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.newly_failed_count == 1
     assert report.marked_stale_count == 1
 
@@ -99,9 +97,7 @@ async def test_janitor_report_only_does_not_mutate_status():
     insight = await _seed_aged(store)
     orchestrator = _orchestrator(store, janitor_marks_stale=False)
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.newly_failed_count == 1
     assert report.marked_stale_count == 0
 
@@ -118,9 +114,7 @@ async def test_already_stale_insight_not_re_marked():
     await store.write(insight.model_copy(update={"status": InsightStatus.STALE_WARN}))
     orchestrator = _orchestrator(store, janitor_marks_stale=True)
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     # Still counted as failed, but not re-marked (already STALE_WARN).
     assert report.newly_failed_count == 1
     assert report.marked_stale_count == 0
@@ -141,9 +135,7 @@ async def test_fresh_insight_stays_active():
     await store.write(fresh)
     orchestrator = _orchestrator(store, janitor_marks_stale=True)
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.marked_stale_count == 0
     stored = await store.get(fresh.id)
     assert stored is not None

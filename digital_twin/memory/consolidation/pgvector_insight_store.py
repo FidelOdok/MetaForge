@@ -64,9 +64,7 @@ class PgVectorInsightStore(InsightStore):
         try:
             import asyncpg
 
-            self._pool = await asyncpg.create_pool(
-                self._dsn, min_size=1, max_size=self._pool_size
-            )
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=self._pool_size)
             async with self._pool.acquire() as conn:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 await conn.execute(
@@ -268,10 +266,7 @@ class PgVectorInsightStore(InsightStore):
 
 def _row_to_insight(row: Any) -> Insight:
     supporting_raw = row["supporting_experience_ids"] or []
-    supporting = [
-        item if isinstance(item, UUID) else UUID(str(item))
-        for item in supporting_raw
-    ]
+    supporting = [item if isinstance(item, UUID) else UUID(str(item)) for item in supporting_raw]
     synthesized_at = row["synthesized_at"]
     if synthesized_at is not None and synthesized_at.tzinfo is None:
         synthesized_at = synthesized_at.replace(tzinfo=UTC)

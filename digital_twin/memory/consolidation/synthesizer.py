@@ -119,10 +119,7 @@ class InsightSynthesizer:
         # Carry the IDs of the source experiences so downstream readers
         # can audit which events motivated the insight. Cap at the same
         # MAX_EXAMPLES_PER_GROUP so the citation list mirrors the prompt.
-        supporting = [
-            _experience_id(exp)
-            for exp in group.experiences[:MAX_EXAMPLES_PER_GROUP]
-        ]
+        supporting = [_experience_id(exp) for exp in group.experiences[:MAX_EXAMPLES_PER_GROUP]]
         try:
             return Insight(
                 theme=group.theme,

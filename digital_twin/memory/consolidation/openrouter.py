@@ -76,9 +76,7 @@ class OpenRouterConfig:
         return cls(
             api_key=api_key,
             primary_model=os.environ.get("CONSOLIDATION_MODEL", DEFAULT_PRIMARY_MODEL),
-            fallback_model=os.environ.get(
-                "CONSOLIDATION_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL
-            ),
+            fallback_model=os.environ.get("CONSOLIDATION_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL),
             temperature=_env_float("CONSOLIDATION_TEMPERATURE", DEFAULT_TEMPERATURE),
             max_tokens=_env_int("CONSOLIDATION_MAX_TOKENS", DEFAULT_MAX_TOKENS),
         )

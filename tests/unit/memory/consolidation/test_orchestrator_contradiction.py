@@ -144,9 +144,7 @@ async def test_no_contradiction_when_corpus_empty():
     await _seed_experiences(exp_store, 2)
 
     synth_llm = StubLLMClient(
-        responses=[
-            {"narrative": "ESP32 is a fine low-power pick here", "confidence": 0.9}
-        ]
+        responses=[{"narrative": "ESP32 is a fine low-power pick here", "confidence": 0.9}]
     )
     # Detector that would say "contradicts" — but the corpus is empty
     # (this is the first insight), so detect short-circuits to no-conflict.

@@ -99,9 +99,7 @@ async def test_multiple_invalidated_experiences():
 async def test_theme_filter_narrows_scan():
     store = InMemoryInsightStore()
     exp = uuid4()
-    mech = _insight(
-        supporting=[exp], theme=ConsolidationTheme.MECHANICAL_VALIDATION
-    )
+    mech = _insight(supporting=[exp], theme=ConsolidationTheme.MECHANICAL_VALIDATION)
     power = _insight(supporting=[exp], theme=ConsolidationTheme.POWER_ANALYSIS)
     await store.write(mech)
     await store.write(power)

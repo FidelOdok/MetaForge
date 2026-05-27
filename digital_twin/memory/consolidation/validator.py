@@ -65,13 +65,9 @@ class InsightValidator:
         min_narrative_length: int = DEFAULT_MIN_NARRATIVE_LENGTH,
     ) -> None:
         if not 0.0 <= min_confidence <= 1.0:
-            raise ValueError(
-                f"min_confidence must be in [0, 1], got {min_confidence!r}"
-            )
+            raise ValueError(f"min_confidence must be in [0, 1], got {min_confidence!r}")
         if min_narrative_length < 1:
-            raise ValueError(
-                f"min_narrative_length must be >= 1, got {min_narrative_length!r}"
-            )
+            raise ValueError(f"min_narrative_length must be >= 1, got {min_narrative_length!r}")
         self._min_confidence = min_confidence
         self._min_narrative_length = min_narrative_length
 

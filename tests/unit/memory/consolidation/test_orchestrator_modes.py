@@ -76,9 +76,7 @@ async def test_on_demand_processes_low_importance_events():
         await exp_store.store(_exp(importance=0.15))
 
     llm = StubLLMClient(
-        responses=[
-            {"narrative": "x" * 40, "confidence": 0.85, "kind": "principle"}
-        ]
+        responses=[{"narrative": "x" * 40, "confidence": 0.85, "kind": "principle"}]
     )
     orchestrator, _store = _build_orchestrator(exp_store, llm)
 
@@ -103,9 +101,7 @@ async def test_proactive_narrows_to_one_theme():
         await exp_store.store(_exp(task_type="run_erc", project_id=project_id))
 
     llm = StubLLMClient(
-        responses=[
-            {"narrative": "x" * 40, "confidence": 0.85, "kind": "principle"}
-        ]
+        responses=[{"narrative": "x" * 40, "confidence": 0.85, "kind": "principle"}]
     )
     orchestrator, _store = _build_orchestrator(exp_store, llm)
 
@@ -128,9 +124,7 @@ async def test_janitor_revalidates_existing_insights_without_synthesis():
     exp_store = InMemoryExperienceStore()
     llm = StubLLMClient()  # never called in janitor mode
 
-    orchestrator, insight_store = _build_orchestrator(
-        exp_store, llm, validator=strict_validator
-    )
+    orchestrator, insight_store = _build_orchestrator(exp_store, llm, validator=strict_validator)
 
     # Seed the store with insights that pass the *default* validator
     # but fail the strict one.
@@ -145,9 +139,7 @@ async def test_janitor_revalidates_existing_insights_without_synthesis():
             )
         )
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.mode == ConsolidationMode.JANITOR
     assert report.revalidated_count == 3
     assert report.newly_failed_count == 3
@@ -171,9 +163,7 @@ async def test_janitor_without_insight_store_returns_empty_report():
         writer=writer,
         insight_store=None,
     )
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.mode == ConsolidationMode.JANITOR
     assert report.revalidated_count == 0
     assert report.newly_failed_count == 0
@@ -186,9 +176,7 @@ async def test_legacy_run_kwargs_still_work():
     for _ in range(2):
         await exp_store.store(_exp())
     llm = StubLLMClient(
-        responses=[
-            {"narrative": "x" * 40, "confidence": 0.85, "kind": "principle"}
-        ]
+        responses=[{"narrative": "x" * 40, "confidence": 0.85, "kind": "principle"}]
     )
     orchestrator, _store = _build_orchestrator(exp_store, llm)
 

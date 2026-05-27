@@ -258,9 +258,7 @@ def test_handle_memory_consolidate_dispatches(monkeypatch):
 
     monkeypatch.setattr(httpx, "Client", _FakeHttpClient)
 
-    args = _build_args(
-        ["memory", "consolidate", "--mode", "background", "--limit", "50"]
-    )
+    args = _build_args(["memory", "consolidate", "--mode", "background", "--limit", "50"])
     result = handle_memory(args, ForgeClient(base_url="http://x"))
 
     assert captured["url"] == "/v1/memory/consolidate"
@@ -358,9 +356,7 @@ def test_handle_memory_insights_dispatches(monkeypatch):
 
     monkeypatch.setattr(httpx, "Client", _FakeHttpClient)
 
-    args = _build_args(
-        ["memory", "insights", "--theme", "power_analysis", "--include-stale"]
-    )
+    args = _build_args(["memory", "insights", "--theme", "power_analysis", "--include-stale"])
     result = handle_memory(args, ForgeClient(base_url="http://x"))
 
     assert captured["url"] == "/v1/memory/insights"

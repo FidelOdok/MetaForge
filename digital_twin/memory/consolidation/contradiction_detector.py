@@ -60,9 +60,7 @@ class ContradictionDetector:
         comparable existing insights the answer is trivially "no
         contradiction" and no LLM call is made.
         """
-        comparable = [
-            i for i in existing if i.theme == candidate.theme and i.id != candidate.id
-        ]
+        comparable = [i for i in existing if i.theme == candidate.theme and i.id != candidate.id]
         if not comparable:
             return ContradictionResult(contradicts=False)
 

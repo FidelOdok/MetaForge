@@ -104,9 +104,7 @@ class Neo4jInsightStore(InsightStore):
 
     def _require_driver(self) -> Any:
         if self._driver is None or not self._connected:
-            raise Neo4jInsightStoreError(
-                "Neo4jInsightStore.connect() must be called before use"
-            )
+            raise Neo4jInsightStoreError("Neo4jInsightStore.connect() must be called before use")
         return self._driver
 
     # ------------------------------------------------------------------
@@ -145,8 +143,7 @@ class Neo4jInsightStore(InsightStore):
             driver = self._require_driver()
             if theme is None:
                 query = (
-                    f"MATCH (n:{_NODE_LABEL}) "
-                    "RETURN n ORDER BY n.synthesized_at DESC LIMIT $limit"
+                    f"MATCH (n:{_NODE_LABEL}) RETURN n ORDER BY n.synthesized_at DESC LIMIT $limit"
                 )
                 params: dict[str, Any] = {"limit": limit}
             else:

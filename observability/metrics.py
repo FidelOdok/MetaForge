@@ -901,13 +901,9 @@ class MetricsCollector:
         )
         if rejected_c is not None and rejected:
             rejected_c.add(rejected, attributes=attrs)
-        contra_c = self._instruments.get(
-            MetricsRegistry.CONSOLIDATION_CONTRADICTIONS_TOTAL.name
-        )
+        contra_c = self._instruments.get(MetricsRegistry.CONSOLIDATION_CONTRADICTIONS_TOTAL.name)
         if contra_c is not None and contradictions:
             contra_c.add(contradictions, attributes={})
-        stale_c = self._instruments.get(
-            MetricsRegistry.CONSOLIDATION_STALE_MARKED_TOTAL.name
-        )
+        stale_c = self._instruments.get(MetricsRegistry.CONSOLIDATION_STALE_MARKED_TOTAL.name)
         if stale_c is not None and stale_marked:
             stale_c.add(stale_marked, attributes={})

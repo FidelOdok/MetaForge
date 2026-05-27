@@ -81,9 +81,7 @@ async def test_background_pass_records_metric():
         collector=spy,
     )
 
-    await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.BACKGROUND)
-    )
+    await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.BACKGROUND))
     assert len(spy.calls) == 1
     call = spy.calls[0]
     assert call["mode"] == "background"
@@ -122,9 +120,7 @@ async def test_janitor_pass_records_stale_marked_metric():
         collector=spy,
     )
 
-    await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert len(spy.calls) == 1
     assert spy.calls[0]["mode"] == "janitor"
     assert spy.calls[0]["stale_marked"] == 1

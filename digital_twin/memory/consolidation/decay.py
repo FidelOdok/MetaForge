@@ -35,9 +35,7 @@ class ConfidenceDecay:
 
     def __post_init__(self) -> None:
         if self.half_life_days <= 0:
-            raise ValueError(
-                f"half_life_days must be > 0, got {self.half_life_days!r}"
-            )
+            raise ValueError(f"half_life_days must be > 0, got {self.half_life_days!r}")
         if not 0.0 <= self.floor <= 1.0:
             raise ValueError(f"floor must be in [0, 1], got {self.floor!r}")
 

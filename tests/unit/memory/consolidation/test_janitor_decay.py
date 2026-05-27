@@ -72,9 +72,7 @@ async def test_janitor_without_decay_keeps_fresh_high_confidence_insight():
     await _seed_insight(store, confidence=0.9, age_days=2 * DEFAULT_HALF_LIFE_DAYS)
     orchestrator = _orchestrator(store)  # no decay
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     # Raw confidence 0.9 passes the 0.70 floor — no decay means no failure.
     assert report.revalidated_count == 1
     assert report.newly_failed_count == 0
@@ -87,9 +85,7 @@ async def test_janitor_with_decay_flags_aged_insight():
     await _seed_insight(store, confidence=0.9, age_days=2 * DEFAULT_HALF_LIFE_DAYS)
     orchestrator = _orchestrator(store, decay=ConfidenceDecay())
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.revalidated_count == 1
     assert report.newly_failed_count == 1
     assert any("confidence" in r for r in report.rejected_reasons)
@@ -102,23 +98,17 @@ async def test_janitor_with_decay_keeps_fresh_insight():
     await _seed_insight(store, confidence=0.9, age_days=0)
     orchestrator = _orchestrator(store, decay=ConfidenceDecay())
 
-    report = await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    report = await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert report.newly_failed_count == 0
 
 
 @pytest.mark.asyncio
 async def test_janitor_decay_does_not_mutate_stored_insight():
     store = InMemoryInsightStore()
-    insight = await _seed_insight(
-        store, confidence=0.9, age_days=2 * DEFAULT_HALF_LIFE_DAYS
-    )
+    insight = await _seed_insight(store, confidence=0.9, age_days=2 * DEFAULT_HALF_LIFE_DAYS)
     orchestrator = _orchestrator(store, decay=ConfidenceDecay())
 
-    await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     # The stored record's confidence is unchanged — decay is read-only.
     stored = await store.get(insight.id)
     assert stored is not None

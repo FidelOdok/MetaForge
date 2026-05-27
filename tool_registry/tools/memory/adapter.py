@@ -306,18 +306,14 @@ class MemoryServer(McpToolServer):
                 try:
                     theme = ConsolidationTheme(theme_raw)
                 except ValueError as exc:
-                    raise ValueError(
-                        f"memory.list_insights: unknown theme {theme_raw!r}"
-                    ) from exc
+                    raise ValueError(f"memory.list_insights: unknown theme {theme_raw!r}") from exc
 
             include_stale = bool(arguments.get("include_stale", False))
             limit_raw = arguments.get("limit", 50)
             try:
                 limit = int(limit_raw)
             except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "memory.list_insights: 'limit' must be an integer"
-                ) from exc
+                raise ValueError("memory.list_insights: 'limit' must be an integer") from exc
             limit = max(1, min(limit, 500))
 
             span.set_attribute("memory.include_stale", include_stale)
@@ -332,9 +328,7 @@ class MemoryServer(McpToolServer):
             if include_stale:
                 selected = raw[:limit]
             else:
-                selected = [
-                    i for i in raw if i.status is not InsightStatus.STALE_WARN
-                ][:limit]
+                selected = [i for i in raw if i.status is not InsightStatus.STALE_WARN][:limit]
 
             span.set_attribute("memory.result_count", len(selected))
             logger.info(

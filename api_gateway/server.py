@@ -385,9 +385,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     app.state.consolidation_orchestrator = None
     app.state.consolidation_insight_store = None
     if app.state.memory_store is None:
-        logger.warning(
-            "consolidation_orchestrator_init_skipped", reason="no_memory_store"
-        )
+        logger.warning("consolidation_orchestrator_init_skipped", reason="no_memory_store")
     else:
         try:
             from digital_twin.memory.consolidation import (
@@ -426,9 +424,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                     pg_insight_store = pg_insight
                     logger.info("consolidation_insight_store_pgvector_initialized")
                 except Exception as exc:
-                    logger.warning(
-                        "consolidation_insight_store_pgvector_failed", error=str(exc)
-                    )
+                    logger.warning("consolidation_insight_store_pgvector_failed", error=str(exc))
 
             if pg_insight_store is None:
                 insight_store = InMemoryInsightStore()
@@ -439,9 +435,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 # stays the read source of truth; Neo4j gets the
                 # structural mirror. A Neo4j connect failure degrades to
                 # pgvector-only rather than failing gateway boot.
-                neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get(
-                    "METAFORGE_NEO4J_URI"
-                )
+                neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get("METAFORGE_NEO4J_URI")
                 if neo4j_uri:
                     try:
                         neo4j_insight = Neo4jInsightStore(
@@ -458,9 +452,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                             ),
                         )
                         await neo4j_insight.connect()
-                        insight_store = DualWriteInsightStore(
-                            pg_insight_store, neo4j_insight
-                        )
+                        insight_store = DualWriteInsightStore(pg_insight_store, neo4j_insight)
                         logger.info("consolidation_insight_store_dual_write_initialized")
                     except Exception as exc:
                         logger.warning(

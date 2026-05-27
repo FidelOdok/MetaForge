@@ -96,10 +96,7 @@ async def test_full_lifecycle_active_then_stale():
 
     # --- Age the insight past the decay half-life --------------------
     aged = insight.model_copy(
-        update={
-            "synthesized_at": datetime.now(UTC)
-            - timedelta(days=2 * DEFAULT_HALF_LIFE_DAYS)
-        }
+        update={"synthesized_at": datetime.now(UTC) - timedelta(days=2 * DEFAULT_HALF_LIFE_DAYS)}
     )
     await insight_store.write(aged)
 
@@ -114,9 +111,7 @@ async def test_full_lifecycle_active_then_stale():
         decay=ConfidenceDecay(),
         janitor_marks_stale=True,
     )
-    jr_report = await janitor.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.JANITOR)
-    )
+    jr_report = await janitor.run_request(ConsolidationRunRequest(mode=ConsolidationMode.JANITOR))
     assert jr_report.revalidated_count == 1
     assert jr_report.newly_failed_count == 1
     assert jr_report.marked_stale_count == 1
@@ -151,9 +146,7 @@ async def test_contradiction_detection_over_synthesized_corpus():
         writer=SemanticMemoryWriter(insight_store),
         insight_store=insight_store,
     )
-    await orchestrator.run_request(
-        ConsolidationRunRequest(mode=ConsolidationMode.BACKGROUND)
-    )
+    await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.BACKGROUND))
     existing = await insight_store.list()
     assert len(existing) == 1
 

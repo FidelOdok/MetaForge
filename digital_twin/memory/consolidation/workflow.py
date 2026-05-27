@@ -138,9 +138,7 @@ class ConsolidationWorkflowInput(BaseModel):
     pin a finite number so the workflow body terminates.
     """
 
-    activity_input: ConsolidationActivityInput = Field(
-        default_factory=ConsolidationActivityInput
-    )
+    activity_input: ConsolidationActivityInput = Field(default_factory=ConsolidationActivityInput)
     interval_seconds: int = Field(default=DEFAULT_INTERVAL_SECONDS, ge=1)
     max_iterations: int = Field(default=DEFAULT_MAX_ITERATIONS, ge=0)
 

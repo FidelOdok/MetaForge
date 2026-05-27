@@ -71,9 +71,7 @@ class ConsolidationRunRequest:
                 "PROACTIVE mode requires a project_id — pass project_id=<UUID>"
             )
         if self.since is not None and self.until is not None and self.since > self.until:
-            raise ConsolidationModeError(
-                "ConsolidationRunRequest.since must be <= until"
-            )
+            raise ConsolidationModeError("ConsolidationRunRequest.since must be <= until")
 
     @property
     def effective_min_importance(self) -> float | None:
