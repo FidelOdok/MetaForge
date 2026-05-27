@@ -7,20 +7,15 @@ embedding, and idempotent replay via ``delete_by_run``.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID
-
 import structlog
 
 from digital_twin.knowledge.embedding_service import EmbeddingService
-from digital_twin.memory.embeddings import event_to_text
+from digital_twin.memory.event_embedder import EventEmbedder
 from digital_twin.memory.importance import (
     DEFAULT_WEIGHTS,
     ImportanceWeights,
     score_importance,
 )
-from digital_twin.memory.models import ConfidenceTier, ExperienceMemory
 from digital_twin.memory.store import ExperienceStore
 from observability.tracing import get_tracer
 from orchestrator.event_bus.events import Event, EventType
@@ -53,6 +48,7 @@ class ExperienceConsumer(EventSubscriber):
     ) -> None:
         self._store = store
         self._embeddings = embeddings
+        self._embedder = EventEmbedder(embeddings)
         self._weights = weights
         self._min_importance = min_importance
         self._index_started_events = index_started_events
@@ -117,7 +113,7 @@ class ExperienceConsumer(EventSubscriber):
                 return
 
             try:
-                experience = await self._build_experience(event, score_total=score.total)
+                experience = await self._embedder.build_experience(event, importance=score.total)
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error(
@@ -146,67 +142,3 @@ class ExperienceConsumer(EventSubscriber):
                 agent_code=stored.agent_code,
                 success=stored.success,
             )
-
-    async def _build_experience(
-        self,
-        event: Event,
-        *,
-        score_total: float,
-    ) -> ExperienceMemory:
-        text = event_to_text(event)
-        embedding = await self._embeddings.embed(text)
-        data: dict[str, Any] = event.data or {}
-
-        success = event.type == EventType.AGENT_TASK_COMPLETED
-        error = data.get("error") if event.type == EventType.AGENT_TASK_FAILED else None
-
-        return ExperienceMemory(
-            run_id=str(data.get("run_id", "")),
-            step_id=str(data.get("step_id", "")),
-            agent_code=str(data.get("agent_code", "")),
-            task_type=str(data.get("task_type", "") or ""),
-            success=success,
-            duration_seconds=_coerce_float(data.get("duration")),
-            result_summary=text,
-            error=str(error) if error else None,
-            project_id=_coerce_uuid(data.get("project_id")),
-            timestamp=_parse_timestamp(event.timestamp),
-            importance=score_total,
-            confidence=ConfidenceTier.VERBATIM,
-            embedding=embedding,
-            metadata={
-                "event_id": event.id,
-                "event_type": str(event.type),
-                "source": event.source,
-            },
-        )
-
-
-def _coerce_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_uuid(value: Any) -> UUID | None:
-    if value is None:
-        return None
-    if isinstance(value, UUID):
-        return value
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_timestamp(value: str) -> datetime:
-    try:
-        ts = datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return datetime.now(UTC)
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    return ts
