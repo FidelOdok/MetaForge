@@ -43,12 +43,22 @@ class MemoryClient:
         project_id: UUID | None = None,
         agent_code: str | None = None,
         only_success: bool | None = None,
+        min_similarity: float | None = None,
     ) -> list[MemorySearchHit]:
-        """Return experiences most similar to ``goal``.
+        """Return experiences most similar to ``goal``, ranked by similarity.
 
         ``goal`` is a natural-language description of what the caller is
         trying to do. The client embeds it with the same service the
-        consumer uses, then queries the store for nearest neighbours.
+        consumer uses, then queries the store for nearest neighbours
+        (already ordered by descending cosine similarity).
+
+        ``min_similarity`` (MET-460) is the retrieval-confidence floor: in
+        a semantic search the cosine similarity *is* the per-result
+        confidence, so hits below the threshold are dropped to keep weak,
+        loosely-related experiences out of the result. ``None`` (default)
+        applies no floor. Because the store returns results sorted by
+        similarity, filtering the top-``limit`` slice never hides a
+        qualifying hit that would otherwise fit within the limit.
         """
         if not goal or not goal.strip():
             return []
@@ -58,6 +68,7 @@ class MemoryClient:
             span.set_attribute("memory.limit", capped_limit)
             span.set_attribute("memory.has_project_filter", project_id is not None)
             span.set_attribute("memory.has_agent_filter", agent_code is not None)
+            span.set_attribute("memory.has_similarity_floor", min_similarity is not None)
             embedding = await self._embeddings.embed(goal.strip())
             hits = await self._store.search(
                 embedding,
@@ -66,6 +77,8 @@ class MemoryClient:
                 agent_code=agent_code,
                 only_success=only_success,
             )
+            if min_similarity is not None:
+                hits = [hit for hit in hits if hit.similarity >= min_similarity]
             span.set_attribute("memory.result_count", len(hits))
             logger.info(
                 "memory_retrieve_completed",
@@ -73,5 +86,6 @@ class MemoryClient:
                 result_count=len(hits),
                 project_id=str(project_id) if project_id else None,
                 agent_code=agent_code,
+                min_similarity=min_similarity,
             )
             return hits
