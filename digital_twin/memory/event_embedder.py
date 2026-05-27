@@ -18,6 +18,7 @@ consumer avoids two ways to insert the same record.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -71,31 +72,67 @@ class EventEmbedder:
             span.set_attribute("event.id", event.id)
             text = event_to_text(event)
             embedding = await self._embeddings.embed(text)
-            data: dict[str, Any] = event.data or {}
+            return self._assemble(event, text, embedding, importance, confidence)
 
-            success = event.type == EventType.AGENT_TASK_COMPLETED
-            error = data.get("error") if event.type == EventType.AGENT_TASK_FAILED else None
+    async def build_experiences_batch(
+        self,
+        items: Sequence[tuple[Event, float]],
+        *,
+        confidence: ConfidenceTier = ConfidenceTier.VERBATIM,
+    ) -> list[ExperienceMemory]:
+        """Build experiences for many events with a **single** ``embed_batch`` call.
 
-            return ExperienceMemory(
-                run_id=str(data.get("run_id", "")),
-                step_id=str(data.get("step_id", "")),
-                agent_code=str(data.get("agent_code", "")),
-                task_type=str(data.get("task_type", "") or ""),
-                success=success,
-                duration_seconds=_coerce_float(data.get("duration")),
-                result_summary=text,
-                error=str(error) if error else None,
-                project_id=_coerce_uuid(data.get("project_id")),
-                timestamp=_parse_timestamp(event.timestamp),
-                importance=importance,
-                confidence=confidence,
-                embedding=embedding,
-                metadata={
-                    "event_id": event.id,
-                    "event_type": str(event.type),
-                    "source": event.source,
-                },
-            )
+        ``items`` pairs each event with its caller-scored importance. The
+        whole batch is serialized, embedded in one provider round-trip
+        (the point of MET-459's "don't embed one-at-a-time"), then
+        assembled. Empty input is a no-op.
+        """
+        pairs = list(items)
+        if not pairs:
+            return []
+        with tracer.start_as_current_span("event_embedder.build_experiences_batch") as span:
+            span.set_attribute("memory.batch_size", len(pairs))
+            texts = [event_to_text(event) for event, _ in pairs]
+            embeddings = await self._embeddings.embed_batch(texts)
+            return [
+                self._assemble(event, text, embedding, importance, confidence)
+                for (event, importance), text, embedding in zip(
+                    pairs, texts, embeddings, strict=True
+                )
+            ]
+
+    @staticmethod
+    def _assemble(
+        event: Event,
+        text: str,
+        embedding: list[float],
+        importance: float,
+        confidence: ConfidenceTier,
+    ) -> ExperienceMemory:
+        """Assemble an ``ExperienceMemory`` from a pre-embedded event."""
+        data: dict[str, Any] = event.data or {}
+        success = event.type == EventType.AGENT_TASK_COMPLETED
+        error = data.get("error") if event.type == EventType.AGENT_TASK_FAILED else None
+        return ExperienceMemory(
+            run_id=str(data.get("run_id", "")),
+            step_id=str(data.get("step_id", "")),
+            agent_code=str(data.get("agent_code", "")),
+            task_type=str(data.get("task_type", "") or ""),
+            success=success,
+            duration_seconds=_coerce_float(data.get("duration")),
+            result_summary=text,
+            error=str(error) if error else None,
+            project_id=_coerce_uuid(data.get("project_id")),
+            timestamp=_parse_timestamp(event.timestamp),
+            importance=importance,
+            confidence=confidence,
+            embedding=embedding,
+            metadata={
+                "event_id": event.id,
+                "event_type": str(event.type),
+                "source": event.source,
+            },
+        )
 
 
 def _coerce_float(value: Any) -> float | None:

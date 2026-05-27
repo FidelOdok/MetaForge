@@ -143,3 +143,61 @@ async def test_embedding_backend_error_propagates():
 
     with pytest.raises(RuntimeError, match="embedding backend down"):
         await embedder.build_experience(event, importance=0.5)
+
+
+class _CountingEmbeddings(EmbeddingService):
+    """Tracks how embedding was invoked so batch behaviour is verifiable."""
+
+    DIM = 8
+
+    def __init__(self) -> None:
+        self.embed_calls = 0
+        self.embed_batch_calls = 0
+
+    async def embed(self, text: str) -> list[float]:
+        self.embed_calls += 1
+        return [float(len(text) % 7)] * self.DIM
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.embed_batch_calls += 1
+        return [[float(len(t) % 7)] * self.DIM for t in texts]
+
+
+@pytest.mark.asyncio
+async def test_build_experiences_batch_uses_single_embed_batch_call():
+    embeddings = _CountingEmbeddings()
+    embedder = EventEmbedder(embeddings)
+    items = [(_event(EventType.AGENT_TASK_COMPLETED, run_id=f"r{i}"), 0.5) for i in range(4)]
+
+    experiences = await embedder.build_experiences_batch(items)
+
+    assert len(experiences) == 4
+    # The whole point: one batched round-trip, not one call per event.
+    assert embeddings.embed_batch_calls == 1
+    assert embeddings.embed_calls == 0
+    assert [e.run_id for e in experiences] == ["r0", "r1", "r2", "r3"]
+
+
+@pytest.mark.asyncio
+async def test_build_experiences_batch_empty_is_noop():
+    embeddings = _CountingEmbeddings()
+    result = await EventEmbedder(embeddings).build_experiences_batch([])
+    assert result == []
+    assert embeddings.embed_batch_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_build_experiences_batch_preserves_per_item_importance(fake_embeddings):
+    embedder = EventEmbedder(fake_embeddings)
+    items = [
+        (_event(EventType.AGENT_TASK_COMPLETED, run_id="a"), 0.3),
+        (_event(EventType.AGENT_TASK_FAILED, run_id="b", extra={"error": "boom"}), 0.9),
+    ]
+
+    experiences = await embedder.build_experiences_batch(items)
+
+    assert experiences[0].importance == 0.3
+    assert experiences[0].success is True
+    assert experiences[1].importance == 0.9
+    assert experiences[1].success is False
+    assert experiences[1].error == "boom"
