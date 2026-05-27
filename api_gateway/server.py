@@ -21,6 +21,7 @@ from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.health import health_router
 from api_gateway.knowledge.routes import router as knowledge_router
+from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.twin.routes import router as twin_router
@@ -339,6 +340,42 @@ async def _init_knowledge_store(app: FastAPI) -> None:
         logger.warning("embedding_service_init_failed", error=str(exc))
         app.state.embedding_service = None
 
+    # MET-453: agent memory layer — experience store + retrieval client.
+    # When DATABASE_URL is set, prefer the pgvector backend so experiences
+    # survive gateway restarts. Fall back to InMemoryExperienceStore for
+    # local dev / test where DATABASE_URL is absent or the pgvector init
+    # fails (extension missing, etc.).
+    app.state.memory_store = None
+    app.state.memory_client = None
+    if app.state.embedding_service is None:
+        logger.warning("memory_client_init_skipped", reason="no_embedding_service")
+    else:
+        try:
+            from digital_twin.memory.client import MemoryClient
+            from digital_twin.memory.pgvector_store import PgVectorExperienceStore
+            from digital_twin.memory.store import InMemoryExperienceStore
+
+            memory_store: InMemoryExperienceStore | PgVectorExperienceStore | None = None
+            if db_url:
+                try:
+                    dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                    pg_memory = PgVectorExperienceStore(dsn=dsn)
+                    await pg_memory.initialize()
+                    memory_store = pg_memory
+                    logger.info("memory_store_pgvector_initialized")
+                except Exception as exc:
+                    logger.warning("memory_store_pgvector_failed", error=str(exc))
+            if memory_store is None:
+                memory_store = InMemoryExperienceStore()
+                logger.info("memory_store_in_memory_initialized")
+
+            app.state.memory_store = memory_store
+            app.state.memory_client = MemoryClient(memory_store, app.state.embedding_service)
+        except Exception as exc:
+            logger.warning("memory_client_init_failed", error=str(exc))
+            app.state.memory_store = None
+            app.state.memory_client = None
+
     # Register pgvector health check
     if pgvector_active:
         from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
@@ -446,6 +483,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin=twin,
         constraint_engine=twin.constraints,
         project_backend=project_backend,
+        memory_client=getattr(app.state, "memory_client", None),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -731,6 +769,7 @@ def create_app(
         pass
 
     app.include_router(knowledge_router)
+    app.include_router(memory_router)
 
     logger.info(
         "gateway_configured",
