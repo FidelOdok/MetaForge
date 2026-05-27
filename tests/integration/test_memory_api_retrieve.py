@@ -118,3 +118,36 @@ def test_post_retrieve_caps_limit_at_max(app_and_store):
     with TestClient(app) as client:
         response = client.post("/v1/memory/retrieve", json={"goal": "x", "limit": 9999})
     assert response.status_code == 422  # Pydantic rejects above MAX_RETRIEVAL_LIMIT
+
+
+def test_post_retrieve_min_similarity_filters_weak_matches(app_and_store):
+    import anyio
+
+    app, store, embeddings = app_and_store
+    anyio.run(_seed, store, embeddings, ["alpha task", "beta task", "gamma task"])
+
+    with TestClient(app) as client:
+        floored = client.post(
+            "/v1/memory/retrieve",
+            json={"goal": "alpha task", "limit": 5, "minSimilarity": 0.999},
+        )
+        unfiltered = client.post(
+            "/v1/memory/retrieve",
+            json={"goal": "alpha task", "limit": 5},
+        )
+    assert floored.status_code == 200
+    assert unfiltered.status_code == 200
+    # The floor keeps only the exact match; without it all three return.
+    assert floored.json()["totalFound"] == 1
+    assert floored.json()["hits"][0]["resultSummary"] == "alpha task"
+    assert unfiltered.json()["totalFound"] == 3
+
+
+def test_post_retrieve_rejects_out_of_range_min_similarity(app_and_store):
+    app, _store, _embeddings = app_and_store
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/memory/retrieve",
+            json={"goal": "x", "minSimilarity": 2.0},
+        )
+    assert response.status_code == 422  # outside [-1.0, 1.0]

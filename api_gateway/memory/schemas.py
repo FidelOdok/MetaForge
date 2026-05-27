@@ -42,6 +42,16 @@ class MemoryRetrieveRequest(BaseModel):
         alias="onlySuccess",
         description="True = success-only, False = failures-only, None = no filter.",
     )
+    min_similarity: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=1.0,
+        alias="minSimilarity",
+        description=(
+            "Optional retrieval-confidence floor: drop hits whose cosine "
+            "similarity is below this value. None = no floor."
+        ),
+    )
 
     model_config = {"populate_by_name": True}
 

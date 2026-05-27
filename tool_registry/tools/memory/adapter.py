@@ -133,6 +133,16 @@ class MemoryServer(McpToolServer):
                                 "When false, only failures. Null = no filter."
                             ),
                         },
+                        "min_similarity": {
+                            "type": ["number", "null"],
+                            "minimum": -1.0,
+                            "maximum": 1.0,
+                            "description": (
+                                "Optional retrieval-confidence floor — drop "
+                                "hits whose cosine similarity is below this "
+                                "value. Null = no floor."
+                            ),
+                        },
                     },
                     "required": ["goal"],
                 },
@@ -272,10 +282,21 @@ class MemoryServer(McpToolServer):
                 bool(only_success_raw) if isinstance(only_success_raw, bool) else None
             )
 
+            min_similarity_raw = arguments.get("min_similarity")
+            min_similarity: float | None = None
+            if min_similarity_raw is not None:
+                try:
+                    min_similarity = float(min_similarity_raw)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "memory.retrieve_similar_experience: 'min_similarity' must be a number"
+                    ) from exc
+
             project_id = _project_id_from_context()
 
             span.set_attribute("memory.goal_length", len(goal))
             span.set_attribute("memory.limit", limit)
+            span.set_attribute("memory.has_similarity_floor", min_similarity is not None)
             if project_id is not None:
                 span.set_attribute("memory.project_id", str(project_id))
                 span.set_attribute("mcp.project_id", str(project_id))
@@ -286,6 +307,7 @@ class MemoryServer(McpToolServer):
                 project_id=project_id,
                 agent_code=agent_code,
                 only_success=only_success,
+                min_similarity=min_similarity,
             )
             span.set_attribute("memory.result_count", len(hits))
             logger.info(
