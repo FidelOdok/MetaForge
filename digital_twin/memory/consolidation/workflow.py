@@ -52,12 +52,26 @@ except ImportError:  # pragma: no cover — exercised in environments without te
 
     class _StubModule:
         @staticmethod
-        def defn(cls: Any) -> Any:
-            return cls
+        def defn(*args: Any, **kwargs: Any) -> Any:
+            # Support both bare ``@defn`` and factory ``@defn(name=...)``
+            # forms — the real temporalio decorators accept both.
+            if len(args) == 1 and not kwargs and callable(args[0]):
+                return args[0]
+
+            def _decorator(obj: Any) -> Any:
+                return obj
+
+            return _decorator
 
         @staticmethod
-        def run(func: Any) -> Any:
-            return func
+        def run(*args: Any, **kwargs: Any) -> Any:
+            if len(args) == 1 and not kwargs and callable(args[0]):
+                return args[0]
+
+            def _decorator(obj: Any) -> Any:
+                return obj
+
+            return _decorator
 
         @staticmethod
         def info() -> Any:
