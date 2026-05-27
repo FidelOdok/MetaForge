@@ -533,7 +533,7 @@ class TestScoreBomRiskHandler:
             ],
         )
 
-        result = asyncio.get_event_loop().run_until_complete(handler.run(skill_input))
+        result = asyncio.run(handler.run(skill_input))
         assert result.success
         assert result.data is not None
         assert result.data.report.total_parts == 1
@@ -573,7 +573,7 @@ class TestFindAlternatesHandler:
             ],
         )
 
-        result = asyncio.get_event_loop().run_until_complete(handler.run(skill_input))
+        result = asyncio.run(handler.run(skill_input))
         assert result.success
         assert result.data is not None
         assert len(result.data.result.alternates) == 1
@@ -596,7 +596,7 @@ class TestSupplyChainAgentDispatch:
             mcp=MagicMock(),
         )
         request = TaskRequest(task_type="unknown_task")
-        result = asyncio.get_event_loop().run_until_complete(agent.run_task(request))
+        result = asyncio.run(agent.run_task(request))
         assert not result.success
         assert "Unsupported task type" in result.errors[0]
 
@@ -632,7 +632,7 @@ class TestSupplyChainAgentDispatch:
                 ],
             },
         )
-        result = asyncio.get_event_loop().run_until_complete(agent.run_task(request))
+        result = asyncio.run(agent.run_task(request))
         assert result.success
         assert len(result.skill_results) == 1
 
@@ -654,7 +654,7 @@ class TestSupplyChainAgentDispatch:
                 "distributor_results": [],
             },
         )
-        result = asyncio.get_event_loop().run_until_complete(agent.run_task(request))
+        result = asyncio.run(agent.run_task(request))
         assert result.success
 
     def test_missing_bom_items_returns_error(self) -> None:
@@ -671,7 +671,7 @@ class TestSupplyChainAgentDispatch:
             task_type="score_bom_risk",
             parameters={"project_id": "test"},
         )
-        result = asyncio.get_event_loop().run_until_complete(agent.run_task(request))
+        result = asyncio.run(agent.run_task(request))
         assert not result.success
         assert "bom_items" in result.errors[0]
 
@@ -689,7 +689,7 @@ class TestSupplyChainAgentDispatch:
             task_type="find_alternates",
             parameters={"specs": {}},
         )
-        result = asyncio.get_event_loop().run_until_complete(agent.run_task(request))
+        result = asyncio.run(agent.run_task(request))
         assert not result.success
         assert "mpn" in result.errors[0]
 
