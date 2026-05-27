@@ -10,7 +10,6 @@ import pytest
 from digital_twin.memory.models import ConfidenceTier, ExperienceMemory
 from digital_twin.memory.store import InMemoryExperienceStore
 
-
 _DEFAULT_EMBEDDING: list[float] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
