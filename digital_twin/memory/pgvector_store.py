@@ -33,6 +33,55 @@ tracer = get_tracer("digital_twin.memory.pgvector_store")
 
 DEFAULT_EMBEDDING_DIM = 384
 
+# ivfflat list count for the embedding ANN index. 100 is pgvector's
+# common default for small-to-mid corpora; retune (≈ rows/1000) once the
+# table is large. Cosine ops match the ``<=>`` operator used in ``search``.
+DEFAULT_IVFFLAT_LISTS = 100
+
+
+def schema_statements(
+    embedding_dim: int,
+    *,
+    ivfflat_lists: int = DEFAULT_IVFFLAT_LISTS,
+) -> list[str]:
+    """DDL that provisions the ``agent_experiences`` pgvector schema (MET-457).
+
+    Returned as an ordered list so ``initialize`` can run them in
+    sequence and unit tests can assert the schema shape (table,
+    dimension, JSONB metadata, and — critically — the ivfflat cosine
+    index on the embedding column) without a live database.
+    """
+    return [
+        "CREATE EXTENSION IF NOT EXISTS vector",
+        f"""
+        CREATE TABLE IF NOT EXISTS agent_experiences (
+            id UUID PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            agent_code TEXT NOT NULL,
+            task_type TEXT NOT NULL DEFAULT '',
+            success BOOLEAN NOT NULL,
+            duration_seconds DOUBLE PRECISION,
+            result_summary TEXT NOT NULL DEFAULT '',
+            error TEXT,
+            project_id UUID,
+            timestamp TIMESTAMPTZ NOT NULL,
+            importance DOUBLE PRECISION NOT NULL,
+            confidence TEXT NOT NULL,
+            embedding vector({embedding_dim}),
+            metadata JSONB NOT NULL DEFAULT '{{}}'
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_agent_experiences_run ON agent_experiences (run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_experiences_project "
+        "ON agent_experiences (project_id)",
+        # MET-457: ivfflat ANN index on the embedding column so cosine
+        # search scales past a sequential scan as the corpus grows.
+        "CREATE INDEX IF NOT EXISTS idx_agent_experiences_embedding "
+        "ON agent_experiences USING ivfflat (embedding vector_cosine_ops) "
+        f"WITH (lists = {ivfflat_lists})",
+    ]
+
 
 class PgVectorExperienceStore(ExperienceStore):
     """PostgreSQL + pgvector backend for ``ExperienceMemory`` records.
@@ -65,36 +114,8 @@ class PgVectorExperienceStore(ExperienceStore):
 
             self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=self._pool_size)
             async with self._pool.acquire() as conn:
-                await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                await conn.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS agent_experiences (
-                        id UUID PRIMARY KEY,
-                        run_id TEXT NOT NULL,
-                        step_id TEXT NOT NULL,
-                        agent_code TEXT NOT NULL,
-                        task_type TEXT NOT NULL DEFAULT '',
-                        success BOOLEAN NOT NULL,
-                        duration_seconds DOUBLE PRECISION,
-                        result_summary TEXT NOT NULL DEFAULT '',
-                        error TEXT,
-                        project_id UUID,
-                        timestamp TIMESTAMPTZ NOT NULL,
-                        importance DOUBLE PRECISION NOT NULL,
-                        confidence TEXT NOT NULL,
-                        embedding vector({self._embedding_dim}),
-                        metadata JSONB NOT NULL DEFAULT '{{}}'
-                    )
-                    """
-                )
-                await conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_agent_experiences_run "
-                    "ON agent_experiences (run_id)"
-                )
-                await conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_agent_experiences_project "
-                    "ON agent_experiences (project_id)"
-                )
+                for statement in schema_statements(self._embedding_dim):
+                    await conn.execute(statement)
             logger.info(
                 "pgvector_experience_store_initialized",
                 embedding_dim=self._embedding_dim,
