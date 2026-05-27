@@ -117,19 +117,46 @@ datasheets:
     NOT redistributed; fetched on demand from the source URL above.
 
     '
-# MET-431: ESP32 is the proof point for the datasheet ingestion pipeline.
-# Pinned hashes are populated on first ``fetch_and_extract.py --only ESP32``
-# run; commit the resulting manifest update with the .txt excerpt.
 - mpn: ESP32-WROOM-32E
   vendor: Espressif
   family: MCU (Wi-Fi/Bluetooth SoC)
   source_url: https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32e_esp32-wroom-32ue_datasheet_en.pdf
-  pdf_sha256: ''
+  pdf_sha256: 1dabd3a7eecee58e2852aaacd6af6f811f4f5d01235211de5ab8486cc001cf40
   text_path: tests/fixtures/datasheets/esp32-wroom-32e.txt
-  text_sha256: ''
+  text_sha256: f72f08f448497d8923cf4d6615f1efbbb859ddf16523ac3875ba54195fc842f9
   license_note: 'Public datasheet by Espressif Systems. Excerpt committed for
 
     UAT testing under fair-use technical-reference doctrine. PDF is
+
+    NOT redistributed; fetched on demand from the source URL above.
+
+    '
+- mpn: TM4C123GH6PM
+  vendor: Texas Instruments
+  family: MCU (ARM Cortex-M4F, Tiva C)
+  source_url: https://www.ti.com/lit/ds/symlink/tm4c123gh6pm.pdf
+  pdf_sha256: bcb0229b86e72655fa24e712d4a65b732d18c489b0eef1de81bfa50aca8f680f
+  text_path: tests/fixtures/datasheets/tm4c123gh6pm.txt
+  text_sha256: 29e0a6849f0dec1c2de37556592009dc0d41c9ef666ac239849b649ca0a507d8
+  license_note: 'Public datasheet by Texas Instruments Incorporated. Excerpt
+
+    committed for UAT testing under fair-use technical-reference
+
+    doctrine. PDF is NOT redistributed; fetched on demand from the
+
+    source URL above.
+
+    '
+- mpn: ATSAMD21G18
+  vendor: Microchip
+  family: MCU (ARM Cortex-M0+, SAM D21)
+  source_url: https://ww1.microchip.com/downloads/aemDocuments/documents/MCU32/ProductDocuments/DataSheets/SAM-D21-DA1-Family-Data-Sheet-DS40001882.pdf
+  pdf_sha256: cd6d39e3e5c2f2116cf99224a102f707444e0395f6faa7ddec75093bd249e394
+  text_path: tests/fixtures/datasheets/atsamd21g18.txt
+  text_sha256: e1e73136e40b7983c0b1e475f38066b5d9d7b8655ba1d1023b6a88fd3ea3416d
+  license_note: 'Public datasheet by Microchip Technology Inc. Excerpt committed
+
+    for UAT testing under fair-use technical-reference doctrine. PDF is
 
     NOT redistributed; fetched on demand from the source URL above.
 

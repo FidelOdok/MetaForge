@@ -1,0 +1,2419 @@
+
+
+## Page 1
+
+ESP32-WROOM-32E
+ESP32-WROOM-32UE
+Datasheet
+Version 2.0
+2.4 GHz Wi-Fi + Bluetooth® + Bluetooth LE module
+Built around ESP32 series of SoCs, Xtensa® dual-core 32-bit LX6 microprocessor
+4/8/16 MB flash available
+26 GPIOs, rich set of peripherals
+On-board PCB antenna or external antenna connector
+ESP32-WROOM-32E ESP32-WROOM-32UE
+www.espressif.com
+
+
+## Page 2
+
+1 ModuleOverview
+1 Module Overview
+Note:
+CheckthelinkortheQRcodetomakesurethatyouusethelatestversionofthisdocument:
+https://espressif.com/documentation/esp32-wroom-32e_esp32-wroom-32ue_datasheet_en.pdf
+1.1 Features
+CPU and On-Chip Memory touchsensor,ADC,DAC,TWAI® (compatible
+• ESP32-D0WD-V3orESP32-D0WDR2-V3 withISO11898-1,i.e. CANSpecification2.0)
+embedded,Xtensadual-core32-bitLX6
+microprocessor,upto240MHz Integrated Components on Module
+• 40MHzcrystaloscillator
+• 448KBROM
+• 4/8/16MBSPIflash
+• 520KBSRAM
+• ESP32-D0WDR2-V3alsoprovides2MBPSRAM
+• 16KBSRAMinRTC
+Antenna Options
+Wi-Fi
+• 802.11b/g/n • ESP32-WROOM-32E:On-boardPCBantenna
+• Bitrate: 802.11nupto150Mbps • ESP32-WROOM-32UE:externalantennaviaa
+connector
+• A-MPDUandA-MSDUaggregation
+• 0.4µsguardintervalsupport Operating Conditions
+• Centerfrequencyrangeofoperatingchannel: • Operatingvoltage/Powersupply: 3.0~3.6V
+2412~2484MHz • Operatingambienttemperature:
+– 85°Cversion: –40~85°C
+Bluetooth®
+• BluetoothV4.2BR/EDRandBluetoothLE – 105°Cversion: –40~105°C.Notethat
+specification onlythemodulesembeddedwitha4/8
+MBflashsupportthisversion.
+• Class-1,class-2andclass-3transmitter
+• AFH Certification
+• CVSDandSBC • Bluetoothcertification: BQB
+• RFcertification: Seecertificatesfor
+Peripherals
+ESP32-WROOM-32EandESP32-WROOM-32UE
+• Upto26GPIOs
+• Greencertification: REACH/RoHS
+– 5strappingGPIOs
+• SDcard,UART,SPI,SDIO,I2C,LEDPWM,Motor Test
+PWM,I2S,IR,pulsecounter,GPIO,capacitive • HTOL/HTSL/uHAST/TCT/ESD
+EspressifSystems 2 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 3
+
+1 ModuleOverview
+1.2 Series Comparison
+ESP32-WROOM-32EandESP32-WROOM-32UEaretwopowerful,genericWi-FiMCUmodulesthathavearich
+setofperipherals. TheyareanidealchoiceforawidevarietyofapplicationscenariosrelatedtoInternetof
+Things(IoT),suchasembeddedsystems,smarthome,wearableelectronics,etc.
+ESP32-WROOM-32EcomeswithaPCBantenna,andESP32-WROOM-32UEwithaconnectorforanexternal
+antenna. Theinformationinthisdatasheetisapplicabletobothmodules.
+TheSeriesComparisonforthetwomodulesisasfollows:
+Table1: ESP32-WROOM-32ESeriesComparison1
+AmbientTemp.3 Size4
+OrderingCode Flash2 PSRAM
+(°C) (mm)
+ESP32-WROOM-32E-N4 4MB(QuadSPI) — –40~85
+ESP32-WROOM-32E-N8 8MB(QuadSPI) — –40~85
+ESP32-WROOM-32E-N16 16MB(QuadSPI) — –40~85
+ESP32-WROOM-32E-H4 4MB(QuadSPI) — –40~105
+18.0×25.5×3.1
+ESP32-WROOM-32E-H8 8MB(QuadSPI) — –40~105
+ESP32-WROOM-32E-N4R2 4MB(QuadSPI) 2MB(QuadSPI)5 –40~85
+ESP32-WROOM-32E-N8R2 8MB(QuadSPI) 2MB(QuadSPI)5 –40~85
+ESP32-WROOM-32E-N16R2 16MB(QuadSPI) 2MB(QuadSPI)5 –40~85
+1Thistablesharesthesamenotespresentedinthetable2below.
+Table2: ESP32-WROOM-32UESeriesComparison
+AmbientTemp.3 Size4
+OrderingCode Flash2 PSRAM
+(°C) (mm)
+ESP32-WROOM-32UE-N4 4MB(QuadSPI) — –40~85
+ESP32-WROOM-32UE-N8 8MB(QuadSPI) — –40~85
+ESP32-WROOM-32UE-N16 16MB(QuadSPI) — –40~85
+ESP32-WROOM-32UE-H4 4MB(QuadSPI) — –40~105
+18.0×19.2×3.2
+ESP32-WROOM-32UE-H8 8MB(QuadSPI) — –40~105
+ESP32-WROOM-32UE-N4R2 4MB(QuadSPI) 2MB(QuadSPI)5 –40~85
+ESP32-WROOM-32UE-N8R2 8MB(QuadSPI) 2MB(QuadSPI)5 –40~85
+ESP32-WROOM-32UE-N16R2 16MB(QuadSPI) 2MB(QuadSPI)5 –40~85
+2Forspecifications,refertoSection6.5MemorySpecifications.
+3Ambienttemperaturespecifiestherecommendedtemperaturerangeoftheenvironmentimmediatelyoutside
+theEspressifmodule.
+4Fordetails,refertoSection10.1ModuleDimensions.
+5ThismoduleusesPSRAMintegratedinthechip’spackage.
+AtthecoreofthemoduleistheESP32-D0WD-V3chiporESP32-D0WDR2-V3chip. Thechipembeddedis
+designedtobescalableandadaptive. TherearetwoCPUcoresthatcanbeindividuallycontrolled,andthe
+CPUclockfrequencyisadjustablefrom80MHzto240MHz. YoucanpowerofftheCPUandmakeuseofthe
+low-powercoprocessortoconstantlymonitortheperipheralsforchangesorcrossingofthresholds.
+EspressifSystems 3 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 4
+
+1 ModuleOverview
+Note:
+• FormoreinformationonESP32-D0WD-V3andESP32-D0WDR2-V3chip,pleaserefertoESP32SeriesDatasheet.
+• Forchiprevisionidentification,ESP-IDFreleasethatsupportsaspecificchiprevision,andotherinformationon
+chiprevisions,pleaserefertoESP32SeriesSoCErrata>SectionChipRevision.
+1.3 Applications
+• SmartHome • AudioDevices
+• IndustrialAutomation • GenericLow-powerIoTSensorHubs
+• HealthCare • GenericLow-powerIoTDataLoggers
+• ConsumerElectronics • CamerasforVideoStreaming
+• SmartAgriculture • SpeechRecognition
+• POSMachines • ImageRecognition
+• ServiceRobot • SDIOWi-Fi+BluetoothNetworkingCard
+EspressifSystems 4 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 5
+
+Contents
+Contents
+1 Module Overview
+2
+1.1 Features 2
+1.2 SeriesComparison 3
+1.3 Applications 4
+2 Block Diagram
+9
+3 Pin Definitions
+10
+3.1 PinLayout 10
+3.2 PinDescription 11
+4 Boot Configurations
+13
+4.1 ChipBootModeControl 14
+4.2 InternalLDO(VDD_SDIO)VoltageControl 15
+4.3 U0TXDPrintingControl 16
+4.4 TimingControlofSDIOSlave 16
+4.5 JTAGSignalSourceControl 16
+4.6 ChipPower-upandReset 16
+5 Peripherals
+18
+5.1 PeripheralOverview 18
+5.2 DigitalPeripherals 18
+5.2.1 GeneralPurposeInput/OutputInterface(GPIO) 18
+5.2.2 SerialPeripheralInterface(SPI) 18
+5.2.3 UniversalAsynchronousReceiverTransmitter(UART) 19
+5.2.4 I2CInterface 19
+5.2.5 I2SInterface 20
+5.2.6 RemoteControlPeripheral 20
+5.2.7 PulseCounterController(PCNT) 21
+5.2.8 LEDPWMController 21
+5.2.9 MotorControlPWM 22
+5.2.10 SD/SDIO/MMCHostController 23
+5.2.11 SDIO/SPISlaveController 23
+5.2.12 TWAI® Controller 24
+5.2.13 EthernetMACInterface 24
+5.3 AnalogPeripherals 25
+5.3.1 Analog-to-DigitalConverter(ADC) 25
+5.3.2 Digital-to-AnalogConverter(DAC) 26
+5.3.3 TouchSensor 26
+6 Electrical Characteristics
+28
+6.1 AbsoluteMaximumRatings 28
+6.2 RecommendedOperatingConditions 28
+EspressifSystems 5 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 6
+
+Contents
+6.3 DCCharacteristics(3.3V,25°C) 28
+6.4 CurrentConsumptionCharacteristics 29
+6.5 MemorySpecifications 30
+7 RF Characteristics
+31
+7.1 Wi-FiRadio 31
+7.1.1 Wi-FiRFTransmitter(TX)Characteristics 31
+7.1.2 Wi-FiRFReceiver(RX)Characteristics 31
+7.2 BluetoothRadio 33
+7.2.1 Receiver–BasicDataRate 33
+7.2.2 Transmitter–BasicDataRate 33
+7.2.3 Receiver–EnhancedDataRate 34
+7.2.4 Transmitter–EnhancedDataRate 35
+7.3 BluetoothLERadio 35
+7.3.1 Receiver 35
+7.3.2 Transmitter 36
+8 Module Schematics
+37
+9 Peripheral Schematics
+39
+10 Physical Dimensions
+40
+10.1 ModuleDimensions 40
+10.2 DimensionsofExternalAntennaConnector 41
+11 PCB Layout Recommendations
+43
+11.1 PCBLandPattern 43
+11.2 ModulePlacementforPCBDesign 45
+12 Product Handling
+46
+12.1 StorageConditions 46
+12.2 ElectrostaticDischarge(ESD) 46
+12.3 ReflowProfile 46
+12.4 UltrasonicVibration 47
+Datasheet Versioning
+48
+Related Documentation and Resources
+49
+Revision History
+50
+EspressifSystems 6 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 7
+
+ListofTables
+List of Tables
+1 ESP32-WROOM-32ESeriesComparison1 3
+2 ESP32-WROOM-32UESeriesComparison 3
+3 PinDefinitions 11
+4 DefaultConfigurationofStrappingPins 13
+5 DescriptionofTimingParametersfortheStrappingPins 14
+6 ChipBootModeControl 14
+7 U0TXDPrintingControl 16
+8 TimingControlofSDIOSlave 16
+9 DescriptionofTimingParametersforPower-upandReset 17
+10 ADCCharacteristics 25
+11 ADCCalibrationResults 26
+12 Capacitive-SensingGPIOsAvailableonESP32 26
+13 AbsoluteMaximumRatings 28
+14 RecommendedOperatingConditions 28
+15 DCCharacteristics(3.3V,25°C) 28
+16 CurrentConsumptionDependingonRFModes 29
+17 FlashSpecifications 30
+18 PSRAMSpecifications 30
+19 Wi-FiRFCharacteristics 31
+20 TXPowerwithSpectralMaskandEVMMeeting802.11Standards 31
+21 RXSensitivity 31
+22 MaximumRXLevel 32
+23 RXAdjacentChannelRejection 33
+24 BluetoothLERFCharacteristics 33
+25 ReceiverCharacteristics–BasicDataRate 33
+26 TransmitterCharacteristics–BasicDataRate 34
+27 ReceiverCharacteristics–EnhancedDataRate 34
+28 TransmitterCharacteristics–EnhancedDataRate 35
+29 ReceiverCharacteristics–BluetoothLE 35
+30 TransmitterCharacteristics–BluetoothLE 36
+EspressifSystems 7 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 8
+
+ListofFigures
+List of Figures
+1 ESP32-WROOM-32EBlockDiagram 9
+2 ESP32-WROOM-32UEBlockDiagram 9
+3 PinLayout(TopView) 10
+4 VisualizationofTimingParametersfortheStrappingPins 14
+5 ChipBootFlow 15
+6 VisualizationofTimingParametersforPower-upandReset 16
+7 ESP32-WROOM-32ESchematics 37
+8 ESP32-WROOM-32UESchematics 38
+9 PeripheralSchematics 39
+10 ESP32-WROOM-32EPhysicalDimensions 40
+11 ESP32-WROOM-32UEPhysicalDimensions 40
+12 DimensionsofExternalAntennaConnector 41
+13 ESP32-WROOM-32ERecommendedPCBLandPattern 43
+14 ESP32-WROOM-32UERecommendedPCBLandPattern 44
+15 ReflowProfile 46
+EspressifSystems 8 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 9
+
+40 MHz
+3V3 Crystal Antenna
+RF Matching
+ESP32-D0WD-V3
+EN GPIOs
+2 BlockDiagram
+2 Block Diagram
+40 MHz
+3V3 Crystal Antenna
+RF Matching
+ESP32-D0WD-V3
+EN GPIOs
+QSPI Flash
+SCIPS KLCIPS IDIPS ODIPS DHIPS PWIPS
+OIDS_DDV
+QSPI Flash
+SCIPS KLCIPS IDIPS ODIPS DHIPS PWIPS
+OIDS_DDV
+ESP32-D0WDR2-V3
+PSRAM(opt.)
+(QSPI)
+ESP32-WROOM-32UE
+ESP32-D0WDR2-V3
+PSRAM(opt.)
+(QSPI)
+ESP32-WROOM-32E
+Figure1: ESP32-WROOM-32EBlockDiagram
+40 MHz
+3V3 Crystal Antenna
+RF Matching
+ESP32-D0WD-V3
+EN GPIOs
+40 MHz
+3V3 Crystal Antenna
+RF Matching
+ESP32-D0WD-V3
+EN GPIOs
+QSPI Flash
+SCIPS KLCIPS IDIPS ODIPS DHIPS PWIPS
+OIDS_DDV
+QSPI Flash
+SCIPS KLCIPS IDIPS ODIPS DHIPS PWIPS
+OIDS_DDV
+ESP32-D0WDR2-V3
+PSRAM(opt.)
+(QSPI)
+ESP32-WROOM-32UE
+Figure2: ESP32-WROOM-32UEBlockDiagram
+Note:
+For the pin mapping between the chip and the in-package flash/PSRAM, please refer to ESP32SeriesDatasheet >
+TablePinMappingBetweenChipandIn-packageFlash/PSRAM.
+ESP32-D0WDR2-V3
+PSRAM(opt.)
+(QSPI)
+EspressifSystems 9 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedbaEcSkP32-WROOM-32E
+
+
+## Page 10
+
+3 PinDefinitions
+3 Pin Definitions
+3.1 Pin Layout
+Thepindiagrambelowshowstheapproximatelocationofpinsonthemodule. Fortheactualdiagramdrawnto
+scale,pleaserefertoFigure10.1ModuleDimensions.
+1 GND
+2 3V3
+3 EN
+4 SENSOR_VP
+5 SENSOR_VN
+6 IO34
+7 IO35
+8 IO32
+9 IO33
+10 IO25
+11 IO26
+12 IO27
+13 IO14
+14 IO12
+DNG
+51
+31OI
+61
+CN
+71
+CN
+81
+CN
+91
+CN
+02
+CN
+12
+CN
+22
+51OI
+32
+2OI
+42
+Keepout Zone
+A
+GND 38
+IO23 37
+IO22 36
+TXD0 35
+RXD0 34
+GND GND GND IO21 33
+GND G 3 N 9 D GND NC 32
+IO19 31
+GND GND GND
+IO18 30
+IO5 29
+IO17 28
+IO16 27
+IO4 26
+IO0 25
+Figure3: PinLayout(TopView)
+NoteA:
+• Thezonemarkedwithdottedlinesistheantennakeepoutzone. ThepinlayoutofESP32-WROOM-32UEisthe
+sameasthatofESP32-WROOM-32E,exceptthatESP32-WROOM-32UEhasnokeepoutzone.
+• Tolearnmoreaboutthekeepoutzoneformodule’santennaonthebaseboard,pleasereferto
+ESP32HardwareDesignGuidelines>SectionPositioningaModuleonaBaseBoard.
+EspressifSystems 10 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 11
+
+3 PinDefinitions
+3.2 Pin Description
+Themodulehas38pins. SeepindefinitionsinTable3PinDescription.
+Forperipheralpinconfigurations,pleaserefertoSection5.2DigitalPeripherals.
+Table3: PinDefinitions
+Name No. Type1 Function
+GND 1 P Ground
+3V3 2 P Powersupply
+High: On;enablesthechip
+EN 3 I Low: Off;thechipshutsdown
+Note: Donotleavethepinfloating.
+SENSOR_VP 4 I GPIO36,ADC1_CH0,RTC_GPIO0
+SENSOR_VN 5 I GPIO39,ADC1_CH3,RTC_GPIO3
+IO34 6 I GPIO34,ADC1_CH6,RTC_GPIO4
+IO35 7 I GPIO35,ADC1_CH7,RTC_GPIO5
+GPIO32,XTAL_32K_P(32.768kHzcrystaloscillatorinput),ADC1_CH4,
+IO32 8 I/O
+TOUCH9,RTC_GPIO9
+GPIO33,XTAL_32K_N(32.768kHzcrystaloscillatoroutput),
+IO33 9 I/O
+ADC1_CH5,TOUCH8,RTC_GPIO8
+IO25 10 I/O GPIO25,DAC_1,ADC2_CH8,RTC_GPIO6,EMAC_RXD0
+IO26 11 I/O GPIO26,DAC_2,ADC2_CH9,RTC_GPIO7,EMAC_RXD1
+IO27 12 I/O GPIO27,ADC2_CH7,TOUCH7,RTC_GPIO17,EMAC_RX_DV
+GPIO14,ADC2_CH6,TOUCH6,RTC_GPIO16,MTMS,HSPICLK,
+IO14 13 I/O
+HS2_CLK,SD_CLK,EMAC_TXD2
+GPIO12,ADC2_CH5,TOUCH5,RTC_GPIO15,MTDI,HSPIQ,HS2_DATA2,
+IO12 14 I/O
+SD_DATA2,EMAC_TXD3
+GND 15 P Ground
+GPIO13,ADC2_CH4,TOUCH4,RTC_GPIO14,MTCK,HSPID,HS2_DATA3,
+IO13 16 I/O
+SD_DATA3,EMAC_RX_ER
+NC 17 - Seenote2
+NC 18 - Seenote2
+NC 19 - Seenote2
+NC 20 - Seenote2
+NC 21 - Seenote2
+NC 22 - Seenote2
+GPIO15,ADC2_CH3,TOUCH3,MTDO,HSPICS0,RTC_GPIO13,
+IO15 23 I/O
+HS2_CMD,SD_CMD,EMAC_RXD3
+GPIO2,ADC2_CH2,TOUCH2,RTC_GPIO12,HSPIWP,HS2_DATA0,
+IO2 24 I/O
+SD_DATA0
+IO0 25 I/O GPIO0,ADC2_CH1,TOUCH1,RTC_GPIO11,CLK_OUT1,EMAC_TX_CLK
+GPIO4,ADC2_CH0,TOUCH0,RTC_GPIO10,HSPIHD,HS2_DATA1,
+IO4 26 I/O
+SD_DATA1,EMAC_TX_ER
+IO163 27 I/O GPIO16,HS1_DATA4,U2RXD,EMAC_CLK_OUT
+Cont’donnextpage
+EspressifSystems 11 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 12
+
+3 PinDefinitions
+Table3–cont’dfrompreviouspage
+Name No. Type1 Function
+IO17 28 I/O GPIO17,HS1_DATA5,U2TXD,EMAC_CLK_OUT_180
+IO5 29 I/O GPIO5,VSPICS0,HS1_DATA6,EMAC_RX_CLK
+IO18 30 I/O GPIO18,VSPICLK,HS1_DATA7
+IO19 31 I/O GPIO19,VSPIQ,U0CTS,EMAC_TXD0
+NC 32 - -
+IO21 33 I/O GPIO21,VSPIHD,EMAC_TX_EN
+RXD0 34 I/O GPIO3,U0RXD,CLK_OUT2
+TXD0 35 I/O GPIO1,U0TXD,CLK_OUT3,EMAC_RXD2
+IO22 36 I/O GPIO22,VSPIWP,U0RTS,EMAC_TXD1
+IO23 37 I/O GPIO23,VSPID,HS1_STROBE
+GND 38 P Ground
+1P:powersupply;I:input;O:output.
+2PinsGPIO6toGPIO11ontheESP32-D0WD-V3/ESP32-D0WDR2-V3chipareconnectedtotheSPIflash
+integratedonthemoduleandarenotledout.
+3In module variants that have embedded QSPI PSRAM, i.e., that embed ESP32-D0WDR2-V3, IO16 is
+connectedtotheembeddedPSRAMandcannotbeusedforotherfunctions.
+EspressifSystems 12 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 13
+
+4 BootConfigurations
+4 Boot Configurations
+Note:
+ThecontentbelowisexcerptedfromESP32SeriesDatasheet>SectionBootConfigurations. Forthestrappingpin
+mappingbetweenthechipandmodules,pleaserefertoChapter8ModuleSchematics.
+ThechipallowsforconfiguringthefollowingbootparametersthroughstrappingpinsandeFusebitsat
+power-uporahardwarereset,withoutmicrocontrollerinteraction.
+• Chipbootmode
+– Strappingpin: GPIO0andGPIO2
+• InternalLDO(VDD_SDIO)Voltage
+– Strappingpin: MTDI
+– eFusebit: EFUSE_SDIO_FORCEandEFUSE_SDIO_TIEH
+• U0TXDprinting
+– Strappingpin: MTDO
+• TimingofSDIOSlave
+– Strappingpin: MTDOandGPIO5
+• JTAGsignalsource
+– eFusebit: EFUSE_DISABLE_JTAG
+ThedefaultvaluesofalltheaboveeFusebitsare0,whichmeansthattheyarenotburnt. GiventhateFuseis
+one-timeprogrammable,onceaneFusebitisprogrammedto1,itcanneverberevertedto0. Forhowto
+programeFusebits,pleaserefertoESP32TechnicalReferenceManual>ChaptereFuseController.
+Thedefaultvaluesofthestrappingpins,namelythelogiclevels,aredeterminedbypins’internalweak
+pull-up/pull-downresistorsatresetifthepinsarenotconnectedtoanycircuit,orconnectedtoanexternal
+high-impedancecircuit.
+Table4: DefaultConfigurationofStrappingPins
+StrappingPin DefaultConfiguration BitValue
+GPIO0 Pull-up 1
+GPIO2 Pull-down 0
+MTDI Pull-down 0
+MTDO Pull-up 1
+GPIO5 Pull-up 1
+Tochangethebitvalues,thestrappingpinsshouldbeconnectedtoexternalpull-down/pull-upresistances. If
+theESP32isusedasadevicebyahostMCU,thestrappingpinvoltagelevelscanalsobecontrolledbythe
+hostMCU.
+Allstrappingpinshavelatches. Atsystemreset,thelatchessamplethebitvaluesoftheirrespectivestrapping
+pinsandstorethemuntilthechipispowereddownorshutdown. Thestatesoflatchescannotbechangedin
+EspressifSystems 13 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 14
+
+4 BootConfigurations
+anyotherway. Itmakesthestrappingpinvaluesavailableduringtheentirechipoperation,andthepinsare
+freeduptobeusedasregularIOpinsafterreset.
+Thetimingofsignalsconnectedtothestrappingpinsshouldadheretothesetuptimeandholdtime
+specificationsinTable5andFigure4.
+Table5: DescriptionofTimingParametersfortheStrappingPins
+Parameter Description Min(ms)
+Setuptimeisthetimereservedforthepowerrailstostabilizebe-
+t 0
+SU
+foretheCHIP_PUpinispulledhightoactivatethechip.
+Hold time is the time reserved for the chip to read the strapping
+t pin values after CHIP_PU is already high and before these pins 1
+H
+startoperatingasregularIOpins.
+tSU tH
+V
+IH_nRST
+CHIP_PU
+V
+IH
+Strapping pin
+Figure4: VisualizationofTimingParametersfortheStrappingPins
+4.1 Chip Boot Mode Control
+GPIO0andGPIO2controlthebootmodeaftertheresetisreleased. SeeTable6ChipBootMode
+Control.
+Table6: ChipBootModeControl
+BootMode GPIO0 GPIO2
+SPIBootMode 1 Anyvalue
+JointDownloadBootMode2 0 0
+1Boldmarksthedefaultvalueandconfiguration.
+2JointDownloadBootmodesupportsthefollowing
+downloadmethods:
+•SDIODownloadBoot
+•UARTDownloadBoot
+InJointDownloadBootmode,thedetailedbootflowofthechipisputbelow5.
+EspressifSystems 14 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 15
+
+4 BootConfigurations
+Figure5: ChipBootFlow
+uart_download_discontrolsbootmodebehaviors:
+ItpermanentlydisablesDownloadBootmodewhenuart_download_disissetto1(validonlyforESP32chip
+revisionsv3.0andhigher).
+4.2 Internal LDO (VDD_SDIO) Voltage Control
+MTDIisusedtoselecttheVDD_SDIOpowersupplyvoltageatreset:
+• MTDI=0(bydefault),VDD_SDIOpinispowereddirectlyfromVDD3P3_RTC.Typicallythisvoltageis3.3
+V.Formoreinformation,seeESP32SeriesDatasheet>SectionPowerScheme.
+• MTDI=1,VDD_SDIOpinispoweredfrominternal1.8VLDO.
+ThisfunctionalitycanbeoverriddenbysettingEFUSE_SDIO_FORCEto1,inwhichcasetheEFUSE_SDIO_TIEH
+determinestheVDD_SDIOvoltage:
+• EFUSE_SDIO_TIEH=0,VDD_SDIOconnectsto1.8VLDO.
+• EFUSE_SPI_TIEH=1,VDD_SDIOconnectstoVDD3P3_RTC.
+EspressifSystems 15 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 16
+
+4 BootConfigurations
+4.3 U0TXD Printing Control
+Duringbooting,thestrappingpinMTDOcanbeusedtocontroltheU0TXDPrinting,asTable7shows.
+Table7: U0TXDPrintingControl
+U0TXDPrintingControl MTDO
+Enabled1 1
+Disabled 0
+1Boldmarksthedefaultvalueand
+configuration.
+4.4 Timing Control of SDIO Slave
+ThestrappingpinMTDOandGPIO5canbeusedtocontrolthetimingofSDIOslave,seeTable8Timing
+ControlofSDIOSlave.
+Table8: TimingControlofSDIOSlave
+Edgebehavior MTDO GPIO5
+Fallingedgesampling,fallingedgeoutput 0 0
+Fallingedgesampling,risingedgeoutput 0 1
+Risingedgesampling,fallingedgeoutput 1 0
+Risingedgesampling,risingedgeoutput 1 1
+1Boldmarksthedefaultvalueandconfiguration.
+4.5 JTAG Signal Source Control
+IfEFUSE_DISABLE_JTAGissetto1,thesourceofJTAGsignalscanbedisabled.
+4.6 Chip Power-up and Reset
+Oncethepowerissuppliedtothechip,itspowerrailsneedashorttimetostabilize. Afterthat,CHIP_PU–the
+pinusedforpower-upandreset–ispulledhightoactivatethechip. ForinformationonCHIP_PUaswellas
+power-upandresettiming,seeFigure6andTable9.
+tSTBL tRST
+VDD3P3_RTCMin
+VDD
+V
+IL_nRST
+CHIP_PU
+Figure6: VisualizationofTimingParametersforPower-upandReset
+EspressifSystems 16 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 17
+
+4 BootConfigurations
+Table9: DescriptionofTimingParametersforPower-upandReset
+Parameter Description Min(µs)
+Time reserved for the 3.3 V rails to stabilize before the CHIP_PU
+t 50
+STBL
+pinispulledhightoactivatethechip
+Time reserved for CHIP_PU to stay below V to reset the
+IL_nRST
+t 50
+RST
+chip(seeTable15)
+Fordetails,pleaserefertoESP32SeriesDatasheet>SectionChipPower-upandReset.
+EspressifSystems 17 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 18
+
+5 Peripherals
+5 Peripherals
+5.1 Peripheral Overview
+ESP32-D0WD-V3chipandESP32-D0WDR2-V3chipintegratearichsetofperipheralsincludingSPI,I2S,
+UART,I2C,pulsecountcontroller,TWAI®,ADC,DAC,touchsensor,etc.
+Tolearnmoreabouton-chipcomponents,pleaserefertoESP32SeriesDatasheet>SectionFunctional
+Description.
+Note:
+• ThecontentbelowissourcedfromESP32SeriesDatasheet>SectionFunctionalDescription. Someinformation
+maynotbeapplicabletoESP32-WROOM-32EandESP32-WROOM-32UEasnotalltheIOsignalsareexposed
+onthemodule.
+• Tolearnmoreaboutperipheralsignals,pleaserefertoESP32TechnicalReferenceManual>SectionPeripheral
+SignalList.
+5.2 Digital Peripherals
+5.2.1 General Purpose Input / Output Interface (GPIO)
+ESP32has34GPIOpinswhichcanbeassignedvariousfunctionsbyprogrammingtheappropriateregisters.
+ThereareseveralkindsofGPIOs: digital-only,analog-enabled,capacitive-touch-enabled,etc. Analog-enabled
+GPIOsandCapacitive-touch-enabledGPIOscanbeconfiguredasdigitalGPIOs.
+MostofthedigitalGPIOscanbeconfiguredasinternalpull-uporpull-down,orsettohighimpedance. When
+configuredasaninput,theinputvaluecanbereadthroughtheregister. Theinputcanalsobesetto
+edge-triggerorlevel-triggertogenerateCPUinterrupts. MostofthedigitalIOpinsarebi-directional,
+non-invertingandtristate,includinginputandoutputbufferswithtristatecontrol. Thesepinscanbe
+multiplexedwithotherfunctions,suchastheSDIO,UART,SPI,etc. (Moredetailscanbefoundin
+ESP32SeriesDatasheet>Appendix,TableIO_MUX.)Forlow-poweroperations,theGPIOscanbesettohold
+theirstates.
+5.2.2 Serial Peripheral Interface (SPI)
+ESP32integratesfourSPIcontrollerswhichcanbeusedtocommunicatewithexternaldevicesthatusethe
+SPIprotocol. ControllerSPI0isusedasabufferforaccessingexternalmemory. ControllerSPI1canbeused
+asamaster. ControllersSPI2andSPI3canbeconfiguredaseitheramasteroraslave.
+SPI1,SPI2,andSPI3usesignalbusesprefixedwithSPI,HSPI,andVSPI,respectively.
+FeaturesofGeneralPurposeSPI(GP-SPI)
+• Programmabledatatransferlength,inmultiplesof1byte
+• Four-linefull-duplex/half-duplexcommunicationandthree-linehalf-duplexcommunicationsupport
+• Mastermodeandslavemode
+EspressifSystems 18 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 19
+
+5 Peripherals
+• ProgrammableCPOLandCPHA
+• Programmableclock
+PinAssignment
+ForSPI,thepinsaremultiplexedwithGPIO6~GPIO11viatheIOMUX.ForHSPI,thepinsaremultiplexedwith
+GPIO2,GPIO4,GPIO12~GPIO15viatheIOMUX.ForVSPI,thepinsaremultiplexedwithGPIO5,GPIO18~
+GPIO19,GPIO21~GPIO23viatheIOMUX.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.3 Universal Asynchronous Receiver Transmitter (UART)
+TheUARTintheESP32chipfacilitatesthetransmissionandreceptionofasynchronousserialdatabetween
+thechipandexternalUARTdevices. ItconsistsoftwoUARTsinthemainsystem,andonelow-powerLP
+UART.
+FeatureList
+• Programmablebaudratesupto5MBaud
+• RAMsharedbyTXFIFOsandRXFIFOs
+• Supportsinputbaudrateself-check
+• Supportforvariouslengthsofdatabitsandstopbits
+• Paritybitsupport
+• Asynchronouscommunication(RS232andRS485)andIrDAsupport
+• SupportsDMAtocommunicatedatainhighspeed
+• SupportsUARTwake-up
+• Supportsbothsoftwareandhardwareflowcontrol
+PinAssignment
+ThepinsforUARTcanbechosenfromanyGPIOsviatheGPIOMatrix.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.4 I2C Interface
+ESP32hastwoI2CbusinterfaceswhichcanserveasI2Cmasterorslave,dependingontheuser’s
+configuration.
+FeatureList
+• TwoI2Ccontrollers: oneinthemainsystemandoneinthelow-powersystem
+• Standardmode(100Kbit/s)
+EspressifSystems 19 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 20
+
+5 Peripherals
+• Fastmode(400Kbit/s)
+• Upto5MHz,yetconstrainedbySDApull-upstrength
+• Supportfor7-bitand10-bitaddressing,aswellasdualaddressmode
+• SupportscontinuousdatatransmissionwithdisabledSerialClockLine(SCL)
+• Supportsprogrammabledigitalnoisefilter
+UserscanprogramcommandregisterstocontrolI2Cinterfaces,sothattheyhavemoreflexibility.
+PinAssignment
+ForregularI2C,thepinsusedcanbechosenfromanyGPIOsviatheGPIOMatrix.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.5 I2S Interface
+TheI2SControllerintheESP32chipprovidesaflexiblecommunicationinterfaceforstreamingdigitaldatain
+multimediaapplications,particularlydigitalaudioapplications.
+FeatureList
+• Mastermodeandslavemode
+• Full-duplexandhalf-duplexcommunications
+• Avarietyofaudiostandardssupported
+• Configurablehigh-precisionoutputclock
+• SupportsPDMsignalinputandoutput
+• Configurabledatatransmitandreceivemodes
+PinAssignment
+ThepinsfortheI2SControllercanbechosenfromanyGPIOsviatheGPIOMatrix.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.6 Remote Control Peripheral
+TheRemoteControlPeripheral(RMT)controlsthetransmissionandreceptionofinfraredremotecontrol
+signals.
+FeatureList
+• Eightchannelsforsendingandreceivinginfraredremotecontrolsignals
+• Independenttransmissionandreceptioncapabilitiesforeachchannel
+• Clockdividercounter,statemachine,andreceiverforeachRXchannel
+EspressifSystems 20 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 21
+
+5 Peripherals
+• Supportsvariousinfraredprotocols
+PinAssignment
+ThepinsfortheRemoteControlPeripheralcanbechosenfromanyGPIOsviatheGPIOMatrix.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.7 Pulse Counter Controller (PCNT)
+Thepulsecountercontroller(PCNT)isdesignedtocountinputpulsesbytrackingrisingandfallingedgesof
+theinputpulsesignal.
+FeatureList
+• Eightindependentpulsecounterunits
+• Eachpulsecounterunithasa16-bitsignedcounterregisterandtwochannels
+• Countermodes: increment,decrement,ordisable
+• Glitchfilteringforinputpulsesignalsandcontrolsignals
+• Selectionbetweencountingonrisingorfallingedgesoftheinputpulsesignal
+PinAssignment
+ThepinsforthePulseCountControllercanbechosenfromanyGPIOsviatheGPIOMatrix.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.8 LED PWM Controller
+TheLEDPWMController(LEDC)isdesignedtogeneratePWMsignalsforLEDcontrol.
+FeatureList
+• SixteenindependentPWMgenerators
+• MaximumPWMdutycycleresolutionof20bits
+• Eightindependenttimerswith20-bitcounters,configurablefractionalclockdividersandcounter
+overflowvalues
+• AdjustablephaseofPWMsignaloutput
+• PWMdutycycledithering
+• Automaticdutycyclefading
+PinAssignment
+ThepinsfortheLEDPWMControllercanbechosenfromanyGPIOsviatheGPIOMatrix.
+EspressifSystems 21 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 22
+
+5 Peripherals
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.9 Motor Control PWM
+ThePulseWidthModulation(PWM)controllercanbeusedfordrivingdigitalmotorsandsmartlights. The
+controllerconsistsofPWMtimers,thePWMoperatorandadedicatedcapturesub-module. Eachtimer
+providestiminginsynchronousorindependentform,andeachPWMoperatorgeneratesawaveformforone
+PWMchannel. Thededicatedcapturesub-modulecanaccuratelycaptureeventswithexternaltiming.
+FeatureList
+• ThreePWMtimersforprecisetimingandfrequencycontrol
+– EveryPWMtimerhasadedicated8-bitclockprescaler
+– The16-bitcounterinthePWMtimercanworkincount-upmode,count-downmode,or
+count-up-downmode
+– AhardwaresynccantriggerareloadonthePWMtimerwithaphaseregister. Itwillalsotriggerthe
+prescaler’restart,sothatthetimer’sclockcanalsobesynced,withselectablehardware
+synchronizationsource
+• ThreePWMoperatorsforgeneratingwaveformpairs
+– SixPWMoutputstooperateinseveraltopologies
+– Configurabledeadtimeonrisingandfallingedges;eachsetupindependently
+– ModulatingofPWMoutputbyhigh-frequencycarriersignals,usefulwhengatedriversareinsulated
+withatransformer
+• FaultDetectionmodule
+– Programmablefaulthandlinginbothcycle-by-cyclemodeandone-shotmode
+– AfaultconditioncanforcethePWMoutputtoeitherhighorlowlogiclevels
+• Capturemoduleforhardware-basedsignalprocessing
+– Speedmeasurementofrotatingmachinery
+– Measurementofelapsedtimebetweenpositionsensorpulses
+– Periodanddutycyclemeasurementofpulsetrainsignals
+– Decodingcurrentorvoltageamplitudederivedfromduty-cycle-encodedsignalsofcurrent/voltage
+sensors
+– Threeindividualcapturechannels,eachofwhichwitha32-bittime-stampregister
+– Selectionofedgepolarityandprescalingofinputcapturesignals
+– ThecapturetimercansyncwithaPWMtimerorexternalsignals
+PinAssignment
+ThepinsfortheMotorControlPWMcanbechosenfromanyGPIOsviatheGPIOMatrix.
+EspressifSystems 22 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 23
+
+5 Peripherals
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.10 SD/SDIO/MMC Host Controller
+AnSD/SDIO/MMChostcontrollerisavailableonESP32.
+FeatureList
+• Supportstwoexternalcards
+• SupportsSDMemoryCardstandard: version3.0andversion3.01)
+• SupportsSDIOVersion3.0
+• SupportsConsumerElectronicsAdvancedTransportArchitecture(CE-ATAVersion1.1)
+• SupportsMultimediaCards(MMCversion4.41,eMMCversion4.5andversion4.51)
+Thecontrollerallowsupto80MHzclockoutputinthreedifferentdata-busmodes: 1-bit,4-bit,and8-bit
+modes. ItsupportstwoSD/SDIO/MMC4.41cardsina4-bitdata-busmode. ItalsosupportsoneSDcard
+operatingat1.8V.
+PinAssignment
+ThepinsforSD/SDIO/MMCHostControlleraremultiplexedwithGPIO2,GPIO4,GPIO6~GPIO15viaIO
+MUX.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.11 SDIO/SPI Slave Controller
+ESP32integratesanSDdeviceinterfacethatconformstotheindustry-standardSDIOCardSpecification
+Version2.0,andallowsahostcontrollertoaccesstheSoC,usingtheSDIObusinterfaceandprotocol. ESP32
+actsastheslaveontheSDIObus. ThehostcanaccesstheSDIO-interfaceregistersdirectlyandcanaccess
+sharedmemoryviaaDMAengine,thusmaximizingperformancewithoutengagingtheprocessorcores.
+FeatureList
+TheSDIO/SPIslavecontrollersupportsthefollowingfeatures:
+• SPI,1-bitSDIO,and4-bitSDIOtransfermodesoverthefullclockrangefrom0to50MHz
+• Configurablesamplinganddrivingclockedge
+• Specialregistersfordirectaccessbyhost
+• Interruptstohostforinitiatingdatatransfer
+• AutomaticloadingofSDIObusdataandautomaticdiscardingofpaddingdata
+• Blocksizeofupto512bytes
+• Interruptvectorsbetweenthehostandtheslave,allowingbothtointerrupteachother
+• SupportsDMAfordatatransfer
+EspressifSystems 23 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 24
+
+5 Peripherals
+PinAssignment
+ThepinsforSDIO/SPISlaveControlleraremultiplexedwithGPIO2,GPIO4,GPIO6~GPIO15viaIOMUX.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.12 TWAI® Controller
+TheTwo-wireAutomotiveInterface(TWAI®)isamulti-master,multi-castcommunicationprotocoldesignedfor
+automotiveapplications. TheTWAIcontrollerfacilitatesthecommunicationbasedonthisprotocol.
+FeatureList
+• CompatiblewithISO11898-1protocol(CANSpecification2.0)
+• Standardframeformat(11-bitID)andextendedframeformat(29-bitID)
+• Bitrates:
+– From25Kbit/sto1Mbit/sinchiprevisionv0.0/v1.0/v1.1
+– From12.5Kbit/sto1Mbit/sinchiprevisionv3.0/v3.1
+• Multiplemodesofoperation: Normal,ListenOnly,andSelf-Test
+• 64-bytereceiveFIFO
+• Specialtransmissions: single-shottransmissionsandselfreception
+• Acceptancefilter(singleanddualfiltermodes)
+• Errordetectionandhandling: errorcounters,configurableerrorinterruptthreshold,errorcodecapture,
+arbitrationlostcapture
+PinAssignment
+ThepinsfortheTwo-wireAutomotiveInterfacecanbechosenfromanyGPIOsviatheGPIOMatrix.
+Formoreinformationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPin
+ConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.2.13 Ethernet MAC Interface
+AnIEEE-802.3-2008-compliantMediaAccessController(MAC)isprovidedforEthernetLANcommunications.
+ESP32requiresanexternalphysicalinterfacedevice(PHY)toconnecttothephysicalLANbus(twisted-pair,
+fiber,etc.). ThePHYisconnectedtoESP32through17signalsofMIIorninesignalsofRMII.
+FeatureList
+• 10Mbpsand100Mbpsrates
+• DedicatedDMAcontrollerallowinghigh-speedtransferbetweenthededicatedSRAMandEthernetMAC
+• TaggedMACframe(VLANsupport)
+• Half-duplex(CSMA/CD)andfull-duplexoperation
+EspressifSystems 24 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 25
+
+5 Peripherals
+• MACcontrolsublayer(controlframes)
+• 32-bitCRCgenerationandremoval
+• Severaladdress-filteringmodesforphysicalandmulticastaddress(multicastandgroupaddresses)
+• 32-bitstatuscodeforeachtransmittedorreceivedframe
+• InternalFIFOstobuffertransmitandreceiveframes. ThetransmitFIFOandthereceiveFIFOareboth512
+words(32-bit)
+• HardwarePTP(PrecisionTimeProtocol)inaccordancewithIEEE15882008(PTPV2)
+• 25MHz/50MHzclockoutput
+PinAssignment
+ForinformationaboutthepinassignmentofEthernetMACInterface,seeESP32SeriesDatasheet>Section
+PeripheralPinConfigurationsandESP32TechnicalReferenceManual>ChapterIO_MUXandGPIO
+Matrix.
+5.3 Analog Peripherals
+5.3.1 Analog-to-Digital Converter (ADC)
+ESP32integratestwo12-bitSARADCsandsupportsmeasurementson18channels(analog-enabledpins).
+TheULPcoprocessorinESP32isalsodesignedtomeasurevoltage,whileoperatinginthesleepmode,which
+enableslow-powerconsumption. TheCPUcanbewokenupbyathresholdsettingand/orviaother
+triggers.
+Table10describestheADCcharacteristics.
+Table10: ADCCharacteristics
+Parameter Description Min Max Unit
+RTCcontroller;ADCconnectedtoan
+DNL(Differentialnonlinearity) –7 7 LSB
+external100nFcapacitor;DCsignalinput;
+ambienttemperatureat25°C;
+INL(Integralnonlinearity) –12 12 LSB
+Wi-Fi&Bluetoothoff
+RTCcontroller — 200 ksps
+Samplingrate
+DIGcontroller — 2 Msps
+Notes:
+• Whenatten=3andthemeasurementresultisabove3000(voltageatapprox. 2450mV),theADC
+accuracywillbeworsethandescribedinthetableabove.
+• TogetbetterDNLresults,userscantakemultiplesamplingtestswithafilter,orcalculatetheaverage
+value.
+• TheinputvoltagerangeofGPIOpinswithinVDD3P3_RTCdomainshouldstrictlyfollowtheDC
+characteristicsprovidedinTable15. Otherwise,measurementerrorsmaybeintroduced,andchip
+performancemaybeaffected.
+EspressifSystems 25 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 26
+
+5 Peripherals
+Bydefault,thereare±6%differencesinmeasuredresultsbetweenchips. ESP-IDFprovidescoupleof
+calibrationmethodsforADC1. ResultsaftercalibrationusingeFuseVrefvalueareshowninTable11. Forhigher
+accuracy,usersmayapplyothercalibrationmethodsprovidedinESP-IDF,orimplementtheirown.
+Table11: ADCCalibrationResults
+Parameter Description Min Max Unit
+Atten=0,effectivemeasurementrangeof100∼950mV –23 23 mV
+Atten=1,effectivemeasurementrangeof100∼1250mV –30 30 mV
+Totalerror
+Atten=2,effectivemeasurementrangeof150∼1750mV –40 40 mV
+Atten=3,effectivemeasurementrangeof150∼2450mV –60 60 mV
+PinAssignment
+Withappropriatesettings,theADCscanbeconfiguredtomeasurevoltageon18pinsmaximum. Fordetailed
+informationaboutthepinassignment,seeESP32SeriesDatasheet>SectionPeripheralPinConfigurations
+andESP32TechnicalReferenceManual>ChapterIO_MUXandGPIOMatrix.
+5.3.2 Digital-to-Analog Converter (DAC)
+Two8-bitDACchannelscanbeusedtoconverttwodigitalsignalsintotwoanalogvoltagesignaloutputs. The
+designstructureiscomposedofintegratedresistorstringsandabuffer. ThisdualDACsupportspowersupply
+asinputvoltagereference. ThetwoDACchannelscanalsosupportindependentconversions.
+PinAssignment
+TheDACcanbeconfiguredbyGPIO25andGPIO26. Fordetailedinformationaboutthepinassignment,see
+ESP32SeriesDatasheet>SectionPeripheralPinConfigurationsandESP32TechnicalReferenceManual>
+ChapterIO_MUXandGPIOMatrix.
+5.3.3 Touch Sensor
+ESP32has10capacitive-sensingGPIOs,whichdetectvariationsinducedbytouchingorapproachingthe
+GPIOswithafingerorotherobjects. Thelow-noisenatureofthedesignandthehighsensitivityofthecircuit
+allowrelativelysmallpadstobeused. Arraysofpadscanalsobeused,sothatalargerareaormorepoints
+canbedetected.
+PinAssignment
+The10capacitive-sensingGPIOsarelistedinTable12.
+Table12: Capacitive-SensingGPIOsAvailableonESP32
+Capacitive-SensingSignalName PinName
+T0 GPIO4
+T1 GPIO0
+T2 GPIO2
+T3 MTDO
+T4 MTCK
+EspressifSystems 26 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 27
+
+5 Peripherals
+Capacitive-SensingSignalName PinName
+T5 MTDI
+T6 MTMS
+T7 GPIO27
+T8 32K_XN
+T9 32K_XP
+Note:
+ESP32TouchSensorhasnotpassedtheConductedSusceptibility(CS)testfornow,andthushaslimitedapplication
+scenarios.
+EspressifSystems 27 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 28
+
+6 ElectricalCharacteristics
+6 Electrical Characteristics
+6.1 Absolute Maximum Ratings
+StressesabovethoselistedinAbsoluteMaximumRatingsmaycausepermanentdamagetothedevice.
+Thesearestressratingsonlyandfunctionaloperationofthedeviceattheseoranyotherconditionsbeyond
+thoseindicatedunderRecommendedOperatingConditionsisnotimplied. Exposureto
+absolute-maximum-ratedconditionsforextendedperiodsmayaffectdevicereliability.
+Table13: AbsoluteMaximumRatings
+Symbol Parameter Min Max Unit
+VDD33 Powersupplyvoltage –0.3 3.6 V
+T Storagetemperature –40 105 °C
+STORE
+* Please see Appendix IO MUX of
+ESP32SeriesDatasheetforIO’spowerdomain.
+6.2 Recommended Operating Conditions
+Table14: RecommendedOperatingConditions
+Symbol Parameter Min Typ Max Unit
+VDD33 Powersupplyvoltage 3.0 3.3 3.6 V
+I Currentdeliveredbyexternalpowersupply 0.5 — — A
+VDD
+85°Cversion 85
+T Operatingambienttemperature –40 — °C
+105°Cversion 105
+6.3 DC Characteristics (3.3 V, 25 °C)
+Table15: DCCharacteristics(3.3V,25°C)
+Symbol Parameter Min Typ Max Unit
+C Pincapacitance — 2 — pF
+IN
+V High-levelinputvoltage 0.75×VDD1 — VDD1 +0.3 V
+IH
+V Low-levelinputvoltage –0.3 — 0.25×VDD1 V
+IL
+I High-levelinputcurrent — — 50 nA
+IH
+I Low-levelinputcurrent — — 50 nA
+IL
+V High-leveloutputvoltage 0.8×VDD1 — — V
+OH
+V Low-leveloutputvoltage — — 0.1×VDD1 V
+OL
+Cont’donnextpage
+EspressifSystems 28 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 29
+
+6 ElectricalCharacteristics
+Table15–cont’dfrompreviouspage
+Symbol Parameter Min Typ Max Unit
+VDD3P3_CPU
+High-levelsourcecurrent — 40 — mA
+power domain
+(VDD1 =3.3V,
+1,2
+I V >=2.64V,
+OH OH
+VDD3P3_RTC
+outputdrivestrengthset — 40 — mA
+power domain
+tothemaximum)
+1,2
+VDD_SDIO power
+— 20 — mA
+domain1,3
+Low-levelsinkcurrent
+I OL (VDD1 =3.3V,V OL =0.495V, — 28 — mA
+outputdrivestrengthsettothemaximum)
+R Resistanceofinternalpull-upresistor — 45 — kΩ
+PU
+R Resistanceofinternalpull-downresistor — 45 — kΩ
+PD
+Chipresetreleasevoltage(CHIP_PUvoltage
+V 0.75×VDD1 — VDD1 +0.3 V
+IH_nRST
+iswithinthespecifiedrange)
+Low-levelinputvoltageofCHIP_PU
+V — — 0.6 V
+IL_nRST
+toshutdownthechip
+1PleaseseeAppendixIOMUXofESP32SeriesDatasheetforIO’spowerdomain. VDDistheI/Ovoltage
+foraparticularpowerdomainofpins.
+2For VDD3P3_CPU and VDD3P3_RTC power domain, per-pin current sourced in the same domain is
+graduallyreducedfromaround40mAtoaround29mA,V >=2.64V,asthenumberofcurrent-source
+OH
+pinsincreases.
+3Pinsoccupiedbyflashand/orPSRAMintheVDD_SDIOpowerdomainwereexcludedfromthetest.
+6.4 Current Consumption Characteristics
+Owingtotheuseofadvancedpower-managementtechnologies,themodulecanswitchbetweendifferent
+powermodes. Fordetailsondifferentpowermodes,pleaserefertoSectionRTCandLow-Power
+Management
+inESP32SeriesDatasheet.
+Thecurrentconsumptionmeasurementsaretakenwitha3.3Vsupplyat25°Cambienttemperature.
+TXcurrentconsumptionisratedata100%dutycycle.
+RXcurrentconsumptionisratedwhentheperipheralsaredisabledandtheCPUidle.
+Table16: CurrentConsumptionDependingonRFModes
+Workmode Description Average(mA) Peak(mA)
+802.11b,20MHz,1Mbps,@19.5dBm 239 379
+802.11g,20MHz,54Mbps,@15dBm 190 276
+TX
+802.11n,20MHz,MCS7,@13dBm 183 258
+Active(RFworking)
+802.11n,40MHz,MCS7,@13dBm 165 211
+802.11b/g/n,20MHz 112 112
+RX
+802.11n,40MHz 118 118
+EspressifSystems 29 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 30
+
+6 ElectricalCharacteristics
+6.5 Memory Specifications
+Thedatabelowissourcedfromthememoryvendordatasheet. Thesevaluesareguaranteedthroughdesign
+and/orcharacterizationbutarenotfullytestedinproduction. Devicesareshippedwiththememory
+erased.
+Table17: FlashSpecifications
+Parameter Description Min Typ Max Unit
+Powersupplyvoltage(1.8V) 1.65 1.80 2.00 V
+VCC
+Powersupplyvoltage(3.3V) 2.7 3.3 3.6 V
+F Maximumclockfrequency 80 — — MHz
+C
+— Program/erasecycles 100,000 — — cycles
+T Dataretentiontime 20 — — years
+RET
+T Pageprogramtime — 0.8 5 ms
+PP
+T Sectorerasetime(4KB) — 70 500 ms
+SE
+T Blockerasetime(32KB) — 0.2 2 s
+BE1
+T Blockerasetime(64KB) — 0.3 3 s
+BE2
+Chiperasetime(16Mb) — 7 20 s
+Chiperasetime(32Mb) — 20 60 s
+T Chiperasetime(64Mb) — 25 100 s
+CE
+Chiperasetime(128Mb) — 60 200 s
+Chiperasetime(256Mb) — 70 300 s
+Table18: PSRAMSpecifications
+Parameter Description Min Typ Max Unit
+Powersupplyvoltage(1.8V) 1.62 1.80 1.98 V
+VCC
+Powersupplyvoltage(3.3V) 2.7 3.3 3.6 V
+F Maximumclockfrequency 80 — — MHz
+C
+EspressifSystems 30 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 31
+
+7 RFCharacteristics
+7 RF Characteristics
+ThissectioncontainstableswithRFcharacteristicsoftheEspressifproduct.
+TheRFdataismeasuredattheantennaport,whereRFcableisconnected,includingthefront-endloss. The
+externalantennasusedforthetestsonthemoduleswithexternalantennaconnectorshaveanimpedanceof
+50Ω.Devicesshouldoperateinthecenterfrequencyrangeallocatedbyregionalregulatoryauthorities. The
+targetcenterfrequencyrangeandthetargettransmitpowerareconfigurablebysoftware. SeeESPRFTest
+ToolandTestGuideforinstructions.
+Unlessotherwisestated,theRFtestsareconductedwitha3.3V(±5%)supplyat25ºCambienttemperature.
+7.1 Wi-Fi Radio
+Table19: Wi-FiRFCharacteristics
+Name Description
+Centerfrequencyrangeofoperatingchannel 2412~2484MHz
+Wi-Fiwirelessstandard IEEE802.11b/g/n
+7.1.1 Wi-Fi RF Transmitter (TX) Characteristics
+Table20: TXPowerwithSpectralMaskandEVMMeeting802.11Standards
+Min Typ Max
+Rate
+(dBm) (dBm) (dBm)
+802.11b,1Mbps — 19.5 —
+802.11b,11Mbps — 19.5 —
+802.11g,6Mbps — 18.0 —
+802.11g,54Mbps — 14.0 —
+802.11n,HT20,MCS0 — 18.0 —
+802.11n,HT20,MCS7 — 13.0 —
+802.11n,HT40,MCS0 — 18.0 —
+802.11n,HT40,MCS7 — 13.0 —
+7.1.2 Wi-Fi RF Receiver (RX) Characteristics
+ForRXtests,thePER(packeterrorrate)limitis8%for802.11b,and10%for802.11g/n.
+Table21: RXSensitivity
+Min Typ Max
+Rate
+(dBm) (dBm) (dBm)
+802.11b,1Mbps — –97.0 —
+802.11b,2Mbps — –94.0 —
+Cont’donnextpage
+EspressifSystems 31 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 32
+
+7 RFCharacteristics
+Table21–cont’dfrompreviouspage
+Min Typ Max
+Rate
+(dBm) (dBm) (dBm)
+802.11b,5.5Mbps — –92.0 —
+802.11b,11Mbps — –88.0 —
+802.11g,6Mbps — –93.0 —
+802.11g,9Mbps — –91.0 —
+802.11g,12Mbps — –89.0 —
+802.11g,18Mbps — –87.0 —
+802.11g,24Mbps — –84.0 —
+802.11g,36Mbps — –80.0 —
+802.11g,48Mbps — –77.0 —
+802.11g,54Mbps — –75.0 —
+802.11n,HT20,MCS0 — –92.0 —
+802.11n,HT20,MCS1 — –88.0 —
+802.11n,HT20,MCS2 — –86.0 —
+802.11n,HT20,MCS3 — -83.0 —
+802.11n,HT20,MCS4 — –80.0 —
+802.11n,HT20,MCS5 — –76.0 —
+802.11n,HT20,MCS6 — –74.0 —
+802.11n,HT20,MCS7 — –72.0 —
+802.11n,HT40,MCS0 — –89.0 —
+802.11n,HT40,MCS1 — –85.0 —
+802.11n,HT40,MCS2 — –83.0 —
+802.11n,HT40,MCS3 — –80.0 —
+802.11n,HT40,MCS4 — –76.0 —
+802.11n,HT40,MCS5 — –72.0 —
+802.11n,HT40,MCS6 — –71.0 —
+802.11n,HT40,MCS7 — –69.0 —
+Table22: MaximumRXLevel
+Min Typ Max
+Rate
+(dBm) (dBm) (dBm)
+802.11b,1Mbps — 5 —
+802.11b,11Mbps — 5 —
+802.11g,6Mbps — 0 —
+802.11g,54Mbps — -8 —
+802.11n,HT20,MCS0 — 0 —
+802.11n,HT20,MCS7 — -8 —
+802.11n,HT40,MCS0 — 0 —
+802.11n,HT40,MCS7 — -8 —
+EspressifSystems 32 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 33
+
+7 RFCharacteristics
+Table23: RXAdjacentChannelRejection
+Min Typ Max
+Rate
+(dB) (dB) (dB)
+802.11b,11Mbps — 35 —
+802.11g,6Mbps — 27 —
+802.11g,54Mbps — 13 —
+802.11n,HT20,MCS0 — 27 —
+802.11n,HT20,MCS7 — 12 —
+802.11n,HT40,MCS0 — 16 —
+802.11n,HT40,MCS7 — 7 —
+7.2 Bluetooth Radio
+Table24: BluetoothLERFCharacteristics
+Name Description
+Centerfrequencyrangeofoperatingchannel 2402~2480MHz
+RFtransmitpowerrange –12.0~9.0dBm
+7.2.1 Receiver – Basic Data Rate
+Table25: ReceiverCharacteristics–BasicDataRate
+Parameter Conditions Min Typ Max Unit
+Sensitivity@0.1%BER — –90 –89 –88 dBm
+Maximumreceivedsignal@0.1%BER — 0 — — dBm
+Co-channelC/I — — +7 — dB
+F=F0+1MHz — — –6 dB
+F=F0–1MHz — — –6 dB
+F=F0+2MHz — — –25 dB
+AdjacentchannelselectivityC/I
+F=F0–2MHz — — –33 dB
+F=F0+3MHz — — –25 dB
+F=F0–3MHz — — –45 dB
+30MHz~2000MHz –10 — — dBm
+2000MHz~2400MHz –27 — — dBm
+Out-of-bandblockingperformance
+2500MHz~3000MHz –27 — — dBm
+3000MHz~12.5GHz –10 — — dBm
+Intermodulation — –36 — — dBm
+7.2.2 Transmitter – Basic Data Rate
+EspressifSystems 33 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 34
+
+7 RFCharacteristics
+Table26: TransmitterCharacteristics–BasicDataRate
+Parameter Conditions Min Typ Max Unit
+RFtransmitpower* — — 0 — dBm
+Gaincontrolstep — — 3 — dB
+RFpowercontrolrange — –12 — +9 dBm
++20dBbandwidth — — 0.9 — MHz
+F=F0±2MHz — –55 — dBm
+Adjacentchanneltransmitpower F=F0±3MHz — –55 — dBm
+F=F0±>3MHz — –59 — dBm
+∆f1 — — — 155 kHz
+avg
+∆f2 — 127 — — kHz
+max
+∆f2 /∆f1 — — 0.92 — —
+avg avg
+ICFT — — –7 — kHz
+Driftrate — — 0.7 — kHz/50µs
+Drift(DH1) — — 6 — kHz
+Drift(DH5) — — 6 — kHz
+* There are a total of eight power levels from 0 to 7, and the transmit power ranges from –12 dBm
+to9dBm. Whenthepowerlevelrisesby1,thetransmitpowerincreasesby3dB.Powerlevel4is
+usedbydefaultandthecorrespondingtransmitpoweris0dBm.
+7.2.3 Receiver – Enhanced Data Rate
+Table27: ReceiverCharacteristics–EnhancedDataRate
+Parameter Conditions Min Typ Max Unit
+π/4DQPSK
+Sensitivity@0.01%BER — –90 –89 –88 dBm
+Maximumreceivedsignal@0.01%BER — — 0 — dBm
+Co-channelC/I — — 11 — dB
+F=F0+1MHz — –7 — dB
+F=F0–1MHz — –7 — dB
+F=F0+2MHz — –25 — dB
+AdjacentchannelselectivityC/I
+F=F0–2MHz — –35 — dB
+F=F0+3MHz — –25 — dB
+F=F0–3MHz — –45 — dB
+8DPSK
+Sensitivity@0.01%BER — –84 –83 –82 dBm
+Maximumreceivedsignal@0.01%BER — — –5 — dBm
+C/Ic-channel — — 18 — dB
+F=F0+1MHz — 2 — dB
+F=F0–1MHz — 2 — dB
+F=F0+2MHz — –25 — dB
+AdjacentchannelselectivityC/I
+F=F0–2MHz — –25 — dB
+F=F0+3MHz — –25 — dB
+Cont’donnextpage
+EspressifSystems 34 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 35
+
+7 RFCharacteristics
+Table27–cont’dfrompreviouspage
+Parameter Conditions Min Typ Max Unit
+F=F0–3MHz — –38 — dB
+7.2.4 Transmitter – Enhanced Data Rate
+Table28: TransmitterCharacteristics–EnhancedDataRate
+Parameter Conditions Min Typ Max Unit
+RFtransmitpower(seenoteunderTable26) — — 0 — dBm
+Gaincontrolstep — — 3 — dB
+RFpowercontrolrange — –12 — +9 dBm
+π/4DQPSKmaxw0 — — –0.72 — kHz
+π/4DQPSKmaxwi — — –6 — kHz
+π/4DQPSKmax|wi+w0| — — –7.42 — kHz
+8DPSKmaxw0 — — 0.7 — kHz
+8DPSKmaxwi — — –9.6 — kHz
+8DPSKmax|wi+w0| — — –10 — kHz
+RMSDEVM — 4.28 — %
+π/4DQPSKmodulationaccuracy 99%DEVM — 100 — %
+PeakDEVM — 13.3 — %
+RMSDEVM — 5.8 — %
+8DPSKmodulationaccuracy 99%DEVM — 100 — %
+PeakDEVM — 14 — %
+F=F0±1MHz — –46 — dBm
+F=F0±2MHz — –44 — dBm
+In-bandspuriousemissions
+F=F0±3MHz — –49 — dBm
+F=F0+/–>3MHz — — –53 dBm
+EDRdifferentialphasecoding — — 100 — %
+7.3 Bluetooth LE Radio
+7.3.1 Receiver
+Table29: ReceiverCharacteristics–BluetoothLE
+Parameter Conditions Min Typ Max Unit
+Sensitivity@30.8%PER — –94 –93 –92 dBm
+Maximumreceivedsignal@30.8%PER — 0 — — dBm
+Co-channelC/I — — +10 — dB
+F=F0+1MHz — –5 — dB
+F=F0–1MHz — –5 — dB
+F=F0+2MHz — –25 — dB
+AdjacentchannelselectivityC/I
+F=F0–2MHz — –35 — dB
+F=F0+3MHz — –25 — dB
+EspressifSystems 35 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 36
+
+7 RFCharacteristics
+Parameter Conditions Min Typ Max Unit
+F=F0–3MHz — –45 — dB
+30MHz~2000MHz –10 — — dBm
+2000 MHz ~ 2400 –27 — — dBm
+Out-of-bandblockingperformance
+MHz
+2500 MHz ~ 3000 –27 — — dBm
+MHz
+3000MHz~12.5GHz –10 — — dBm
+Intermodulation — –36 — — dBm
+7.3.2 Transmitter
+Table30: TransmitterCharacteristics–BluetoothLE
+Parameter Conditions Min Typ Max Unit
+RF transmit power (see note under Table — — 0 — dBm
+26)
+Gaincontrolstep — — 3 — dB
+RFpowercontrolrange — –12 — +9 dBm
+F=F0±2MHz — –55 — dBm
+Adjacentchanneltransmitpower F=F0±3MHz — –57 — dBm
+F=F0±>3MHz — –59 — dBm
+∆f1 — — — 265 kHz
+avg
+∆f2 — 210 — — kHz
+max
+∆f2 /∆f1 — — +0.92 — —
+avg avg
+ICFT — — –10 — kHz
+Driftrate — — 0.7 — kHz/50µs
+Drift — — 2 — kHz
+EspressifSystems 36 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 37
+
+8
+ModuleSchematics
+5 4 3 2 1
+8 Module Schematics
+D D
+Thisisthereferencedesignofthemodule.
+Pin.1
+GND
+Pin.2 3V3
+Pin.3 EN Pin.4 SENSOR_VP Pin.5 SENSOR_VN
+C C Pin.6 IO34
+Pin.7 IO35 Pin.8 IO32 Pin.9 IO33 Pin.10 IO25 Pin.11 IO26 Pin.12
+IO27 Pin.13 IO14 Pin.14 IO12
+B B
+A A
+5 4 3 2 1
+51.niP
+DNG
+61.niP
+31OI
+71.niP
+CN
+81.niP
+CN
+91.niP
+CN
+02.niP
+CN
+12.niP
+CN
+22.niP
+CN
+32.niP
+51OI
+42.niP
+2OI
+The values of C1 and C2 vary with PCB ANTENNA
+the selection of the crystal.
+The value of R2 varies with the actual
+PCB board.
+Pin.38
+GND
+Pin.37
+IO23 Pin.36
+IO22 Pin.35 SENSOR_VP TXD0 Pin.34 SENSOR_VN RXD0
+Pin.33 IO21 Pin.32
+NC EPAD Pin.31 GPIO32 IO19 Pin.30 SENSOR_VP SCS/CMD SDI/SD1 GPIO33 IO18 Pin.29 C SE H N IP S _ O P R U _VN SCK/CLK SDO/SD0 IO5 GPIO34 SHD/SD2 SWP/SD3 Pin.28 The values of C15, L4 and C14 GPIO35 IO17 vary with the actual PCB board. Pin.27 IO16
+NC: No component. Pin.26 IO4 Pin.25 E E S S P P 3 3 2 2- - D D 0 0 W W D D - R V 2 3 -V3 IO0
+ESP32-WROOM-32E(pin-out)
+2OIPG
+CHIP_PU
+GPIO34
+GPIO35 GPIO25 GPIO26 GPIO27
+GPIO14 GPIO12 31OIPG 51OIPG
+U0TXD
+GPIO32 GPIO33 GPIO25
+62OIPG 72OIPG 41OIPG 21OIPG 31OIPG 51OIPG 2OIPG 0OIPG 4OIPG
+GND
+GND GND
+C2
+TBD
+VDD33
+GND GND
+C3 C20 GND GND VDD33
+VDD33 100p G F ND 1u G F ND C5 R1 20K(5%) GPIO21 VDD33 GPIO23
+10nF/6.3V(10%) GPIO22 U0RXD GPIO22 GND U0TXD VDD33 GND U0RXD L5 2.0nH(0.1nH) GND GND
+C12 C10 GPIO21 NC 0.1uF VDD33
+GND GND GND GND GND VDD_SDIO GPIO19 GPIO19 GPIO23 C14 GPIO18 GPIO5 GPIO18 TBD SDI/SD1 SDO/SD0 SCK/CLK GPIO5 GND GND GND SCS/CMD SWP/SD3 SHD/SD2 GPIO17 GPIO17 GPIO16 GPIO16
+GND C18 GPIO4 VDD_SDIO 1uF GPIO0 VDD33 GND GND
+C19
+0.1uF
+GND
+TTTiiitttllleee
+<<<EEESSSPPP333222---WWWRRROOOOOOMMM---333222EEE>>>
+SSSiiizzzeee DDDooocccuuummmeeennnttt NNNuuummmbbbeeerrr RRReeevvv
+CCC <<<000222___EEESSSPPP333222---WWWRRROOOOOOMMM---333222EEE>>> VVV111...222
+DDDaaattteee::: MMMooonnndddaaayyy,,, JJJuuulllyyy 000444,,, 222000222222 SSShhheeeeeettt 222 ooofff 222
+0
+2R
+U1
+40MHz(±10ppm） C6
+R3 499 3.3nF/6.3V(10%) D1 C9 ESD 0.1uF
+C21 NC C4
+0.1uF ANT1 1 L4 TBD 2 C15 C16 PCB_ANT TBD NC C17 NC
+4
+DNG
+NIX
+1
+3
+TUOXDNG
+2
+C13 C11 10uF 1uF
+1 /CS DO 2 /WP 3 U3 FLASH DNG 4 DI 5 6 CLK 7 /HOLD 8 CCV
+C1
+TBD
+1 1 1 1 1 1 2 3 4 5 6 7 8 9 0 1 2 3 4 V L V V S S S S C V V 3 3 G N 2 2 D D D E E E E D D H P K K A N N N N D D D E E I I P O _ _ _ S S S S T T A 3 3 X X _ I 2 P P _ _ O O O O N P P N 5 1 2 3 3 R R R R U _ _ _ _ V C C V P N A A P P P N
+U2
+CTR_3
+6 7 P 2 2 2 0 4 O S K 3 O O O O O I M D C D D I I I I I P P P P P T T T T D M M M M G G G G G V 5 6 7 8 9 0 1 2 3 4 1 1 1 1 1 2 2 2 2 2
+S S S V D D D D _ _ _ S S D D D D G G D D A A A _ _ P P _ S T T T C I I C O O A A A D M L _ _ _ 1 1 IO D K 2 3 0 6 7 2 2 2 2 2 3 3 3 6 5 7 8 9 0 1 2
+94
+DNG
+GPIO19 38 SD_D G G A P T P IO A IO _ 1 5 1 8 3 3 3 3 4 5
+74
+2PAC
+3 4 5 4 4 4
+P A N _ D _ L L D A A V T T X X
+GPIO23 36
+1 2 4 4
+1 D 2 X O T I 0 P U G
+93
+22OIPG
+VDD3P3_CPU 37
+84
+1PAC
+64
+ADDV
+04
+DXR0U
+Figure7: ESP32-WROOM-32ESchematics
+SubmitDocumentationFeedback
+EspressifSystems
+37
+ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+
+
+## Page 38
+
+8
+ModuleSchematics
+5 4 3 2 1
+D D
+Pin.1
+GND
+Pin.2 3V3
+Pin.3 EN Pin.4 SENSOR_VP
+Pin.5 SENSOR_VN
+C C Pin.6 IO34
+Pin.7 IO35 Pin.8 IO32 Pin.9 IO33 Pin.10 IO25 Pin.11 IO26 Pin.12
+IO27 Pin.13 IO14
+Pin.14 IO12
+B B
+A A
+5 4 3 2 1
+51.niP
+DNG
+61.niP
+31OI
+71.niP
+CN
+81.niP
+CN
+91.niP
+CN
+02.niP
+CN
+12.niP
+CN
+22.niP
+CN
+32.niP
+51OI
+42.niP
+2OI
+The values of C1 and C2 vary with the selection of the crystal.
+The value of R2 varies with the actual PCB board.
+Pin.38
+GND
+Pin.37
+IO23 Pin.36
+IO22 Pin.35 SENSOR_VP TXD0 Pin.34
+SENSOR_VN RXD0
+Pin.33 IO21 Pin.32
+NC EPAD Pin.31 GPIO32 IO19 Pin.30 SENSOR_VP SCS/CMD SDI/SD1 GPIO33 IO18 Pin.29 E S N ENSOR_VN SCK/CLK SDO/SD0 IO5 GPIO34 SHD/SD2 SWP/SD3 Pin.28 The values of C15, L4 and C14 GPIO35 IO17 vary with the actual PCB board. Pin.27 IO16
+NC: No component. Pin.26 IO4 Pin.25
+E E S S P P 3 3 2 2- - D D 0 0 W W D D - R V 2 3 -V3 IO0
+ESP32-WROOM-32UE(pin-out)
+2OIPG
+EN
+GPIO34
+GPIO35 GPIO25 GPIO26 GPIO27
+GPIO14
+GPIO12 31OIPG 51OIPG
+U0TXD
+GPIO32 GPIO33 GPIO25
+62OIPG 72OIPG 41OIPG 21OIPG 31OIPG 51OIPG 2OIPG 0OIPG 4OIPG
+GND
+GND GND
+VDD33
+GND GND
+C3 C20 GND GND VDD33
+VDD33 100p G F ND 1u G F ND C5 R1 20K(5%) GPIO21 VDD33 GPIO23
+10nF/6.3V(10%) GPIO22 U0RXD GPIO22 GND U0TXD VDD33
+GND U0RXD L5 2.0nH(0.1nH) GND GND
+C10 GPIO21 0.1uF VDD33
+GND GND GND GND VDD_SDIO GPIO19 1 LNA_IN GPIO19 GPIO23 J39 GPIO18 GPIO5 GPIO18 IPEX SDI/SD1 SDO/SD0 SCK/CLK GPIO5 GND GND GND SCS/CMD SWP/SD3 SHD/SD2 GPIO17 GPIO17 GPIO16 GPIO16
+GND C18 GPIO4 VDD_SDIO 1uF
+GPIO0 VDD33 GND GND
+C19
+0.1uF
+GND
+TTTiiitttllleee
+<<<EEESSSPPP333222---WWWRRROOOOOOMMM---333222UUUEEE>>>
+SSSiiizzzeee DDDooocccuuummmeeennnttt NNNuuummmbbbeeerrr RRReeevvv
+CCC <<<000222___EEESSSPPP333222---WWWRRROOOOOOMMM---333222UUUEEE>>> VVV111...222
+DDDaaattteee::: MMMooonnndddaaayyy,,, JJJuuulllyyy 000444,,, 222000222222 SSShhheeeeeettt 222 ooofff 222
+2 3
+C2
+TBD
+C14 TBD
+0
+2R
+U1
+40MHz(±10ppm) C6
+R3 499 3.3nF/6.3V(10%) D1 C9 ESD 0.1uF
+C21 NC C4
+0.1uF L4 TBD C15 TBD
+4
+DNG
+NIX
+1
+3
+TUOXDNG
+2
+C13 C11 10uF 1uF
+1 /CS DO 2 /WP 3 U3 FLASH DNG 4 DI 5 6 CLK 7 /HOLD 8 CCV
+C1
+TBD
+1 1 1 1 1 1 2 3 4 5 6 7 8 9 0 1 2 3 4 V L V V S S S S C V V 3 3 G N 2 2 D D D E E E E D D H P K K A N N N N D D D E E I I P O _ _ _ S S S S T T A 3 3 X X _ I 2 P P _ _ O O O O N P P N 5 1 2 3 3 R R R R U _ _ _ _ V C C V P N A A P P P N
+U2
+CTR_3
+6 7 P 2 2 2 0 4 O S K 3 O O O O O I M D C D D I I I I I P P P P P T T T T D M M M M G G G G G V
+5 6 7 8 9 0 1 2 3 4 1 1 1 1 1 2 2 2 2 2
+S S S V D D D D _ _ _ S S D D D D G G D D A A A _ _ P P _ S T T T C I I C O O A A A D M L _ _ _ 1 1 IO D K 2 3 0 6 7 2 2 2 2 2 3 3 3 6 5 7 8 9 0 1 2
+94
+DNG
+GPIO19 38 SD_D G G A P T P IO A IO _ 1 5 1 8 3 3 3 3 4 5
+74
+2PAC
+3 4 5 4 4 4
+P A N _ D _ L L D A A V T T X X
+GPIO23 36
+1 2 4 4
+1 D 2 X O T I 0 P U G
+93
+22OIPG
+VDD3P3_CPU 37
+84
+1PAC
+64
+ADDV
+04
+DXR0U
+Figure8: ESP32-WROOM-32UESchematics
+SubmitDocumentationFeedback
+EspressifSystems
+38
+ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+
+
+## Page 39
+
+5 4 3 2 1
+9 PeripheralSchematics
+D 9 Peripheral Schematics D
+Thisisthetypicalapplicationcircuitofthemoduleconnectedwithperipheralcomponents(forexample,
+powersupply,antenna,resetbutton,JTAGinterface,andUARTinterface).
+I34
+C X1: ESR = Max. 70 KΩ I35 C
+R4: 5 MΩ ~ 10MΩ
+NC: No component.
+In module variants that have
+embedded QSPI PSRAM,
+i.e., that embed
+ESP32-D0WDR2-V3, IO16
+should be pulled-up and can
+not be used for other funtion.
+B IO14 TMS EN B IO12 TDI
+IO13 TCK
+IO15 TDO
+IO12 should be kept low when the module is powered on.
+A A
+5 4 3 2 1
+31OI
+IO23
+IO22
+TXD0
+RXD0
+IO21
+IO32 IO19 IO33 IO18
+IO25 IO5
+IO26 IO17
+IO27 IO16
+IO4
+51OI
+2OI
+VDD33
+GND GND
+VDD33
+EN
+GND I36
+GND GND I39
+GND
+GND VDD33
+GND
+IO14
+IO12 IO0
+JP2
+1
+2
+GND
+Boot Option
+GND
+R4
+NC
+ESP32-WROOM-32E/ESP32-WROOM-32UE
+C2 R1 TBD 1 38
+2 GND1 GND3 37
+0.1uF C3 TBD 3 3V3 IO23 36
+4 EN IO22 35
+5 SENSOR_VP TXD0 34
+C4 12pF(NC) 6 SENSOR_VN RXD0 33
+7 IO34 IO21 32
+R3 0(NC) 8 IO35 NC 31 R5 0(NC) 9 IO32 IO19 30
+10 IO33 IO18 29
+11 IO25 IO5 28
+C7 12pF(NC) 12 IO26 IO17 27
+13 IO27 IO16 26
+14 IO14 IO4 25
+IO12 IO0
+U1
+JP3
+1 2 1
+3 2 C4 0.1uF
+4 3
+4
+JTAG
+51
+2DNG
+61
+31OI
+71
+CN
+81
+CN
+91
+CN
+02
+CN
+12
+CN
+22
+CN
+32
+51OI
+42
+2OI
+39
+P_GND C1
+JP1
+22uF 1
+2 1
+3 2
+4 3
+4
+X1 UART
+32.768KHz(NC)
+SW1
+R2 0
+1
+2
+R6 10K
+Figure9: PeripheralSchematics
+• SolderingEPADPin39tothegroundofthebaseboardisnotamust. Ifyouchoosetosolderit,please
+applythecorrectamountofsolderingpaste. Toomuchsolderingpastemayincreasethegapbetween
+themoduleandthebaseboard. Asaresult,theadhesionbetweenotherpinsandthebaseboardmaybe
+poor.
+• ToensurethatthepowersupplytotheESP32chipisstableduringpower-up,itisadvisedtoaddanRC
+delaycircuitattheENpin. TherecommendedsettingfortheRCdelaycircuitisusuallyR=10kΩandC=
+1µF.However,specificparametersshouldbeadjustedbasedonthepower-uptimingofthemoduleand
+thepower-upandresetsequencetimingofthechip. ForESP32’spower-upandresetsequencetiming
+diagram,pleaserefertoSection4.6ChipPower-upandReset.
+• UART0isusedtodownloadfirmwareandlogoutput. WhenusingtheATfirmware,pleasenotethatthe
+UARTGPIOisalreadyconfigured(refertoHardwareConnection). Itisrecommendedtousethedefault
+configuration.
+EspressifSystems 39 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 40
+
+10 PhysicalDimensions
+10 Physical Dimensions
+10.1 Module Dimensions
+51.0±5.52
+15.61 9.0
+x
+83
+5.1
+72.1 9.0
+x
+83
+ESP32-WROOM-32E Dimensions
+18±0.15 3.1±0.15
+15.8
+Top View Side View Bottom View
+6.71
+38 x 0.45 1.1
+50.1
+0.8
+0.5
+38 x Ø0.55
+3.7
+38 x 0.85
+91.6
+Unit: mm
+0.9
+5 0.
+Ø
+11.43
+ESP32-WROOM-32UE Dimensions
+15.61
+9.0
+x
+83
+5.1
+72.1
+18±0.15
+10.75
+0.5
+15.65 3.7
+38 x 0.45 38 x 0.85
+Top View Bottom View
+5.71
+0.9
+Side View
+51.0±2.91
+9.0
+x
+83
+0.8
+38 x Ø0.55
+1.18
+70.3
+1.1
+Unit: mm
+3.2±0.15
+3.27
+11.43 1.27
+50.31
+7.5
+9.0
+5.0
+92.01
+76.01
+7.3
+7.3
+7.5
+1.27
+Figure10: ESP32-WROOM-32EPhysicalDimensions
+51.0±5.52
+15.61
+9.0
+x
+83
+5.1
+72.1 9.0
+x 83
+ESP32-WROOM-32E Dimensions
+18±0.15 3.1±0.15
+15.8
+Top View Side View Bottom View
+6.71
+38 x 0.45 1.1
+50.1
+0.8
+0.5
+38 x Ø0.55
+3.7
+38 x 0.85
+91.6
+Unit: mm
+0.9
+5 0. Ø
+11.43
+ESP32-WROOM-32UE Dimensions
+15.61
+9.0
+x
+83
+5.1
+72.1
+18±0.15
+10.75
+0.5
+15.65
+3.7
+38 x 0.45 38 x 0.85
+Top View Bottom View
+5.71
+0.9
+Side View
+51.0±2.91
+9.0
+x 83
+0.8
+38 x Ø0.55
+1.18
+70.3
+1.1
+Unit: mm
+3.2±0.15
+3.27
+11.43 1.27
+50.31
+7.5
+9.0
+5.0
+92.01
+76.01
+7.3
+7.3
+7.5
+1.27
+Figure11: ESP32-WROOM-32UEPhysicalDimensions
+Note:
+Forinformationabouttape,reel,andproductmarking,pleaserefertoESP32ModulePackagingInformation.
+EspressifSystems 40 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 41
+
+10 PhysicalDimensions
+10.2 Dimensions of External Antenna Connector
+ESP32-WROOM-32UEusesthefirstgenerationexternalantennaconnectorasshowninFigure12Dimensions
+ofExternalAntennaConnector. Thisconnectoriscompatiblewiththefollowingconnectors:
+• U.FLSeriesconnectorfromHirose
+• MHFIconnectorfromI-PEX
+• AMCconnectorfromAmphenol
+Unit: mm
+Figure12: DimensionsofExternalAntennaConnector
+TheexternalantennausedforESP32-WROOM-32UEduringcertificationtestingisthefirstgeneration
+EspressifSystems 41 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 42
+
+10 PhysicalDimensions
+monopoleantenna,withmaterialcodeTFPD05H08750011.
+Themoduledoesnotincludeanexternalantennauponshipment. Ifneeded,selectasuitableexternal
+antennabasedontheproduct’susageenvironmentandperformancerequirements.
+Itisrecommendedtoselectanantennathatmeetsthefollowingrequirements:
+• 2.4GHzband
+• 50Ωimpedance
+• Themaximumgaindoesnotexceed2.33dBi,thegainoftheantennausedforcertification
+• TheconnectormatchesthespecificationsshowninFigure12DimensionsofExternalAntennaConnector
+Note:
+Ifyouuseanexternalantennaofadifferenttypeorgain,additionaltesting,suchasEMC,mayberequiredbeyondthe
+existingantennatestreportsforEspressifmodules. Specificrequirementsdependonthecertificationtype.
+EspressifSystems 42 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 43
+
+11 PCBLayoutRecommendations
+11 PCB Layout Recommendations
+11.1 PCB Land Pattern
+Thissectionprovidesthefollowingresourcesforyourreference:
+• FiguresforrecommendedPCBlandpatternswithallthedimensionsneededforPCBdesign. SeeFigure
+13ESP32-WROOM-32ERecommendedPCBLandPatternandFigure14ESP32-WROOM-32UE
+RecommendedPCBLandPattern.
+• SourcefilesofrecommendedPCBlandpatternstomeasuredimensionsnotcoveredinFigure13and
+Figure14. YoucanviewthesourcefilesforESP32-WROOM-32EandESP32-WROOM-32UEwith
+AutodeskViewer.
+• 3DmodelsofESP32-WROOM-32EandESP32-WROOM-32UE.Pleasemakesurethatyoudownloadthe
+ESP32-WROOM-32E Land Pattern
+3Dmodelfilein.STEPformat(bewarethatsomebrowsersmightadd.txt).
+18
+Antenna Area
+38 x1.5
+1 38
+14 25
+5.1
+9.0x
+83
+7.3
+9.0
+0.9
+3.7
+7.5
+91.6
+72.1
+0.5
+ESP32-WROOM-32UE Land Pattern
+18
+1
+14 25
+5.1
+2.91
+38 x1.5
+9.0x
+83
+72.1
+38
+0.5
+5.0
+7.3
+3.7
+9.0
+Unit: mm
+Via for thermal pad
+Copper
+Unit: mm
+Via for thermal pad
+Copper
+0.9
+0.5
+7.5 76.01
+0.5
+5.0
+1.27
+3.285 3.285
+17.5
+15.61
+92.01
+1.27
+3.285 3.285
+17.5
+15.61
+91.1
+94.7
+5.52
+Figure13: ESP32-WROOM-32ERecommendedPCBLandPattern
+EspressifSystems 43 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 44
+
+ESP32-WROOM-32E Land Pattern
+18
+Antenna Area
+38 x1.5
+1 38
+14 25
+11 PCBLayoutRecommendations
+5.1
+9.0x
+83
+7.3
+9.0
+0.9
+3.7
+7.5
+91.6
+72.1
+0.5
+ESP32-WROOM-32UE Land Pattern
+18
+1
+14 25
+5.1
+2.91
+38 x1.5
+9.0x
+83
+72.1
+38
+0.5
+5.0
+7.3
+3.7
+9.0
+Unit: mm
+Via for thermal pad
+Copper
+Unit: mm
+Via for thermal pad
+Copper
+0.9
+0.5
+7.5 76.01
+0.5
+5.0
+1.27
+3.285 3.285
+17.5
+15.61
+92.01
+1.27
+3.285 3.285
+17.5
+15.61
+91.1
+94.7
+5.52
+Figure14: ESP32-WROOM-32UERecommendedPCBLandPattern
+EspressifSystems 44 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 45
+
+11 PCBLayoutRecommendations
+11.2 Module Placement for PCB Design
+Ifmodule-on-boarddesignisadopted,attentionshouldbepaidwhilepositioningthemoduleonthebase
+board. Theinterferenceofthebaseboardonthemodule’santennaperformanceshouldbeminimized.
+FordetailsaboutmoduleplacementforPCBdesign,pleaserefertoESP32HardwareDesignGuidelines>
+SectionPositioningaModuleonaBaseBoard.
+EspressifSystems 45 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 46
+
+12 ProductHandling
+12 Product Handling
+12.1 Storage Conditions
+Theproductssealedinmoisturebarrierbags(MBB)shouldbestoredinanon-condensingatmospheric
+environmentof<40°Cand90%RH.Themoduleisratedatthemoisturesensitivitylevel(MSL)of3.
+Afterunpacking,themodulemustbesolderedwithin168hourswiththefactoryconditions25±5°Cand60
+%RH.Iftheaboveconditionsarenotmet,themoduleneedstobebaked.
+12.2 Electrostatic Discharge (ESD)
+• Humanbodymodel(HBM):±2000V
+• Charged-devicemodel(CDM):±500V
+12.3 Reflow Profile
+Solderthemoduleinasinglereflow.
+250
+Reflow zone Cooling zone
+(cid:33)217 ℃ 60 ~ 90 s –1 ~ –5 ℃/s
+217
+200
+1 ~ 3 ℃/s
+100
+50
+25
+0
+0 50 100 150 200 250
+)℃(
+erutarepmeT
+Peak Temp.
+235 ~ 250 ℃
+Preheating zone
+150 ~ 200 ℃ 60 ~ 120 s
+Soldering time
+> 30 s
+Ramp-up zone
+Time (sec.)
+Ramp-up zone — Temp.: 25 ~ 150 ℃ Time: 60 ~ 90 s Ramp-up rate: 1 ~ 3 ℃/s
+Preheating zone — Temp.: 150 ~ 200 ℃ Time: 60 ~ 120 s
+Reflow zone — Temp.: >217 ℃ (cid:55)(cid:76)(cid:80)(cid:72)(cid:29)(cid:3)60 ~ 90 s; Peak Temp.: 235 ~ 250 ℃ Time: 30 ~ 70 s
+Cooling zone — Peak Temp. ~ 180 ℃ Ramp-down rate: –1 ~ –5 ℃/s
+Solder — Sn-Ag-Cu (SAC305) lead-free solder alloy
+Figure15: ReflowProfile
+EspressifSystems 46 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 47
+
+12 ProductHandling
+12.4 Ultrasonic Vibration
+AvoidexposingEspressifmodulestovibrationfromultrasonicequipment,suchasultrasonicweldersor
+ultrasoniccleaners. Thisvibrationmayinduceresonanceinthein-modulecrystalandleadtoitsmalfunctionor
+evenfailure. Asaconsequence,themodulemaystopworkingoritsperformancemaydeteriorate.
+EspressifSystems 47 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 48
+
+DatasheetVersioning
+Datasheet Versioning
+Datasheet
+Status Watermark Definition
+Version
+Thisdatasheetisunderdevelopmentforproducts
+v0.1~v0.5
+Draft Confidential inthedesignstage. Specificationsmaychange
+(excludingv0.5)
+withoutpriornotice.
+Thisdatasheetisactivelyupdatedforproductsin
+v0.5~v1.0 Preliminary theverificationstage. Specificationsmaychange
+Preliminary
+(excludingv1.0) release beforemassproduction,andthechangeswillbe
+documentationinthedatasheet’sRevisionHistory.
+Thisdatasheetispubliclyreleasedforproductsin
+massproduction. Specificationsarefinalized,and
+v1.0andhigher Officialrelease —
+majorchangeswillbecommunicatedviaProduct
+ChangeNotifications(PCN).
+Not
+Recommended Thisdatasheetisupdatedlessfrequentlyfor
+Anyversion —
+forNewDesign productsnotrecommendedfornewdesigns.
+(NRND)1
+EndofLife Thisdatasheetisnolongermtainedforproducts
+Anyversion —
+(EOL)2 thathavereachedendoflife.
+1Watermark will be added to the datasheet title page only when all the product variants covered by this
+datasheetarenotrecommendedfornewdesigns.
+2Watermark will be added to the datasheet title page only when all the product variants covered by this
+datasheethavereachedendoflife.
+EspressifSystems 48 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 49
+
+RelatedDocumentationandResources
+Related Documentation and Resources
+Related Documentation
+• ESP32SeriesDatasheet–SpecificationsoftheESP32hardware.
+• ESP32TechnicalReferenceManual–DetailedinformationonhowtousetheESP32memoryandperipherals.
+• ESP32HardwareDesignGuidelines–GuidelinesonhowtointegratetheESP32intoyourhardwareproduct.
+• ESP32ECOandWorkaroundsforBugs–CorrectionofESP32designerrors.
+• ESP32SeriesSoCErrata–DescriptionsofknownerrorsinESP32seriesofSoCs.
+• Certificates
+https://espressif.com/en/support/documents/certificates
+• ESP32Product/ProcessChangeNotifications(PCN)
+https://espressif.com/en/support/documents/pcns
+• ESP32Advisories–Informationonsecurity,bugs,compatibility,componentreliability.
+https://espressif.com/en/support/documents/advisories
+• DocumentationUpdatesandUpdateNotificationSubscription
+https://espressif.com/en/support/download/documents
+Developer Zone
+• ESP-IDFProgrammingGuideforESP32–ExtensivedocumentationfortheESP-IDFdevelopmentframework.
+• ESP-IDF andotherdevelopmentframeworksonGitHub.
+https://github.com/espressif
+• ESP32BBSForum–Engineer-to-Engineer(E2E)CommunityforEspressifproductswhereyoucanpostquestions,
+shareknowledge,exploreideas,andhelpsolveproblemswithfellowengineers.
+https://esp32.com/
+• TheESPJournal–BestPractices,Articles,andNotesfromEspressiffolks.
+https://blog.espressif.com/
+• SeethetabsSDKsandDemos,Apps,Tools,ATFirmware.
+https://espressif.com/en/support/download/sdks-demos
+Products
+• ESP32SeriesSoCs–BrowsethroughallESP32SoCs.
+https://espressif.com/en/products/socs?id=ESP32
+• ESP32SeriesModules–BrowsethroughallESP32-basedmodules.
+https://espressif.com/en/products/modules?id=ESP32
+• ESP32SeriesDevKits–BrowsethroughallESP32-baseddevkits.
+https://espressif.com/en/products/devkits?id=ESP32
+• ESPProductSelector–FindanEspressifhardwareproductsuitableforyourneedsbycomparingorapplyingfilters.
+https://products.espressif.com/#/product-selector?language=en
+Contact Us
+• SeethetabsSalesQuestions,TechnicalEnquiries,CircuitSchematic&PCBDesignReview,GetSamples
+(Onlinestores),BecomeOurSupplier,Comments&Suggestions.
+https://espressif.com/en/contact-us/sales-questions
+EspressifSystems 49 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 50
+
+RevisionHistory
+Revision History
+Date Version Releasenotes
+• Section2BlockDiagram: Addedanoteaboutpinmappingbetweenthe
+chipandthein-packageflash/PSRAM
+• Updated Figure 4 Visualization of Timing Parameters for the Strapping
+Pins
+2025-10-20 v2.0
+• AddedSection4.6ChipPower-upandReset
+• Table15DCCharacteristics(3.3V,25°C):AddedV
+IH_nRST
+• AddedSection6.5MemorySpecifications
+• AddedSectionDatasheetVersioning
+• Section10.2DimensionsofExternalAntennaConnector: Addedtheex-
+2025-07-15 v1.9
+ternalantennainformationforcertification.
+2025-04-14 v1.8 • Section9PeripheralSchematics: AddedanoteaboutUART
+• Improvedthewordingandstructureoffollowingsections:
+– UpdatedSection”StrappingPins”andrenamedto4BootConfigu-
+rations
+– AddedChapter5Peripherals
+2024-09 v1.7 – UpdatedTable”Wi-FiRFStandards”andrenamedtoWi-FiRFChar-
+acteristics
+– AddednotesabouterasecyclesandretentiontimeforflashinTable
+2SeriesComparison
+– Updatednote1inChapter9PeripheralSchematics
+• Majorupdates:
+– RemovedcontentsabouthallsensoraccordingtoPCN20221202
+2023-01-18 v1.6 • Otherupdates:
+– AddedsourcefilesofPCBlandpatternsand3Dmodelsofthemod-
+ulesinSection11.1PCBLandPattern
+• AddedmodulevariantsembeddedwithESP32-D0WDR2-V3chip
+• AddedTable1SeriesComparisonandTable2SeriesComparison
+• AddedFigure4VisualizationofTimingParametersfortheStrappingPins
+2022-07-20 v1.5
+and Table 5 Description of Timing Parameters for the Strapping Pins in
+Section4BootConfigurations
+• UpdatedSection12ProductHandling
+• AddedalinktoRFcertificatesinSection1.1Features
+2022-02-22 v1.4
+• FixedapinnametypoinFigure9PeripheralSchematics
+Cont’donnextpage
+EspressifSystems 50 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 51
+
+RevisionHistory
+Cont’dfrompreviouspage
+Date Version Releasenotes
+• Addeda105°Cmodulevariant
+• UpdatedTable13AbsoluteMaximumRatings
+• UpdatedTable14RecommendedOperatingConditions
+• Replaced Espressif Product Ordering Information with ESP Product
+2021-11-08 v1.3 Selector
+• UpdatedthedescriptionofTWAIinSection1.1Features
+• AddedanotebelowFigure11ESP32-WROOM-32UEPhysicalDimensions
+• Upgradedfigureformatting
+• Upgradeddocumentformatting
+• Updated Figure 13 ESP32-WROOM-32E Recommended PCB Land Pat-
+tern,Figure14ESP32-WROOM-32UERecommendedPCBLandPattern,
+Figure10ESP32-WROOM-32EPhysicalDimensions,andFigure11ESP32-
+2021-02-09 v1.2
+WROOM-32UEPhysicalDimensions
+• ModifiedthenotebelowFigure15ReflowProfile
+• UpdatedthetrademarkfromTWAI™toTWAI®
+• Updatedthetable16CurrentConsumptionDependingonRFModes
+2020-11-02 v1.1 • AddedanotetoEPADinSection11.1PCBLandPattern
+• UpdatedthenotetoRCcircuitinSection9PeripheralSchematics
+2020-05-29 v1.0 Officialrelease
+2020-05-18 v0.5 Preliminaryrelease
+EspressifSystems 51 ESP32-WROOM-32E&WROOM-32UEDatasheetv2.0
+SubmitDocumentationFeedback
+
+
+## Page 52
+
+Disclaimer and Copyright Notice
+Informationinthisdocument,includingURLreferences,issubjecttochangewithoutnotice.
+ALLTHIRDPARTY’SINFORMATIONINTHISDOCUMENTISPROVIDEDASISWITHNOWARRANTIESTOITSAUTHENTICITYAND
+ACCURACY.
+NOWARRANTYISPROVIDEDTOTHISDOCUMENTFORITSMERCHANTABILITY,NON-INFRINGEMENT,FITNESSFORANYPARTICULAR
+PURPOSE,NORDOESANYWARRANTYOTHERWISEARISINGOUTOFANYPROPOSAL,SPECIFICATIONORSAMPLE.
+Allliability,includingliabilityforinfringementofanyproprietaryrights,relatingtouseofinformationinthisdocumentisdisclaimed. No
+licensesexpressorimplied,byestoppelorotherwise,toanyintellectualpropertyrightsaregrantedherein.
+TheWi-FiAllianceMemberlogoisatrademarkoftheWi-FiAlliance.TheBluetoothlogoisaregisteredtrademarkofBluetoothSIG.
+Alltradenames, trademarksandregisteredtrademarksmentionedinthisdocumentarepropertyoftheirrespectiveowners, andare
+herebyacknowledged.
+Copyright©2025EspressifSystems(Shanghai)Co.,Ltd.Allrightsreserved.
+www.espressif.com

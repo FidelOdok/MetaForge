@@ -1,0 +1,98 @@
+# MET-470 knowledge-base search evaluation set.
+#
+# 20 natural-language queries (5 easy / 10 medium / 5 hard) mapped to the
+# component(s) in the committed datasheet corpus (manifest.yaml) that a good
+# result should surface. ``scripts/datasheets/run_kb_eval.py`` runs each query
+# against a populated knowledge base and scores hit@k: a query passes when at
+# least one expected MPN appears in the top-k results. Target: >= 80% pass.
+#
+# Matching is by MPN substring against each hit's source_path (the ingested
+# fixtures are named <mpn-lower>.txt) and content, case-insensitive.
+target_pass_rate: 0.80
+default_top_k: 10
+queries:
+  # --- easy: direct, near-verbatim intent ---
+  - id: e1
+    tier: easy
+    query: low-power Bluetooth Low Energy SoC
+    expected_mpns: [nRF52840]
+  - id: e2
+    tier: easy
+    query: WiFi and Bluetooth wireless module
+    expected_mpns: [ESP32-WROOM-32, ESP32-WROOM-32E]
+  - id: e3
+    tier: easy
+    query: temperature humidity and pressure sensor
+    expected_mpns: [BME280]
+  - id: e4
+    tier: easy
+    query: stand-alone CAN bus controller with SPI
+    expected_mpns: [MCP2515]
+  - id: e5
+    tier: easy
+    query: step-down buck switching regulator
+    expected_mpns: [TPS62840, LM2596]
+
+  # --- medium: requires light inference over specs ---
+  - id: m1
+    tier: medium
+    query: ultra low quiescent current DC-DC converter for battery devices
+    expected_mpns: [TPS62840]
+  - id: m2
+    tier: medium
+    query: high performance Cortex-M7 microcontroller with lots of flash
+    expected_mpns: [STM32H723VGT6]
+  - id: m3
+    tier: medium
+    query: dual-core Cortex-M0+ microcontroller with programmable IO
+    expected_mpns: [RP2040]
+  - id: m4
+    tier: medium
+    query: Cortex-M4F microcontroller with floating point unit
+    expected_mpns: [TM4C123GH6PM]
+  - id: m5
+    tier: medium
+    query: low-power 32-bit Cortex-M0+ MCU with USB
+    expected_mpns: [ATSAMD21G18]
+  - id: m6
+    tier: medium
+    query: 802.11n WiFi system on chip
+    expected_mpns: [ESP32-WROOM-32, ESP32-WROOM-32E]
+  - id: m7
+    tier: medium
+    query: barometric pressure sensor with I2C interface
+    expected_mpns: [BME280]
+  - id: m8
+    tier: medium
+    query: 3 amp output switching regulator
+    expected_mpns: [LM2596]
+  - id: m9
+    tier: medium
+    query: BLE 5 radio with USB and ARM TrustZone
+    expected_mpns: [nRF52840]
+  - id: m10
+    tier: medium
+    query: automotive qualified CAN interface controller
+    expected_mpns: [MCP2515]
+
+  # --- hard: abstract / derived intent ---
+  - id: h1
+    tier: hard
+    query: maximize battery life on a sleepy sensor node power supply
+    expected_mpns: [TPS62840]
+  - id: h2
+    tier: hard
+    query: chip for a low-power wireless mesh sensor
+    expected_mpns: [nRF52840, ESP32-WROOM-32, ESP32-WROOM-32E]
+  - id: h3
+    tier: hard
+    query: microcontroller with rich motor-control PWM and many timers
+    expected_mpns: [TM4C123GH6PM, STM32H723VGT6]
+  - id: h4
+    tier: hard
+    query: flexible programmable IO for custom digital interfaces
+    expected_mpns: [RP2040]
+  - id: h5
+    tier: hard
+    query: entry-level ARM MCU for a USB MIDI controller
+    expected_mpns: [ATSAMD21G18]
