@@ -18,6 +18,7 @@ from digital_twin.memory.pgvector_store import (
     _parse_delete_count,
     _row_to_experience,
     _vector_literal,
+    schema_statements,
 )
 
 
@@ -104,3 +105,41 @@ def test_row_to_experience_handles_dict_metadata():
 def test_constructor_defaults_embedding_dim():
     store = PgVectorExperienceStore(dsn="postgresql://example")
     assert store._embedding_dim == 384  # noqa: SLF001 — testing the default
+
+
+# ---------------------------------------------------------------------------
+# Schema DDL (MET-457) — verifiable without a live database
+# ---------------------------------------------------------------------------
+
+
+def test_schema_statements_create_table_and_extension():
+    stmts = schema_statements(384)
+    joined = "\n".join(stmts)
+    assert "CREATE EXTENSION IF NOT EXISTS vector" in joined
+    assert "CREATE TABLE IF NOT EXISTS agent_experiences" in joined
+
+
+def test_schema_statements_pins_embedding_dimension():
+    assert "embedding vector(1536)" in "\n".join(schema_statements(1536))
+    assert "embedding vector(384)" in "\n".join(schema_statements(384))
+
+
+def test_schema_statements_metadata_is_jsonb():
+    assert "metadata JSONB" in "\n".join(schema_statements(384))
+
+
+def test_schema_statements_includes_ivfflat_cosine_index():
+    joined = "\n".join(schema_statements(384))
+    assert "USING ivfflat (embedding vector_cosine_ops)" in joined
+    assert "WITH (lists = 100)" in joined
+
+
+def test_schema_statements_honors_custom_ivfflat_lists():
+    assert "WITH (lists = 250)" in "\n".join(schema_statements(384, ivfflat_lists=250))
+
+
+def test_schema_statements_index_targets_searchable_columns():
+    joined = "\n".join(schema_statements(384))
+    assert "idx_agent_experiences_run" in joined
+    assert "idx_agent_experiences_project" in joined
+    assert "idx_agent_experiences_embedding" in joined
