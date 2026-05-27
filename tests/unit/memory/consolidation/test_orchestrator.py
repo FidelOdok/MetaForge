@@ -166,3 +166,70 @@ async def test_orchestrator_resets_writer_counters_per_run():
     # resets per-pass counters so the report reflects this pass only.
     assert second.written_by_theme[ConsolidationTheme.MECHANICAL_VALIDATION] == 1
     assert writer.written_by_theme()[ConsolidationTheme.MECHANICAL_VALIDATION] == 1
+
+
+@pytest.mark.asyncio
+async def test_archiver_moves_consolidated_batch_to_cold_storage():
+    from digital_twin.memory.consolidation.archiver import (
+        EventArchiver,
+        InMemoryExperienceArchive,
+    )
+
+    exp_store = InMemoryExperienceStore()
+    for _ in range(3):
+        await exp_store.store(_exp("stress_check"))
+
+    llm = StubLLMClient(
+        responses=[
+            {
+                "narrative": "A reasonably long lesson learned about stress runs",
+                "confidence": 0.9,
+                "kind": "principle",
+            }
+        ]
+    )
+    archive = InMemoryExperienceArchive()
+    insight_store = InMemoryInsightStore()
+    orchestrator = ConsolidationOrchestrator(
+        fetcher=InMemoryEventFetcher(exp_store),
+        grouper=EventGrouper(min_group_size=2),
+        synthesizer=InsightSynthesizer(llm),
+        validator=InsightValidator(),
+        writer=SemanticMemoryWriter(insight_store),
+        archiver=EventArchiver(exp_store, archive),
+    )
+
+    report = await orchestrator.run()
+
+    assert report.fetched_count == 3
+    assert report.archived_count == 3
+    # Hot memory is cleared; the batch now lives in cold storage.
+    assert len(archive.archived) == 3
+    # A second pass finds nothing left to fetch (active forgetting).
+    second = await orchestrator.run()
+    assert second.fetched_count == 0
+    assert second.archived_count == 0
+
+
+@pytest.mark.asyncio
+async def test_no_archiver_leaves_experiences_in_hot_store():
+    exp_store = InMemoryExperienceStore()
+    for _ in range(3):
+        await exp_store.store(_exp("stress_check"))
+    llm = StubLLMClient(
+        responses=[
+            {
+                "narrative": "A reasonably long lesson learned about stress runs",
+                "confidence": 0.9,
+                "kind": "principle",
+            }
+        ]
+    )
+    orchestrator, _writer, _store = _orchestrator(experience_store=exp_store, llm=llm)
+
+    report = await orchestrator.run()
+
+    assert report.archived_count == 0
+    # Without an archiver wired, a second pass still sees the batch.
+    second = await orchestrator.run()
+    assert second.fetched_count == 3

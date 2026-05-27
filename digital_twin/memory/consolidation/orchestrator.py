@@ -17,6 +17,7 @@ from uuid import UUID
 
 import structlog
 
+from digital_twin.memory.consolidation.archiver import EventArchiver
 from digital_twin.memory.consolidation.contradiction_detector import ContradictionDetector
 from digital_twin.memory.consolidation.decay import ConfidenceDecay
 from digital_twin.memory.consolidation.fetcher import (
@@ -69,6 +70,9 @@ class ConsolidationReport:
     contradictions: list[str] = field(default_factory=list)
     """Human-readable records of synthesized insights that conflict with the
     existing corpus (populated only when a ContradictionDetector is wired)."""
+    archived_count: int = 0
+    """Stage 6 — how many fetched experiences were moved to cold storage and
+    cleared from hot memory (populated only when an EventArchiver is wired)."""
 
 
 class ConsolidationOrchestrator:
@@ -86,6 +90,7 @@ class ConsolidationOrchestrator:
         decay: ConfidenceDecay | None = None,
         janitor_marks_stale: bool = False,
         contradiction_detector: ContradictionDetector | None = None,
+        archiver: EventArchiver | None = None,
         collector: Any = None,
     ) -> None:
         self._fetcher = fetcher
@@ -121,6 +126,11 @@ class ConsolidationOrchestrator:
         # insight is still written (newest lesson wins); the contradiction
         # is surfaced for review rather than silently dropped.
         self._contradiction_detector = contradiction_detector
+        # MET-463: stage 6. When wired, a BACKGROUND/PROACTIVE pass moves the
+        # fetched experiences to cold storage and clears them from the hot
+        # store once synthesis is done (active forgetting). Opt-in — when
+        # None the pass never touches the experience store.
+        self._archiver = archiver
 
     async def run(
         self,
@@ -223,6 +233,14 @@ class ConsolidationOrchestrator:
             await self._writer.write(insight)
             accepted.append(insight)
 
+        # MET-463 stage 6: move the consolidated batch to cold storage and
+        # clear it from hot memory. Opt-in; integrity is enforced inside the
+        # archiver (no hot-store delete without a successful archive write).
+        archived_count = 0
+        if self._archiver is not None:
+            archive_result = await self._archiver.archive_experiences(experiences)
+            archived_count = archive_result.archived_count
+
         written = self._writer.written_by_theme()
         report = ConsolidationReport(
             mode=request.mode,
@@ -235,6 +253,7 @@ class ConsolidationOrchestrator:
             rejected_reasons=rejected,
             contradictions=contradictions,
             insights=accepted,
+            archived_count=archived_count,
         )
         span.set_attribute("memory.accepted_count", report.accepted_count)
         span.set_attribute("memory.rejected_count", report.rejected_count)

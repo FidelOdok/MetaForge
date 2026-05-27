@@ -9,11 +9,17 @@ This package holds the stage-by-stage implementation:
 * ``themes`` — ``ConsolidationTheme`` enum + rule-based classifier
 * ``grouper`` — ``EventGrouper`` clusters experiences by theme
 * ``fetcher`` — ``EventFetcher`` Protocol + in-memory adapter
-
-Synthesizer / validator / writer / archiver land in subsequent commits
-once the deterministic backbone is testable end-to-end.
+* ``synthesizer`` / ``validator`` / ``writer`` — synthesize, gate, persist
+* ``archiver`` — ``EventArchiver`` moves consolidated experiences to cold
+  storage and clears hot memory (stage 6)
 """
 
+from digital_twin.memory.consolidation.archiver import (
+    ArchiveResult,
+    EventArchiver,
+    ExperienceArchive,
+    InMemoryExperienceArchive,
+)
 from digital_twin.memory.consolidation.contradiction_detector import (
     MAX_COMPARISON_INSIGHTS,
     ContradictionDetector,
@@ -97,6 +103,7 @@ from digital_twin.memory.consolidation.writer import (
 )
 
 __all__ = [
+    "ArchiveResult",
     "ConfidenceDecay",
     "ContradictionDetector",
     "ContradictionResult",
@@ -136,6 +143,9 @@ __all__ = [
     "ConsolidationWorkflowOutput",
     "DEFAULT_INTERVAL_SECONDS",
     "DualWriteInsightStore",
+    "EventArchiver",
+    "ExperienceArchive",
+    "InMemoryExperienceArchive",
     "Neo4jInsightStore",
     "Neo4jInsightStoreError",
     "PgVectorInsightStore",
