@@ -150,6 +150,7 @@ class KnowledgeService(Protocol):
         rerank: bool = False,
         actor_id: str | None = None,
         include_historical: bool = False,
+        hybrid: bool = False,
     ) -> list[SearchHit]:
         """Search the knowledge base.
 
@@ -160,6 +161,13 @@ class KnowledgeService(Protocol):
         ``superseded=True`` when their parent ``Datasheet`` gains an
         incoming SUPERSEDES edge; admin / audit queries pass True to
         bypass the filter and see historical revisions too.
+
+        ``hybrid`` (MET-465): when True, fuse the vector similarity
+        ranking with a lexical BM25 ranking over the candidate chunks
+        (reciprocal rank fusion). Improves recall on exact tokens —
+        part numbers, spec values — that pure embedding search ranks
+        poorly. Dependency-free and cheap, unlike the cross-encoder
+        ``rerank``; the two can be combined.
         """
         ...
 
