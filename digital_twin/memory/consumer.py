@@ -7,6 +7,8 @@ embedding, and idempotent replay via ``delete_by_run``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import structlog
 
 from digital_twin.knowledge.embedding_service import EmbeddingService
@@ -142,3 +144,72 @@ class ExperienceConsumer(EventSubscriber):
                 agent_code=stored.agent_code,
                 success=stored.success,
             )
+
+    async def index_batch(self, events: Sequence[Event]) -> int:
+        """Bulk-index a batch of events with a single embedding round-trip.
+
+        The batch counterpart to ``on_event`` for backfill / replay jobs
+        that already hold a slice of events: each event is importance-scored
+        and gated, then the survivors are embedded together in one
+        ``embed_batch`` call (MET-459's "don't embed one-at-a-time") before
+        being persisted. A failed embedding batch or an individual store
+        error is logged and never propagates — partial progress is kept and
+        the count of successfully-stored experiences is returned.
+
+        This path does not run the per-run idempotent-replay dance that the
+        streaming ``on_event`` does (that tracks STARTED→terminal pairs);
+        bulk callers are expected to scope their own event set.
+        """
+        with tracer.start_as_current_span("experience_consumer.index_batch") as span:
+            span.set_attribute("memory.batch_input", len(events))
+            scored_pairs: list[tuple[Event, float]] = []
+            for event in events:
+                run_id = str(event.data.get("run_id", "")) if event.data else ""
+                if not run_id:
+                    continue
+                # Honour the same STARTED-event policy as the streaming path:
+                # start records carry little signal and are skipped unless
+                # explicitly enabled.
+                if event.type == EventType.AGENT_TASK_STARTED and not self._index_started_events:
+                    continue
+                score = score_importance(event, weights=self._weights)
+                if score.total < self._min_importance:
+                    continue
+                scored_pairs.append((event, score.total))
+
+            if not scored_pairs:
+                span.set_attribute("memory.indexed_count", 0)
+                return 0
+
+            try:
+                experiences = await self._embedder.build_experiences_batch(scored_pairs)
+            except Exception as exc:
+                span.record_exception(exc)
+                logger.error(
+                    "experience_consumer_batch_embed_failed",
+                    batch_size=len(scored_pairs),
+                    error=str(exc),
+                )
+                return 0
+
+            indexed = 0
+            for experience in experiences:
+                try:
+                    await self._store.store(experience)
+                    indexed += 1
+                except Exception as exc:
+                    span.record_exception(exc)
+                    logger.error(
+                        "experience_consumer_batch_store_failed",
+                        experience_id=str(experience.id),
+                        error=str(exc),
+                    )
+
+            span.set_attribute("memory.indexed_count", indexed)
+            logger.info(
+                "experience_consumer_batch_indexed",
+                requested=len(events),
+                gated=len(scored_pairs),
+                indexed=indexed,
+            )
+            return indexed
