@@ -34,7 +34,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -50,6 +50,9 @@ from digital_twin.knowledge.service import (
 from digital_twin.knowledge.types import KnowledgeType
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
+
+if TYPE_CHECKING:
+    from digital_twin.knowledge.llm_property_extractor import PropertyLLM
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.lightrag_service")
@@ -381,6 +384,10 @@ class LightRAGKnowledgeService:
         # ``extract_properties`` raises ``RuntimeError`` if called
         # before set_twin lands.
         self._twin: Any = None
+        # MET-462: optional LLM for Tier-2/3 property extraction. Late-bound
+        # via ``set_property_llm``. When None, ``extract_properties`` is
+        # Tier-1 (verbatim) only — unchanged from MET-433/445 behaviour.
+        self._property_llm: PropertyLLM | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -395,6 +402,19 @@ class LightRAGKnowledgeService:
         """
         self._twin = twin
         logger.info("knowledge_service_twin_bound", twin=type(twin).__name__)
+
+    def set_property_llm(self, llm: PropertyLLM | None) -> None:
+        """Bind the Tier-2/3 extraction LLM after construction (MET-462).
+
+        When wired, ``extract_properties`` falls back to the LLM for any
+        property Tier-1 verbatim matching misses. Optional — the gateway /
+        MCP entrypoint binds it only when an LLM provider is configured.
+        """
+        self._property_llm = llm
+        logger.info(
+            "knowledge_service_property_llm_bound",
+            llm=type(llm).__name__ if llm is not None else None,
+        )
 
     async def initialize(self) -> None:
         """Set up the LightRAG instance + pgvector backends.
@@ -1350,14 +1370,17 @@ class LightRAGKnowledgeService:
         *,
         aliases: dict[str, list[str]] | None = None,
     ) -> ExtractedProperties:
-        """Tier-1 typed-property extraction for the current datasheet of ``mpn`` (MET-433).
+        """Typed-property extraction for the current datasheet of ``mpn`` (MET-433/462).
 
-        Thin wrapper around ``extract_properties_for_mpn``: looks up
-        the head-of-supersedes-chain datasheet via the bound
-        ``TwinAPI``, reads its ``metadata["tables"]``, and runs each
-        requested property through Tier-1 matching. Span attributes
-        include the MPN, requested property count, and the hit/miss
-        per property so dashboards can show extraction success rates.
+        Wraps ``extract_properties_for_mpn``: looks up the
+        head-of-supersedes-chain datasheet via the bound ``TwinAPI``,
+        reads its ``metadata["tables"]``, and runs each requested
+        property through Tier-1 verbatim matching. When a Tier-2/3 LLM
+        is bound via ``set_property_llm`` (MET-462), properties Tier-1
+        misses fall back to the LLM (``llm_inferred`` / ``derived``).
+        Span attributes include the MPN, requested property count, and
+        the hit/miss per property so dashboards can show extraction
+        success rates.
 
         Raises ``RuntimeError`` when ``set_twin`` hasn't been called —
         callers in the gateway and the standalone MCP entrypoint are
@@ -1377,7 +1400,10 @@ class LightRAGKnowledgeService:
         with tracer.start_as_current_span("lightrag.extract_properties") as span:
             span.set_attribute("knowledge.mpn", mpn)
             span.set_attribute("knowledge.property_count", len(properties))
-            result = await extract_properties_for_mpn(self._twin, mpn, properties, aliases=aliases)
+            span.set_attribute("knowledge.llm_tier_enabled", self._property_llm is not None)
+            result = await extract_properties_for_mpn(
+                self._twin, mpn, properties, aliases=aliases, llm=self._property_llm
+            )
             span.set_attribute("knowledge.mpn_found", result.mpn_found)
             if result.mpn_found:
                 span.set_attribute(

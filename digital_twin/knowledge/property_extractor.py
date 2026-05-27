@@ -40,6 +40,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from digital_twin.knowledge.llm_property_extractor import PropertyLLM
     from digital_twin.knowledge.service import ExtractedProperties
 
 
@@ -147,6 +148,7 @@ async def extract_properties_for_mpn(
     properties: list[str],
     *,
     aliases: dict[str, list[str]] | None = None,
+    llm: PropertyLLM | None = None,
 ) -> ExtractedProperties:
     """Resolve ``mpn`` to its current datasheet and extract typed values.
 
@@ -157,6 +159,11 @@ async def extract_properties_for_mpn(
 
     ``aliases`` maps a requested property name to alternative labels
     the same Tier-1 matcher should accept.
+
+    ``llm`` (MET-462) enables the Tier-2/3 fallback: when Tier-1 verbatim
+    matching can't locate a property and the datasheet carries prose text,
+    the property is re-asked of the LLM (``llm_inferred`` / ``derived``).
+    When ``llm`` is ``None`` the behaviour is Tier-1-only, unchanged.
 
     Returns an ``ExtractedProperties`` with one ``ExtractedProperty``
     per input property name (input order preserved). When no current
@@ -178,10 +185,25 @@ async def extract_properties_for_mpn(
 
     tables = (datasheet.metadata or {}).get("tables") or []
     alias_map = aliases or {}
-    items = [
-        extract_property_from_tables(tables, name, aliases=alias_map.get(name))
-        for name in properties
-    ]
+    datasheet_text = _datasheet_text(datasheet) if llm is not None else ""
+
+    items: list[ExtractedProperty] = []
+    for name in properties:
+        tier1 = extract_property_from_tables(tables, name, aliases=alias_map.get(name))
+        if tier1.found or llm is None or not datasheet_text:
+            items.append(tier1)
+            continue
+        # Tier-1 miss with an LLM wired and prose available → Tier-2/3.
+        from digital_twin.knowledge.llm_property_extractor import infer_property
+
+        items.append(
+            await infer_property(
+                llm,
+                mpn=mpn,
+                property_name=name,
+                datasheet_text=datasheet_text,
+            )
+        )
 
     return ExtractedProperties(
         mpn=mpn,
@@ -191,6 +213,33 @@ async def extract_properties_for_mpn(
         datasheet_source_path=datasheet.source_url or datasheet.source_path or None,
         items=items,
     )
+
+
+def _datasheet_text(datasheet: Any) -> str:
+    """Best-effort prose text for the Tier-2/3 LLM pass.
+
+    Prefers an explicit full-text field on ``metadata`` (``text`` /
+    ``full_text`` / ``raw_text``); falls back to flattening any
+    structured tables so a table-only datasheet still gives the model
+    something to reason over. Returns ``""`` when nothing is available —
+    the caller then skips the LLM pass.
+    """
+    metadata = datasheet.metadata or {}
+    for key in ("text", "full_text", "raw_text"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    tables = metadata.get("tables") or []
+    parts: list[str] = []
+    for table in tables:
+        heading = table.get("heading")
+        if heading:
+            parts.append(str(heading))
+        for row in table.get("rows") or []:
+            cells = [str(c) for c in row if c is not None and str(c).strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
