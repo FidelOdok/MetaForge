@@ -142,9 +142,7 @@ async def test_handler_rejects_missing_goal(wired_server):
 async def test_handler_rejects_non_integer_limit(wired_server):
     server, _store, _embeddings = wired_server
     with pytest.raises(ValueError, match="'limit' must be an integer"):
-        await server.handle_retrieve_similar_experience(
-            {"goal": "alpha", "limit": "not-a-number"}
-        )
+        await server.handle_retrieve_similar_experience({"goal": "alpha", "limit": "not-a-number"})
 
 
 @pytest.mark.asyncio

@@ -23,9 +23,7 @@ class FakeEmbeddingService(EmbeddingService):
 
     async def embed(self, text: str) -> list[float]:
         digest = hashlib.sha256(text.encode("utf-8")).digest()
-        return [
-            (digest[i] - 128) / 128.0 for i in range(self.DIM)
-        ]
+        return [(digest[i] - 128) / 128.0 for i in range(self.DIM)]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [await self.embed(t) for t in texts]

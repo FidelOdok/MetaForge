@@ -395,9 +395,7 @@ async def bootstrap_tool_registry(
             logger.info(
                 "memory_mcp_adapter_skipped",
                 reason=(
-                    "no memory_client supplied"
-                    if memory_client is None
-                    else "disabled via config"
+                    "no memory_client supplied" if memory_client is None else "disabled via config"
                 ),
             )
 
