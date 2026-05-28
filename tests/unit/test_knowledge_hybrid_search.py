@@ -194,3 +194,65 @@ def test_invalid_weights_rejected():
         HybridRanker(mode="weighted", lexical_weight=0.0, semantic_weight=0.0)
     with pytest.raises(ValueError, match="non-negative"):
         HybridRanker(mode="weighted", lexical_weight=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# Wildcard partial-spec matching (MET-467 Task 1)
+# ---------------------------------------------------------------------------
+
+
+def test_tokenize_query_preserves_trailing_wildcard():
+    from digital_twin.knowledge.hybrid_search import _tokenize_query
+
+    assert _tokenize_query("STM32* prefix match") == ["stm32*", "prefix", "match"]
+    # Bare ``*`` is dropped (the regex requires alphanumeric first).
+    assert _tokenize_query("* alone") == ["alone"]
+
+
+def test_bm25_wildcard_matches_documents_with_prefix_token():
+    from digital_twin.knowledge.hybrid_search import _bm25_scores, _tokenize
+
+    docs = [
+        _tokenize("stm32f4 microcontroller cortex-m4"),
+        _tokenize("stm32h7 high-performance mcu"),
+        _tokenize("nrf52840 bluetooth soc"),
+    ]
+    scores = _bm25_scores("stm32*", docs)
+    # The two STM32 docs score; the nRF doc scores zero.
+    assert scores[0] > 0
+    assert scores[1] > 0
+    assert scores[2] == 0.0
+
+
+def test_bm25_wildcard_with_no_matching_prefix_scores_zero():
+    from digital_twin.knowledge.hybrid_search import _bm25_scores, _tokenize
+
+    docs = [_tokenize("resistor capacitor inductor")]
+    assert _bm25_scores("stm32*", docs) == [0.0]
+
+
+def test_bm25_exact_terms_unchanged_by_wildcard_refactor():
+    from digital_twin.knowledge.hybrid_search import _bm25_scores, _tokenize
+
+    docs = [
+        _tokenize("the quick brown fox"),
+        _tokenize("low power wifi module esp32"),
+        _tokenize("generic capacitor"),
+    ]
+    scores = _bm25_scores("low power wifi", docs)
+    assert scores[1] > scores[0]
+    assert scores[1] > scores[2]
+
+
+def test_fuse_wildcard_promotes_prefix_match():
+    # Hit 1 has the only STM32-family token; vector score is mid-pack.
+    # Wildcard query "stm32*" should pull it above non-matching hits.
+    h1 = _hit("STM32H7 high performance microcontroller", 0.55, source="hit-stm.pdf")
+    h2 = _hit("thermal paste application notes", 0.92, source="hit-noise1.pdf")
+    h3 = _hit("generic resistor array", 0.85, source="hit-noise2.pdf")
+
+    ranker = HybridRanker(mode="weighted", lexical_weight=1.0, semantic_weight=0.0)
+    fused = [h.source_path for h in ranker.fuse("STM32*", [h2, h3, h1])]
+
+    # Lexical-only weighting must put the STM32 doc first via wildcard match.
+    assert fused[0] == "hit-stm.pdf"

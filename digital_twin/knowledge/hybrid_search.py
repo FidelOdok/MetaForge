@@ -62,11 +62,24 @@ DEFAULT_SYNONYMS: dict[str, list[str]] = {
 }
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_QUERY_TOKEN_RE = re.compile(r"[a-z0-9]+\*?")
 
 
 def _tokenize(text: str) -> list[str]:
     """Lowercase + alphanumeric tokenization (keeps part-number digits)."""
     return _TOKEN_RE.findall(text.lower())
+
+
+def _tokenize_query(query: str) -> list[str]:
+    """Tokenize a query, preserving trailing ``*`` wildcards (MET-467 Task 1).
+
+    A trailing ``*`` makes the preceding prefix match any document token
+    that starts with it — useful for partial-spec searches like
+    ``STM32*`` or ``TPS62*``. Documents are still tokenized via
+    :func:`_tokenize` (which never produces ``*``), so wildcards only
+    appear on the query side.
+    """
+    return _QUERY_TOKEN_RE.findall(query.lower())
 
 
 def expand_query(query: str, synonyms: dict[str, list[str]]) -> str:
@@ -102,22 +115,50 @@ def _bm25_scores(query: str, documents: list[list[str]]) -> list[float]:
     The candidate hit set *is* the corpus — IDF is computed over the
     documents being ranked, which is what we want when re-ranking a
     retrieved shortlist. Returns one score per document, in order.
+
+    A query term ending in ``*`` (MET-467 wildcard) matches any document
+    token starting with the prefix; the matching tokens contribute their
+    summed term frequency to that wildcard's tf and document frequency,
+    so the BM25 math stays self-consistent.
     """
     n = len(documents)
     if n == 0:
         return []
-    query_terms = set(_tokenize(query))
+    # Dedupe while preserving form (``stm32`` vs ``stm32*`` are distinct).
+    query_terms: list[str] = []
+    seen_terms: set[str] = set()
+    for tok in _tokenize_query(query):
+        if not tok or tok == "*" or tok in seen_terms:
+            continue
+        seen_terms.add(tok)
+        query_terms.append(tok)
     if not query_terms:
         return [0.0] * n
 
     doc_lengths = [len(doc) for doc in documents]
     avgdl = (sum(doc_lengths) / n) or 1.0
-    # Document frequency per query term.
+
+    # Resolve each query term to the set of concrete document tokens it
+    # matches. Exact terms map to ``{term}`` (or ``{}`` if absent from
+    # the corpus); wildcard terms expand to every doc token starting
+    # with the prefix.
+    all_doc_tokens: set[str] = set()
+    for doc in documents:
+        all_doc_tokens.update(doc)
+    concrete: dict[str, set[str]] = {}
+    for term in query_terms:
+        if term.endswith("*"):
+            prefix = term[:-1]
+            concrete[term] = {tok for tok in all_doc_tokens if tok.startswith(prefix)}
+        else:
+            concrete[term] = {term} if term in all_doc_tokens else set()
+
+    # df = number of docs containing ANY concrete token for the term.
     df: Counter[str] = Counter()
     for doc in documents:
-        seen = set(doc)
-        for term in query_terms:
-            if term in seen:
+        doc_set = set(doc)
+        for term, matched in concrete.items():
+            if matched and doc_set & matched:
                 df[term] += 1
 
     scores: list[float] = []
@@ -125,7 +166,8 @@ def _bm25_scores(query: str, documents: list[list[str]]) -> list[float]:
         tf = Counter(doc)
         score = 0.0
         for term in query_terms:
-            term_freq = tf.get(term, 0)
+            matched = concrete[term]
+            term_freq = sum(tf.get(t, 0) for t in matched)
             if term_freq == 0:
                 continue
             # BM25 idf with the +1 guard so it never goes negative.
