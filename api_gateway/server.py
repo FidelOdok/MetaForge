@@ -286,10 +286,41 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     if db_url:
         try:
             dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
-            knowledge_service = create_knowledge_service(
-                "lightrag",
+
+            # MET-466 Task 4: wire the OpenRouter llm_model_func into
+            # LightRAG so entity extraction actually runs. Without this,
+            # ``LightRAGConfig.llm_model_func`` falls back to the no-op
+            # stub and LightRAG runs in naive vector mode — ingest still
+            # chunks and embeds, but produces ``0 Ent + 0 Rel`` per
+            # chunk and the entity tables stay empty.
+            from digital_twin.knowledge.lightrag_service import LightRAGConfig
+
+            llm_model_func: Any = None
+            llm_provider = "noop"
+            if os.environ.get("OPEN_ROUTER_API_KEY"):
+                try:
+                    from digital_twin.knowledge.openrouter_lightrag import (
+                        OpenRouterLightRAGConfig,
+                        build_openrouter_llm_model_func,
+                    )
+
+                    or_cfg = OpenRouterLightRAGConfig.from_env()
+                    llm_model_func = build_openrouter_llm_model_func(or_cfg)
+                    llm_provider = or_cfg.primary_model
+                except Exception as or_exc:  # noqa: BLE001
+                    logger.warning(
+                        "knowledge_service_openrouter_wiring_failed",
+                        error=str(or_exc),
+                    )
+
+            lr_config = LightRAGConfig(
                 working_dir=os.environ.get("METAFORGE_LIGHTRAG_WORKDIR", "./.lightrag-storage"),
                 postgres_dsn=dsn,
+                llm_model_func=llm_model_func,
+            )
+            knowledge_service = create_knowledge_service(
+                "lightrag",
+                config=lr_config,
                 reranker_enabled=reranker_enabled,
             )
             await knowledge_service.initialize()  # type: ignore[attr-defined]
@@ -297,6 +328,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             logger.info(
                 "knowledge_service_lightrag_initialized",
                 reranker_enabled=reranker_enabled,
+                llm_provider=llm_provider,
             )
         except Exception as exc:
             logger.warning("knowledge_service_lightrag_failed", error=str(exc))
