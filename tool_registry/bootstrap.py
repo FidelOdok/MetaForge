@@ -408,6 +408,79 @@ async def bootstrap_tool_registry(
                 ),
             )
 
+        # ----- Distributor MCP adapters (MET-434) -----
+        # Self-constructing clients keyed on env vars. The HTTP code
+        # lives in tool_registry/tools/{digikey,mouser,nexar}/adapter.py;
+        # this block wraps each one in a DistributorMcpServer if the
+        # creds are present, otherwise skips. Adding Arrow / Avnet is a
+        # one-line addition to ``_DISTRIBUTOR_FACTORIES``.
+        from tool_registry.tools.distributors.base import DistributorAdapter
+        from tool_registry.tools.distributors.mcp_adapter import DistributorMcpServer
+
+        def _make_digikey() -> DistributorAdapter | None:
+            if not (
+                os.environ.get("DIGIKEY_CLIENT_ID") and os.environ.get("DIGIKEY_CLIENT_SECRET")
+            ):
+                return None
+            from tool_registry.tools.digikey.adapter import DigiKeyAdapter
+
+            return DigiKeyAdapter()
+
+        def _make_mouser() -> DistributorAdapter | None:
+            if not os.environ.get("MOUSER_API_KEY"):
+                return None
+            from tool_registry.tools.mouser.adapter import MouserAdapter
+
+            return MouserAdapter()
+
+        def _make_nexar() -> DistributorAdapter | None:
+            if not (os.environ.get("NEXAR_CLIENT_ID") and os.environ.get("NEXAR_CLIENT_SECRET")):
+                return None
+            from tool_registry.tools.nexar.adapter import NexarAdapter
+
+            return NexarAdapter()
+
+        _DISTRIBUTOR_FACTORIES = (
+            ("digikey", _make_digikey, "DIGIKEY_CLIENT_ID + DIGIKEY_CLIENT_SECRET"),
+            ("mouser", _make_mouser, "MOUSER_API_KEY"),
+            ("nexar", _make_nexar, "NEXAR_CLIENT_ID + NEXAR_CLIENT_SECRET"),
+        )
+
+        for distributor_id, factory, creds_hint in _DISTRIBUTOR_FACTORIES:
+            if not _is_adapter_enabled(distributor_id):
+                skipped.append(distributor_id)
+                logger.info(
+                    f"{distributor_id}_mcp_adapter_skipped",
+                    reason="disabled via config",
+                )
+                continue
+            try:
+                adapter = factory()
+            except Exception as exc:
+                logger.error(f"{distributor_id}_mcp_adapter_construction_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append(distributor_id)
+                continue
+            if adapter is None:
+                skipped.append(distributor_id)
+                logger.info(
+                    f"{distributor_id}_mcp_adapter_skipped",
+                    reason=f"missing env vars: {creds_hint}",
+                )
+                continue
+            try:
+                server = DistributorMcpServer(adapter=adapter)
+                await registry.register_adapter(server)
+                registered.append(distributor_id)
+                logger.info(
+                    f"{distributor_id}_mcp_adapter_registered",
+                    distributor=adapter.name,
+                )
+            except Exception as exc:
+                logger.error(f"{distributor_id}_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append(distributor_id)
+
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))
         span.set_attribute("adapters.failed", len(failed))
