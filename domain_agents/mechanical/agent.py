@@ -65,6 +65,7 @@ from domain_agents.mechanical.writeback import (
     writeback_stress,
     writeback_tolerance,
 )
+from domain_agents.shared.experience_recorder import ExperienceRecorder
 from observability.tracing import get_tracer
 from shared.storage import FileStorageService
 from skill_registry.mcp_bridge import McpBridge
@@ -153,6 +154,23 @@ status, safety factors, and recommendations.
 Always validate that required parameters are available before calling a tool. \
 If parameters are missing, note what is needed in your recommendations.
 """
+
+
+def _summarize_result(result: TaskResult, request: TaskRequest) -> str:
+    """Build a one-line natural-language summary of a task outcome.
+
+    The summary is the text embedded into the agent_experiences row's
+    ``result_summary`` field — it's what ``memory.retrieve_similar_experience``
+    matches against. Keep it short and information-dense; the embedder
+    truncates at 8 K tokens but a single sentence is plenty.
+    """
+    status = "succeeded" if result.success else "failed"
+    summary = f"Mechanical agent {status} {request.task_type} ({len(result.skill_results)} skills)"
+    if result.errors:
+        summary += f"; errors: {'; '.join(result.errors[:2])}"
+    elif result.warnings:
+        summary += f"; warnings: {len(result.warnings)}"
+    return summary[:500]
 
 
 def _get_or_create_pydantic_agent() -> Any:
@@ -421,11 +439,15 @@ class MechanicalAgent:
         mcp: McpBridge,
         session_id: UUID | None = None,
         storage: FileStorageService | None = None,
+        experience_recorder: ExperienceRecorder | None = None,
     ) -> None:
         self.twin = twin
         self.mcp = mcp
         self.session_id = session_id or uuid4()
         self.storage = storage
+        # MET-454-followup: optional. When None the agent is silent —
+        # tests and air-gapped runs don't need a memory backend.
+        self._recorder = experience_recorder
         self.logger = logger.bind(agent="mechanical", session_id=str(self.session_id))
 
     async def run_task(self, request: TaskRequest) -> TaskResult:
@@ -434,6 +456,8 @@ class MechanicalAgent:
         If an LLM is configured, attempts PydanticAI-driven execution.
         Falls back to hardcoded dispatch on LLM unavailability or error.
         """
+        import time as _time
+
         with tracer.start_as_current_span("agent.execute") as span:
             span.set_attribute("agent.code", "mechanical")
             span.set_attribute("session.id", str(self.session_id))
@@ -445,11 +469,18 @@ class MechanicalAgent:
                 work_product_id=str(request.work_product_id),
             )
 
+            t0 = _time.monotonic()
+            result: TaskResult
+            error_msg: str | None = None
+            mode: str = "hardcoded"
+
             # Try PydanticAI path if LLM is available
             if is_llm_available() and request.task_type in self.SUPPORTED_TASKS:
                 try:
                     result = await self._run_with_llm(request)
                     span.set_attribute("agent.mode", "llm")
+                    mode = "llm"
+                    await self._record_experience(request, result, t0, mode, error_msg)
                     return result
                 except Exception as exc:
                     span.record_exception(exc)
@@ -460,7 +491,54 @@ class MechanicalAgent:
 
             # Hardcoded dispatch (fallback)
             span.set_attribute("agent.mode", "hardcoded")
-            return await self._run_hardcoded(request)
+            result = await self._run_hardcoded(request)
+            await self._record_experience(request, result, t0, mode, error_msg)
+            return result
+
+    async def _record_experience(
+        self,
+        request: TaskRequest,
+        result: TaskResult,
+        start_monotonic: float,
+        mode: str,
+        error_msg: str | None,
+    ) -> None:
+        """Persist one agent_experiences row (MET-454-followup).
+
+        Silent no-op when no recorder was injected. Recorder errors are
+        already swallowed by the implementation per the Protocol
+        contract — this guard is belt-and-suspenders so a misbehaving
+        recorder still can't break the task return.
+        """
+        import time as _time
+
+        if self._recorder is None:
+            return
+        duration = _time.monotonic() - start_monotonic
+        try:
+            await self._recorder.record(
+                run_id=str(self.session_id),
+                step_id=request.task_type,
+                agent_code="mechanical",
+                task_type=request.task_type,
+                success=getattr(result, "success", True),
+                duration_seconds=duration,
+                result_summary=_summarize_result(result, request),
+                error=error_msg,
+                project_id=None,
+                importance=0.5,
+                metadata={
+                    "mode": mode,
+                    "work_product_id": str(request.work_product_id),
+                    "parameters_keys": sorted(list(request.parameters.keys())),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — must never break the agent
+            self.logger.warning(
+                "agent_experience_record_failed",
+                error=str(exc),
+                task_type=request.task_type,
+            )
 
     async def _run_with_llm(self, request: TaskRequest) -> TaskResult:
         """Execute a task using PydanticAI agent with LLM reasoning."""

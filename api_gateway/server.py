@@ -748,7 +748,33 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Create agents — use active bridge for tool access (MET-306).
     # Defaults to RegistryMcpBridge in-process; switches to external MCP
     # server when METAFORGE_MCP_BRIDGE=http|stdio is set.
-    mech_agent = MechanicalAgent(twin=twin, mcp=active_bridge)
+    #
+    # MET-454-followup: inject an ExperienceRecorder when both the
+    # memory store and embedding service are available. Each agent task
+    # writes one ``agent_experiences`` row so
+    # ``memory.retrieve_similar_experience`` has traffic to learn from.
+    # When either dependency is absent (in-memory dev, unit tests), the
+    # agent runs silent — the Protocol injection is optional.
+    experience_recorder: Any = None
+    memory_store = getattr(app.state, "memory_store", None)
+    embedding_service = getattr(app.state, "embedding_service", None)
+    if memory_store is not None and embedding_service is not None:
+        try:
+            from digital_twin.memory.experience_recorder import MemoryExperienceRecorder
+
+            experience_recorder = MemoryExperienceRecorder(
+                store=memory_store,
+                embeddings=embedding_service,
+            )
+            logger.info("agent_experience_recorder_wired", agent="mechanical")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent_experience_recorder_wiring_failed", error=str(exc))
+
+    mech_agent = MechanicalAgent(
+        twin=twin,
+        mcp=active_bridge,
+        experience_recorder=experience_recorder,
+    )
     ee_agent = ElectronicsAgent(twin=twin, mcp=active_bridge)
 
     # Build a dependency graph from the full_validation workflow (most complex)
