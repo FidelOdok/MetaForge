@@ -170,12 +170,14 @@ def server() -> KnowledgeServer:
 
 
 class TestRegistration:
-    def test_registers_three_tools(self, server: KnowledgeServer) -> None:
+    def test_registers_four_tools(self, server: KnowledgeServer) -> None:
         # MET-433: knowledge.extract joins the search + ingest surface.
+        # MET-473: knowledge.populate_bom adds Auto-BOM ranking.
         assert set(server.tool_ids) == {
             "knowledge.search",
             "knowledge.ingest",
             "knowledge.extract",
+            "knowledge.populate_bom",
         }
 
     def test_search_manifest_shape(self, server: KnowledgeServer) -> None:

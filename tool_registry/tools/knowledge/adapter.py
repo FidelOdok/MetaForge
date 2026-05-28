@@ -76,6 +76,11 @@ _KNOWLEDGE_TYPE_VALUES = sorted(kt.value for kt in KnowledgeType)
 # "search inside a list" or "match a sub-object" semantics to debate.
 _ALLOWED_FILTER_VALUE_TYPES: tuple[type, ...] = (str, int, bool, type(None))
 
+# MET-473: ops accepted by the ``knowledge.populate_bom`` tool. Kept in
+# the adapter (not imported from bom_populator) so the manifest schema
+# enum is stable even when bom_populator is unavailable at import time.
+_ALLOWED_OPS_FOR_SCHEMA: tuple[str, ...] = ("<=", ">=", "==", "in")
+
 
 class McpToolError(ValueError):
     """Adapter-side raise form of the MET-385 ``McpToolError`` envelope.
@@ -558,6 +563,101 @@ class KnowledgeServer(McpToolServer):
             handler=self.handle_extract,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="knowledge.populate_bom",
+                adapter_id="knowledge",
+                name="Populate BOM",
+                description=(
+                    "Suggest BOM components matching a design-intent query "
+                    "plus structured constraints. Surfaces candidates via "
+                    "knowledge.search, runs knowledge.extract per MPN for "
+                    "each constraint property, and ranks by constraint "
+                    "margin × extraction confidence. Failing candidates are "
+                    "still returned (score=0.0) when fewer than top_k "
+                    "candidates pass — so the caller can see *why* nothing "
+                    "fit instead of getting an empty list (MET-473)."
+                ),
+                capability="bom_populate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "search_query": {
+                            "type": "string",
+                            "description": (
+                                "Free-text design-intent query, e.g. "
+                                "'low-power BLE microcontroller with USB'."
+                            ),
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "property": {"type": "string"},
+                                    "op": {
+                                        "type": "string",
+                                        "enum": list(_ALLOWED_OPS_FOR_SCHEMA),
+                                    },
+                                    "value": {},
+                                    "weight": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "default": 1.0,
+                                    },
+                                },
+                                "required": ["property", "op", "value"],
+                            },
+                            "minItems": 1,
+                            "description": (
+                                "List of constraints. ``>=``/``<=`` are "
+                                "margin-aware (more headroom = higher score). "
+                                "``==``/``in`` are binary."
+                            ),
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 50,
+                            "default": 5,
+                        },
+                        "candidate_limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 200,
+                            "default": 30,
+                            "description": (
+                                "Max chunks pulled from knowledge.search "
+                                "before dedup-by-MPN. Bump for wider net at "
+                                "the cost of more property-extraction calls."
+                            ),
+                        },
+                        "aliases": {
+                            "type": "object",
+                            "description": (
+                                "Optional property alias map forwarded to "
+                                "knowledge.extract (e.g. "
+                                '``{"supply_voltage": ["VCC", "VDD"]}``).'
+                            ),
+                        },
+                    },
+                    "required": ["search_query", "constraints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestions": {"type": "array"},
+                        "candidates_evaluated": {"type": "integer"},
+                        "total_search_hits": {"type": "integer"},
+                        "query_time_ms": {"type": "number"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.handle_populate_bom,
+        )
+
     # ------------------------------------------------------------------
     # Resource registration (MET-384)
     # ------------------------------------------------------------------
@@ -870,6 +970,79 @@ class KnowledgeServer(McpToolServer):
                 actor_id=actor_id,
             )
             return _extracted_properties_to_dict(result)
+
+    async def handle_populate_bom(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """MET-473: rank components for an Auto-BOM query.
+
+        Delegates the heavy lifting to
+        :func:`digital_twin.knowledge.bom_populator.populate_bom`. The
+        adapter only validates the wire input shape and renders the
+        result via :func:`bom_populator.to_dict`.
+        """
+        from digital_twin.knowledge.bom_populator import (
+            parse_constraints,
+            populate_bom,
+            to_dict,
+        )
+
+        with tracer.start_as_current_span("knowledge.mcp.populate_bom") as span:
+            search_query = arguments.get("search_query")
+            if not isinstance(search_query, str) or not search_query.strip():
+                raise ValueError(
+                    "knowledge.populate_bom: 'search_query' is required and must be "
+                    "a non-empty string"
+                )
+            try:
+                constraints = parse_constraints(arguments.get("constraints", []))
+            except ValueError as exc:
+                raise ValueError(f"knowledge.populate_bom: {exc}") from exc
+
+            top_k = arguments.get("top_k", 5)
+            candidate_limit = arguments.get("candidate_limit", 30)
+            aliases = arguments.get("aliases")
+
+            try:
+                top_k_int = int(top_k)
+                candidate_limit_int = int(candidate_limit)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "knowledge.populate_bom: 'top_k' / 'candidate_limit' must be integers"
+                ) from exc
+            if top_k_int < 1 or top_k_int > 50:
+                raise ValueError("knowledge.populate_bom: 'top_k' must be in [1, 50]")
+            if candidate_limit_int < 1 or candidate_limit_int > 200:
+                raise ValueError("knowledge.populate_bom: 'candidate_limit' must be in [1, 200]")
+            if aliases is not None and not isinstance(aliases, dict):
+                raise ValueError(
+                    "knowledge.populate_bom: 'aliases' must be an object mapping "
+                    "property → list[str]"
+                )
+
+            span.set_attribute("bom.search_query_length", len(search_query))
+            span.set_attribute("bom.constraint_count", len(constraints))
+            span.set_attribute("bom.top_k", top_k_int)
+            span.set_attribute("bom.candidate_limit", candidate_limit_int)
+
+            result = await populate_bom(
+                self.service,
+                search_query=search_query.strip(),
+                constraints=constraints,
+                top_k=top_k_int,
+                candidate_limit=candidate_limit_int,
+                property_aliases=aliases,
+            )
+
+            span.set_attribute("bom.candidates_evaluated", result.candidates_evaluated)
+            span.set_attribute("bom.suggestions_returned", len(result.suggestions))
+            logger.info(
+                "knowledge_populate_bom",
+                search_query=search_query[:80],
+                constraint_count=len(constraints),
+                candidates_evaluated=result.candidates_evaluated,
+                suggestions=len(result.suggestions),
+                query_time_ms=result.query_time_ms,
+            )
+            return to_dict(result)
 
     async def handle_ingest(self, arguments: dict[str, Any]) -> dict[str, Any]:
         # MET-388 (L1-B2): batch mode short-circuits when ``files`` is set.
