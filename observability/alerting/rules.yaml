@@ -285,3 +285,64 @@ groups:
             Review GET /v1/memory/insights and the consolidation logs;
             reconcile or mark the conflicting insights stale.
           runbook_url: "observability/runbooks/consolidation-contradictions.md"
+
+  # MET-476 — KB object-store (MinIO) operational alerts. These rules
+  # activate once Prometheus scrapes the MinIO ``/minio/v2/metrics/*``
+  # endpoints; on a single-node MinIO they evaluate normally, and on a
+  # MinIO-less environment they're inert (no series to match). The three
+  # warnings cover bucket size, write latency, and access errors per the
+  # MET-476 acceptance criteria.
+  - name: metaforge_storage_alerts
+    rules:
+      - alert: MinIOKBBucketSizeHigh
+        expr: minio_bucket_usage_total_bytes{bucket="metaforge-kb"} > 1.0995116e+11  # 100 GiB
+        for: 30m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "MinIO KB bucket usage above 100 GiB"
+          description: >-
+            ``metaforge-kb`` bucket has exceeded 100 GiB of stored bytes for
+            >30 minutes. Lifecycle is configured to transition objects to
+            cold storage after 365 days; check whether the configured tier
+            is healthy and whether ingest volume warrants raising this
+            threshold.
+          runbook_url: "observability/runbooks/minio-bucket-size.md"
+
+      - alert: MinIOKBWriteLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(minio_s3_requests_seconds_bucket{api="PutObject",bucket="metaforge-kb"}[5m])
+            )
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "MinIO KB write p95 latency > 5s"
+          description: >-
+            PutObject p95 latency on ``metaforge-kb`` exceeded 5s for
+            10 minutes. Check MinIO node health, network egress, and
+            backing-disk saturation; ingest pipelines (MET-468) will
+            stall under sustained slow writes.
+          runbook_url: "observability/runbooks/minio-write-latency.md"
+
+      - alert: MinIOKBAccessErrorsRising
+        expr: |
+          sum(rate(minio_s3_requests_errors_total{bucket="metaforge-kb"}[5m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "MinIO KB error rate > 0.5 req/s"
+          description: >-
+            Sustained access-error rate on ``metaforge-kb`` above
+            0.5 req/s for 15 minutes. Inspect MinIO logs for 4xx /
+            5xx patterns, verify credentials + IAM policies, and check
+            for client misconfigurations.
+          runbook_url: "observability/runbooks/minio-access-errors.md"
