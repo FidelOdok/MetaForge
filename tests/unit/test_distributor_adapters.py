@@ -465,6 +465,49 @@ class TestDigiKeyAdapter:
         assert adapter.name == "DigiKey"
 
 
+class TestDigiKeyBaseUrl:
+    """DIGIKEY_BASE_URL selects between production and sandbox hosts."""
+
+    def test_default_base_url_is_production(self, monkeypatch):
+        from tool_registry.tools.digikey import adapter as digikey_module
+
+        monkeypatch.delenv("DIGIKEY_BASE_URL", raising=False)
+        assert digikey_module._base_url() == "https://api.digikey.com"
+        assert digikey_module._token_url() == "https://api.digikey.com/v1/oauth2/token"
+        assert digikey_module._search_url() == "https://api.digikey.com/products/v4/search/keyword"
+        assert (
+            digikey_module._product_url("STM32H7")
+            == "https://api.digikey.com/products/v4/search/STM32H7/productdetails"
+        )
+
+    def test_sandbox_base_url_is_honored(self, monkeypatch):
+        from tool_registry.tools.digikey import adapter as digikey_module
+
+        monkeypatch.setenv("DIGIKEY_BASE_URL", "https://sandbox-api.digikey.com")
+        assert digikey_module._base_url() == "https://sandbox-api.digikey.com"
+        assert digikey_module._token_url() == "https://sandbox-api.digikey.com/v1/oauth2/token"
+        assert (
+            digikey_module._search_url()
+            == "https://sandbox-api.digikey.com/products/v4/search/keyword"
+        )
+        assert (
+            digikey_module._product_url("LM2596")
+            == "https://sandbox-api.digikey.com/products/v4/search/LM2596/productdetails"
+        )
+
+    def test_trailing_slash_is_stripped(self, monkeypatch):
+        from tool_registry.tools.digikey import adapter as digikey_module
+
+        monkeypatch.setenv("DIGIKEY_BASE_URL", "https://sandbox-api.digikey.com/")
+        assert digikey_module._base_url() == "https://sandbox-api.digikey.com"
+
+    def test_empty_base_url_falls_back_to_default(self, monkeypatch):
+        from tool_registry.tools.digikey import adapter as digikey_module
+
+        monkeypatch.setenv("DIGIKEY_BASE_URL", "")
+        assert digikey_module._base_url() == "https://api.digikey.com"
+
+
 # ======================================================================
 # Mouser adapter tests
 # ======================================================================

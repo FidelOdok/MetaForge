@@ -23,10 +23,30 @@ from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("distributors.digikey")
 
-# Digi-Key API base URLs
-_TOKEN_URL = "https://api.digikey.com/v1/oauth2/token"
-_SEARCH_URL = "https://api.digikey.com/products/v4/search/keyword"
-_PRODUCT_URL = "https://api.digikey.com/products/v4/search/{mpn}/productdetails"
+# Digi-Key API base URLs. Production = ``api.digikey.com``; sandbox =
+# ``sandbox-api.digikey.com``. ``DIGIKEY_BASE_URL`` selects between
+# them (or any future regional host) without code change. Trailing
+# slashes are stripped so the path templates below always compose
+# cleanly.
+_DEFAULT_BASE_URL = "https://api.digikey.com"
+
+
+def _base_url() -> str:
+    raw = os.environ.get("DIGIKEY_BASE_URL", _DEFAULT_BASE_URL).strip()
+    return raw.rstrip("/") or _DEFAULT_BASE_URL
+
+
+def _token_url() -> str:
+    return f"{_base_url()}/v1/oauth2/token"
+
+
+def _search_url() -> str:
+    return f"{_base_url()}/products/v4/search/keyword"
+
+
+def _product_url(mpn: str) -> str:
+    return f"{_base_url()}/products/v4/search/{mpn}/productdetails"
+
 
 _LIFECYCLE_MAP: dict[str, LifecycleStatus] = {
     "Active": LifecycleStatus.ACTIVE,
@@ -74,7 +94,7 @@ class DigiKeyAdapter(DistributorAdapter):
         with tracer.start_as_current_span("digikey.auth") as span:
             try:
                 resp = await self._client.post(
-                    _TOKEN_URL,
+                    _token_url(),
                     data={
                         "grant_type": "client_credentials",
                         "client_id": self._client_id,
@@ -111,7 +131,7 @@ class DigiKeyAdapter(DistributorAdapter):
                 await self._rate_limiter.acquire()
                 headers = await self._headers()
                 resp = await self._client.post(
-                    _SEARCH_URL,
+                    _search_url(),
                     headers=headers,
                     json={"Keywords": query, "RecordCount": limit},
                 )
@@ -128,7 +148,7 @@ class DigiKeyAdapter(DistributorAdapter):
             try:
                 await self._rate_limiter.acquire()
                 headers = await self._headers()
-                url = _PRODUCT_URL.format(mpn=mpn)
+                url = _product_url(mpn)
                 resp = await self._client.get(url, headers=headers)
                 if resp.status_code == 404:
                     return None
@@ -145,7 +165,7 @@ class DigiKeyAdapter(DistributorAdapter):
             try:
                 await self._rate_limiter.acquire()
                 headers = await self._headers()
-                url = _PRODUCT_URL.format(mpn=mpn)
+                url = _product_url(mpn)
                 resp = await self._client.get(url, headers=headers)
                 if resp.status_code == 404:
                     return []
@@ -162,7 +182,7 @@ class DigiKeyAdapter(DistributorAdapter):
             try:
                 await self._rate_limiter.acquire()
                 headers = await self._headers()
-                url = _PRODUCT_URL.format(mpn=mpn)
+                url = _product_url(mpn)
                 resp = await self._client.get(url, headers=headers)
                 if resp.status_code == 404:
                     return None
