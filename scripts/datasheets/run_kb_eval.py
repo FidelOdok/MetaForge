@@ -44,6 +44,15 @@ class QueryResult:
     expected_mpns: tuple[str, ...]
     matched_mpns: tuple[str, ...]
     passed: bool
+    precision_at_k: float = 0.0
+    """Fraction of the top-k hits that contained any expected MPN.
+
+    MET-470 Task 1 explicitly calls for ``precision@10`` alongside the
+    hit@k pass/fail signal.
+    """
+    recall_at_k: float = 0.0
+    """Fraction of the expected MPNs that surfaced anywhere in the top-k
+    hits — the natural recall complement to ``precision_at_k``."""
 
 
 @dataclass
@@ -64,6 +73,18 @@ class EvalReport:
     def pass_rate(self) -> float:
         return self.passed / self.total if self.total else 0.0
 
+    @property
+    def mean_precision_at_k(self) -> float:
+        if not self.results:
+            return 0.0
+        return sum(r.precision_at_k for r in self.results) / len(self.results)
+
+    @property
+    def mean_recall_at_k(self) -> float:
+        if not self.results:
+            return 0.0
+        return sum(r.recall_at_k for r in self.results) / len(self.results)
+
     def meets(self, target: float) -> bool:
         return self.pass_rate >= target
 
@@ -77,6 +98,34 @@ def query_hit(expected_mpns: list[str], hit_blobs: list[str], top_k: int) -> lis
     """
     haystack = " ".join(hit_blobs[: max(0, top_k)]).lower()
     return [mpn for mpn in expected_mpns if mpn.lower() in haystack]
+
+
+def precision_at_k(expected_mpns: list[str], hit_blobs: list[str], top_k: int) -> float:
+    """Fraction of the top-k hits that contain at least one expected MPN.
+
+    A hit is "relevant" when any expected MPN (case-insensitive) appears
+    in its blob. Precision@k = |relevant top-k hits| / k. An empty
+    expected or top-k collection returns 0.0.
+    """
+    k = max(0, top_k)
+    if k == 0 or not expected_mpns:
+        return 0.0
+    needles = [m.lower() for m in expected_mpns]
+    top = hit_blobs[:k]
+    relevant = sum(1 for blob in top if any(n in blob.lower() for n in needles))
+    return relevant / k
+
+
+def recall_at_k(expected_mpns: list[str], hit_blobs: list[str], top_k: int) -> float:
+    """Fraction of the expected MPNs that appear somewhere in the top-k hits.
+
+    Complement to ``precision_at_k`` — measures coverage of the expected
+    set rather than ranking density. An empty expected list returns 0.0.
+    """
+    if not expected_mpns:
+        return 0.0
+    matched = query_hit(expected_mpns, hit_blobs, top_k)
+    return len(matched) / len(expected_mpns)
 
 
 def summarize(
@@ -98,6 +147,8 @@ def summarize(
                 expected_mpns=tuple(expected),
                 matched_mpns=tuple(matched),
                 passed=bool(matched),
+                precision_at_k=precision_at_k(expected, blobs, top_k),
+                recall_at_k=recall_at_k(expected, blobs, top_k),
             )
         )
     return report
@@ -129,10 +180,17 @@ def _print_report(report: EvalReport, target: float) -> None:
     for r in report.results:
         mark = "PASS" if r.passed else "FAIL"
         got = ",".join(r.matched_mpns) if r.matched_mpns else "-"
-        print(f"  [{mark}] {r.query_id} ({r.tier}): {r.query!r} -> matched [{got}]")
+        print(
+            f"  [{mark}] {r.query_id} ({r.tier}): {r.query!r} -> matched [{got}] "
+            f"P@k={r.precision_at_k:.2f} R@k={r.recall_at_k:.2f}"
+        )
     print(
         f"\nhit@k pass rate: {report.passed}/{report.total} "
         f"= {report.pass_rate:.0%} (target {target:.0%})"
+    )
+    print(
+        f"mean precision@k: {report.mean_precision_at_k:.2f}    "
+        f"mean recall@k: {report.mean_recall_at_k:.2f}"
     )
 
 
