@@ -89,6 +89,10 @@ knowledge = [
     # (MET-317). Already a transitive of lightrag-hku — hoisted explicit
     # so the context layer doesn't depend on LightRAG just for tokens.
     "tiktoken>=0.7",
+    # MET-476: MinIO/S3 client for the KB object-storage source of truth.
+    # ``MinIOKBStorage`` lazy-imports this — environments without it use
+    # ``InMemoryKBStorage`` (tests, local dev).
+    "minio>=7.2",
 ]
 cadquery = [
     "cadquery>=2.4.0",
