@@ -234,7 +234,23 @@ class PgVectorExperienceStore(ExperienceStore):
                     LIMIT ${len(params)}
                 """
                 async with self._pool.acquire() as conn:
-                    rows = await conn.fetch(query, *params)
+                    # MET-454-fu: bump ivfflat.probes inside the search
+                    # transaction so low-volume tables (early in the
+                    # lifecycle, before consolidation kicks in) still
+                    # return hits. With ``lists = sqrt(N)`` and the
+                    # default ``probes = 1``, an ivfflat scan over 3-20
+                    # rows lands in mostly empty centroids and returns
+                    # nothing. Raising probes to 10 widens the search to
+                    # every centroid we have in practice — recall climbs
+                    # at a tiny scan-cost we do not care about at this
+                    # volume. Once the table grows past a few thousand
+                    # rows we can revisit and tune lists / probes
+                    # together (or move to HNSW like the LightRAG
+                    # tables). ``SET LOCAL`` is transaction-scoped, so
+                    # the override does not leak across pool checkouts.
+                    async with conn.transaction():
+                        await conn.execute("SET LOCAL ivfflat.probes = 10")
+                        rows = await conn.fetch(query, *params)
 
                 hits: list[MemorySearchHit] = []
                 for rank, row in enumerate(rows):
