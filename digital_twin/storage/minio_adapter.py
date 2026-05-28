@@ -38,6 +38,16 @@ tracer = get_tracer("digital_twin.storage.minio_adapter")
 
 _PREFIX_MARKER = ".keep"
 
+# MET-476 lifecycle policy — archive every KB object to a cold tier
+# after one year. ``DEFAULT_ARCHIVE_STORAGE_CLASS`` is the S3-spec
+# class name MinIO uses when transitioning to a configured remote
+# tier; on a single-tier MinIO instance the rule is still applied
+# (no-op at runtime) so the bucket carries a compliance-ready policy
+# the moment a tier is configured.
+DEFAULT_ARCHIVE_AFTER_DAYS = 365
+DEFAULT_ARCHIVE_STORAGE_CLASS = "GLACIER"
+LIFECYCLE_RULE_ID = "kb-archive-1yr"
+
 
 class MinIODependencyError(RuntimeError):
     """Raised when the ``minio`` package is not installed.
@@ -100,6 +110,40 @@ def _resolve_minio_module() -> Any:
             "`pip install -e .[knowledge]` (or `pip install minio>=7.2`)."
         ) from exc
     return minio
+
+
+def _build_kb_lifecycle_config(
+    *,
+    archive_after_days: int = DEFAULT_ARCHIVE_AFTER_DAYS,
+    storage_class: str = DEFAULT_ARCHIVE_STORAGE_CLASS,
+) -> Any:
+    """Build the canonical KB lifecycle configuration (MET-476).
+
+    Lazy-imports ``minio`` so the storage package stays importable in
+    environments without the optional dependency. Returns a
+    ``minio.lifecycleconfig.LifecycleConfig`` instance carrying a single
+    rule that transitions every object in the bucket to ``storage_class``
+    after ``archive_after_days``. Override the defaults in tests / staging
+    by passing different values.
+    """
+    if archive_after_days <= 0:
+        raise ValueError(f"archive_after_days must be > 0, got {archive_after_days!r}")
+    if not storage_class:
+        raise ValueError("storage_class must be a non-empty string")
+    _resolve_minio_module()  # raise MinIODependencyError if missing
+    from minio.commonconfig import ENABLED, Filter  # noqa: PLC0415
+    from minio.lifecycleconfig import LifecycleConfig, Rule, Transition  # noqa: PLC0415
+
+    return LifecycleConfig(
+        [
+            Rule(
+                rule_id=LIFECYCLE_RULE_ID,
+                rule_filter=Filter(prefix=""),
+                status=ENABLED,
+                transition=Transition(days=archive_after_days, storage_class=storage_class),
+            ),
+        ],
+    )
 
 
 class MinIOKBStorage:
@@ -210,6 +254,38 @@ class MinIOKBStorage:
             if removed:
                 logger.info("kb_object_deleted", bucket=self._settings.bucket, key=key)
             return removed
+
+    async def apply_kb_lifecycle(
+        self,
+        *,
+        archive_after_days: int = DEFAULT_ARCHIVE_AFTER_DAYS,
+        storage_class: str = DEFAULT_ARCHIVE_STORAGE_CLASS,
+    ) -> None:
+        """Apply the canonical KB lifecycle policy (MET-476).
+
+        Idempotent: setting the same lifecycle config twice is a no-op on
+        S3-compatible backends. The default rule transitions every object
+        in the bucket to ``GLACIER`` after 365 days — the compliance horizon
+        MET-476 calls for. Pass custom values for staging environments.
+        """
+        with tracer.start_as_current_span("kb_storage.minio.apply_lifecycle") as span:
+            span.set_attribute("storage.bucket", self._settings.bucket)
+            span.set_attribute("storage.archive_after_days", archive_after_days)
+            span.set_attribute("storage.storage_class", storage_class)
+            config = await asyncio.to_thread(
+                _build_kb_lifecycle_config,
+                archive_after_days=archive_after_days,
+                storage_class=storage_class,
+            )
+            await asyncio.to_thread(
+                self._client.set_bucket_lifecycle, self._settings.bucket, config
+            )
+            logger.info(
+                "kb_bucket_lifecycle_applied",
+                bucket=self._settings.bucket,
+                archive_after_days=archive_after_days,
+                storage_class=storage_class,
+            )
 
     # ------------------------------------------------------------------
     # Sync helpers (executed on a worker thread via asyncio.to_thread)

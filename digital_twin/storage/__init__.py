@@ -26,17 +26,23 @@ from digital_twin.storage.kb_storage import (
     ObjectListing,
 )
 from digital_twin.storage.minio_adapter import (
+    DEFAULT_ARCHIVE_AFTER_DAYS,
+    DEFAULT_ARCHIVE_STORAGE_CLASS,
+    LIFECYCLE_RULE_ID,
     MinIODependencyError,
     MinIOKBStorage,
     MinIOSettings,
 )
 
 __all__ = [
+    "DEFAULT_ARCHIVE_AFTER_DAYS",
+    "DEFAULT_ARCHIVE_STORAGE_CLASS",
     "DEFAULT_BUCKET_NAME",
     "InMemoryKBStorage",
     "KBObjectStorage",
     "KBPrefix",
     "KBStorageError",
+    "LIFECYCLE_RULE_ID",
     "MinIODependencyError",
     "MinIOKBStorage",
     "MinIOSettings",

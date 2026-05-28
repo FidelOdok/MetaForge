@@ -63,6 +63,7 @@ class _FakeMinio:
         self.buckets: set[str] = set()
         self.objects: dict[tuple[str, str], bytes] = {}
         self.versioning: dict[str, bool] = {}
+        self.lifecycle: dict[str, object] = {}
 
     def bucket_exists(self, bucket: str) -> bool:
         return bucket in self.buckets
@@ -72,6 +73,9 @@ class _FakeMinio:
 
     def set_bucket_versioning(self, bucket: str, _config: object) -> None:
         self.versioning[bucket] = True
+
+    def set_bucket_lifecycle(self, bucket: str, config: object) -> None:
+        self.lifecycle[bucket] = config
 
     def stat_object(self, bucket: str, key: str) -> _FakeStat:
         if (bucket, key) not in self.objects:
@@ -235,3 +239,86 @@ async def test_delete_returns_existed_flag():
 
     assert await storage.delete_object(KBPrefix.BOM_SPECS, "bom.yaml") is True
     assert await storage.delete_object(KBPrefix.BOM_SPECS, "bom.yaml") is False
+
+
+# ---------------------------------------------------------------------------
+# Bucket lifecycle policy (MET-476)
+# ---------------------------------------------------------------------------
+
+
+class _SentinelConfig:
+    """Stand-in lifecycle config so tests don't need the real minio types."""
+
+
+@pytest.mark.asyncio
+async def test_apply_kb_lifecycle_calls_set_bucket_lifecycle(monkeypatch):
+    from digital_twin.storage import minio_adapter
+
+    sentinel = _SentinelConfig()
+    captured: dict[str, object] = {}
+
+    def fake_build(*, archive_after_days: int, storage_class: str) -> object:
+        captured["archive_after_days"] = archive_after_days
+        captured["storage_class"] = storage_class
+        return sentinel
+
+    monkeypatch.setattr(minio_adapter, "_build_kb_lifecycle_config", fake_build)
+
+    fake = _FakeMinio()
+    storage = MinIOKBStorage(_settings(), client=fake)
+    await storage.apply_kb_lifecycle()
+
+    # Defaults flowed through to the builder.
+    assert captured["archive_after_days"] == minio_adapter.DEFAULT_ARCHIVE_AFTER_DAYS
+    assert captured["storage_class"] == minio_adapter.DEFAULT_ARCHIVE_STORAGE_CLASS
+    # The fake captured the SDK call with the sentinel config and bucket name.
+    assert fake.lifecycle[DEFAULT_BUCKET_NAME] is sentinel
+
+
+@pytest.mark.asyncio
+async def test_apply_kb_lifecycle_custom_archive_settings(monkeypatch):
+    from digital_twin.storage import minio_adapter
+
+    captured: dict[str, object] = {}
+
+    def fake_build(*, archive_after_days: int, storage_class: str) -> object:
+        captured["archive_after_days"] = archive_after_days
+        captured["storage_class"] = storage_class
+        return _SentinelConfig()
+
+    monkeypatch.setattr(minio_adapter, "_build_kb_lifecycle_config", fake_build)
+
+    storage = MinIOKBStorage(_settings(), client=_FakeMinio())
+    await storage.apply_kb_lifecycle(archive_after_days=30, storage_class="STANDARD_IA")
+
+    assert captured == {"archive_after_days": 30, "storage_class": "STANDARD_IA"}
+
+
+def test_build_kb_lifecycle_config_rejects_invalid_inputs():
+    from digital_twin.storage.minio_adapter import _build_kb_lifecycle_config
+
+    with pytest.raises(ValueError, match="archive_after_days"):
+        _build_kb_lifecycle_config(archive_after_days=0)
+    with pytest.raises(ValueError, match="storage_class"):
+        _build_kb_lifecycle_config(archive_after_days=365, storage_class="")
+
+
+def test_build_kb_lifecycle_config_real_minio_shape():
+    """Structural check against the real minio types — skip when not installed."""
+    pytest.importorskip("minio")
+    from digital_twin.storage.minio_adapter import (
+        DEFAULT_ARCHIVE_AFTER_DAYS,
+        DEFAULT_ARCHIVE_STORAGE_CLASS,
+        LIFECYCLE_RULE_ID,
+        _build_kb_lifecycle_config,
+    )
+
+    config = _build_kb_lifecycle_config()
+    rules = list(config.rules)
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule.rule_id == LIFECYCLE_RULE_ID
+    assert rule.status == "Enabled"
+    assert rule.transition is not None
+    assert rule.transition.days == DEFAULT_ARCHIVE_AFTER_DAYS
+    assert rule.transition.storage_class == DEFAULT_ARCHIVE_STORAGE_CLASS
