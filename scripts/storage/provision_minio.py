@@ -26,6 +26,8 @@ import asyncio
 import sys
 
 from digital_twin.storage import (
+    DEFAULT_ARCHIVE_AFTER_DAYS,
+    DEFAULT_ARCHIVE_STORAGE_CLASS,
     DEFAULT_BUCKET_NAME,
     KBPrefix,
     MinIODependencyError,
@@ -34,7 +36,12 @@ from digital_twin.storage import (
 )
 
 
-async def _provision(bucket: str | None) -> int:
+async def _provision(
+    bucket: str | None,
+    *,
+    archive_after_days: int = DEFAULT_ARCHIVE_AFTER_DAYS,
+    storage_class: str = DEFAULT_ARCHIVE_STORAGE_CLASS,
+) -> int:
     try:
         settings = MinIOSettings.from_env()
     except Exception as exc:  # noqa: BLE001 — surface env / config issues to the user
@@ -62,6 +69,15 @@ async def _provision(bucket: str | None) -> int:
     for prefix in KBPrefix:
         objects = await storage.list_objects(prefix)
         print(f"  {prefix.value}/: {len(objects)} object(s)")
+    try:
+        await storage.apply_kb_lifecycle(
+            archive_after_days=archive_after_days,
+            storage_class=storage_class,
+        )
+        print(f"  lifecycle: transition to {storage_class} after {archive_after_days} days")
+    except Exception as exc:  # noqa: BLE001 — surface the error but don't crash other steps
+        print(f"[provision_minio] lifecycle apply failed: {exc}", file=sys.stderr)
+        return 4
     print("[provision_minio] OK")
     return 0
 
@@ -76,8 +92,31 @@ def main(argv: list[str] | None = None) -> int:
             "Useful for staging vs prod runs."
         ),
     )
+    parser.add_argument(
+        "--archive-after-days",
+        type=int,
+        default=DEFAULT_ARCHIVE_AFTER_DAYS,
+        help=(
+            f"Days before transition (default {DEFAULT_ARCHIVE_AFTER_DAYS}). "
+            "Set to a smaller value for staging."
+        ),
+    )
+    parser.add_argument(
+        "--storage-class",
+        default=DEFAULT_ARCHIVE_STORAGE_CLASS,
+        help=(
+            f"Lifecycle target storage class (default {DEFAULT_ARCHIVE_STORAGE_CLASS}). "
+            "Requires the tier to be configured in MinIO; otherwise the rule is a no-op."
+        ),
+    )
     args = parser.parse_args(argv)
-    return asyncio.run(_provision(args.bucket))
+    return asyncio.run(
+        _provision(
+            args.bucket,
+            archive_after_days=args.archive_after_days,
+            storage_class=args.storage_class,
+        )
+    )
 
 
 if __name__ == "__main__":
