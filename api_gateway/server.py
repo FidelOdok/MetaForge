@@ -325,10 +325,37 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             )
             await knowledge_service.initialize()  # type: ignore[attr-defined]
             pgvector_active = True
+
+            # MET-422: wire the OpenRouter PropertyLLM (MET-462) into the
+            # service so ``knowledge.extract`` returns Tier-2 / Tier-3
+            # values (``llm_inferred`` / ``derived``) for properties the
+            # Tier-1 verbatim path misses. Without this hook, the tool
+            # surfaces ``not_found`` for every property the datasheet
+            # tables don't carry literally — even when the datasheet
+            # prose plainly states the answer.
+            property_llm_provider = "tier1_only"
+            if os.environ.get("OPEN_ROUTER_API_KEY"):
+                try:
+                    from digital_twin.knowledge.openrouter_property_llm import (
+                        OpenRouterPropertyConfig,
+                        OpenRouterPropertyLLM,
+                    )
+
+                    prop_cfg = OpenRouterPropertyConfig.from_env()
+                    prop_llm = OpenRouterPropertyLLM(prop_cfg)
+                    knowledge_service.set_property_llm(prop_llm)  # type: ignore[attr-defined]
+                    property_llm_provider = prop_cfg.primary_model
+                except Exception as prop_exc:  # noqa: BLE001
+                    logger.warning(
+                        "knowledge_service_property_llm_wiring_failed",
+                        error=str(prop_exc),
+                    )
+
             logger.info(
                 "knowledge_service_lightrag_initialized",
                 reranker_enabled=reranker_enabled,
                 llm_provider=llm_provider,
+                property_llm_provider=property_llm_provider,
             )
         except Exception as exc:
             logger.warning("knowledge_service_lightrag_failed", error=str(exc))
