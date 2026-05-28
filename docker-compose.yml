@@ -133,6 +133,33 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── MinIO (KB object-storage source of truth — MET-476) ─────────
+  # Authoritative store for L1-L3 knowledge data (datasheets, extracted
+  # properties, design decisions, BOM specs). Neo4j + pgvector are
+  # regenerable caches built from these objects. Dev creds default to
+  # minioadmin/minioadmin; override via MINIO_ACCESS_KEY/MINIO_SECRET_KEY
+  # in real environments.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── Kafka (Event Bus) ───────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
@@ -566,6 +593,7 @@ volumes:
   postgres-data:
   neo4j-data:
   neo4j-logs:
+  minio-data:
   zookeeper-data:
   kafka-data:
   temporal-db-data:
