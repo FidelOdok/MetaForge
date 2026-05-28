@@ -80,3 +80,109 @@ def test_summarize_missing_hits_treated_as_fail():
     report = kbe.summarize(queries, {}, top_k=10)  # no hits fetched for q1
     assert report.passed == 0
     assert report.results[0].passed is False
+
+
+# ---------- MET-470 Task 1: precision@k / recall@k ----------
+
+
+def test_precision_at_k_all_relevant():
+    # Every top-k hit mentions an expected MPN → precision 1.0
+    blobs = ["a.txt nRF52840", "b.txt nrf52840 datasheet", "c.txt NRF52840 pinout"]
+    assert kbe.precision_at_k(["nRF52840"], blobs, top_k=3) == pytest.approx(1.0)
+
+
+def test_precision_at_k_partial_relevance():
+    # 1 of 4 top-k blobs is relevant → precision 0.25
+    blobs = [
+        "a.txt unrelated",
+        "b.txt MCP2515 can controller",
+        "c.txt unrelated",
+        "d.txt unrelated",
+    ]
+    assert kbe.precision_at_k(["MCP2515"], blobs, top_k=4) == pytest.approx(0.25)
+
+
+def test_precision_at_k_empty_expected_returns_zero():
+    blobs = ["a.txt anything"]
+    assert kbe.precision_at_k([], blobs, top_k=3) == 0.0
+
+
+def test_precision_at_k_zero_k_returns_zero():
+    assert kbe.precision_at_k(["nRF52840"], ["nrf52840.txt"], top_k=0) == 0.0
+
+
+def test_precision_at_k_truncates_to_top_k():
+    # The match is at rank 5 (index 4); precision@3 must not see it.
+    blobs = [
+        "a.txt junk",
+        "b.txt junk",
+        "c.txt junk",
+        "d.txt junk",
+        "e.txt RP2040 microcontroller",
+    ]
+    assert kbe.precision_at_k(["RP2040"], blobs, top_k=3) == 0.0
+    assert kbe.precision_at_k(["RP2040"], blobs, top_k=5) == pytest.approx(0.2)
+
+
+def test_recall_at_k_full_coverage():
+    # Both expected MPNs appear in the top-k → recall 1.0
+    blobs = ["a.txt nRF52840", "b.txt MCP2515"]
+    assert kbe.recall_at_k(["nRF52840", "MCP2515"], blobs, top_k=2) == pytest.approx(1.0)
+
+
+def test_recall_at_k_partial_coverage():
+    # Only one of two expected MPNs is found → recall 0.5
+    blobs = ["a.txt nRF52840 only"]
+    assert kbe.recall_at_k(["nRF52840", "MCP2515"], blobs, top_k=5) == pytest.approx(0.5)
+
+
+def test_recall_at_k_empty_expected_returns_zero():
+    assert kbe.recall_at_k([], ["anything"], top_k=10) == 0.0
+
+
+def test_summarize_attaches_per_query_precision_and_recall():
+    queries = [
+        {
+            "id": "q1",
+            "tier": "easy",
+            "query": "ble soc",
+            "expected_mpns": ["nRF52840", "nRF52832"],
+        },
+    ]
+    # 2 of 4 top-k blobs are relevant (P@4=0.5); 1 of 2 expected found (R@4=0.5).
+    hits = {
+        "q1": [
+            "a.txt nRF52840 ble soc",
+            "b.txt unrelated buck regulator",
+            "c.txt nrf52840 reference design",
+            "d.txt unrelated wifi",
+        ]
+    }
+    report = kbe.summarize(queries, hits, top_k=4)
+    r = report.results[0]
+    assert r.precision_at_k == pytest.approx(0.5)
+    assert r.recall_at_k == pytest.approx(0.5)
+
+
+def test_eval_report_aggregates_mean_precision_and_recall():
+    queries = [
+        {"id": "q1", "expected_mpns": ["nRF52840"]},
+        {"id": "q2", "expected_mpns": ["MCP2515"]},
+    ]
+    # q1: 1/2 top-k relevant → P=0.5, R=1.0
+    # q2: 0/2 top-k relevant → P=0.0, R=0.0
+    hits = {
+        "q1": ["doc.txt nRF52840 ble", "doc.txt unrelated buck"],
+        "q2": ["doc.txt unrelated wifi", "doc.txt nothing useful"],
+    }
+    report = kbe.summarize(queries, hits, top_k=2)
+    # Mean precision = (0.5 + 0.0) / 2 = 0.25
+    assert report.mean_precision_at_k == pytest.approx(0.25)
+    # Mean recall = (1.0 + 0.0) / 2 = 0.5
+    assert report.mean_recall_at_k == pytest.approx(0.5)
+
+
+def test_eval_report_mean_metrics_empty_report():
+    empty = kbe.EvalReport()
+    assert empty.mean_precision_at_k == 0.0
+    assert empty.mean_recall_at_k == 0.0
