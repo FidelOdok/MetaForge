@@ -89,6 +89,14 @@ class LightRAGConfig:
     # Per-chunk character budget. Heading-aware chunking still applies
     # this as an upper bound to avoid 50KB chunks under a single H2.
     max_chunk_chars: int = 1500
+    # MET-466 Task 2: optional LightRAG ``llm_model_func`` (async callable
+    # matching ``(prompt, system_prompt=None, history_messages=None, **kw)
+    # -> str``). When provided, LightRAG can perform KG entity extraction;
+    # when ``None`` (default), naive vector mode keeps using the no-op stub
+    # so existing behaviour is unchanged. Build via
+    # ``openrouter_lightrag.build_openrouter_llm_model_func`` for the
+    # OpenRouter-backed production path.
+    llm_model_func: Any = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -453,10 +461,15 @@ class LightRAGKnowledgeService:
                 func=self._make_embedder(),
             )
 
+            # MET-466 Task 2: use the configured llm_model_func when supplied
+            # (typically the OpenRouter-backed factory in
+            # ``openrouter_lightrag.build_openrouter_llm_model_func``);
+            # otherwise stay on the noop stub for naive vector mode.
+            llm_func = self._cfg.llm_model_func or _noop_llm_model_func
             kwargs: dict[str, Any] = {
                 "working_dir": self._cfg.working_dir,
                 "embedding_func": embedding_func,
-                "llm_model_func": _noop_llm_model_func,
+                "llm_model_func": llm_func,
                 # LightRAG 1.4 uses ``workspace`` as the namespace key.
                 "workspace": self._cfg.namespace_prefix,
             }
