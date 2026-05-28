@@ -38,6 +38,17 @@ services:
       - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
       - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
       - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
+      # OpenRouter — read by digital_twin/knowledge/openrouter_lightrag.py
+      # and openrouter_property_llm.py. Tunables fall back to in-code defaults.
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
+      - LIGHTRAG_FALLBACK_MODEL=${LIGHTRAG_FALLBACK_MODEL:-}
+      - PROPERTY_EXTRACTION_MODEL=${PROPERTY_EXTRACTION_MODEL:-}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
     volumes:
       - adapter-workspace:/workspace:ro
     depends_on:
