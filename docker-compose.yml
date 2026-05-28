@@ -49,6 +49,15 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
       - MINIO_SECURE=${MINIO_SECURE:-false}
+      # Distributor APIs (MET-434). Loader skips registration when the
+      # creds aren't set, so leaving these blank is the no-op default.
+      # ``*_BASE_URL`` selects sandbox vs production per distributor.
+      - DIGIKEY_CLIENT_ID=${DIGIKEY_CLIENT_ID:-}
+      - DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET:-}
+      - DIGIKEY_BASE_URL=${DIGIKEY_BASE_URL:-}
+      - MOUSER_API_KEY=${MOUSER_API_KEY:-}
+      - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
+      - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
     volumes:
       - adapter-workspace:/workspace:ro
     depends_on:
