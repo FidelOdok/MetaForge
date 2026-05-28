@@ -68,6 +68,42 @@ tracer = get_tracer("digital_twin.knowledge.lightrag_service")
 _DEFAULT_EMBEDDING_DIM = 384
 _DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
+# MET-466 Task 2: canonical KB entity types. LightRAG's KG extractor uses
+# these labels when classifying spans pulled out of a datasheet. Tuple
+# (immutable) so the constant can't be mutated by callers.
+DEFAULT_KB_ENTITY_TYPES: tuple[str, ...] = (
+    "Component",
+    "Supplier",
+    "Property",
+    "Constraint",
+)
+DEFAULT_KB_LANGUAGE = "English"
+
+
+def resolve_kb_addon_params(cfg: LightRAGConfig) -> dict[str, Any]:
+    """Build LightRAG's ``addon_params`` dict from a :class:`LightRAGConfig`.
+
+    Public so callers / tests can inspect what would be passed to LightRAG
+    without instantiating LightRAG (which requires ``lightrag-hku``).
+    ``entity_types`` defaults to :data:`DEFAULT_KB_ENTITY_TYPES`; passing
+    an empty tuple disables the override and lets LightRAG use its own
+    defaults. ``language`` is included when set (or when the canonical
+    defaults are applied).
+    """
+    params: dict[str, Any] = {}
+    if cfg.entity_types is None:
+        params["entity_types"] = list(DEFAULT_KB_ENTITY_TYPES)
+    elif cfg.entity_types:
+        params["entity_types"] = list(cfg.entity_types)
+    # Explicit empty tuple ⇒ no entity_types key (use LightRAG defaults).
+    if cfg.language is not None:
+        params["language"] = cfg.language
+    elif "entity_types" in params:
+        # Pair the canonical entity types with the canonical language so
+        # the extraction prompt is consistent unless the caller overrides.
+        params["language"] = DEFAULT_KB_LANGUAGE
+    return params
+
 
 @dataclass
 class LightRAGConfig:
@@ -97,6 +133,14 @@ class LightRAGConfig:
     # ``openrouter_lightrag.build_openrouter_llm_model_func`` for the
     # OpenRouter-backed production path.
     llm_model_func: Any = None
+    # MET-466 Task 2: LightRAG addon_params entity-extraction inputs.
+    # ``entity_types`` constrains the KG schema (defaults to the four
+    # canonical KB types Component / Supplier / Property / Constraint);
+    # ``language`` localises LightRAG's extraction prompts (defaults to
+    # English to match the bundled datasheet corpus). Both can be
+    # overridden per project.
+    entity_types: tuple[str, ...] | None = None
+    language: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -473,6 +517,13 @@ class LightRAGKnowledgeService:
                 # LightRAG 1.4 uses ``workspace`` as the namespace key.
                 "workspace": self._cfg.namespace_prefix,
             }
+            # MET-466 Task 2: constrain LightRAG's KG extractor to the
+            # canonical KB entity types (Component / Supplier / Property /
+            # Constraint) and pin the prompt language. ``addon_params`` is
+            # the documented LightRAG knob for this.
+            addon_params = resolve_kb_addon_params(self._cfg)
+            if addon_params:
+                kwargs["addon_params"] = addon_params
             if self._cfg.postgres_dsn:
                 kwargs.update(
                     vector_storage="PGVectorStorage",
