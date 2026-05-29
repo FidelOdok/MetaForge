@@ -20,10 +20,18 @@ Files landed:
 - Test in `test_memory_tools.py` is the regression guard.
 - Process-cleanup gotcha: the live MCP server had a stale process holding the port through prior fires. `docker compose restart gateway` + relaunch picked up the new code cleanly.
 
-### G2 — CadQuery in MCP bootstrap (next)
-Live tools/list still shows zero `cadquery.*` tools despite the in-process fixture loading them. Live server's adapter list is `['freecad', 'calculix', 'knowledge', 'constraint', 'twin', 'project', 'memory', 'digikey']` — cadquery missing. Need to find why bootstrap skips it in the gateway container (env var? adapter_ids filter? docker config inconsistency?).
+### G2 — CadQuery in MCP bootstrap ✅ DONE + LIVE-VERIFIED (PR #269)
+Root cause: `METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101` in the gateway env told bootstrap to fetch the adapter remotely; that container doesn't exist in single-container setups, the HTTP fetch failed, cadquery landed in `failed` and never fell through to in-process.
 
-### G3 — memory pool contention
+Fix: on remote-fetch failure, log a warning and drop through to `_create_adapter`. Production deploys with the remote container still get the remote path; dev / single-container deploys get the in-process fallback.
+
+**Live verification on fidel-dev** (post-merge):
+- Tool count: **28 → 35** (the 7 cadquery tools landed)
+- `tools/list` now includes `cadquery.boolean_operation`, `cadquery.create_assembly`, `cadquery.create_parametric`, `cadquery.execute_script`, `cadquery.export_geometry`, `cadquery.generate_enclosure`, `cadquery.get_properties`
+
+### G3 — memory pool contention (next)
+Live `memory.list_insights` and `memory.retrieve_similar_experience` both error with `"another operation in progress"`. The MCP server's PgVectorInsightStore + PgVectorExperienceStore share the gateway's asyncpg pool. Fix: give the MCP server its own pool — separate `PgVectorInsightStore(dsn)` instance with its own pool inside `_build_insight_store` and `_build_memory_client`.
+
 ### G4 — extract_properties LLM-over-chunks fallback
 
 ## Phase 3-7 — pending
