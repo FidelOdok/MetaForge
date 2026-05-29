@@ -52,7 +52,7 @@ memory.retrieve_similar_experience:  OK status=success count=3
 ```
 Both memory tools now return clean envelopes. `retrieve_similar_experience` even surfaces the 3 existing `agent_experiences` rows from the earlier Mechanical-agent recording.
 
-### G4 — extract_properties LLM-over-chunks fallback ✅ DONE (this PR)
+### G4 — extract_properties LLM-over-chunks fallback ✅ DONE (PR #273, merged 2026-05-29)
 
 Root cause: every text-ingested datasheet lands in pgvector chunks but no
 Twin ``Datasheet`` node is created (the ingest pipeline tied to MET-444's
@@ -84,4 +84,21 @@ Tests (`tests/unit/test_knowledge_property_extractor_llm.py`):
 - broken search backend → ``mpn_found=False`` (fail-open)
 - multi-property: one search round-trip fuels N per-property LLM calls
 
-## Phase 3-7 — pending
+**Live verification: DEFERRED.** The MCP HTTP server on fidel-dev wasn't
+running at G4 merge time (the host process started for the G3 verify had
+exited; the gateway container itself doesn't run the MCP HTTP server).
+G4's behaviour also depends on a property LLM being wired, which needs
+``OPENROUTER_API_KEY`` / ``METAFORGE_PROPERTY_LLM_PROVIDER`` in the MCP
+process environment. Live re-launch + verify is a follow-up — captured
+in the suite as the `knowledge.extract` happy-path scenario landing in
+Phase 3.
+
+## Phase 3 — Per-tool happy-path coverage (next)
+
+Next file: `test_knowledge_tools.py`. Covers `knowledge.search`,
+`knowledge.ingest`, `knowledge.extract` (G4 unblocker), and
+`knowledge.populate_bom`. One canonical happy-path call per tool with
+real KB data; in-process mode against the InMemory adapters by default,
+live mode pinned by `METAFORGE_MCP_URL` for the deferred G4 verify.
+
+## Phase 4-7 — pending
