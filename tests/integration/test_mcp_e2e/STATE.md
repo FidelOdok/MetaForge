@@ -314,13 +314,40 @@ the readiness matrix.
 
 Tool counts after this PR: 87 → 88 e2e tests + 6 skipped.
 
+### `test_vertical_electronics.py` ✅ DONE (this PR)
+
+Seven-step sequence smoke + an inventory-gap test:
+
+1. `project.create`
+2. `knowledge.populate_bom` (EE-relevant: 3.3V LDO regulator query)
+3. `kicad.run_erc`
+4. `kicad.run_drc`
+5. `kicad.export_bom`
+6. `kicad.export_gerber`
+7. `constraint.validate`
+
+**KiCad gating**: KiCad has an adapter under
+`tool_registry/tools/kicad/` but is **not in
+`tool_registry.bootstrap._ADAPTER_REGISTRY`** — it ships as a separate
+stdio entrypoint. In CI the four `kicad.*` calls return
+`-32601 METHOD_NOT_FOUND`. The scenario records that outcome as
+`{"status": "skipped", "skip_reason": "kicad adapter not in unified
+MCP bootstrap"}`, which Phase 7 can roll up into the EE vertical's
+readiness signal (NOT READY: KiCad bootstrap gap).
+
+Steps 1, 2, and 7 must always execute cleanly (no dispatcher errors).
+A second test mirrors the inventory-gap assertion locally so the
+EE-vertical readiness signal is self-contained.
+
+When KiCad gets wired into the unified bootstrap, the kicad.* steps
+will start surfacing real envelopes and the assertions auto-upgrade
+(in-process mode is gated on `METAFORGE_MCP_URL` being unset).
+
+Tool counts after this PR: 88 → 90 e2e tests + 6 skipped.
+
 ### Remaining Phase 5 files — pending
 
-- `test_vertical_electronics.py` (project + knowledge + KiCad** + constraint)
 - `test_vertical_firmware.py` (project + knowledge.search + skill mock)
 - `test_vertical_supplychain.py` (project + digikey + memory)
-
-** KiCad isn't in the unified MCP bootstrap yet — the EE scenario
-will skip KiCad steps until it lands.
 
 ## Phase 6-7 — pending
