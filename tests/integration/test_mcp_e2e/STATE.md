@@ -157,9 +157,23 @@ pre-populated with one canonical `WorkProduct`.
 
 Tool counts after this PR: 27 → 38 e2e tests + 2 live-only skips.
 
+### `test_project_tools.py` ✅ DONE (this PR)
+
+All three `project.*` MCP tools driven against
+`api_gateway.projects.backend.InMemoryProjectBackend` (already satisfies
+the adapter's `ProjectBackendLike` protocol).
+
+- `project.create` persists and returns id + timestamps; missing /
+  empty `name` rejected
+- `project.list` empty + 2-record cases
+- `project.get` by id round-trip, by name, unknown id returns null
+  payload, missing both args raises `McpRpcError`
+- `tools/list` inventory confirms all three register
+
+Tool counts after this PR: 38 → 47 e2e tests + 2 live-only skips.
+
 ### Remaining Phase 3 files — pending
 
-- `test_project_tools.py`
 - `test_constraint_tools.py`
 - `test_cad_tools.py` (cadquery / freecad / calculix / kicad)
 - `test_supplier_tools.py` (skip-on-missing-creds)
