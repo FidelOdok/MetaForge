@@ -364,8 +364,42 @@ round-trip.
 
 Tool counts after this PR: 90 → 91 e2e tests + 6 skipped.
 
-### Remaining Phase 5 files — pending
+### `test_vertical_supplychain.py` ✅ DONE (this PR)
 
-- `test_vertical_supplychain.py` (project + digikey + memory)
+Four-step sequence:
+
+1. `project.create`
+2. `digikey.search` (BME280 environmental sensor)
+3. `digikey.get_pricing` — pricing breaks for the chosen MPN, asserts
+   ascending quantity ordering
+4. `memory.retrieve_similar_experience` — G1/G3 regression coverage
+   (empty store → empty hits, but envelope must succeed)
+
+Fake-adapter path: patches `tool_registry.tools.digikey.adapter.DigiKeyAdapter`
+with the `_FakeDistributorAdapter` from `test_supplier_tools.py` so
+the four digikey.* MCP tools register without real OAuth. Live mode
+exercises the real sandbox API when `DIGIKEY_CLIENT_ID/SECRET` are
+in env (or against fidel-dev via `METAFORGE_MCP_URL`).
+
+Second test asserts the readiness signal: without distributor creds,
+digikey.* tools MUST be absent from `tools/list` so the Phase 7
+reporter can roll up the supply-chain vertical as NOT READY with
+the precise blocker ("DIGIKEY_CLIENT_ID + DIGIKEY_CLIENT_SECRET not
+set in MCP env").
+
+Tool counts after this PR: 91 → 93 e2e tests + 6 skipped.
+
+## Phase 5 — COMPLETE
+
+All four per-vertical scenarios merged. Readiness signals are
+emitted via stable test names + per-step outcome dicts that the
+Phase 7 reporter can consume:
+
+| Vertical    | File                          | PR    | CI status (in-process)                              |
+|-------------|-------------------------------|-------|-----------------------------------------------------|
+| Mechanical  | test_vertical_mechanical.py   | #283  | core 3/5 execute; cadquery + calculix skip (no libs)|
+| Electronics | test_vertical_electronics.py  | #284  | core 3/7 execute; 4 kicad steps skip (bootstrap gap)|
+| Firmware    | test_vertical_firmware.py     | #285  | 3/3 execute (skill mock surrogate)                  |
+| Supply-chain| test_vertical_supplychain.py  | this  | 4/4 execute against fake adapter                    |
 
 ## Phase 6-7 — pending
