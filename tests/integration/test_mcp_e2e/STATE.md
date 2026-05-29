@@ -402,4 +402,35 @@ Phase 7 reporter can consume:
 | Firmware    | test_vertical_firmware.py     | #285  | 3/3 execute (skill mock surrogate)                  |
 | Supply-chain| test_vertical_supplychain.py  | this  | 4/4 execute against fake adapter                    |
 
-## Phase 6-7 — pending
+## Phase 6 — Perf baselines ✅ DONE (this PR)
+
+`test_mcp_perf.py` ships opt-in p50 / p95 latency baselines for the
+three hot MCP tools. Mechanics:
+
+- `pyproject.toml` adds `markers = ["perf: ..."]` + `addopts = "-m 'not perf'"`
+  so the default `pytest` run **excludes** the perf cases.
+- Each perf test carries `@pytest.mark.perf` **and**
+  `@pytest.mark.skipif(not METAFORGE_PERF_TESTS)` — belt-and-braces so
+  `pytest -m perf` without the env var is still a no-op in CI.
+- One unmarked sanity test stays in the file so default CI collects
+  something and catches import-path / fixture wiring at merge time.
+
+Hot tools covered (50 calls each):
+
+| Tool                  | In-process p95 ceiling | Hot-path used by                  |
+|-----------------------|------------------------|-----------------------------------|
+| `knowledge.search`    | < 250 ms               | every vertical's RAG/search path  |
+| `twin.get_node`       | < 100 ms               | every agent's graph read          |
+| `constraint.validate` | < 100 ms               | constraint engine pre-flight gate |
+
+To run locally: `METAFORGE_PERF_TESTS=1 pytest -m perf tests/integration/test_mcp_e2e/`.
+
+Live mode (`METAFORGE_MCP_URL=…`) is where the real-deployment numbers
+matter; the in-process ceilings are just regression bounds. The
+Phase 7 reporter pulls the p50/p95 figure for each hot tool into the
+readiness matrix.
+
+Tool counts after this PR: 93 → 94 e2e tests + 6 skipped + 3
+deselected (the perf opt-ins).
+
+## Phase 7 — pending

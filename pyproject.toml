@@ -118,6 +118,12 @@ gateway = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "perf: opt-in latency/throughput baselines; not run in default CI (MET-477 Phase 6)",
+]
+# Phase 6: exclude perf tests from the default `pytest` invocation. Opt in
+# with `pytest -m perf` (or set METAFORGE_PERF_TESTS=1 to belt-and-braces).
+addopts = "-m 'not perf'"
 
 [tool.ruff]
 target-version = "py311"
