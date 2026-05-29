@@ -115,6 +115,36 @@ class TestBootstrapToolRegistry:
         registry = await bootstrap_tool_registry(adapter_ids=["nonexistent"])
         assert len(registry.list_adapters()) == 0
 
+    async def test_remote_url_unreachable_falls_back_to_in_process(self):
+        """MET-477 G2: when ``METAFORGE_ADAPTER_<ID>_URL`` points at a
+        host that can't be reached, bootstrap MUST register the
+        in-process adapter rather than marking it failed.
+
+        The MET-477 smoke caught this on fidel-dev: a forward-compatible
+        ``METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101``
+        in the gateway env caused the in-container MCP server to skip
+        the cadquery adapter entirely because the remote container
+        wasn't deployed. The fix dropped through to the local
+        ``_create_adapter`` path on remote-fetch failure.
+        """
+        env = {
+            "METAFORGE_ADAPTER_CADQUERY_URL": (
+                "http://nonexistent-host-that-does-not-resolve.invalid:9999"
+            ),
+        }
+        with patch.dict(os.environ, env):
+            registry = await bootstrap_tool_registry(adapter_ids=["cadquery"])
+
+        adapter_ids = {a.adapter_id for a in registry.list_adapters()}
+        assert "cadquery" in adapter_ids, (
+            "remote-adapter fetch failed but the in-process fallback didn't fire — G2 regression"
+        )
+        # And the cadquery tools should be live, not just the adapter shell.
+        tool_ids = {t.tool_id for t in registry.list_tools()}
+        assert any(tid.startswith("cadquery.") for tid in tool_ids), (
+            "in-process cadquery adapter registered but exposed no tools"
+        )
+
     async def test_bootstrap_tool_count(self):
         """Verify total tool count across all adapters."""
         registry = await bootstrap_tool_registry()
