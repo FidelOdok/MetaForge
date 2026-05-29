@@ -213,7 +213,15 @@ async def bootstrap_tool_registry(
                 skipped.append(adapter_id)
                 continue
 
-            # Check for remote adapter URL first (Docker / container mode)
+            # Check for remote adapter URL first (Docker / container mode).
+            # MET-477 G2: when the remote fetch fails (typical when the
+            # containerized adapter isn't deployed yet but the URL env
+            # var is set as forward-compatible config), fall through to
+            # the in-process adapter rather than marking the whole
+            # adapter as ``failed``. Production deployments that DO
+            # have the remote container still get the remote path
+            # first; only the dev / single-container deploys benefit
+            # from the fallback.
             remote_url = _get_remote_url(adapter_id)
             if remote_url is not None:
                 try:
@@ -226,16 +234,16 @@ async def bootstrap_tool_registry(
                         adapter_id=adapter_id,
                         url=remote_url,
                     )
+                    continue
                 except Exception as exc:
-                    logger.error(
-                        "Remote adapter registration failed",
+                    logger.warning(
+                        "Remote adapter unreachable — falling back to in-process",
                         adapter_id=adapter_id,
                         url=remote_url,
                         error=str(exc),
                     )
                     span.record_exception(exc)
-                    failed.append(adapter_id)
-                continue
+                    # Drop through to the in-process path below.
 
             # Fall back to local adapter creation (in-process mode)
             server = _create_adapter(adapter_id, spec)
