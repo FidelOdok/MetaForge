@@ -29,7 +29,7 @@ Fix: on remote-fetch failure, log a warning and drop through to `_create_adapter
 - Tool count: **28 → 35** (the 7 cadquery tools landed)
 - `tools/list` now includes `cadquery.boolean_operation`, `cadquery.create_assembly`, `cadquery.create_parametric`, `cadquery.execute_script`, `cadquery.export_geometry`, `cadquery.generate_enclosure`, `cadquery.get_properties`
 
-### G3 — MCP event-loop unification ✅ DONE (this PR)
+### G3 — MCP event-loop unification ✅ DONE + LIVE-VERIFIED (PR #271)
 Root cause was NOT pool sharing across processes — it was loop binding within the same process. `metaforge.mcp.__main__:main()` did:
 ```
 server, ... = asyncio.run(_bootstrap(args))    # creates pools on loop A, destroys loop A
@@ -44,6 +44,13 @@ Tests (`tests/unit/test_mcp_serve_http_loop.py`):
 - `serve_http_async` is a coroutine function (regression guard)
 - Stub uvicorn.Server: verify `.serve()` is called, `.run()` is NOT
 - `run_http` delegates via exactly one `asyncio.run`
+
+**Live verification on fidel-dev** (post-merge):
+```
+memory.list_insights:                OK status=success count=0
+memory.retrieve_similar_experience:  OK status=success count=3
+```
+Both memory tools now return clean envelopes. `retrieve_similar_experience` even surfaces the 3 existing `agent_experiences` rows from the earlier Mechanical-agent recording.
 
 ### G4 — extract_properties LLM-over-chunks fallback (next)
 
