@@ -172,9 +172,24 @@ the adapter's `ProjectBackendLike` protocol).
 
 Tool counts after this PR: 38 → 47 e2e tests + 2 live-only skips.
 
+### `test_constraint_tools.py` ✅ DONE (this PR)
+
+Single `constraint.validate` tool, driven against
+`InMemoryConstraintEngine` wired to a twin with one WorkProduct + one
+trivially-passing constraint.
+
+- Empty `work_product_ids` → vacuous pass, evaluated_count=0
+- WP with attached constraint → evaluated_count=1, passed=True
+- Unknown UUID → resolves to zero constraints, vacuous pass
+- Missing `work_product_ids` → `McpRpcError`
+- Non-UUID strings → `McpRpcError`
+- Non-list input → `McpRpcError`
+- `tools/list` inventory confirms `constraint.validate` registers
+
+Tool counts after this PR: 47 → 54 e2e tests + 2 live-only skips.
+
 ### Remaining Phase 3 files — pending
 
-- `test_constraint_tools.py`
 - `test_cad_tools.py` (cadquery / freecad / calculix / kicad)
 - `test_supplier_tools.py` (skip-on-missing-creds)
 
