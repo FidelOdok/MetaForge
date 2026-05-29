@@ -114,9 +114,28 @@ deployed MCP server — that's where the deferred G4 live-verify will run.
 Tool counts after this PR: 14 e2e tests pre-existing + 7 new = 21 in
 `tests/integration/test_mcp_e2e/`.
 
+### `test_memory_tools.py` ✅ DONE (extended in this PR)
+
+Existing G1 smoke (3 tests against the shared session `mcp_client`)
+expanded with 6 more cases using a module-local `memory_mcp_client`
+fixture that wires fresh `InMemoryExperienceStore` +
+`InMemoryInsightStore`:
+
+- `memory.list_insights` round-trips an active insight with the right
+  theme / status / confidence shape
+- `memory.list_insights` filters STALE_WARN by default (MET-472
+  lifecycle); `include_stale=true` returns both
+- `memory.list_insights` rejects an unknown theme with `McpRpcError`
+- `memory.retrieve_similar_experience` finds a pre-indexed match
+  (embed → store → MCP retrieve) and returns agent_code / task_type /
+  success / similarity
+- `memory.retrieve_similar_experience` rejects missing + empty `goal`
+- `tools/list` inventory confirms both memory tools register
+
+Tool counts after this PR: 21 → 27 e2e tests.
+
 ### Remaining Phase 3 files — pending
 
-- `test_memory_tools.py` (G1/G3 regression)
 - `test_twin_tools.py`
 - `test_project_tools.py`
 - `test_constraint_tools.py`
