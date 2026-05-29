@@ -188,9 +188,32 @@ trivially-passing constraint.
 
 Tool counts after this PR: 47 → 54 e2e tests + 2 live-only skips.
 
+### `test_cad_tools.py` ✅ DONE (this PR — extended)
+
+Existing G2 inventory smokes joined by full per-adapter coverage:
+
+- Inventory: all 7 cadquery + 5 freecad + 4 calculix tools register
+  (G2 regression guard tightened to a fixed set per adapter)
+- Total CAD/sim tool count == 16
+- KiCad **explicitly absent** from the unified MCP bootstrap — KiCad
+  ships as a separate stdio entrypoint and isn't in
+  `tool_registry.bootstrap._ADAPTER_REGISTRY`. The test is the gap
+  tripwire; flipping it means the EE vertical scenarios should
+  exercise KiCad too.
+- Adapter-level validation: missing required args + invalid enums
+  rejected by `cadquery.create_parametric` / `cadquery.boolean_operation` /
+  `cadquery.get_properties` / `freecad.create_parametric` /
+  `freecad.export_geometry` / `calculix.run_fea` / `calculix.validate_mesh`
+  before forwarding to the backend (which is what makes them
+  runnable in CI without the CAD libs installed)
+
+Full happy-path execution (real cadquery, FreeCAD headless, ccx solver)
+lives in Phase 5 live-mode vertical scenarios.
+
+Tool counts after this PR: 54 → 68 e2e tests + 2 live-only skips.
+
 ### Remaining Phase 3 files — pending
 
-- `test_cad_tools.py` (cadquery / freecad / calculix / kicad)
 - `test_supplier_tools.py` (skip-on-missing-creds)
 
 ## Phase 4-7 — pending

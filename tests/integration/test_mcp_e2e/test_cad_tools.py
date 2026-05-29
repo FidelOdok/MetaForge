@@ -1,27 +1,63 @@
-"""CAD adapter readiness — cadquery / freecad / calculix in tools/list.
+"""Phase 3 — cad / sim MCP tools coverage (MET-477).
 
-The MET-477 smoke surfaced that ``cadquery.*`` was missing from the
-live MCP server's ``tools/list`` despite being in
-``tool_registry/_ADAPTER_REGISTRY``. Root cause (G2):
-``METAFORGE_ADAPTER_CADQUERY_URL`` was set in the gateway env, telling
-bootstrap to fetch the adapter from a containerised endpoint that
-isn't deployed in single-container setups. The fetch failed and the
-adapter landed in ``failed`` instead of falling through to the
-in-process implementation.
+Three adapters are bootstrap-registered by ``tool_registry``:
 
-The G2 fix added the in-process fallback. These tests assert the
-post-G2 contract: every CAD adapter that has an in-process impl is
-present in the registry even when its remote URL env var points at a
-dead container.
+* ``cadquery.*`` — 7 tools (post-G2 fallback)
+* ``freecad.*``  — 5 tools
+* ``calculix.*`` — 4 tools
+
+Full happy-path execution requires the real backends (cadquery library,
+FreeCAD headless, ``ccx`` solver). They are not installed in the CI
+container, so this file focuses on what's reproducible *without* the
+backends:
+
+* inventory: every documented tool appears in ``tools/list``
+* adapter-level validation: missing required args + invalid enums
+  surface as clean ``McpRpcError`` envelopes — the adapter rejects
+  before forwarding to the backend, so this works without the binaries
+
+KiCad has an adapter under ``tool_registry/tools/kicad/`` but is **not
+in the unified MCP bootstrap registry** (``tool_registry.bootstrap``
+ships ``cadquery / freecad / calculix`` only). A regression test
+documents the gap so the suite catches any silent re-wire.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from tests.integration.test_mcp_e2e._helpers import rpc
+from ._helpers import McpRpcError, call_tool, rpc
 
 pytestmark = pytest.mark.asyncio
+
+
+# ---------------------------------------------------------------------------
+# Inventory — also doubles as G2 regression guard for cadquery.
+# ---------------------------------------------------------------------------
+
+
+_EXPECTED_CADQUERY_TOOLS = {
+    "cadquery.create_parametric",
+    "cadquery.boolean_operation",
+    "cadquery.get_properties",
+    "cadquery.export_geometry",
+    "cadquery.execute_script",
+    "cadquery.create_assembly",
+    "cadquery.generate_enclosure",
+}
+_EXPECTED_FREECAD_TOOLS = {
+    "freecad.export_geometry",
+    "freecad.generate_mesh",
+    "freecad.boolean_operation",
+    "freecad.get_properties",
+    "freecad.create_parametric",
+}
+_EXPECTED_CALCULIX_TOOLS = {
+    "calculix.run_fea",
+    "calculix.run_thermal",
+    "calculix.validate_mesh",
+    "calculix.extract_results",
+}
 
 
 @pytest.mark.parametrize("adapter_id", ["cadquery", "freecad", "calculix"])
@@ -40,17 +76,174 @@ async def test_cad_adapter_registers_tools(mcp_client, adapter_id):
     )
 
 
+async def test_cadquery_full_tool_set(mcp_client):
+    """G2 regression: all 7 cadquery tools must register in-process."""
+    result = await rpc(mcp_client, "tools/list")
+    tool_ids = {t.get("name") for t in result.get("tools", [])}
+    missing = _EXPECTED_CADQUERY_TOOLS - tool_ids
+    assert not missing, f"missing cadquery tools (G2 regression?): {missing}"
+
+
+async def test_freecad_full_tool_set(mcp_client):
+    result = await rpc(mcp_client, "tools/list")
+    tool_ids = {t.get("name") for t in result.get("tools", [])}
+    missing = _EXPECTED_FREECAD_TOOLS - tool_ids
+    assert not missing, f"missing freecad tools: {missing}"
+
+
+async def test_calculix_full_tool_set(mcp_client):
+    result = await rpc(mcp_client, "tools/list")
+    tool_ids = {t.get("name") for t in result.get("tools", [])}
+    missing = _EXPECTED_CALCULIX_TOOLS - tool_ids
+    assert not missing, f"missing calculix tools: {missing}"
+
+
 async def test_cadquery_register_floor(mcp_client):
-    """The cadquery adapter ships 7 tools; floor at the count we know.
+    """The cadquery adapter ships 7 tools; floor at 5 to keep some room.
 
     G2 specifically blocked the cadquery surface in the MET-477 smoke,
-    so this test gets a tighter floor than the other CAD adapters
-    (which weren't affected).
+    so this test gets a tighter floor than the other CAD adapters.
     """
     result = await rpc(mcp_client, "tools/list")
     cadquery_tools = [t for t in result.get("tools", []) if t["name"].startswith("cadquery.")]
     assert len(cadquery_tools) >= 5, (
-        f"cadquery exposes only {len(cadquery_tools)} tools — "
-        f"expected at least 5 (create_parametric, execute_script, "
-        f"boolean_operation, get_properties, export_geometry, ...)"
+        f"cadquery exposes only {len(cadquery_tools)} tools — expected at least 5"
     )
+
+
+async def test_kicad_tools_not_in_unified_bootstrap(mcp_client):
+    """Document: KiCad has an adapter but isn't in the unified MCP bootstrap.
+
+    KiCad ships as a separate stdio MCP entrypoint
+    (``tool_registry/tools/kicad/entrypoint.py``). Re-wiring it into
+    the unified bootstrap would require adding it to
+    ``tool_registry.bootstrap._ADAPTER_REGISTRY`` and supplying the
+    KiCad CLI binary in the runtime container. This test is the gap
+    tripwire — if KiCad starts showing up here we should update the
+    EE vertical scenarios in Phase 5 to actually exercise it.
+    """
+    result = await rpc(mcp_client, "tools/list")
+    tool_ids = {t.get("name") for t in result.get("tools", [])}
+    kicad_present = {tid for tid in tool_ids if tid and tid.startswith("kicad.")}
+    assert kicad_present == set(), (
+        f"kicad tools unexpectedly registered: {kicad_present} — "
+        "update bootstrap registry expectations + EE vertical scenarios"
+    )
+
+
+async def test_total_cad_sim_tool_count(mcp_client):
+    """Adapter-level total: cadquery=7 + freecad=5 + calculix=4 = 16."""
+    result = await rpc(mcp_client, "tools/list")
+    tool_ids = {t.get("name") for t in result.get("tools", [])}
+    cad_ids = {
+        tid
+        for tid in tool_ids
+        if tid and tid.split(".", 1)[0] in {"cadquery", "freecad", "calculix"}
+    }
+    assert len(cad_ids) == 16, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
+
+
+# ---------------------------------------------------------------------------
+# Adapter-level validation — rejects before forwarding to the backend.
+# Full happy-path execution requires Docker + real cadquery / FreeCAD /
+# CalculiX. Those tests live in Phase 5 vertical scenarios under live mode.
+# ---------------------------------------------------------------------------
+
+
+# CadQuery -------------------------------------------------------------------
+
+
+async def test_cadquery_create_parametric_requires_shape_type(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(mcp_client, "cadquery.create_parametric", {})
+
+
+async def test_cadquery_create_parametric_rejects_unsupported_shape(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            mcp_client,
+            "cadquery.create_parametric",
+            {
+                "shape_type": "not-a-real-shape",
+                "parameters": {"length": 10},
+                "output_path": "/tmp/x.step",
+            },
+        )
+
+
+async def test_cadquery_boolean_operation_rejects_unknown_op(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            mcp_client,
+            "cadquery.boolean_operation",
+            {
+                "input_file_a": "/tmp/a.step",
+                "input_file_b": "/tmp/b.step",
+                "operation": "merge",  # not one of union/subtract/intersect
+                "output_path": "/tmp/c.step",
+            },
+        )
+
+
+async def test_cadquery_get_properties_requires_input_file(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(mcp_client, "cadquery.get_properties", {})
+
+
+# FreeCAD --------------------------------------------------------------------
+
+
+async def test_freecad_create_parametric_rejects_unsupported_shape(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            mcp_client,
+            "freecad.create_parametric",
+            {
+                "shape_type": "not-a-real-shape",
+                "parameters": {"length": 10},
+                "output_path": "/tmp/x.step",
+            },
+        )
+
+
+async def test_freecad_export_geometry_rejects_unsupported_format(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            mcp_client,
+            "freecad.export_geometry",
+            {
+                "input_file": "/tmp/in.step",
+                "output_format": "gif",  # not one of step/stl/obj/brep
+                "output_path": "/tmp/out.gif",
+            },
+        )
+
+
+# CalculiX -------------------------------------------------------------------
+
+
+async def test_calculix_run_fea_requires_mesh_file(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            mcp_client,
+            "calculix.run_fea",
+            {"load_case": "lc1"},
+        )
+
+
+async def test_calculix_run_fea_rejects_unsupported_analysis_type(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            mcp_client,
+            "calculix.run_fea",
+            {
+                "mesh_file": "/tmp/mesh.inp",
+                "load_case": "lc1",
+                "analysis_type": "transient_thermal",  # not static_stress/modal
+            },
+        )
+
+
+async def test_calculix_validate_mesh_requires_mesh_file(mcp_client):
+    with pytest.raises(McpRpcError):
+        await call_tool(mcp_client, "calculix.validate_mesh", {})
