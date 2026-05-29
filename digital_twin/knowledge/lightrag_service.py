@@ -1474,12 +1474,24 @@ class LightRAGKnowledgeService:
                 "wires the twin in after bootstrap."
             )
 
+        # G4 (MET-477): bind a search closure so extract_properties_for_mpn
+        # can fall back to LLM-over-chunks when no Twin Datasheet node
+        # exists for `mpn`. Closure adapts the 2-arg ``SearchCallable``
+        # signature to ``self.search``'s richer parameter set.
+        async def _search_for_fallback(query: str, top_k: int) -> Any:
+            return await self.search(query, top_k=top_k)
+
         with tracer.start_as_current_span("lightrag.extract_properties") as span:
             span.set_attribute("knowledge.mpn", mpn)
             span.set_attribute("knowledge.property_count", len(properties))
             span.set_attribute("knowledge.llm_tier_enabled", self._property_llm is not None)
             result = await extract_properties_for_mpn(
-                self._twin, mpn, properties, aliases=aliases, llm=self._property_llm
+                self._twin,
+                mpn,
+                properties,
+                aliases=aliases,
+                llm=self._property_llm,
+                search=_search_for_fallback if self._property_llm is not None else None,
             )
             span.set_attribute("knowledge.mpn_found", result.mpn_found)
             if result.mpn_found:

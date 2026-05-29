@@ -35,13 +35,24 @@ outside MCP.
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from digital_twin.knowledge.llm_property_extractor import PropertyLLM
-    from digital_twin.knowledge.service import ExtractedProperties
+    from digital_twin.knowledge.service import ExtractedProperties, SearchHit
+
+# Type alias: a narrow search callable that takes the MPN query and a
+# top-K cap and returns ``SearchHit`` rows. Kept local so this module
+# doesn't import the full ``KnowledgeService`` protocol just for typing.
+SearchCallable = Callable[[str, int], Awaitable[list["SearchHit"]]]
+
+# G4 (MET-477): max chunks pulled from search for the LLM-over-chunks
+# fallback when no Twin Datasheet exists. 5 keeps the prompt budget
+# bounded; chunks are typically ~1k chars each.
+_DEFAULT_FALLBACK_TOP_K = 5
 
 
 class ExtractionMethod(StrEnum):
@@ -149,6 +160,8 @@ async def extract_properties_for_mpn(
     *,
     aliases: dict[str, list[str]] | None = None,
     llm: PropertyLLM | None = None,
+    search: SearchCallable | None = None,
+    fallback_top_k: int = _DEFAULT_FALLBACK_TOP_K,
 ) -> ExtractedProperties:
     """Resolve ``mpn`` to its current datasheet and extract typed values.
 
@@ -165,22 +178,32 @@ async def extract_properties_for_mpn(
     the property is re-asked of the LLM (``llm_inferred`` / ``derived``).
     When ``llm`` is ``None`` the behaviour is Tier-1-only, unchanged.
 
+    ``search`` (MET-477 G4) plus ``llm`` together enable the
+    LLM-over-chunks fallback: when no Twin ``Datasheet`` node exists for
+    ``mpn`` (text-only ingest path), search the KB for the MPN, take the
+    top ``fallback_top_k`` chunks, concatenate their content, and run
+    each property through the Tier-2/3 LLM extractor against that
+    synthesised prose. This is what closes the populated-KB-but-empty-
+    Twin gap the MET-477 smoke surfaced. When the fallback fires,
+    ``mpn_found`` is True, ``datasheet_revision`` is ``None`` (sentinel
+    for "synthesised from chunks"), and ``datasheet_source_path`` is the
+    source path of the top-ranked hit.
+
     Returns an ``ExtractedProperties`` with one ``ExtractedProperty``
     per input property name (input order preserved). When no current
-    datasheet exists for ``mpn``, ``mpn_found=False`` and ``items``
-    is empty.
+    datasheet exists for ``mpn`` AND no fallback path is available,
+    ``mpn_found=False`` and ``items`` is empty.
     """
     from digital_twin.knowledge.service import ExtractedProperties
 
     datasheet = await twin.get_current_datasheet(mpn)
     if datasheet is None:
-        return ExtractedProperties(
+        return await _extract_via_search_fallback(
             mpn=mpn,
-            mpn_found=False,
-            datasheet_revision=None,
-            datasheet_published_at=None,
-            datasheet_source_path=None,
-            items=[],
+            properties=properties,
+            llm=llm,
+            search=search,
+            top_k=fallback_top_k,
         )
 
     tables = (datasheet.metadata or {}).get("tables") or []
@@ -211,6 +234,87 @@ async def extract_properties_for_mpn(
         datasheet_revision=datasheet.revision,
         datasheet_published_at=datasheet.published_at,
         datasheet_source_path=datasheet.source_url or datasheet.source_path or None,
+        items=items,
+    )
+
+
+async def _extract_via_search_fallback(
+    *,
+    mpn: str,
+    properties: list[str],
+    llm: PropertyLLM | None,
+    search: SearchCallable | None,
+    top_k: int,
+) -> ExtractedProperties:
+    """G4 fallback path used when no Twin ``Datasheet`` node exists.
+
+    Returns a fully NOT_FOUND result (``mpn_found=False``, empty
+    ``items``) when either dependency is missing — that's the
+    pre-MET-477 contract. When both ``search`` and ``llm`` are wired,
+    pull top-K chunks and run the same per-property LLM extractor used
+    for Tier-2/3 prose lookups; ``mpn_found`` flips to True even though
+    no structured Datasheet node was found.
+    """
+    from digital_twin.knowledge.service import ExtractedProperties
+
+    if llm is None or search is None:
+        return ExtractedProperties(
+            mpn=mpn,
+            mpn_found=False,
+            datasheet_revision=None,
+            datasheet_published_at=None,
+            datasheet_source_path=None,
+            items=[],
+        )
+
+    try:
+        hits = await search(mpn, top_k)
+    except Exception:
+        # Search backend failure must not crash extract — fall through
+        # to "no datasheet" semantics, same as a missing dependency.
+        hits = []
+
+    if not hits:
+        return ExtractedProperties(
+            mpn=mpn,
+            mpn_found=False,
+            datasheet_revision=None,
+            datasheet_published_at=None,
+            datasheet_source_path=None,
+            items=[],
+        )
+
+    chunks_text = "\n\n".join((hit.content or "") for hit in hits if hit.content)
+    if not chunks_text:
+        return ExtractedProperties(
+            mpn=mpn,
+            mpn_found=False,
+            datasheet_revision=None,
+            datasheet_published_at=None,
+            datasheet_source_path=None,
+            items=[],
+        )
+
+    from digital_twin.knowledge.llm_property_extractor import infer_property
+
+    items: list[ExtractedProperty] = []
+    for name in properties:
+        items.append(
+            await infer_property(
+                llm,
+                mpn=mpn,
+                property_name=name,
+                datasheet_text=chunks_text,
+            )
+        )
+
+    top_source = next((hit.source_path for hit in hits if hit.source_path), None)
+    return ExtractedProperties(
+        mpn=mpn,
+        mpn_found=True,
+        datasheet_revision=None,
+        datasheet_published_at=None,
+        datasheet_source_path=top_source,
         items=items,
     )
 
