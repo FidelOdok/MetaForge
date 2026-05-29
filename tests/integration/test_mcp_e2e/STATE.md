@@ -249,16 +249,43 @@ covered end-to-end through the JSON-RPC HTTP envelope:
 | test_cad_tools.py        | #280  | cadquery + freecad + calculix inventory + valid. |
 | test_supplier_tools.py   | this  | digikey + mouser + nexar (fake + live-gated)     |
 
-## Phase 4 — Error-path coverage (next)
+## Phase 4 — Error-path coverage ✅ DONE (this PR)
 
-Next file: `test_mcp_errors.py`. Per the loop spec, cover:
-- missing required arg
-- unknown tool name
-- oversized payload (MET-450 64KB stdio readline guard)
-- invalid enum value
-- malformed JSON-RPC
+`test_mcp_errors.py` covers the JSON-RPC error envelope contract for
+every documented failure mode. Error codes (`metaforge/mcp/server.py`):
 
-Each error must return a clean JSON-RPC error envelope with a
-`-32xxx` code + structured `data`.
+- `-32600` INVALID_REQUEST — malformed JSON, missing/wrong `jsonrpc`
+- `-32601` METHOD_NOT_FOUND — unknown method, unknown tool name (data
+  carries `tool_id`)
+- `-32001` TOOL_EXECUTION_ERROR — handler raised (data carries
+  `error_type / tool_id / details / duration_ms`)
+
+Cases:
+- Invalid JSON body → -32600
+- Wrong `jsonrpc` version → -32600
+- Unknown RPC method → -32601
+- Unknown tool name → -32601 with `data.tool_id`
+- Missing required arg (`twin.get_node` without `node_id`) → -32001
+  with `data.tool_id` + `data.details`
+- Invalid UUID → -32001 with "uuid" in details
+- Invalid enum value (`cadquery.create_parametric` unknown shape) →
+  -32001
+- Mutating Cypher rejected when read-only → -32001 with "mutating"
+  or "read-only" in details
+- Error envelope shape: `jsonrpc==2.0`, id round-trip, no `result`,
+  `code: int < 0`, `message: str`
+- `initialize` with empty params succeeds (spec compliance)
+- `tools/call` without `arguments` key → defaults to `{}`, then
+  the handler errors with -32001 (proves dispatcher doesn't crash)
+
+**MET-450 64 KiB stdio readline guard**: skipped — the guard is the
+default `asyncio.StreamReader` limit on `__main__.run_stdio()`; the
+HTTP transport has no body cap of its own. The test is a documented
+`@pytest.mark.skip` placeholder; the real stdio guard test belongs
+in a subprocess-driven runner that spawns the MCP CLI and pipes a
+>64 KiB line through stdin.
+
+Tool counts after this PR: 76 → 87 e2e tests + 6 live/skip
+(2 Cypher + 3 distributor cred + 1 stdio guard).
 
 ## Phase 5-7 — pending
