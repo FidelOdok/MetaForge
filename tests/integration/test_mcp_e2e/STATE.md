@@ -134,9 +134,31 @@ fixture that wires fresh `InMemoryExperienceStore` +
 
 Tool counts after this PR: 21 → 27 e2e tests.
 
+### `test_twin_tools.py` ✅ DONE (this PR)
+
+All five `twin.*` MCP tools covered with a module-local `twin_mcp_client`
++ `twin_with_data` fixture that wires a fresh `InMemoryTwinAPI`
+pre-populated with one canonical `WorkProduct`.
+
+- `twin.get_node` — root + first-hop envelope; invalid UUID + missing
+  arg yield clean `McpRpcError`
+- `twin.thread_for` — depth-bounded subgraph round-trip; depth-range
+  validation (1..10) rejects out-of-bounds
+- `twin.find_by_property` — adapter validation: unsafe Cypher labels +
+  missing value rejected at the adapter, before forwarding (no
+  injection path). The Cypher happy-path requires the Neo4j twin and
+  is gated on `METAFORGE_MCP_URL` (skipped in CI in-process mode).
+- `twin.constraint_violations` — empty branch passes, evaluated_count
+  shape verified
+- `twin.query_cypher` — read-only enforced (CREATE / MERGE / DELETE
+  rejected by the adapter), empty cypher rejected. Cypher-backed read
+  happy-path is `_REQUIRES_LIVE_TWIN`-gated.
+- `tools/list` inventory confirms all five tools register.
+
+Tool counts after this PR: 27 → 38 e2e tests + 2 live-only skips.
+
 ### Remaining Phase 3 files — pending
 
-- `test_twin_tools.py`
 - `test_project_tools.py`
 - `test_constraint_tools.py`
 - `test_cad_tools.py` (cadquery / freecad / calculix / kicad)
