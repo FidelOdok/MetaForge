@@ -345,9 +345,27 @@ will start surfacing real envelopes and the assertions auto-upgrade
 
 Tool counts after this PR: 88 → 90 e2e tests + 6 skipped.
 
+### `test_vertical_firmware.py` ✅ DONE (this PR)
+
+Three-step sequence — the spec made firmware deliberately lighter
+than mech/EE (no live build):
+
+1. `project.create`
+2. `knowledge.search` (MCU-family lookup: "STM32H7 ARM Cortex-M7")
+3. skill mock: synthesises a deterministic build plan from the top
+   `knowledge.search` hit (`build_target`, `toolchain`, `flash_layout`,
+   `build_status: PLANNED`)
+
+No backend gating here — every step must execute. The build-plan
+"skill mock" is the surrogate the loop spec called out: it stands
+in for the firmware-build step we don't run in CI but proves the
+agent-facing interface shape can be populated from a real MCP
+round-trip.
+
+Tool counts after this PR: 90 → 91 e2e tests + 6 skipped.
+
 ### Remaining Phase 5 files — pending
 
-- `test_vertical_firmware.py` (project + knowledge.search + skill mock)
 - `test_vertical_supplychain.py` (project + digikey + memory)
 
 ## Phase 6-7 — pending
