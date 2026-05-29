@@ -288,4 +288,39 @@ in a subprocess-driven runner that spawns the MCP CLI and pipes a
 Tool counts after this PR: 76 → 87 e2e tests + 6 live/skip
 (2 Cypher + 3 distributor cred + 1 stdio guard).
 
-## Phase 5-7 — pending
+## Phase 5 — Per-vertical readiness scenarios
+
+### `test_vertical_mechanical.py` ✅ DONE (this PR)
+
+Five-step sequence smoke:
+
+1. `project.create` — fresh project, must succeed
+2. `knowledge.populate_bom` — design-intent query → ranked suggestions
+3. `cadquery.create_parametric` — bracket geometry
+4. `calculix.validate_mesh` — pre-solve mesh check
+5. `constraint.validate` — gate the WP list (empty → vacuous pass)
+
+**CI gating**: cadquery + ccx binaries aren't installed in CI, so
+steps 3-4 are allowed to surface `-32001 TOOL_EXECUTION_ERROR` (the
+adapter validates + forwards, backend import/shell-out fails, the
+dispatcher returns a clean envelope). What's refused is any
+dispatcher-level error (`-32600`/`-32601`) — that would mean the
+wire-up itself is broken.
+
+Live mode (`METAFORGE_MCP_URL` against a deploy with real CAD/sim
+binaries) is where the scenario should pass at every step. Outcomes
+are stashed in a per-step dict the Phase 7 reporter can roll up into
+the readiness matrix.
+
+Tool counts after this PR: 87 → 88 e2e tests + 6 skipped.
+
+### Remaining Phase 5 files — pending
+
+- `test_vertical_electronics.py` (project + knowledge + KiCad** + constraint)
+- `test_vertical_firmware.py` (project + knowledge.search + skill mock)
+- `test_vertical_supplychain.py` (project + digikey + memory)
+
+** KiCad isn't in the unified MCP bootstrap yet — the EE scenario
+will skip KiCad steps until it lands.
+
+## Phase 6-7 — pending
