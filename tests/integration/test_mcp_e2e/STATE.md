@@ -212,8 +212,53 @@ lives in Phase 5 live-mode vertical scenarios.
 
 Tool counts after this PR: 54 → 68 e2e tests + 2 live-only skips.
 
-### Remaining Phase 3 files — pending
+### `test_supplier_tools.py` ✅ DONE (this PR)
 
-- `test_supplier_tools.py` (skip-on-missing-creds)
+Distributor coverage with a CI-friendly fake-adapter path plus
+live-cred gated smokes:
 
-## Phase 4-7 — pending
+- Default mode (no creds): all three distributors (digikey / mouser /
+  nexar) are absent from `tools/list` — MET-434 "skip with structured
+  log" contract enforced
+- Fake-adapter mode: a `_FakeDistributorAdapter` patched into
+  `tool_registry.tools.digikey.adapter.DigiKeyAdapter` so bootstrap's
+  `_make_digikey()` returns the stub with fake env creds. Tests then
+  drive `digikey.search`, `digikey.get_product`, `digikey.get_pricing`,
+  `digikey.get_availability` against the fake — quantity-tier
+  sort, null returns on unknown MPN, missing-arg → `McpRpcError`,
+  inventory check
+- Live mode (`DIGIKEY_CLIENT_ID/SECRET`, `MOUSER_API_KEY`,
+  `NEXAR_CLIENT_ID/SECRET`): smoke tests against the real APIs gated
+  on the relevant credentials; skip in CI
+
+Tool counts after this PR: 68 → 76 e2e tests + 5 live-only skips
+(2 Cypher + 3 distributor credential gates).
+
+## Phase 3 — COMPLETE
+
+All seven Phase 3 per-tool files are merged. The MCP surface is
+covered end-to-end through the JSON-RPC HTTP envelope:
+
+| File                     | PR    | Tools covered                                    |
+|--------------------------|-------|--------------------------------------------------|
+| test_knowledge_tools.py  | #275  | search / ingest / extract / populate_bom         |
+| test_memory_tools.py     | #276  | retrieve_similar_experience / list_insights      |
+| test_twin_tools.py       | #277  | get_node / thread_for / find_by_property / +2    |
+| test_project_tools.py    | #278  | create / list / get                              |
+| test_constraint_tools.py | #279  | validate                                         |
+| test_cad_tools.py        | #280  | cadquery + freecad + calculix inventory + valid. |
+| test_supplier_tools.py   | this  | digikey + mouser + nexar (fake + live-gated)     |
+
+## Phase 4 — Error-path coverage (next)
+
+Next file: `test_mcp_errors.py`. Per the loop spec, cover:
+- missing required arg
+- unknown tool name
+- oversized payload (MET-450 64KB stdio readline guard)
+- invalid enum value
+- malformed JSON-RPC
+
+Each error must return a clean JSON-RPC error envelope with a
+`-32xxx` code + structured `data`.
+
+## Phase 5-7 — pending
