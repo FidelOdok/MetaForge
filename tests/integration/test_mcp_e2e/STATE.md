@@ -433,4 +433,42 @@ readiness matrix.
 Tool counts after this PR: 93 → 94 e2e tests + 6 skipped + 3
 deselected (the perf opt-ins).
 
-## Phase 7 — pending
+## Phase 7 — Final report ✅ DONE (this PR)
+
+`tests/integration/test_mcp_e2e/REPORT.md` is the human-readable
+readiness matrix for the MCP integration suite. It rolls up:
+
+- per-phase summary (1 through 7) with PR cross-refs
+- per-tool coverage matrix (every documented tool, happy vs error
+  path, CI vs live-only marker)
+- per-vertical readiness with go/no-go signal and precise blockers:
+  - **Mechanical** 🟢 READY (live solve needs cadquery + ccx)
+  - **Electronics** 🔴 NOT READY — KiCad bootstrap gap
+  - **Firmware** 🟢 READY (skill-mock surrogate)
+  - **Supply-chain** 🟡 READY with `DIGIKEY_CLIENT_ID/SECRET`
+- gap-fix outcomes (G1 / G2 / G3 fully live-verified; G4 contract
+  covered, live verify deferred until MCP relaunch with property
+  LLM env)
+- Phase 6 perf baselines (p50 / p95 / mean / max for the three hot
+  tools — all ~3 orders of magnitude under the in-process ceilings)
+- follow-ups: KiCad bootstrap wire-up; G4 live verify; containerised
+  CAD/sim runner for CI; MET-450 stdio guard in a subprocess runner
+
+Linear issue filed alongside this PR captures the EE vertical's
+KiCad blocker and the G4 deferred verify as follow-ups under
+MET-477's parent project.
+
+## STATE: ALL_DONE
+
+All seven phases of the MET-477 MCP integration suite are complete.
+The suite is the pre-vertical readiness gate it set out to be:
+
+- **94 e2e tests** in the default run (~2.3s)
+- **6 skipped** (Cypher live-only, distributor cred gates, MET-450
+  stdio guard placeholder)
+- **3 deselected** (perf opt-ins; `METAFORGE_PERF_TESTS=1 pytest -m
+  perf` runs all three baselines green)
+- **8 PRs for Phase 2** (G1 #267, G2 #269, G3 #271, G4 #273 +
+  4 docs / STATE ticks)
+- **7 PRs for Phase 3** (one per per-tool file)
+- **1 PR for Phase 4**, **4 for Phase 5**, **1 each for Phase 6 & 7**
