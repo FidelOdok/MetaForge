@@ -14,16 +14,14 @@ Files landed:
 
 ## Phase 2 — Gap fixes
 
-### G1 — MCP server wires insight_store ✅ DONE (this PR)
-- `metaforge/mcp/server.py:build_unified_server` now accepts `memory_insight_store` and forwards to `bootstrap_tool_registry`.
-- `metaforge/mcp/__main__.py` gains `_build_insight_store()` + `_close_insight_store()` — pgvector when `DATABASE_URL` set, in-memory otherwise.
-- `_bootstrap()` returns a 5-tuple; both stdio and HTTP paths unpack and close.
-- `conftest.py` mirrors the wiring with an `InMemoryInsightStore` so the in-process fixture matches production.
-- Test: `test_memory_tools.py` asserts `memory.list_insights` returns a clean `data.insights: []` envelope (pre-G1 raised -32001).
-- Also asserts `memory.retrieve_similar_experience` returns `data.hits: []`.
+### G1 — MCP server wires insight_store ✅ DONE + LIVE-VERIFIED (PR #267)
+- `build_unified_server`, `_build_insight_store`, `_close_insight_store` shipped.
+- Live probe on fidel-dev confirms: `memory.list_insights` no longer raises `set_insight_store was never called`. Error message **shifted to** "another operation is in progress" — that's G3 (pool contention), not G1. G1 is genuinely fixed.
+- Test in `test_memory_tools.py` is the regression guard.
+- Process-cleanup gotcha: the live MCP server had a stale process holding the port through prior fires. `docker compose restart gateway` + relaunch picked up the new code cleanly.
 
 ### G2 — CadQuery in MCP bootstrap (next)
-Surface check from the in-process test fixture showed cadquery IS already loaded in `build_unified_server` (registered via `tool_registry/bootstrap.py:_ADAPTER_REGISTRY`). The MET-477 smoke ran against a live MCP server where cadquery was apparently filtered out by `METAFORGE_ADAPTERS`. Verify the live server includes it after deploy; if not, debug the env-var allow-list.
+Live tools/list still shows zero `cadquery.*` tools despite the in-process fixture loading them. Live server's adapter list is `['freecad', 'calculix', 'knowledge', 'constraint', 'twin', 'project', 'memory', 'digikey']` — cadquery missing. Need to find why bootstrap skips it in the gateway container (env var? adapter_ids filter? docker config inconsistency?).
 
 ### G3 — memory pool contention
 ### G4 — extract_properties LLM-over-chunks fallback
