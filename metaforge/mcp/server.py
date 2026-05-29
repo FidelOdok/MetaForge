@@ -389,6 +389,7 @@ async def build_unified_server(
     constraint_engine: Any = None,
     project_backend: Any = None,
     memory_client: Any = None,
+    memory_insight_store: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -400,7 +401,8 @@ async def build_unified_server(
     contract from MET-335). Twin and constraint adapters are included
     only when ``twin`` and ``constraint_engine`` are supplied (MET-421).
     Memory adapter is included only when a ``MemoryClient`` is
-    supplied (MET-453).
+    supplied (MET-453); the optional ``memory_insight_store`` is
+    forwarded so ``memory.list_insights`` works (MET-477).
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -409,5 +411,6 @@ async def build_unified_server(
         constraint_engine=constraint_engine,
         project_backend=project_backend,
         memory_client=memory_client,
+        memory_insight_store=memory_insight_store,
     )
     return UnifiedMcpServer(adapters=registry.list_adapter_servers())

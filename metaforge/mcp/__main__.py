@@ -458,17 +458,71 @@ async def _close_memory_store(store: Any) -> None:
         logger.warning("mcp_memory_store_close_failed", error=str(exc))
 
 
+async def _build_insight_store() -> Any:
+    """Construct the consolidation insight store (MET-477 / G1).
+
+    Mirrors ``api_gateway/server.py``'s lighter wiring: prefer
+    pgvector when ``DATABASE_URL`` is set, otherwise fall back to
+    in-memory. Without this, ``memory.list_insights`` raises
+    "insight_store was called before set_insight_store()". Returns
+    ``None`` only on import / init failure — the caller passes that
+    straight to ``build_unified_server`` and MemoryServer falls back
+    to its old "no store bound" error envelope (no regression).
+
+    Note: this builder only stands up the *read* side of the
+    consolidation flow. The full pipeline (orchestrator + Neo4j
+    dual-write) lives in the gateway. The standalone MCP server is
+    a read consumer, so pgvector alone is enough.
+    """
+    try:
+        from digital_twin.memory.consolidation import (
+            InMemoryInsightStore,
+            PgVectorInsightStore,
+        )
+
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url:
+            try:
+                dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                pg_store = PgVectorInsightStore(dsn=dsn)
+                await pg_store.initialize()
+                logger.info("mcp_insight_store_pgvector_initialised")
+                return pg_store
+            except Exception as exc:  # noqa: BLE001 — degrade to in-memory
+                logger.warning("mcp_insight_store_pgvector_failed", error=str(exc))
+        logger.info("mcp_insight_store_in_memory_initialised")
+        return InMemoryInsightStore()
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.warning("mcp_insight_store_init_failed", error=str(exc))
+        return None
+
+
+async def _close_insight_store(store: Any) -> None:
+    """Best-effort teardown of the insight-store pool (MET-477)."""
+    if store is None:
+        return
+    close = getattr(store, "close", None)
+    if close is None:
+        return
+    try:
+        await close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_insight_store_close_failed", error=str(exc))
+
+
 async def _bootstrap(
     args: argparse.Namespace,
-) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any, Any]:
-    """Return the unified MCP server, the twin, knowledge service, memory store.
+) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any, Any, Any]:
+    """Return the unified MCP server, the twin, knowledge service, memory store, insight store.
 
     Callers must close the twin (``await twin.aclose()``), the
-    knowledge service (``await _close_knowledge_service(svc)``), and
-    the memory store (``await _close_memory_store(store)``) when the
+    knowledge service (``await _close_knowledge_service(svc)``), the
+    memory store (``await _close_memory_store(store)``), and the
+    insight store (``await _close_insight_store(store)``) when the
     transport loop exits — otherwise the Neo4j driver, aiohttp
-    sessions, the LightRAG pgvector pool, and the memory pgvector
-    pool leak across subprocess restarts (MET-425, MET-453).
+    sessions, the LightRAG pgvector pool, the memory pgvector pool,
+    and the insight pgvector pool leak across subprocess restarts
+    (MET-425, MET-453, MET-477).
     """
     from api_gateway.projects.backend import create_project_backend
     from twin_core.api import InMemoryTwinAPI
@@ -495,6 +549,11 @@ async def _bootstrap(
     # is exposed alongside knowledge.* when the standalone stdio MCP
     # server is the entrypoint (Claude Code / Cursor talking direct).
     memory_client, memory_store = await _build_memory_client()
+    # MET-477 / G1: build the consolidation insight store so
+    # ``memory.list_insights`` doesn't error out with
+    # "set_insight_store was never called". The gateway has the full
+    # consolidation pipeline; the MCP server only needs the read side.
+    insight_store = await _build_insight_store()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -502,8 +561,9 @@ async def _bootstrap(
         constraint_engine=twin.constraints,
         project_backend=project_backend,
         memory_client=memory_client,
+        memory_insight_store=insight_store,
     )
-    return server, twin, knowledge_service, memory_store
+    return server, twin, knowledge_service, memory_store, insight_store
 
 
 def _configure_logging_for_transport(transport: str) -> None:
@@ -541,7 +601,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.transport == "stdio":
 
         async def _stdio() -> None:
-            server, twin, knowledge_service, memory_store = await _bootstrap(args)
+            server, twin, knowledge_service, memory_store, insight_store = await _bootstrap(args)
             try:
                 await run_stdio(server)
             finally:
@@ -553,13 +613,15 @@ def main(argv: list[str] | None = None) -> int:
                 await _close_knowledge_service(knowledge_service)
                 # MET-453: same hygiene for the memory pgvector pool.
                 await _close_memory_store(memory_store)
+                # MET-477 / G1: same hygiene for the insight pgvector pool.
+                await _close_insight_store(insight_store)
 
         asyncio.run(_stdio())
     else:
         # HTTP path keeps the two-step flow: ``run_http`` runs uvicorn
         # which manages its own loop and only consumes the bootstrapped
         # server's introspection surface.
-        server, twin, knowledge_service, memory_store = asyncio.run(_bootstrap(args))
+        server, twin, knowledge_service, memory_store, insight_store = asyncio.run(_bootstrap(args))
         try:
             run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
         finally:
@@ -568,6 +630,7 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(twin.aclose())
             asyncio.run(_close_knowledge_service(knowledge_service))
             asyncio.run(_close_memory_store(memory_store))
+            asyncio.run(_close_insight_store(insight_store))
     return 0
 
 
