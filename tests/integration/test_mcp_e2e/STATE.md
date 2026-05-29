@@ -29,9 +29,22 @@ Fix: on remote-fetch failure, log a warning and drop through to `_create_adapter
 - Tool count: **28 → 35** (the 7 cadquery tools landed)
 - `tools/list` now includes `cadquery.boolean_operation`, `cadquery.create_assembly`, `cadquery.create_parametric`, `cadquery.execute_script`, `cadquery.export_geometry`, `cadquery.generate_enclosure`, `cadquery.get_properties`
 
-### G3 — memory pool contention (next)
-Live `memory.list_insights` and `memory.retrieve_similar_experience` both error with `"another operation in progress"`. The MCP server's PgVectorInsightStore + PgVectorExperienceStore share the gateway's asyncpg pool. Fix: give the MCP server its own pool — separate `PgVectorInsightStore(dsn)` instance with its own pool inside `_build_insight_store` and `_build_memory_client`.
+### G3 — MCP event-loop unification ✅ DONE (this PR)
+Root cause was NOT pool sharing across processes — it was loop binding within the same process. `metaforge.mcp.__main__:main()` did:
+```
+server, ... = asyncio.run(_bootstrap(args))    # creates pools on loop A, destroys loop A
+run_http(server, ...)                          # uvicorn creates loop B, queries fail
+asyncio.run(_close_*)                          # would also try yet another loop
+```
+asyncpg pools are bound to the event loop they were created in. By the time uvicorn served the first request, loop A was dead and every `pg_store.list()` / `pg_store.search()` failed with `"another operation is in progress"`.
 
-### G4 — extract_properties LLM-over-chunks fallback
+Fix: introduce `serve_http_async()` (a coroutine that awaits `uvicorn.Server.serve()`) and run bootstrap + uvicorn + cleanup inside one `asyncio.run(_http_main())`. `run_http` stays as a sync wrapper for back-compat (delegates to `serve_http_async`).
+
+Tests (`tests/unit/test_mcp_serve_http_loop.py`):
+- `serve_http_async` is a coroutine function (regression guard)
+- Stub uvicorn.Server: verify `.serve()` is called, `.run()` is NOT
+- `run_http` delegates via exactly one `asyncio.run`
+
+### G4 — extract_properties LLM-over-chunks fallback (next)
 
 ## Phase 3-7 — pending

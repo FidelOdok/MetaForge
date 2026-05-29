@@ -316,7 +316,38 @@ def build_http_app(
 
 
 def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool) -> None:
-    """Block on uvicorn until shutdown."""
+    """Block on uvicorn until shutdown.
+
+    Kept as a synchronous entry-point for back-compat with callers that
+    pre-built the server. Production HTTP launch goes through
+    :func:`serve_http_async` so the bootstrap + uvicorn loop share the
+    same event loop (MET-477 / G3 — fixes the asyncpg pool-binding bug
+    where pools created during ``_bootstrap`` were attached to a dead
+    loop by the time uvicorn served requests on a new one).
+    """
+    import asyncio
+
+    asyncio.run(serve_http_async(server, host, port, enable_sse=enable_sse))
+
+
+async def serve_http_async(
+    server: UnifiedMcpServer,
+    host: str,
+    port: int,
+    *,
+    enable_sse: bool,
+) -> None:
+    """Run uvicorn in the **current** event loop (MET-477 G3).
+
+    Critical for the bootstrap path: ``_bootstrap`` creates asyncpg
+    pools (memory experience store, consolidation insight store) bound
+    to whichever event loop is running. If uvicorn then spins up its
+    own loop via ``uvicorn.Server.run()``, every query against those
+    pools fails with ``"another operation is in progress"`` because
+    the pool's connection is tied to the dead bootstrap loop. Serving
+    via ``uvicorn.Server.serve()`` (the async variant) keeps the
+    pools and the request handlers in the same loop.
+    """
     import uvicorn
 
     api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
@@ -338,7 +369,7 @@ def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool
         adapter_count=len(server.adapters),
         tool_count=len(server.tool_ids),
     )
-    server_runner.run()
+    await server_runner.serve()
 
 
 # ---------------------------------------------------------------------------
@@ -618,19 +649,30 @@ def main(argv: list[str] | None = None) -> int:
 
         asyncio.run(_stdio())
     else:
-        # HTTP path keeps the two-step flow: ``run_http`` runs uvicorn
-        # which manages its own loop and only consumes the bootstrapped
-        # server's introspection surface.
-        server, twin, knowledge_service, memory_store, insight_store = asyncio.run(_bootstrap(args))
-        try:
-            run_http(server, args.host, args.port, enable_sse=args.transport == "sse")
-        finally:
-            # MET-425: best-effort teardown after uvicorn returns. The
-            # neo4j async driver tolerates cross-loop close in practice.
-            asyncio.run(twin.aclose())
-            asyncio.run(_close_knowledge_service(knowledge_service))
-            asyncio.run(_close_memory_store(memory_store))
-            asyncio.run(_close_insight_store(insight_store))
+        # MET-477 / G3: bootstrap + uvicorn share one event loop so
+        # asyncpg pools created during ``_bootstrap`` stay bound to
+        # the loop that uvicorn serves requests on. The previous
+        # ``asyncio.run(_bootstrap) ... run_http() ... asyncio.run(_close_*)``
+        # pattern destroyed the bootstrap loop before uvicorn's loop
+        # started — every subsequent memory.* / list_insights query
+        # failed with "another operation is in progress" because the
+        # asyncpg pool was bound to a dead loop.
+        async def _http_main() -> None:
+            server, twin, kb_svc, mem_store, ins_store = await _bootstrap(args)
+            try:
+                await serve_http_async(
+                    server,
+                    args.host,
+                    args.port,
+                    enable_sse=args.transport == "sse",
+                )
+            finally:
+                await twin.aclose()
+                await _close_knowledge_service(kb_svc)
+                await _close_memory_store(mem_store)
+                await _close_insight_store(ins_store)
+
+        asyncio.run(_http_main())
     return 0
 
 
