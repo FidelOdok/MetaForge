@@ -188,6 +188,148 @@ async def test_mpn_not_found_short_circuits():
     assert llm.calls == []
 
 
+# ---------------------------------------------------------------------------
+# G4 (MET-477): LLM-over-chunks fallback when no Twin Datasheet exists
+# ---------------------------------------------------------------------------
+
+
+def _hit(content: str, source_path: str | None = "kb/bme280.txt") -> Any:
+    from digital_twin.knowledge.service import SearchHit
+
+    return SearchHit(
+        content=content,
+        similarity_score=0.9,
+        source_path=source_path,
+        heading=None,
+        chunk_index=0,
+        total_chunks=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_g4_search_fallback_extracts_when_no_datasheet_node():
+    """No Twin Datasheet, but search returns chunks + llm wired → LLM-over-chunks."""
+    twin = _StubTwin(None)
+    captured_query: dict[str, Any] = {}
+
+    async def fake_search(query: str, top_k: int) -> list[Any]:
+        captured_query["query"] = query
+        captured_query["top_k"] = top_k
+        return [
+            _hit("BME280 supply voltage VDD = 3.3 V typical, range 1.71-3.6 V."),
+            _hit("Operating temperature range -40 to +85 °C."),
+        ]
+
+    llm = StubPropertyLLM(
+        {"supply_voltage": _resp(found=True, value="3.3", unit="V", confidence=0.75)}
+    )
+
+    result = await extract_properties_for_mpn(
+        twin, "BME280", ["supply_voltage"], llm=llm, search=fake_search
+    )
+
+    assert captured_query["query"] == "BME280"
+    assert result.mpn_found is True
+    assert result.datasheet_revision is None
+    assert result.datasheet_source_path == "kb/bme280.txt"
+    assert len(result.items) == 1
+    assert result.items[0].value == "3.3"
+    assert result.items[0].extraction_method is ExtractionMethod.LLM_INFERRED
+
+
+@pytest.mark.asyncio
+async def test_g4_search_fallback_disabled_without_search():
+    """Pre-G4 contract: no search wired → mpn_found=False even with llm."""
+    twin = _StubTwin(None)
+    llm = StubPropertyLLM({"x": _resp(found=True, value="1")})
+    result = await extract_properties_for_mpn(twin, "BME280", ["x"], llm=llm)
+    assert result.mpn_found is False
+    assert result.items == []
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_g4_search_fallback_disabled_without_llm():
+    """No llm wired → fallback inactive even when search would have hits."""
+    twin = _StubTwin(None)
+    search_calls: list[str] = []
+
+    async def fake_search(query: str, top_k: int) -> list[Any]:
+        search_calls.append(query)
+        return [_hit("BME280 supply 3.3V")]
+
+    result = await extract_properties_for_mpn(twin, "BME280", ["x"], search=fake_search)
+    assert result.mpn_found is False
+    assert result.items == []
+    # No LLM means no point calling search.
+    assert search_calls == []
+
+
+@pytest.mark.asyncio
+async def test_g4_search_fallback_empty_hits_returns_mpn_not_found():
+    twin = _StubTwin(None)
+
+    async def fake_search(query: str, top_k: int) -> list[Any]:
+        return []
+
+    llm = StubPropertyLLM({"x": _resp(found=True, value="1")})
+    result = await extract_properties_for_mpn(twin, "MISSING", ["x"], llm=llm, search=fake_search)
+    assert result.mpn_found is False
+    assert result.items == []
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_g4_search_fallback_swallows_search_errors():
+    """Backend failure in search must not crash extract — degrade to NOT_FOUND."""
+    twin = _StubTwin(None)
+
+    async def broken_search(query: str, top_k: int) -> list[Any]:
+        raise RuntimeError("pgvector connection refused")
+
+    llm = StubPropertyLLM({"x": _resp(found=True, value="1")})
+    result = await extract_properties_for_mpn(twin, "BME280", ["x"], llm=llm, search=broken_search)
+    assert result.mpn_found is False
+    assert result.items == []
+
+
+@pytest.mark.asyncio
+async def test_g4_search_fallback_multiple_properties_against_chunks():
+    """One search call, top-K chunks fuel multiple per-property LLM calls."""
+    twin = _StubTwin(None)
+    search_count = {"n": 0}
+
+    async def fake_search(query: str, top_k: int) -> list[Any]:
+        search_count["n"] += 1
+        return [
+            _hit("BME280 supply voltage 3.3V, range 1.71-3.6V."),
+            _hit("BME280 measurement: temperature, humidity, pressure."),
+        ]
+
+    llm = StubPropertyLLM(
+        {
+            "supply_voltage": _resp(found=True, value="3.3", unit="V", confidence=0.75),
+            "operating_temperature_max": _resp(found=True, value="85", unit="°C", confidence=0.7),
+        }
+    )
+
+    result = await extract_properties_for_mpn(
+        twin,
+        "BME280",
+        ["supply_voltage", "operating_temperature_max"],
+        llm=llm,
+        search=fake_search,
+    )
+
+    assert result.mpn_found is True
+    # Only one search round-trip even though two properties were requested.
+    assert search_count["n"] == 1
+    assert len(result.items) == 2
+    values = {item.property_name: item.value for item in result.items}
+    assert values["supply_voltage"] == "3.3"
+    assert values["operating_temperature_max"] == "85"
+
+
 @pytest.mark.asyncio
 async def test_five_properties_mixed_tiers_against_ground_truth():
     # Tier-1 covers two; the LLM covers three.

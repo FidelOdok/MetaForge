@@ -52,6 +52,36 @@ memory.retrieve_similar_experience:  OK status=success count=3
 ```
 Both memory tools now return clean envelopes. `retrieve_similar_experience` even surfaces the 3 existing `agent_experiences` rows from the earlier Mechanical-agent recording.
 
-### G4 — extract_properties LLM-over-chunks fallback (next)
+### G4 — extract_properties LLM-over-chunks fallback ✅ DONE (this PR)
+
+Root cause: every text-ingested datasheet lands in pgvector chunks but no
+Twin ``Datasheet`` node is created (the ingest pipeline tied to MET-444's
+structured-table extraction only fires on PDF ingest). So
+``knowledge.extract`` returned ``mpn_found=False`` for everything in the
+populated KB even though the prose was sitting right there.
+
+Fix: ``extract_properties_for_mpn`` now accepts an optional ``search``
+callable. When ``twin.get_current_datasheet(mpn)`` returns None AND both
+``search`` and ``llm`` are wired, we pull the top ``fallback_top_k`` (=5)
+hits, concat their content, and run the existing Tier-2/3
+``infer_property`` per property against that synthesised prose.
+``LightRAGKnowledgeService.extract_properties`` binds a closure around
+``self.search`` and forwards it. Fallback path is gated on the LLM being
+configured — same gate the existing Tier-2/3 path uses.
+
+Contract additions:
+- ``mpn_found=True`` even though no ``Datasheet`` node exists.
+- ``datasheet_revision=None`` (sentinel for "synthesised from chunks").
+- ``datasheet_source_path`` is the source path of the top-ranked hit.
+- Search backend failures degrade to ``mpn_found=False`` rather than
+  crashing the call.
+
+Tests (`tests/unit/test_knowledge_property_extractor_llm.py`):
+- happy path (one-property fallback returns ``llm_inferred``)
+- no-search disables fallback (pre-G4 contract preserved)
+- no-llm disables fallback (no point calling search)
+- empty hits → ``mpn_found=False``
+- broken search backend → ``mpn_found=False`` (fail-open)
+- multi-property: one search round-trip fuels N per-property LLM calls
 
 ## Phase 3-7 — pending
