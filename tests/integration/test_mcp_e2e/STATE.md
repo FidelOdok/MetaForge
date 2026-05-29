@@ -93,12 +93,34 @@ process environment. Live re-launch + verify is a follow-up — captured
 in the suite as the `knowledge.extract` happy-path scenario landing in
 Phase 3.
 
-## Phase 3 — Per-tool happy-path coverage (next)
+## Phase 3 — Per-tool happy-path coverage
 
-Next file: `test_knowledge_tools.py`. Covers `knowledge.search`,
-`knowledge.ingest`, `knowledge.extract` (G4 unblocker), and
-`knowledge.populate_bom`. One canonical happy-path call per tool with
-real KB data; in-process mode against the InMemory adapters by default,
-live mode pinned by `METAFORGE_MCP_URL` for the deferred G4 verify.
+### `test_knowledge_tools.py` ✅ DONE (this PR)
+
+Covers all four `knowledge.*` MCP tools end-to-end through the JSON-RPC
+HTTP layer:
+
+- `knowledge.search` — citation round-trip + `top_k` forwarding + `knowledge_type` enum validation
+- `knowledge.ingest` — single-payload mode, asserts `chunks_indexed` + enum forwarding
+- `knowledge.extract` — `ExtractedProperties` envelope shape, input-order preservation, missing/empty-args error path
+- `knowledge.populate_bom` — search → extract → rank smoke; deduped candidate by MPN
+- `tools/list` inventory check confirms all four tools register when `knowledge_service` is wired
+
+In-process mode wires a `_FakeKnowledgeService` (KnowledgeService Protocol)
+into `build_unified_server` via a module-level `knowledge_mcp_client`
+fixture. Live mode (`METAFORGE_MCP_URL`) routes the same fixture at the
+deployed MCP server — that's where the deferred G4 live-verify will run.
+
+Tool counts after this PR: 14 e2e tests pre-existing + 7 new = 21 in
+`tests/integration/test_mcp_e2e/`.
+
+### Remaining Phase 3 files — pending
+
+- `test_memory_tools.py` (G1/G3 regression)
+- `test_twin_tools.py`
+- `test_project_tools.py`
+- `test_constraint_tools.py`
+- `test_cad_tools.py` (cadquery / freecad / calculix / kicad)
+- `test_supplier_tools.py` (skip-on-missing-creds)
 
 ## Phase 4-7 — pending
