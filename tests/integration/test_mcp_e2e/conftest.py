@@ -74,6 +74,7 @@ async def _build_in_process_app() -> Any:
     from digital_twin.knowledge.embedding_service import create_embedding_service
     from digital_twin.knowledge.store import InMemoryKnowledgeStore
     from digital_twin.memory.client import MemoryClient
+    from digital_twin.memory.consolidation import InMemoryInsightStore
     from digital_twin.memory.store import InMemoryExperienceStore
     from metaforge.mcp.__main__ import build_http_app
     from metaforge.mcp.server import build_unified_server
@@ -87,6 +88,10 @@ async def _build_in_process_app() -> Any:
     # the in-process suite uses None and skips the tools that need them.
     memory_store = InMemoryExperienceStore()
     memory_client = MemoryClient(store=memory_store, embeddings=embedder)
+    # MET-477 / G1: mirror the live MCP server's insight_store wiring
+    # so memory.list_insights returns a clean envelope (empty list)
+    # instead of -32001 "set_insight_store was never called".
+    insight_store = InMemoryInsightStore()
 
     server = await build_unified_server(
         knowledge_service=None,  # KB tools require LightRAG — exercised in live mode
@@ -94,5 +99,6 @@ async def _build_in_process_app() -> Any:
         constraint_engine=None,
         project_backend=None,
         memory_client=memory_client,
+        memory_insight_store=insight_store,
     )
     return build_http_app(server, enable_sse=False, api_key=None)
