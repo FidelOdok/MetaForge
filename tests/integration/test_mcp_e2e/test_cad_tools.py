@@ -111,36 +111,49 @@ async def test_cadquery_register_floor(mcp_client):
     )
 
 
-async def test_kicad_tools_not_in_unified_bootstrap(mcp_client):
-    """Document: KiCad has an adapter but isn't in the unified MCP bootstrap.
+_EXPECTED_KICAD_TOOLS = {
+    "kicad.run_erc",
+    "kicad.run_drc",
+    "kicad.export_bom",
+    "kicad.export_gerber",
+    "kicad.export_netlist",
+    "kicad.get_pin_mapping",
+}
 
-    KiCad ships as a separate stdio MCP entrypoint
-    (``tool_registry/tools/kicad/entrypoint.py``). Re-wiring it into
-    the unified bootstrap would require adding it to
-    ``tool_registry.bootstrap._ADAPTER_REGISTRY`` and supplying the
-    KiCad CLI binary in the runtime container. This test is the gap
-    tripwire — if KiCad starts showing up here we should update the
-    EE vertical scenarios in Phase 5 to actually exercise it.
+
+async def test_kicad_tools_register_in_unified_bootstrap(mcp_client):
+    """KiCad now registers in the unified MCP bootstrap (MET-478 blocker fix).
+
+    Pre-MET-478: KiCad shipped as a separate stdio entrypoint and was
+    absent from ``tools/list``, forcing the EE vertical scenario to
+    skip steps 3-6. Post-MET-478: ``KicadServer`` is registered via
+    ``tool_registry.bootstrap._ADAPTER_REGISTRY``, all 6 kicad.* tools
+    surface, and the EE vertical scenario in
+    ``test_vertical_electronics.py`` executes them end-to-end. The
+    handlers themselves still need the KiCad CLI binary in PATH at
+    runtime to actually succeed; without it each call surfaces as
+    ``-32001 TOOL_EXECUTION_ERROR`` (which the EE scenario's
+    ``_attempt()`` helper treats as acceptable in CI).
     """
     result = await rpc(mcp_client, "tools/list")
     tool_ids = {t.get("name") for t in result.get("tools", [])}
-    kicad_present = {tid for tid in tool_ids if tid and tid.startswith("kicad.")}
-    assert kicad_present == set(), (
-        f"kicad tools unexpectedly registered: {kicad_present} — "
-        "update bootstrap registry expectations + EE vertical scenarios"
-    )
+    missing = _EXPECTED_KICAD_TOOLS - tool_ids
+    assert not missing, f"missing kicad tools post-MET-478: {missing}"
 
 
 async def test_total_cad_sim_tool_count(mcp_client):
-    """Adapter-level total: cadquery=7 + freecad=5 + calculix=4 = 16."""
+    """Adapter-level total: cadquery=7 + freecad=5 + calculix=4 + kicad=6 = 22.
+
+    The kicad slice landed with MET-478 (unified MCP bootstrap wire-up).
+    """
     result = await rpc(mcp_client, "tools/list")
     tool_ids = {t.get("name") for t in result.get("tools", [])}
     cad_ids = {
         tid
         for tid in tool_ids
-        if tid and tid.split(".", 1)[0] in {"cadquery", "freecad", "calculix"}
+        if tid and tid.split(".", 1)[0] in {"cadquery", "freecad", "calculix", "kicad"}
     }
-    assert len(cad_ids) == 16, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
+    assert len(cad_ids) == 22, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
 
 
 # ---------------------------------------------------------------------------

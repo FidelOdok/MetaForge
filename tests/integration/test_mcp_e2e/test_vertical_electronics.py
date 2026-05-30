@@ -10,27 +10,23 @@ Per the loop spec, the EE-agent tool sequence is:
 6. ``kicad.export_gerber``┘
 7. ``constraint.validate`` — gate the assembled WP list
 
-KiCad bootstrap gap
--------------------
-KiCad has an adapter under ``tool_registry/tools/kicad/`` but is **not
-wired into the unified MCP bootstrap** (`tool_registry.bootstrap`
-registers only ``cadquery / freecad / calculix``). KiCad ships as a
-separate stdio entrypoint (``tool_registry/tools/kicad/entrypoint.py``).
+KiCad bootstrap — MET-478
+-------------------------
+KiCad is now registered in the unified MCP bootstrap
+(``tool_registry.bootstrap._ADAPTER_REGISTRY``), so all six kicad.*
+tools surface in ``tools/list``. Pre-MET-478 the scenario skipped
+steps 3-6 because those tools returned ``-32601 METHOD_NOT_FOUND``;
+post-MET-478 the dispatcher routes them through the adapter and the
+underlying handlers run.
 
-That means in CI (and on the current fidel-dev deploy) ``kicad.*`` tools
-return `-32601 METHOD_NOT_FOUND`. The EE scenario therefore:
-
-* asserts steps 1/2/7 (`project.create`, `knowledge.populate_bom`,
-  `constraint.validate`) succeed at the dispatcher level;
-* records each `kicad.*` step's outcome as "skipped — KiCad adapter not
-  in unified bootstrap" so the Phase 7 readiness reporter can roll up
-  the EE vertical as **NOT READY** with a precise blocker reason;
-* still proves the *non-KiCad* part of the wire-up is intact.
-
-When KiCad is added to ``tool_registry.bootstrap._ADAPTER_REGISTRY`` (or
-its own MCP entrypoint is consolidated into the unified server), the
-KiCad steps will start surfacing real outcomes and this test will
-upgrade automatically.
+In CI the KiCad CLI binary isn't in PATH on the GitHub Actions
+runners, so each kicad.* call surfaces as ``-32001
+TOOL_EXECUTION_ERROR`` (the adapter validates input, the
+``KicadCliNotFoundError`` raises, the dispatcher returns a clean
+envelope). The ``_attempt()`` helper treats that as an acceptable CI
+outcome — same tolerance band as the mechanical vertical's cadquery /
+calculix steps. Live mode (a deploy with the KiCad CLI installed)
+flips the kicad.* outcomes to ``success``.
 """
 
 from __future__ import annotations
@@ -101,19 +97,16 @@ async def _attempt(
     tool: str,
     args: dict[str, Any],
 ) -> dict[str, Any]:
-    """Call ``tool``; capture success or any kind of error envelope.
+    """Call ``tool``; capture success or a ``-32001`` tool error.
 
-    For the EE vertical, ``kicad.*`` legitimately returns
-    ``-32601 METHOD_NOT_FOUND`` in CI because KiCad isn't in the
-    unified MCP bootstrap. That outcome is recorded as ``"skipped"``
-    so the readiness reporter can roll the EE vertical up as NOT
-    READY with that specific blocker.
-
-    All non-KiCad steps treat ``-32600`` / ``-32601`` as wire-up
-    failures (the same contract as the mechanical vertical) — but
-    KiCad is the documented exception.
+    Post-MET-478 KiCad is wired into the unified MCP bootstrap, so
+    the EE vertical follows the same contract as the mechanical
+    vertical: dispatcher-level errors (``-32600`` / ``-32601``) are
+    wire-up failures that fail the test loudly; ``-32001`` means the
+    handler ran but its backend (KiCad CLI, cadquery lib, ccx) is
+    absent — acceptable in CI, surfaces as ``status="success"`` in
+    live mode against a deploy with the binaries installed.
     """
-    is_kicad = tool.startswith("kicad.")
     try:
         envelope = await call_tool(client, tool, args)
         return {
@@ -123,14 +116,6 @@ async def _attempt(
             "data": envelope.get("data"),
         }
     except McpRpcError as exc:
-        if exc.code == -32601 and is_kicad:
-            return {
-                "tool": tool,
-                "status": "skipped",
-                "executed": False,
-                "skip_reason": "kicad adapter not in unified MCP bootstrap",
-                "error_code": exc.code,
-            }
         if exc.code in (-32600, -32601):
             raise AssertionError(
                 f"{tool}: dispatcher-level error {exc.code} (wire-up broken): {exc.message}"
@@ -255,36 +240,52 @@ async def test_electronics_vertical_shape(
     }
     assert kicad_steps <= set(outcomes), f"missing KiCad outcomes: {kicad_steps - set(outcomes)}"
 
-    # In CI default mode all KiCad steps should be skipped with the
-    # documented reason; in live mode they may be executed.
+    # Post-MET-478: KiCad is wired into the unified MCP bootstrap,
+    # so kicad.* tools now route through the dispatcher rather than
+    # 404'ing. In CI the underlying handlers still need the KiCad
+    # CLI binary (not in PATH on the GitHub Actions runners), so the
+    # expected per-step outcome is "tool_execution_error" — the
+    # adapter validates input, the CLI shell-out fails, the
+    # dispatcher returns a clean -32001 envelope. Live mode against
+    # a deploy with the KiCad binary installed flips these to
+    # "success".
     if not os.environ.get("METAFORGE_MCP_URL"):
         for step in kicad_steps:
-            assert outcomes[step]["status"] == "skipped", (
-                f"{step}: expected skipped (KiCad not in bootstrap), got {outcomes[step]}"
+            assert outcomes[step]["status"] in {"success", "tool_execution_error"}, (
+                f"{step}: expected success or tool_execution_error post-MET-478, "
+                f"got {outcomes[step]}"
             )
-            assert outcomes[step]["skip_reason"] == ("kicad adapter not in unified MCP bootstrap")
 
 
-async def test_electronics_vertical_reports_kicad_gap_in_inventory(
+async def test_electronics_vertical_kicad_tools_in_inventory(
     electronics_vertical_client: httpx.AsyncClient,
 ) -> None:
-    """Phase 7 readiness rollup needs a stable signal for the KiCad gap.
+    """Phase 7 readiness signal: KiCad is now wired into the unified MCP.
 
-    The inventory check from ``test_cad_tools.py`` already asserts
-    KiCad is absent from ``tools/list`` in the unified MCP bootstrap.
-    This test mirrors that assertion locally so the EE vertical's
-    READY/NOT READY signal in REPORT.md keys off a self-contained
-    check and doesn't depend on cross-file ordering.
+    Pre-MET-478 this test asserted KiCad's *absence* (the EE-vertical
+    blocker). Post-MET-478 the assertion flips: every kicad.* tool
+    must appear in ``tools/list`` so the readiness reporter can flip
+    the EE vertical from NOT READY → READY. The handlers still need
+    the KiCad CLI binary at runtime to actually succeed, but the
+    wire-up gap is closed.
     """
     if os.environ.get("METAFORGE_MCP_URL"):
-        pytest.skip("inventory gap check is for the CI default bootstrap")
+        pytest.skip("inventory readiness check is for the CI default bootstrap")
 
     from ._helpers import rpc
 
     result = await rpc(electronics_vertical_client, "tools/list")
     tool_ids = {t.get("name") for t in result.get("tools", [])}
-    kicad_present = {tid for tid in tool_ids if tid and tid.startswith("kicad.")}
-    assert kicad_present == set(), (
-        f"EE vertical expected KiCad absent from unified MCP bootstrap; "
-        f"found {kicad_present}. Update vertical-readiness gating."
+    expected = {
+        "kicad.run_erc",
+        "kicad.run_drc",
+        "kicad.export_bom",
+        "kicad.export_gerber",
+        "kicad.export_netlist",
+        "kicad.get_pin_mapping",
+    }
+    missing = expected - tool_ids
+    assert not missing, (
+        f"EE vertical expected KiCad tools registered post-MET-478; "
+        f"missing {missing} — bootstrap registry regression"
     )

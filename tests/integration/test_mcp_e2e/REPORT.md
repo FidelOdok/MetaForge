@@ -9,11 +9,12 @@ Compliance / Supply-chain agents
 
 ## TL;DR
 
-The MCP surface is **integration-ready for three of four agent
-verticals** (Mechanical, Firmware, Supply-chain). The Electronics
-vertical is **NOT READY** because KiCad is not wired into the unified
-MCP bootstrap (KiCad has an adapter but ships as a separate stdio
-entrypoint). All four documented MET-477 gaps (G1–G4) are closed and
+The MCP surface is **integration-ready for all four agent
+verticals** (Mechanical, Electronics, Firmware, Supply-chain) as of
+MET-478. The Electronics vertical previously flagged NOT READY
+because KiCad wasn't in the unified MCP bootstrap; the bootstrap
+wire-up landed and all six `kicad.*` tools now surface in
+`tools/list`. All four documented MET-477 gaps (G1–G4) are closed and
 locked in by regression tests. The MCP server's JSON-RPC error envelope,
 tool inventory, per-tool happy paths, and per-vertical readiness
 scenarios all pass in CI.
@@ -84,7 +85,7 @@ Legend:
 | Vertical     | Status           | Sequence file                  | Blocker (if any)                                |
 |--------------|------------------|--------------------------------|-------------------------------------------------|
 | Mechanical   | 🟢 READY (live)  | `test_vertical_mechanical.py`  | none — cadquery / ccx required for live solve  |
-| Electronics  | 🔴 NOT READY     | `test_vertical_electronics.py` | **KiCad adapter not in unified MCP bootstrap** |
+| Electronics  | 🟢 READY (live)  | `test_vertical_electronics.py` | none — KiCad CLI binary required for live run |
 | Firmware     | 🟢 READY         | `test_vertical_firmware.py`    | none — 3/3 steps execute, build is skill-mocked |
 | Supply-chain | 🟡 READY (creds) | `test_vertical_supplychain.py` | needs `DIGIKEY_CLIENT_ID/SECRET` for live API   |
 
@@ -101,15 +102,17 @@ Legend:
 - Sequence: `project.create` → `knowledge.populate_bom` →
   `kicad.run_erc` → `kicad.run_drc` → `kicad.export_bom` →
   `kicad.export_gerber` → `constraint.validate`
-- CI: core 3/7 execute. **All four `kicad.*` steps surface
-  `-32601 METHOD_NOT_FOUND`** because KiCad is not in
-  `tool_registry.bootstrap._ADAPTER_REGISTRY` — it ships as a
-  separate stdio entrypoint at
-  `tool_registry/tools/kicad/entrypoint.py`.
-- Resolution: a follow-up Linear ticket (filed by this report) will
-  add KiCad to the unified bootstrap registry; the tripwire test
-  here auto-upgrades the EE vertical from NOT READY → READY when
-  KiCad starts surfacing in `tools/list`.
+- CI: all 7 steps reachable through the dispatcher post-MET-478.
+  The four `kicad.*` steps surface `-32001 TOOL_EXECUTION_ERROR` in
+  CI because the KiCad CLI binary isn't on the GH Actions runners
+  (the adapter validates input, the CLI shell-out fails); same
+  tolerance band as the mechanical vertical's cadquery + calculix
+  steps. Live mode against a deploy with the KiCad CLI installed
+  flips those four steps to `success`.
+- Bootstrap wire-up landed in PR #294 (MET-478): added KiCad to
+  `tool_registry.bootstrap._ADAPTER_REGISTRY`; the inventory
+  assertion in `test_cad_tools.py` flipped from "kicad absent" to
+  "all 6 kicad.* present"; EE vertical reads as READY.
 
 ### Firmware (`test_vertical_firmware.py`)
 - Sequence: `project.create` → `knowledge.search` (MCU family) →
@@ -171,13 +174,14 @@ just regression bounds for the ASGI fast path. Run with
 ## Open issues / follow-ups
 
 ### Tracked (Linear)
-- **KiCad bootstrap gap (EE blocker)** — add KiCad adapter entry to
-  `tool_registry/bootstrap.py` so `kicad.*` tools register under the
-  unified MCP. A follow-up Linear issue will be filed alongside this
-  report.
 - **G4 live verify deferred** — the LLM-over-chunks fallback needs the
   MCP HTTP server on fidel-dev running with `OPENROUTER_API_KEY` (or
   Anthropic equivalent) in env to exercise the path end-to-end.
+
+### Resolved
+- ~~**KiCad bootstrap gap (EE blocker)**~~ — closed by MET-478 (this
+  PR). KiCad added to `_ADAPTER_REGISTRY`; all 6 kicad.* tools surface
+  in `tools/list`; EE vertical flipped NOT READY → READY.
 
 ### Stable but worth lifting
 - **In-process CAD/sim execution** — cadquery, freecad, calculix
@@ -212,10 +216,10 @@ DIGIKEY_CLIENT_ID=… DIGIKEY_CLIENT_SECRET=… \
 
 ## Sign-off
 
-The MCP integration suite is **GO for the Mechanical, Firmware, and
-Supply-chain verticals**. The **Electronics vertical is NOT READY**
-pending the KiCad bootstrap fix. The deferred G4 live-verify and the
-in-process CAD/sim execution coverage are tracked as follow-ups; they
-don't block the verticals that are READY.
+The MCP integration suite is **GO for all four agent verticals**
+(Mechanical, Electronics, Firmware, Supply-chain) as of MET-478. The
+deferred G4 live-verify and the in-process CAD/sim execution
+coverage are tracked as follow-ups; they don't block any vertical.
 
-Filed by MET-477; tracked under the MetaForge Platform v1.0 project.
+Filed by MET-477 + MET-478; tracked under the MetaForge Platform
+v1.0 project.
