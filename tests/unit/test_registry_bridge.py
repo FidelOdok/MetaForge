@@ -29,11 +29,13 @@ class TestRegistryMcpBridge:
         assert await bridge.is_available("nonexistent.tool") is False
 
     async def test_list_tools_all(self):
-        """List all tools returns expected count."""
+        """List all tools returns expected count.
+
+        Post-MET-478: cadquery=7 + freecad=5 + calculix=4 + kicad=6 = 22.
+        """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        # cadquery=7 + freecad=5 + calculix=4 = 16
-        assert len(tools) == 16
+        assert len(tools) == 22
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

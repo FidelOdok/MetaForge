@@ -48,6 +48,26 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.calculix.config",
         "config_class": "CalculixConfig",
     },
+    # MET-478 / MET-477 EE-vertical blocker: KiCad has lived under
+    # tool_registry/tools/kicad/ since MET-336 but shipped as a
+    # separate stdio entrypoint (kicad/entrypoint.py). The unified
+    # MCP bootstrap never registered it, so kicad.* tools were absent
+    # from tools/list and the EE vertical scenario in
+    # tests/integration/test_mcp_e2e/test_vertical_electronics.py
+    # was forced to skip steps 3-6 (run_erc / run_drc / export_bom /
+    # export_gerber). Wiring KiCad here surfaces all 6 kicad.* tools
+    # in the unified server. Production deploys still need the kicad
+    # CLI binary in PATH for the tools to execute; without it the
+    # adapter registers (tools/list contains them) but each handler
+    # raises KicadCliNotFoundError, which the dispatcher surfaces as
+    # -32001 TOOL_EXECUTION_ERROR — the EE vertical's _attempt() helper
+    # already treats that as an acceptable outcome.
+    "kicad": {
+        "module": "tool_registry.tools.kicad.adapter",
+        "class": "KicadServer",
+        "config_module": "tool_registry.tools.kicad.config",
+        "config_class": "KicadConfig",
+    },
 }
 
 
