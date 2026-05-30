@@ -14,6 +14,8 @@ clients can fall back to keyword search instead of seeing opaque 500s.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -22,10 +24,14 @@ from api_gateway.memory.schemas import (
     ConsolidationTriggerResponse,
     InsightListResponse,
     InsightResponse,
+    KnowledgeHitResponse,
     MemoryHitResponse,
     MemoryRetrieveRequest,
     MemoryRetrieveResponse,
+    MemorySearchRequest,
+    MemorySearchResponse,
 )
+from digital_twin.knowledge.service import SearchHit
 from digital_twin.memory.client import MemoryClient
 from digital_twin.memory.consolidation.insight import Insight, InsightStatus
 from digital_twin.memory.consolidation.modes import (
@@ -245,6 +251,127 @@ def _insight_to_response(insight: Insight) -> InsightResponse:
         status=insight.status,
         supporting_experience_ids=list(insight.supporting_experience_ids),
         synthesized_at=insight.synthesized_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# MET-471 — knowledge-backed convenience endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/search", response_model=MemorySearchResponse)
+async def search_design_rationale(
+    payload: MemorySearchRequest,
+    request: Request,
+) -> MemorySearchResponse:
+    """Semantic search over design-decision knowledge (MET-471).
+
+    Wraps ``MemoryClient.search_design_rationale``: a typed convenience
+    over the L1 knowledge base that asks "why was X decided?" and
+    returns ranked hits keyed off ``KnowledgeType.DESIGN_DECISION``.
+    Requires the gateway to have wired a knowledge_service on
+    ``app.state.knowledge_service``; the 503 from ``_get_client``
+    covers the case where the service hasn't initialised.
+    """
+    client = _get_client(request)
+    with tracer.start_as_current_span("memory.api.search") as span:
+        span.set_attribute("memory.query_length", len(payload.query))
+        span.set_attribute("memory.limit", payload.limit)
+        if payload.project_id is not None:
+            span.set_attribute("memory.project_id", str(payload.project_id))
+
+        try:
+            hits = await client.search_design_rationale(
+                payload.query,
+                limit=payload.limit,
+                project_id=payload.project_id,
+            )
+        except RuntimeError as exc:
+            # MemoryClient raises when knowledge_service wasn't wired.
+            raise HTTPException(
+                status_code=503,
+                detail="memory_client_knowledge_service_not_ready",
+            ) from exc
+
+        span.set_attribute("memory.result_count", len(hits))
+        logger.info(
+            "memory_api_search",
+            query_length=len(payload.query),
+            limit=payload.limit,
+            result_count=len(hits),
+            project_id=str(payload.project_id) if payload.project_id else None,
+        )
+        return MemorySearchResponse(
+            hits=[_knowledge_hit_to_response(h) for h in hits],
+            query=payload.query,
+            total_found=len(hits),
+        )
+
+
+@router.get("/components/{name}", response_model=MemorySearchResponse)
+async def get_component_context(
+    name: str,
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=50),
+    project_id: UUID | None = Query(default=None, alias="projectId"),
+) -> MemorySearchResponse:
+    """Component usage / relationship knowledge for ``name`` (MET-471).
+
+    Wraps ``MemoryClient.get_component_context``: a typed convenience
+    over the L1 knowledge base keyed off ``KnowledgeType.COMPONENT``.
+    Empty / whitespace ``name`` returns 422 — that's a client bug, not
+    a backend gap.
+    """
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="component name must be non-empty",
+        )
+
+    client = _get_client(request)
+    with tracer.start_as_current_span("memory.api.get_component") as span:
+        span.set_attribute("memory.component_name", name)
+        span.set_attribute("memory.limit", limit)
+        if project_id is not None:
+            span.set_attribute("memory.project_id", str(project_id))
+
+        try:
+            hits = await client.get_component_context(
+                name,
+                limit=limit,
+                project_id=project_id,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="memory_client_knowledge_service_not_ready",
+            ) from exc
+
+        span.set_attribute("memory.result_count", len(hits))
+        logger.info(
+            "memory_api_get_component",
+            component_name=name,
+            limit=limit,
+            result_count=len(hits),
+            project_id=str(project_id) if project_id else None,
+        )
+        return MemorySearchResponse(
+            hits=[_knowledge_hit_to_response(h) for h in hits],
+            query=name,
+            total_found=len(hits),
+        )
+
+
+def _knowledge_hit_to_response(hit: SearchHit) -> KnowledgeHitResponse:
+    return KnowledgeHitResponse(
+        content=hit.content,
+        similarity_score=hit.similarity_score,
+        source_path=hit.source_path,
+        heading=hit.heading,
+        chunk_index=hit.chunk_index,
+        total_chunks=hit.total_chunks,
+        knowledge_type=hit.knowledge_type.value if hit.knowledge_type else None,
+        source_work_product_id=hit.source_work_product_id,
     )
 
 

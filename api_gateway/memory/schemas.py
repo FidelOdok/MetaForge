@@ -154,3 +154,60 @@ class InsightListResponse(BaseModel):
     include_stale: bool = Field(alias="includeStale")
 
     model_config = {"populate_by_name": True}
+
+
+# ---------------------------------------------------------------------------
+# MET-471 — knowledge-backed convenience endpoints
+# ---------------------------------------------------------------------------
+
+
+class MemorySearchRequest(BaseModel):
+    """Request body for ``POST /v1/memory/search`` (design-rationale search)."""
+
+    query: str = Field(
+        min_length=1,
+        description="Natural-language query against design-decision knowledge.",
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=MAX_RETRIEVAL_LIMIT,
+        description="Maximum number of hits to return.",
+    )
+    project_id: UUID | None = Field(
+        default=None,
+        alias="projectId",
+        description="Optional project scope.",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class KnowledgeHitResponse(BaseModel):
+    """Wire shape of a single knowledge-base hit.
+
+    Used by ``POST /v1/memory/search`` (design rationale) and
+    ``GET /v1/memory/components/{name}`` (component context). Fields
+    mirror ``digital_twin.knowledge.service.SearchHit``.
+    """
+
+    content: str
+    similarity_score: float = Field(alias="similarityScore")
+    source_path: str | None = Field(default=None, alias="sourcePath")
+    heading: str | None = None
+    chunk_index: int | None = Field(default=None, alias="chunkIndex")
+    total_chunks: int | None = Field(default=None, alias="totalChunks")
+    knowledge_type: str | None = Field(default=None, alias="knowledgeType")
+    source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
+
+    model_config = {"populate_by_name": True}
+
+
+class MemorySearchResponse(BaseModel):
+    """Response body for ``POST /v1/memory/search`` and the components GET."""
+
+    hits: list[KnowledgeHitResponse]
+    query: str
+    total_found: int = Field(alias="totalFound")
+
+    model_config = {"populate_by_name": True}
