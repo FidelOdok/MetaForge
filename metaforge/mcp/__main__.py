@@ -132,6 +132,45 @@ def _stdio_auth_check() -> tuple[bool, str]:
     return True, "match"
 
 
+# MET-450: default stdio readline cap. 16 MiB is generous for text
+# ingest (real payloads run 10-500 KB; PDFs ride in via filesystem
+# paths, not inline bytes). Bumped from the asyncio default of 64 KiB
+# which crashed the loop mid-readline on any real datasheet ingest.
+_DEFAULT_STDIO_MAX_LINE_BYTES = 16 * 1024 * 1024
+
+
+def _stdio_max_line_bytes() -> int:
+    """Return the asyncio StreamReader ``limit`` for stdio reads (MET-450).
+
+    Reads ``METAFORGE_MCP_MAX_LINE_BYTES`` from env to let ops cap or
+    raise the ceiling without code changes; falls back to 16 MiB. A
+    non-positive / unparseable value falls back to the default so a
+    misconfigured env can't deadlock the stdio loop with a 0-byte cap.
+    """
+    import os
+
+    raw = os.environ.get("METAFORGE_MCP_MAX_LINE_BYTES", "").strip()
+    if not raw:
+        return _DEFAULT_STDIO_MAX_LINE_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "mcp_stdio_max_line_bytes_invalid",
+            value=raw,
+            fallback=_DEFAULT_STDIO_MAX_LINE_BYTES,
+        )
+        return _DEFAULT_STDIO_MAX_LINE_BYTES
+    if value <= 0:
+        logger.warning(
+            "mcp_stdio_max_line_bytes_non_positive",
+            value=value,
+            fallback=_DEFAULT_STDIO_MAX_LINE_BYTES,
+        )
+        return _DEFAULT_STDIO_MAX_LINE_BYTES
+    return value
+
+
 async def run_stdio(server: UnifiedMcpServer) -> None:
     """Read line-delimited JSON-RPC requests from stdin; reply on stdout.
 
@@ -169,7 +208,16 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
     print("metaforge-mcp ready", file=sys.stderr, flush=True)
 
     loop = asyncio.get_event_loop()
-    reader = asyncio.StreamReader()
+    # MET-450: ``asyncio.StreamReader``'s default ``limit`` is 64 KiB
+    # (``2**16``). A single ``knowledge.ingest`` JSON-RPC request line
+    # easily exceeds that — the ESP32-WROOM-32 fixture is ~61 KB, real
+    # datasheet payloads run 10-500 KB. Default behaviour was a hard
+    # ``ValueError`` mid-``readline()`` that killed the stdio loop with
+    # no JSON-RPC response, collapsing the SSH-piped harness. Bump to
+    # 16 MiB by default; ``METAFORGE_MCP_MAX_LINE_BYTES`` lets ops
+    # tighten or loosen the cap without code changes.
+    max_line_bytes = _stdio_max_line_bytes()
+    reader = asyncio.StreamReader(limit=max_line_bytes)
     transport, _ = await loop.connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader), sys.stdin
     )
