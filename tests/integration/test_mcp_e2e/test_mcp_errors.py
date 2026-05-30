@@ -10,12 +10,13 @@ Error code map (see ``metaforge/mcp/server.py``):
 * ``-32001`` ``TOOL_EXECUTION_ERROR`` — handler raised; ``data`` carries
   ``error_type / tool_id / details / duration_ms``
 
-The MET-450 64 KiB stdio readline guard is the default
-``asyncio.StreamReader`` limit on ``__main__.run_stdio()``; the HTTP
-transport doesn't have a body-size cap of its own (uvicorn defaults to
-``--limit-max-requests`` style controls). The oversize-payload test
-documents this with a skip rather than asserting an HTTP-transport
-behaviour that doesn't exist.
+The MET-450 stdio readline cap is now a 16 MiB default (env-tunable
+via ``METAFORGE_MCP_MAX_LINE_BYTES``); see
+``tests/unit/test_mcp_stdio_max_line_bytes.py`` for the regression
+guard. The HTTP transport here doesn't have a body-size cap of its
+own (uvicorn defaults to ``--limit-max-requests`` style controls), so
+the oversize-payload test in this file stays a documented skip — the
+real cap is exercised on the stdio side.
 """
 
 from __future__ import annotations
@@ -183,16 +184,19 @@ async def test_error_envelope_shape_is_jsonrpc20_compliant(
 
 @pytest.mark.skip(
     reason=(
-        "MET-450's 64 KiB guard is the asyncio.StreamReader default on the "
-        "stdio transport (metaforge.mcp.__main__.run_stdio). The HTTP "
-        "transport has no equivalent body cap (uvicorn defaults apply). "
-        "Lives in a stdio-specific test outside the e2e HTTP suite."
+        "MET-450 lifted the asyncio.StreamReader default 64 KiB cap to "
+        "16 MiB (env-tunable via METAFORGE_MCP_MAX_LINE_BYTES); see "
+        "tests/unit/test_mcp_stdio_max_line_bytes.py for the regression "
+        "guard. The HTTP transport here has no equivalent body cap, so "
+        "this placeholder stays as documentation."
     )
 )
 async def test_stdio_64kb_payload_guard() -> None:
-    """Placeholder — see docstring. The actual stdio guard test belongs in a
-    subprocess-driven runner that spawns ``python -m metaforge.mcp`` and
-    pipes a >64 KiB line through stdin."""
+    """Placeholder — MET-450 fix lives in
+    ``tests/unit/test_mcp_stdio_max_line_bytes.py``. The HTTP transport
+    in this suite doesn't have an equivalent cap to exercise; we keep
+    the marker so the readme map of error-path coverage stays
+    self-documenting."""
 
 
 # ---------------------------------------------------------------------------
