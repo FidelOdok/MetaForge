@@ -30,8 +30,27 @@ def test_metaforge_server_entry_present() -> None:
     assert "metaforge" in servers, sorted(servers)
 
 
-def test_metaforge_entry_targets_stdio_module_runner() -> None:
+def test_metaforge_entry_uses_supported_transport() -> None:
+    """The ``metaforge`` entry must be a launchable Claude Code config.
+
+    Two shapes are accepted:
+
+    * **stdio launcher** — ``command`` + ``args`` with ``-m metaforge.mcp
+      --transport stdio``. Used when Claude Code spawns the MCP as a
+      local subprocess.
+    * **http / sse transport** — ``transport`` in ``{"http", "sse"}``
+      plus a ``url``. Used when Claude Code connects to a remote MCP
+      server (MET-479 — the dev sidecar at ``fidel-dev:8765``).
+    """
     entry = _load()["mcpServers"]["metaforge"]
+
+    if "transport" in entry:
+        assert entry["transport"] in {"http", "sse"}, entry["transport"]
+        assert isinstance(entry.get("url"), str) and entry["url"], (
+            "http/sse transport requires a non-empty url"
+        )
+        return
+
     assert entry["command"] == "python"
     assert entry["args"][:2] == ["-m", "metaforge.mcp"]
     assert "--transport" in entry["args"]

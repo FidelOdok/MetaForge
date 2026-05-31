@@ -1,13 +1,8 @@
 {
   "mcpServers": {
     "metaforge": {
-      "command": "python",
-      "args": ["-m", "metaforge.mcp", "--transport", "stdio"],
-      "env": {
-        "METAFORGE_ADAPTERS": "cadquery,calculix,knowledge",
-        "METAFORGE_ADAPTER_CADQUERY_URL": "http://localhost:8101",
-        "METAFORGE_ADAPTER_CALCULIX_URL": "http://localhost:8200"
-      }
+      "transport": "http",
+      "url": "http://fidel-dev:8765/mcp"
     }
   }
 }
