@@ -183,17 +183,20 @@ class ProjectServer(McpToolServer):
                     "properties": {
                         "id": {
                             "type": "string",
-                            "description": "Project UUID (preferred).",
+                            "description": (
+                                "Project UUID (preferred). Exactly one of `id` or "
+                                "`name` must be provided; the handler raises if "
+                                "both are absent."
+                            ),
                         },
                         "name": {
                             "type": "string",
-                            "description": "Project name (used when id is absent).",
+                            "description": (
+                                "Project name (used when `id` is absent). Exactly "
+                                "one of `id` or `name` must be provided."
+                            ),
                         },
                     },
-                    "anyOf": [
-                        {"required": ["id"]},
-                        {"required": ["name"]},
-                    ],
                 },
                 output_schema={
                     "oneOf": [

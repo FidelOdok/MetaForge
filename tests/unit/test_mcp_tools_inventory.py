@@ -29,6 +29,14 @@ async def _tools_list(server) -> set[str]:  # type: ignore[no-untyped-def]
     return {tool["name"] for tool in response["result"]["tools"]}
 
 
+async def _tools_list_full(server) -> list[dict]:  # type: ignore[no-untyped-def]
+    raw = await server.handle_request(
+        json.dumps({"jsonrpc": "2.0", "id": "1", "method": "tools/list"})
+    )
+    response = json.loads(raw)
+    return list(response["result"]["tools"])
+
+
 class TestToolsListInventory:
     """Hard floor + must-have categories for the unified MCP server."""
 
@@ -136,6 +144,37 @@ class TestToolsListInventory:
         assert not missing, f"knowledge tools missing from tools/list: {missing}"
         # 22 baseline + 3 knowledge = 25 floor with knowledge supplied.
         assert len(names) >= 25, f"surface shrank to {len(names)}: {sorted(names)}"
+
+    async def test_no_tool_has_top_level_union_in_input_schema(self, twin: InMemoryTwinAPI) -> None:
+        """Anthropic's tool-use API rejects `oneOf`/`allOf`/`anyOf` at the
+        top level of `input_schema` with HTTP 400. A single offending tool
+        kills the whole MCP surface from the client's perspective.
+
+        Regression for MET-481: `project.get` shipped with a top-level
+        `anyOf` ("must supply id or name"); Claude Code disconnected the
+        whole MetaForge MCP every turn. Enforce the constraint across the
+        full surface so no future adapter can re-introduce it.
+        """
+        from api_gateway.projects.backend import InMemoryProjectBackend
+        from tests.unit._mcp_inventory_helpers import StubKnowledgeService
+
+        server = await build_unified_server(
+            twin=twin,
+            constraint_engine=twin.constraints,
+            project_backend=InMemoryProjectBackend.create(),
+            knowledge_service=StubKnowledgeService(),
+        )
+        tools = await _tools_list_full(server)
+        forbidden = ("oneOf", "allOf", "anyOf")
+        offenders = [
+            (t["name"], [k for k in forbidden if k in t.get("inputSchema", {})])
+            for t in tools
+            if any(k in t.get("inputSchema", {}) for k in forbidden)
+        ]
+        assert not offenders, (
+            "MCP tools must not declare top-level oneOf/allOf/anyOf in inputSchema "
+            f"(Anthropic API rejects them). Offenders: {offenders}"
+        )
 
     async def test_no_twin_yields_smaller_surface(self) -> None:
         """Omitting twin/constraint drops them — the regression test must
