@@ -56,3 +56,53 @@ services:
     networks:
       - metaforge
     restart: unless-stopped
+
+  # ── MCP HTTP sidecar (dev) — exposes the unified MCP server on :8765
+  # Reuses the gateway image (built once, cached); same source mounts so
+  # hot-reload picks up changes. DATABASE_URL points at the in-cluster
+  # postgres so knowledge + memory adapters wire up.
+  mcp-http:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      python -m metaforge.mcp --transport http
+      --host 0.0.0.0 --port 8765
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey
+    ports:
+      - "8765:8765"
+    environment:
+      - METAFORGE_ENV=docker
+      - NEO4J_URI=bolt://neo4j:7687
+      # Credentials sourced from .env — same vars the gateway service uses.
+      # No literal fallbacks: secret scanners treat a hardcoded user/pass
+      # pair in a connection string as a credential leak even for dev defaults.
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
+      - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - ADAPTER_WORKSPACE_DIR=/workspace
+      - WATCHFILES_FORCE_POLLING=true
+    volumes:
+      - ./api_gateway:/app/api_gateway
+      - ./orchestrator:/app/orchestrator
+      - ./twin_core:/app/twin_core
+      - ./digital_twin:/app/digital_twin
+      - ./shared:/app/shared
+      - ./skill_registry:/app/skill_registry
+      - ./mcp_core:/app/mcp_core
+      - ./tool_registry:/app/tool_registry
+      - ./domain_agents:/app/domain_agents
+      - ./observability:/app/observability
+      - ./metaforge:/app/metaforge
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - adapter-workspace:/workspace:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
