@@ -145,9 +145,7 @@ class TestToolsListInventory:
         # 22 baseline + 3 knowledge = 25 floor with knowledge supplied.
         assert len(names) >= 25, f"surface shrank to {len(names)}: {sorted(names)}"
 
-    async def test_no_tool_has_top_level_union_in_input_schema(
-        self, twin: InMemoryTwinAPI
-    ) -> None:
+    async def test_no_tool_has_top_level_union_in_input_schema(self, twin: InMemoryTwinAPI) -> None:
         """Anthropic's tool-use API rejects `oneOf`/`allOf`/`anyOf` at the
         top level of `input_schema` with HTTP 400. A single offending tool
         kills the whole MCP surface from the client's perspective.
