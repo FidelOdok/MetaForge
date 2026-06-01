@@ -113,6 +113,11 @@ gateway = [
     "sentence-transformers>=2.0",
     "lightrag-hku>=1.4",
     "raganything>=1.2",
+    # MET-483: the gateway is the MinIO source-of-truth for work-product
+    # blobs (Planner data-modalities.md), so it needs the client. Was
+    # only in [knowledge], leaving the built gateway image unable to
+    # import ``minio`` — MinIOKBStorage silently fell back / errored.
+    "minio>=7.2",
 ]
 
 [tool.pytest.ini_options]
