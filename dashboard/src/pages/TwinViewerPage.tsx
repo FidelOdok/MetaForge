@@ -13,7 +13,7 @@ import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls'
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
-import { getNodeModel } from '../api/endpoints/twin';
+import { getNodeModel, nodeFileUrl, fetchNodeFileText } from '../api/endpoints/twin';
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 
@@ -117,6 +117,103 @@ function ToolBtn({
 }
 
 // ── NodeDetail (right floating panel) ────────────────────────────────────────
+// ── Work-product file: worktype + path + download / open / preview (MET-483) ──
+const _PREVIEW_IMG_FORMATS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg']);
+const _PREVIEW_TEXT_FORMATS = new Set([
+  'txt', 'md', 'json', 'csv', 'log', 'kicad_sch', 'kicad_pcb', 'net', 'gbr', 'c', 'h',
+]);
+
+function FileActionBtn({ icon, label }: { icon: string; label: string }) {
+  return (
+    <Button variant="secondary" size="sm" className="text-xs">
+      <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>{icon}</span>
+      {label}
+    </Button>
+  );
+}
+
+function WorkProductFileSection({ node }: { node: TwinNode }) {
+  const wpType = node.properties.wp_type ? String(node.properties.wp_type) : undefined;
+  const filePath = node.properties.file_path ? String(node.properties.file_path) : '';
+  const fmt = (node.properties.format ? String(node.properties.format) : '').toLowerCase();
+  const [preview, setPreview] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const isImg = _PREVIEW_IMG_FORMATS.has(fmt);
+  const isPdf = fmt === 'pdf';
+  const isText = _PREVIEW_TEXT_FORMATS.has(fmt);
+  const inlineUrl = nodeFileUrl(node.id, false);
+  const downloadUrl = nodeFileUrl(node.id, true);
+
+  const togglePreview = useCallback(async () => {
+    if (preview) { setPreview(false); return; }
+    setPreview(true);
+    setError(null);
+    if (isText) {
+      setLoading(true);
+      try {
+        setText(await fetchNodeFileText(node.id));
+      } catch {
+        setError('No file stored for this work product yet.');
+      } finally {
+        setLoading(false);
+      }
+    }
+  }, [preview, isText, node.id]);
+
+  return (
+    <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        File
+      </div>
+      <div className="flex items-center gap-2 mb-1" style={{ flexWrap: 'wrap' }}>
+        <span
+          className="font-mono"
+          style={{ fontSize: 10, color: KC.orange, background: 'rgba(230,126,34,0.1)', padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}
+        >
+          {wpType ?? 'unknown'}
+        </span>
+        {fmt && <span className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>.{fmt}</span>}
+      </div>
+      <div
+        className="font-mono mb-2"
+        title={filePath || undefined}
+        style={{ fontSize: 11, color: filePath ? KC.onSurface : KC.onSurfaceVariant, wordBreak: 'break-all' }}
+      >
+        {filePath || 'No file path on record'}
+      </div>
+      <div className="flex gap-1.5">
+        <a href={downloadUrl} download style={{ textDecoration: 'none' }}><FileActionBtn icon="download" label="Download" /></a>
+        <a href={inlineUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><FileActionBtn icon="open_in_new" label="Open" /></a>
+        <button type="button" onClick={togglePreview} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}>
+          <FileActionBtn icon="visibility" label={preview ? 'Hide' : 'Preview'} />
+        </button>
+      </div>
+      {preview && (
+        <div className="mt-2" style={{ border: `1px solid ${KC.border}`, borderRadius: 4, overflow: 'hidden', maxHeight: 320 }}>
+          {error ? (
+            <div className="font-mono px-2 py-3" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>{error}</div>
+          ) : isImg ? (
+            <img src={inlineUrl} alt={node.name} style={{ width: '100%', objectFit: 'contain', maxHeight: 320 }} />
+          ) : isPdf ? (
+            <iframe src={inlineUrl} title={node.name} style={{ width: '100%', height: 320, border: 'none', background: '#fff' }} />
+          ) : isText ? (
+            <pre style={{ margin: 0, padding: 8, fontSize: 10, color: KC.onSurface, maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {loading ? 'Loading…' : (text ?? '')}
+            </pre>
+          ) : (
+            <div className="font-mono px-2 py-3" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
+              Inline preview not available for .{fmt || 'this type'} — use Open or Download.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
   const chat = useScopedChat({
     scopeKind: 'digital-twin-node',
@@ -197,6 +294,9 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             </Button>
           </div>
         )}
+
+        {/* File: worktype + path + download / open / preview (MET-483) */}
+        <WorkProductFileSection node={node} />
 
         {/* Properties */}
         {Object.keys(node.properties).length > 0 && (
