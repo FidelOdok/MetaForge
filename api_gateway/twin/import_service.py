@@ -23,6 +23,7 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.import_service")
 
 ALLOWED_EXTENSIONS = {
+    # CAD / EDA source (parsed for metadata)
     ".step",
     ".stp",
     ".iges",
@@ -31,6 +32,26 @@ ALLOWED_EXTENSIONS = {
     ".kicad_pcb",
     ".kicad_pro",
     ".fcstd",
+    # MET-483: the rest of the work-product modalities (data-modalities.md).
+    # These ride the basic-metadata path — no parser needed — so the full
+    # project (PRD, constraints, BOM, firmware, manufacturing, docs) can be
+    # imported as typed, downloadable work products.
+    ".md",
+    ".txt",
+    ".pdf",
+    ".json",
+    ".csv",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".hex",
+    ".map",
+    ".gbr",
+    ".drl",
+    ".xln",
+    ".stl",
+    ".glb",
 }
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
@@ -48,9 +69,28 @@ _EXT_TO_DOMAIN: dict[str, str] = {
     ".kicad_sch": "electronics",
     ".kicad_pcb": "electronics",
     ".kicad_pro": "electronics",
+    # MET-483 modalities
+    ".gbr": "electronics",
+    ".drl": "electronics",
+    ".xln": "electronics",
+    ".csv": "electronics",
+    ".c": "firmware",
+    ".h": "firmware",
+    ".cpp": "firmware",
+    ".hpp": "firmware",
+    ".hex": "firmware",
+    ".map": "firmware",
+    ".stl": "mechanical",
+    ".glb": "mechanical",
+    ".md": "systems",
+    ".txt": "systems",
+    ".pdf": "systems",
+    ".json": "systems",
 }
 
-# Extension → WorkProductType mapping
+# Extension → WorkProductType mapping. These are sensible defaults; the
+# import API's ``wp_type`` field overrides per file (e.g. a ``.json`` that
+# is really a BOM or pinmap, a ``.md`` that is the PRD).
 _EXT_TO_WP_TYPE: dict[str, WorkProductType] = {
     ".step": WorkProductType.CAD_MODEL,
     ".stp": WorkProductType.CAD_MODEL,
@@ -60,6 +100,23 @@ _EXT_TO_WP_TYPE: dict[str, WorkProductType] = {
     ".kicad_sch": WorkProductType.SCHEMATIC,
     ".kicad_pcb": WorkProductType.PCB_LAYOUT,
     ".kicad_pro": WorkProductType.DOCUMENTATION,
+    # MET-483 modalities
+    ".c": WorkProductType.FIRMWARE_SOURCE,
+    ".h": WorkProductType.FIRMWARE_SOURCE,
+    ".cpp": WorkProductType.FIRMWARE_SOURCE,
+    ".hpp": WorkProductType.FIRMWARE_SOURCE,
+    ".hex": WorkProductType.FIRMWARE_SOURCE,
+    ".map": WorkProductType.FIRMWARE_SOURCE,
+    ".csv": WorkProductType.BOM,
+    ".gbr": WorkProductType.GERBER,
+    ".drl": WorkProductType.MANUFACTURING_FILE,
+    ".xln": WorkProductType.MANUFACTURING_FILE,
+    ".stl": WorkProductType.MANUFACTURING_FILE,
+    ".glb": WorkProductType.CAD_MODEL,
+    ".md": WorkProductType.DOCUMENTATION,
+    ".txt": WorkProductType.DOCUMENTATION,
+    ".pdf": WorkProductType.DOCUMENTATION,
+    ".json": WorkProductType.DOCUMENTATION,
 }
 
 
