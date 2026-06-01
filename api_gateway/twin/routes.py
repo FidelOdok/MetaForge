@@ -429,7 +429,8 @@ async def import_work_product(
         import_service = ImportService()
         metadata = await import_service.extract_metadata(content, filename)
 
-        # Store file
+        # Store file locally (kept as a cache / fallback even when MinIO
+        # is the source of truth — download prefers the object key).
         content_hash = default_storage.content_hash(content)
         session_id = f"import-{uuid4()}"
         stored_path = default_storage.save(session_id, filename, content)
@@ -437,23 +438,48 @@ async def import_work_product(
         # Build name from description or filename
         name = description.strip()[:60] if description.strip() else Path(filename).stem
 
-        # Create WorkProduct
         now = datetime.now(UTC)
+        wp_id = uuid4()
+
+        # MET-483: upload the blob to MinIO — the architecture's source of
+        # truth for work-product blobs (data-modalities.md). Graceful: if
+        # the minio client is missing or the server is unreachable, keep
+        # the local file_path and skip the object key so download falls
+        # back to disk rather than failing the import.
+        minio_object_key: str | None = None
+        try:
+            from api_gateway.twin.blob_store import store_work_product_blob
+
+            minio_object_key = store_work_product_blob(
+                str(wp_id),
+                filename,
+                content,
+                content_type=_content_type_for(ext.lstrip("."), filename),
+            )
+        except Exception as exc:  # minio absent / bucket unreachable / etc.
+            logger.warning("wp_blob_minio_upload_skipped", filename=filename, error=str(exc))
+
+        wp_metadata: dict[str, object] = {
+            "imported": True,
+            "original_filename": filename,
+            "session_id": session_id,
+            "timestamp": now.isoformat(),
+            **metadata,
+        }
+        if minio_object_key:
+            wp_metadata["minio_object_key"] = minio_object_key
+            span.set_attribute("import.minio_object_key", minio_object_key)
+
+        # Create WorkProduct
         wp = WorkProduct(
-            id=uuid4(),
+            id=wp_id,
             name=name,
             type=resolved_type,
             domain=resolved_domain,
             file_path=stored_path,
             content_hash=content_hash,
             format=ext.lstrip("."),
-            metadata={
-                "imported": True,
-                "original_filename": filename,
-                "session_id": session_id,
-                "timestamp": now.isoformat(),
-                **metadata,
-            },
+            metadata=wp_metadata,
             created_at=now,
             updated_at=now,
             created_by="import-api",
@@ -502,7 +528,9 @@ async def import_work_product(
             file_path=stored_path,
             content_hash=content_hash,
             format=ext.lstrip("."),
-            metadata=metadata,
+            # Return the stored metadata (incl. minio_object_key) so callers
+            # see where the blob landed, not just the extracted fields.
+            metadata=wp_metadata,
             project_id=project_id,
             created_at=now.isoformat(),
         )

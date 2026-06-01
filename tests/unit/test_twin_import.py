@@ -390,6 +390,34 @@ class TestImportEndpoint:
         assert body["wp_type"] == "schematic"
         assert body["format"] == "kicad_sch"
 
+    async def test_import_uploads_blob_to_minio(self, client):
+        """MET-483: a successful import records the MinIO object key."""
+        with patch(
+            "api_gateway.twin.blob_store.store_work_product_blob",
+            return_value="work-products/abc/drone.kicad_sch",
+        ):
+            async with client:
+                resp = await client.post(
+                    "/v1/twin/import",
+                    files={"file": ("drone.kicad_sch", b"(kicad_sch)", "application/octet-stream")},
+                )
+        assert resp.status_code == 201
+        assert resp.json()["metadata"]["minio_object_key"] == "work-products/abc/drone.kicad_sch"
+
+    async def test_import_graceful_when_minio_unavailable(self, client):
+        """Import still succeeds (local file_path) if the MinIO upload fails."""
+        with patch(
+            "api_gateway.twin.blob_store.store_work_product_blob",
+            side_effect=RuntimeError("minio down"),
+        ):
+            async with client:
+                resp = await client.post(
+                    "/v1/twin/import",
+                    files={"file": ("drone.kicad_sch", b"(kicad_sch)", "application/octet-stream")},
+                )
+        assert resp.status_code == 201
+        assert "minio_object_key" not in resp.json()["metadata"]
+
     async def test_custom_domain_overrides_inference(self, client):
         with patch(
             "api_gateway.twin.import_service.ImportService.extract_metadata",
