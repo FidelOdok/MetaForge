@@ -90,6 +90,11 @@ services:
       # makes :8765 publicly reachable, set this in .env so the endpoint
       # isn't open to the world. Empty => open mode (LAN-only dev).
       - METAFORGE_MCP_API_KEY=${METAFORGE_MCP_API_KEY:-}
+      # OAuth 2.1 + PKCE for the claude.ai web connector (MET-480).
+      # Setting the login secret turns the OAuth server on; the issuer is
+      # the public tunnel hostname (else derived from forwarded headers).
+      - METAFORGE_OAUTH_LOGIN_SECRET=${METAFORGE_OAUTH_LOGIN_SECRET:-}
+      - METAFORGE_OAUTH_ISSUER=${METAFORGE_OAUTH_ISSUER:-}
     volumes:
       - ./api_gateway:/app/api_gateway
       - ./orchestrator:/app/orchestrator

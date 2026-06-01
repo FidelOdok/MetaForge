@@ -26,7 +26,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -34,9 +34,15 @@ import structlog
 if TYPE_CHECKING:
     from twin_core.api import InMemoryTwinAPI
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 from mcp_core.auth import AUTH_DENIED, redact, verify_api_key
+from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 
 logger = structlog.get_logger("metaforge.mcp")
@@ -253,6 +259,7 @@ def build_http_app(
     *,
     enable_sse: bool,
     api_key: str | None = None,
+    oauth: OAuthProvider | None = None,
 ) -> Any:
     """Construct a FastAPI app exposing the unified server.
 
@@ -265,6 +272,12 @@ def build_http_app(
     ``/mcp`` and ``/mcp/sse`` must carry ``Authorization: Bearer <key>``.
     ``/health`` is exempt — readiness checks must work without
     credentials so orchestrators can probe the server.
+
+    MET-480: when ``oauth`` is provided, the app also serves an OAuth 2.1
+    + PKCE authorization server (``/.well-known/*``, ``/register``,
+    ``/authorize``, ``/token``) and ``/mcp`` accepts a valid OAuth bearer
+    token **or** the static key. This is what the claude.ai web connector
+    requires — it cannot send a static bearer header.
     """
     app = FastAPI(
         title="MetaForge MCP",
@@ -276,24 +289,72 @@ def build_http_app(
         ),
     )
 
-    def _check_auth(authorization: str | None) -> None:
-        if not api_key:
-            return
-        provided: str | None = None
+    def _issuer_for(request: Request) -> str:
+        """Public base URL of this server.
+
+        Behind the Cloudflare tunnel (MET-482) TLS is terminated at the
+        edge, so the request the app sees is plain HTTP — we trust the
+        ``X-Forwarded-*`` headers Cloudflare sets to reconstruct the
+        public ``https://host`` the client actually used. An explicit
+        ``METAFORGE_OAUTH_ISSUER`` always wins.
+        """
+        if oauth and oauth.config.issuer:
+            return oauth.config.issuer.rstrip("/")
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+        return str(request.base_url).rstrip("/")
+
+    def _bearer(authorization: str | None) -> str | None:
         if authorization and authorization.lower().startswith("bearer "):
-            provided = authorization.split(None, 1)[1].strip()
-        result = verify_api_key(provided, api_key)
-        if not result.ok:
-            logger.warning(
-                "mcp_auth_denied",
-                transport="http",
-                reason=result.reason,
-                redacted=result.redacted or redact(provided or ""),
-            )
-            raise HTTPException(
-                status_code=401,
-                detail={"error_type": AUTH_DENIED, "reason": result.reason},
-            )
+            return authorization.split(None, 1)[1].strip()
+        return None
+
+    def _check_auth(request: Request, authorization: str | None) -> None:
+        """Accept the static API key (MET-338) OR an OAuth token (MET-480).
+
+        Open mode (no key, no OAuth) passes everything. When either
+        mechanism is configured, an unauthenticated request gets a 401
+        carrying ``WWW-Authenticate: Bearer`` with a pointer to the
+        protected-resource metadata so the claude.ai connector can begin
+        the OAuth dance.
+        """
+        provided = _bearer(authorization)
+        oauth_on = oauth is not None and oauth.config.enabled
+
+        # OAuth token path (only when configured).
+        if oauth is not None and oauth_on and provided and oauth.validate_token(provided):
+            return
+
+        # Static API-key path — authoritative only when a key is set.
+        reason = "invalid_token"
+        if api_key:
+            result = verify_api_key(provided, api_key)
+            if result.ok:
+                return
+            reason = result.reason
+        elif not oauth_on:
+            # Neither mechanism configured → open mode, everything passes.
+            return
+
+        # At least one mechanism is on and the request failed it.
+        logger.warning(
+            "mcp_auth_denied",
+            transport="http",
+            reason=reason,
+            oauth_enabled=oauth_on,
+            redacted=redact(provided or ""),
+        )
+        headers: dict[str, str] = {}
+        if oauth and oauth.config.enabled:
+            meta_url = f"{_issuer_for(request)}/.well-known/oauth-protected-resource"
+            headers["WWW-Authenticate"] = f'Bearer resource_metadata="{meta_url}"'
+        raise HTTPException(
+            status_code=401,
+            detail={"error_type": AUTH_DENIED, "reason": reason},
+            headers=headers or None,
+        )
 
     @app.get("/health")
     async def health() -> JSONResponse:
@@ -308,7 +369,7 @@ def build_http_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
-        _check_auth(authorization)
+        _check_auth(request, authorization)
         raw_body = await request.body()
         # MET-387: install per-request McpCallContext from headers so
         # downstream handlers see the project / actor / session via
@@ -338,7 +399,7 @@ def build_http_app(
             queue multiple. Each response is emitted as a separate
             ``data:`` event so generic SSE clients can consume them.
             """
-            _check_auth(authorization)
+            _check_auth(request, authorization)
             queries = request.query_params.getlist("request")
             # MET-387: install per-stream context from headers; every
             # queued request runs under the same ctx (one SSE connection
@@ -360,7 +421,184 @@ def build_http_app(
                 headers={"Cache-Control": "no-cache"},
             )
 
+    # -- OAuth 2.1 + PKCE authorization server (MET-480) -------------------
+    # Only mounted when configured. These endpoints are intentionally
+    # unauthenticated — they ARE the auth handshake the claude.ai connector
+    # runs before it can present a bearer token to /mcp.
+    if oauth and oauth.config.enabled:
+        _mount_oauth_routes(app, oauth, _issuer_for)
+
     return app
+
+
+def _form_params(raw: bytes) -> dict[str, str]:
+    """Parse an ``application/x-www-form-urlencoded`` body into a flat map.
+
+    Parsed by hand so the OAuth endpoints don't pull in ``python-multipart``
+    just to read a handful of fields.
+    """
+    from urllib.parse import parse_qsl
+
+    return dict(parse_qsl(raw.decode("utf-8")))
+
+
+def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
+    """Minimal shared-secret login form for ``/authorize``.
+
+    Carries the original OAuth request parameters as hidden inputs so the
+    POST can re-validate and mint the code without server-side session
+    state.
+    """
+    from html import escape
+
+    hidden = "\n".join(
+        f'<input type="hidden" name="{escape(k)}" value="{escape(v)}">'
+        for k, v in fields.items()
+        if v
+    )
+    banner = f'<p class="err">{escape(error)}</p>' if error else ""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MetaForge MCP — Sign in</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; background:#0b0f14; color:#e6edf3;
+         display:grid; place-items:center; height:100vh; margin:0; }}
+  form {{ background:#161b22; padding:2rem; border-radius:12px; width:min(360px,90vw);
+          box-shadow:0 8px 32px rgba(0,0,0,.4); }}
+  h1 {{ font-size:1.1rem; margin:0 0 1rem; }}
+  input[type=password] {{ width:100%; padding:.6rem; border-radius:8px;
+          border:1px solid #30363d; background:#0d1117; color:#e6edf3; box-sizing:border-box; }}
+  button {{ margin-top:1rem; width:100%; padding:.6rem; border:0; border-radius:8px;
+          background:#2f81f7; color:#fff; font-weight:600; cursor:pointer; }}
+  .err {{ color:#f85149; font-size:.85rem; }}
+</style></head>
+<body>
+<form method="post" action="{action}">
+  <h1>Authorize MetaForge MCP</h1>
+  {banner}
+  <label>Access secret<br>
+    <input type="password" name="login_secret" autofocus required>
+  </label>
+  {hidden}
+  <button type="submit">Authorize</button>
+</form>
+</body></html>"""
+
+
+def _mount_oauth_routes(
+    app: Any,
+    oauth: OAuthProvider,
+    issuer_for: Callable[[Request], str],
+) -> None:
+    from urllib.parse import urlencode
+
+    @app.get("/.well-known/oauth-protected-resource")
+    async def oauth_protected_resource(request: Request) -> JSONResponse:
+        return JSONResponse(oauth.protected_resource_metadata(issuer_for(request)))
+
+    @app.get("/.well-known/oauth-authorization-server")
+    async def oauth_authorization_server(request: Request) -> JSONResponse:
+        return JSONResponse(oauth.authorization_server_metadata(issuer_for(request)))
+
+    @app.post("/register")
+    async def oauth_register(request: Request) -> JSONResponse:
+        try:
+            metadata = json.loads(await request.body() or b"{}")
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail={"error": "invalid_request"}) from exc
+        try:
+            registration = oauth.register_client(metadata)
+        except OAuthError as exc:
+            return JSONResponse(exc.as_dict(), status_code=exc.status)
+        logger.info("oauth_client_registered", client_id=registration["client_id"])
+        return JSONResponse(registration, status_code=201)
+
+    def _authorize_fields(params: dict[str, str]) -> dict[str, str]:
+        keys = (
+            "client_id",
+            "redirect_uri",
+            "response_type",
+            "code_challenge",
+            "code_challenge_method",
+            "scope",
+            "state",
+        )
+        return {k: params.get(k, "") for k in keys}
+
+    @app.get("/authorize")
+    async def oauth_authorize_get(request: Request) -> Any:
+        params = dict(request.query_params)
+        try:
+            oauth.validate_authorize(
+                client_id=params.get("client_id"),
+                redirect_uri=params.get("redirect_uri"),
+                response_type=params.get("response_type"),
+                code_challenge=params.get("code_challenge"),
+                code_challenge_method=params.get("code_challenge_method"),
+                scope=params.get("scope"),
+            )
+        except OAuthError as exc:
+            return _authorize_error(exc, params)
+        return HTMLResponse(_login_page("/authorize", _authorize_fields(params)))
+
+    @app.post("/authorize")
+    async def oauth_authorize_post(request: Request) -> Any:
+        params = _form_params(await request.body())
+        try:
+            client = oauth.validate_authorize(
+                client_id=params.get("client_id"),
+                redirect_uri=params.get("redirect_uri"),
+                response_type=params.get("response_type"),
+                code_challenge=params.get("code_challenge"),
+                code_challenge_method=params.get("code_challenge_method"),
+                scope=params.get("scope"),
+            )
+        except OAuthError as exc:
+            return _authorize_error(exc, params)
+        if not oauth.verify_login(params.get("login_secret")):
+            logger.warning("oauth_login_denied", client_id=params.get("client_id"))
+            return HTMLResponse(
+                _login_page("/authorize", _authorize_fields(params), error="Invalid secret"),
+                status_code=401,
+            )
+        redirect_uri = params["redirect_uri"]
+        code = oauth.issue_code(
+            client, redirect_uri, params["code_challenge"], params.get("scope")
+        )
+        query = {"code": code}
+        if params.get("state"):
+            query["state"] = params["state"]
+        logger.info("oauth_code_issued", client_id=client.client_id)
+        sep = "&" if "?" in redirect_uri else "?"
+        return RedirectResponse(f"{redirect_uri}{sep}{urlencode(query)}", status_code=302)
+
+    def _authorize_error(exc: OAuthError, params: dict[str, str]) -> Any:
+        # Redirectable errors bounce back to the (already-validated)
+        # redirect_uri per RFC 6749 §4.1.2.1; the rest render inline.
+        if exc.redirectable and params.get("redirect_uri"):
+            query = {"error": exc.error}
+            if exc.description:
+                query["error_description"] = exc.description
+            if params.get("state"):
+                query["state"] = params["state"]
+            redirect_uri = params["redirect_uri"]
+            sep = "&" if "?" in redirect_uri else "?"
+            return RedirectResponse(f"{redirect_uri}{sep}{urlencode(query)}", status_code=302)
+        return JSONResponse(exc.as_dict(), status_code=exc.status)
+
+    @app.post("/token")
+    async def oauth_token(request: Request) -> JSONResponse:
+        params = _form_params(await request.body())
+        try:
+            tokens = oauth.exchange(params)
+        except OAuthError as exc:
+            return JSONResponse(exc.as_dict(), status_code=exc.status)
+        logger.info("oauth_token_issued", grant_type=params.get("grant_type"))
+        return JSONResponse(
+            tokens,
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
 
 
 def run_http(server: UnifiedMcpServer, host: str, port: int, *, enable_sse: bool) -> None:
@@ -398,8 +636,12 @@ async def serve_http_async(
     """
     import uvicorn
 
+    from metaforge.mcp.oauth import OAuthConfig
+
     api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
-    app = build_http_app(server, enable_sse=enable_sse, api_key=api_key)
+    oauth_config = OAuthConfig.from_env()
+    oauth = OAuthProvider(oauth_config) if oauth_config else None
+    app = build_http_app(server, enable_sse=enable_sse, api_key=api_key, oauth=oauth)
     config = uvicorn.Config(
         app,
         host=host,
@@ -414,6 +656,7 @@ async def serve_http_async(
         port=port,
         sse_enabled=enable_sse,
         auth_enforced=bool(api_key),
+        oauth_enabled=bool(oauth),
         adapter_count=len(server.adapters),
         tool_count=len(server.tool_ids),
     )

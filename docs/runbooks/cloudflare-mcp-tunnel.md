@@ -80,9 +80,38 @@ local dev — use the public URL only in environments that need it.)
 
 ### claude.ai web connector
 
-The web connector UI does not accept static bearer tokens — it requires
-OAuth 2.1 + PKCE, tracked in **MET-480**. Until that lands, use the public
-hostname from remote Claude Code (above), not the claude.ai connector.
+The web connector UI can't send a static bearer token — it runs OAuth 2.1
++ PKCE against the MCP server, which is implemented in **MET-480**
+(`metaforge/mcp/oauth.py`). To enable it:
+
+1. In `.env`, set `METAFORGE_OAUTH_LOGIN_SECRET` (the shared access secret
+   the `/authorize` page asks for) and `METAFORGE_OAUTH_ISSUER` to the
+   public tunnel URL (e.g. `https://mcp.yourdomain.com`). Restart
+   `mcp-http`.
+2. In claude.ai → **Settings → Connectors → Add custom connector**, enter
+   the MCP URL `https://mcp.yourdomain.com/mcp`.
+3. claude.ai auto-discovers the OAuth endpoints (via the
+   `WWW-Authenticate` header on `/mcp` → `/.well-known/oauth-protected-resource`),
+   dynamically registers a client, and sends you to the `/authorize` page.
+   Enter the shared secret to authorize; claude.ai completes the token
+   exchange and connects.
+
+Identity is dev-grade (one shared secret, single actor, in-memory tokens
+that reset on restart — claude.ai re-runs the flow transparently).
+Federation to a real IdP and persistent token storage are tracked
+follow-ups on MET-480.
+
+The OAuth flow claude.ai runs:
+
+```
+claude.ai --GET /mcp (401 + WWW-Authenticate)-->
+          --GET /.well-known/oauth-protected-resource-->
+          --GET /.well-known/oauth-authorization-server-->
+          --POST /register (DCR)-->
+          --GET /authorize (PKCE S256, shared-secret login)--> code
+          --POST /token (code + verifier)--> access_token
+          --POST /mcp (Bearer access_token)--> tools
+```
 
 ## Verification
 
