@@ -75,6 +75,9 @@ class IngestRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
     source_path: str | None = Field(default=None, alias="sourcePath")
+    # MET-485: scope the ingest to a project tenant (mirrors the
+    # ``projectId`` filter on /search and /sources). Absent → default tenant.
+    project_id: UUID | None = Field(default=None, alias="projectId")
 
     model_config = {"populate_by_name": True}
 
@@ -96,6 +99,8 @@ class IngestDocumentRequest(BaseModel):
     knowledge_type: KnowledgeType = Field(alias="knowledgeType")
     source_work_product_id: UUID | None = Field(default=None, alias="sourceWorkProductId")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # MET-485: scope the ingest to a project tenant. Absent → default.
+    project_id: UUID | None = Field(default=None, alias="projectId")
 
     model_config = {"populate_by_name": True}
 
@@ -322,6 +327,7 @@ async def ingest_document(
             knowledge_type=body.knowledge_type,
             source_work_product_id=body.source_work_product_id,
             metadata=body.metadata or None,
+            project_id=body.project_id,
         )
         logger.info(
             "knowledge_document_ingested",
@@ -365,6 +371,7 @@ async def ingest_knowledge(
                     knowledge_type=body.knowledge_type,
                     source_work_product_id=body.source_work_product_id,
                     metadata=body.metadata or None,
+                    project_id=body.project_id,
                 )
             except ValueError as exc:
                 # KnowledgeService raises on empty content (MET-375).
