@@ -563,9 +563,7 @@ def _mount_oauth_routes(
                 status_code=401,
             )
         redirect_uri = params["redirect_uri"]
-        code = oauth.issue_code(
-            client, redirect_uri, params["code_challenge"], params.get("scope")
-        )
+        code = oauth.issue_code(client, redirect_uri, params["code_challenge"], params.get("scope"))
         query = {"code": code}
         if params.get("state"):
             query["state"] = params["state"]

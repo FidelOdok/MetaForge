@@ -90,6 +90,4 @@ def test_sidecar_supports_api_key_auth() -> None:
     env = _env_list(_services()["mcp-http"])
     key = next((e for e in env if e.startswith("METAFORGE_MCP_API_KEY=")), None)
     assert key is not None, env
-    assert "${METAFORGE_MCP_API_KEY" in key, (
-        "METAFORGE_MCP_API_KEY must come from the environment"
-    )
+    assert "${METAFORGE_MCP_API_KEY" in key, "METAFORGE_MCP_API_KEY must come from the environment"

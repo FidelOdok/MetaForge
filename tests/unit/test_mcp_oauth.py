@@ -21,9 +21,7 @@ from metaforge.mcp.oauth import OAuthConfig, OAuthError, OAuthProvider, verify_p
 def _pkce() -> tuple[str, str]:
     verifier = "verifier-" + "a" * 50
     challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
-        .rstrip(b"=")
-        .decode()
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     )
     return verifier, challenge
 
