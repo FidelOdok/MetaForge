@@ -86,6 +86,15 @@ services:
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       - WATCHFILES_FORCE_POLLING=true
+      # Static API-key auth (MET-338). Once the Cloudflare tunnel (MET-482)
+      # makes :8765 publicly reachable, set this in .env so the endpoint
+      # isn't open to the world. Empty => open mode (LAN-only dev).
+      - METAFORGE_MCP_API_KEY=${METAFORGE_MCP_API_KEY:-}
+      # OAuth 2.1 + PKCE for the claude.ai web connector (MET-480).
+      # Setting the login secret turns the OAuth server on; the issuer is
+      # the public tunnel hostname (else derived from forwarded headers).
+      - METAFORGE_OAUTH_LOGIN_SECRET=${METAFORGE_OAUTH_LOGIN_SECRET:-}
+      - METAFORGE_OAUTH_ISSUER=${METAFORGE_OAUTH_ISSUER:-}
     volumes:
       - ./api_gateway:/app/api_gateway
       - ./orchestrator:/app/orchestrator
@@ -103,6 +112,34 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Cloudflare named tunnel (dev) — exposes mcp-http to Claude cloud
+  # Gives the MCP sidecar a stable public HTTPS hostname so the claude.ai
+  # web connector and remote/cloud Claude Code can reach it — no inbound
+  # ports opened on the host. (MET-482)
+  #
+  # Setup (one-time, in the Cloudflare Zero Trust dashboard):
+  #   1. Networks → Tunnels → Create a tunnel (type: Cloudflared).
+  #   2. Copy the tunnel token into .env as CLOUDFLARE_TUNNEL_TOKEN.
+  #   3. Add a Public Hostname route on that tunnel:
+  #        Subdomain/domain → e.g. mcp.yourdomain.com
+  #        Service          → HTTP   http://mcp-http:8765
+  #      (The container resolves mcp-http over the metaforge network.)
+  #   4. Point Claude at https://mcp.yourdomain.com/mcp — see
+  #      docs/runbooks/cloudflare-mcp-tunnel.md.
+  #
+  # Ingress lives in the dashboard against the token, so no local config
+  # file is needed — `tunnel run` reads everything from the token.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - mcp-http
     networks:
       - metaforge
     restart: unless-stopped
