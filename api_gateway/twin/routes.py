@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
 from api_gateway.convert.service import ConversionService
 from api_gateway.twin.file_link import (
@@ -233,6 +233,141 @@ async def get_node_model(
 
 
 # ---------------------------------------------------------------------------
+# Work-product file download / open / preview (MET-483)
+# ---------------------------------------------------------------------------
+
+# Content types for inline preview in the browser. Anything not listed
+# falls back to application/octet-stream (forces a download rather than a
+# broken inline render). Keyed by the WorkProduct.format (extension sans
+# dot) or the filename suffix.
+_PREVIEW_CONTENT_TYPES: dict[str, str] = {
+    "pdf": "application/pdf",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "svg": "image/svg+xml",
+    "gif": "image/gif",
+    "txt": "text/plain; charset=utf-8",
+    "md": "text/markdown; charset=utf-8",
+    "json": "application/json",
+    "csv": "text/csv; charset=utf-8",
+    "log": "text/plain; charset=utf-8",
+    "glb": "model/gltf-binary",
+    "gltf": "model/gltf+json",
+    "step": "application/step",
+    "stp": "application/step",
+    # Tool-native text formats preview fine as plain text.
+    "kicad_sch": "text/plain; charset=utf-8",
+    "kicad_pcb": "text/plain; charset=utf-8",
+    "net": "text/plain; charset=utf-8",
+    "gbr": "text/plain; charset=utf-8",
+    "c": "text/plain; charset=utf-8",
+    "h": "text/plain; charset=utf-8",
+}
+
+
+def _content_type_for(fmt: str, filename: str) -> str:
+    """Best-effort MIME type for inline preview from format or filename."""
+    key = (fmt or "").lower().lstrip(".")
+    if key in _PREVIEW_CONTENT_TYPES:
+        return _PREVIEW_CONTENT_TYPES[key]
+    suffix = Path(filename).suffix.lower().lstrip(".")
+    return _PREVIEW_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+
+def _resolve_blob(wp: WorkProduct) -> tuple[bytes, str]:
+    """Return ``(content, filename)`` for a work product's stored blob.
+
+    Resolution order matches the storage layering:
+
+    1. **MinIO object key** — if the WP records one in metadata
+       (``minio_object_key``), fetch the blob from object storage. This
+       is the architecture's source of truth for work-product blobs
+       (Planner data-modalities.md).
+    2. **Local file path** — the import path stores blobs on disk via
+       ``shared.storage`` and records the absolute path in ``file_path``;
+       workspace-relative paths resolve against the adapter workspace
+       (mirrors ``get_node_model``).
+
+    Raises ``HTTPException(404)`` when no retrievable blob exists — which
+    is exactly the "work product has no file behind it" case.
+    """
+    filename = str(wp.metadata.get("original_filename") or "") or (
+        f"{wp.name}.{wp.format}" if wp.format else wp.name
+    )
+
+    object_key = wp.metadata.get("minio_object_key")
+    if isinstance(object_key, str) and object_key:
+        try:
+            from api_gateway.twin.blob_store import fetch_work_product_blob
+
+            return fetch_work_product_blob(object_key), filename
+        except HTTPException:
+            raise
+        except Exception as exc:  # storage misconfigured / object gone
+            logger.warning("wp_blob_minio_fetch_failed", key=object_key, error=str(exc))
+            raise HTTPException(
+                status_code=502, detail="Work product blob could not be read from storage"
+            ) from exc
+
+    file_path = wp.file_path
+    if not file_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Work product has no stored file (empty file_path and no object key)",
+        )
+    path = Path(file_path)
+    if not path.is_absolute():
+        path = _WORKSPACE_DIR / path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Stored file not found: {path.name}")
+    return path.read_bytes(), (filename or path.name)
+
+
+@router.get("/nodes/{node_id}/file")
+async def download_node_file(
+    node_id: str,
+    download: bool = Query(False, description="Force attachment download vs inline preview"),
+) -> Response:
+    """Stream a work product's stored file for download / open / preview.
+
+    ``download=false`` (default) returns the blob inline with a preview
+    content-type so the dashboard can render PDFs, images, text, and BOMs
+    in place; ``download=true`` forces a ``Content-Disposition: attachment``.
+    """
+    with tracer.start_as_current_span("twin.download_node_file") as span:
+        span.set_attribute("twin.node_id", node_id)
+        try:
+            uid = UUID(node_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid node ID format")
+
+        wp = await _twin.get_work_product(uid)
+        if wp is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+
+        content, filename = _resolve_blob(wp)
+        media_type = _content_type_for(wp.format, filename)
+        disposition = "attachment" if download else "inline"
+        span.set_attribute("file.media_type", media_type)
+        span.set_attribute("file.size", len(content))
+        logger.info(
+            "node_file_served",
+            node_id=node_id,
+            wp_type=wp.type.value,
+            filename=filename,
+            media_type=media_type,
+            disposition=disposition,
+            size=len(content),
+        )
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+        )
+
+
+# ---------------------------------------------------------------------------
 # Import endpoint
 # ---------------------------------------------------------------------------
 
@@ -294,7 +429,8 @@ async def import_work_product(
         import_service = ImportService()
         metadata = await import_service.extract_metadata(content, filename)
 
-        # Store file
+        # Store file locally (kept as a cache / fallback even when MinIO
+        # is the source of truth — download prefers the object key).
         content_hash = default_storage.content_hash(content)
         session_id = f"import-{uuid4()}"
         stored_path = default_storage.save(session_id, filename, content)
@@ -302,23 +438,48 @@ async def import_work_product(
         # Build name from description or filename
         name = description.strip()[:60] if description.strip() else Path(filename).stem
 
-        # Create WorkProduct
         now = datetime.now(UTC)
+        wp_id = uuid4()
+
+        # MET-483: upload the blob to MinIO — the architecture's source of
+        # truth for work-product blobs (data-modalities.md). Graceful: if
+        # the minio client is missing or the server is unreachable, keep
+        # the local file_path and skip the object key so download falls
+        # back to disk rather than failing the import.
+        minio_object_key: str | None = None
+        try:
+            from api_gateway.twin.blob_store import store_work_product_blob
+
+            minio_object_key = store_work_product_blob(
+                str(wp_id),
+                filename,
+                content,
+                content_type=_content_type_for(ext.lstrip("."), filename),
+            )
+        except Exception as exc:  # minio absent / bucket unreachable / etc.
+            logger.warning("wp_blob_minio_upload_skipped", filename=filename, error=str(exc))
+
+        wp_metadata: dict[str, object] = {
+            "imported": True,
+            "original_filename": filename,
+            "session_id": session_id,
+            "timestamp": now.isoformat(),
+            **metadata,
+        }
+        if minio_object_key:
+            wp_metadata["minio_object_key"] = minio_object_key
+            span.set_attribute("import.minio_object_key", minio_object_key)
+
+        # Create WorkProduct
         wp = WorkProduct(
-            id=uuid4(),
+            id=wp_id,
             name=name,
             type=resolved_type,
             domain=resolved_domain,
             file_path=stored_path,
             content_hash=content_hash,
             format=ext.lstrip("."),
-            metadata={
-                "imported": True,
-                "original_filename": filename,
-                "session_id": session_id,
-                "timestamp": now.isoformat(),
-                **metadata,
-            },
+            metadata=wp_metadata,
             created_at=now,
             updated_at=now,
             created_by="import-api",
@@ -367,7 +528,9 @@ async def import_work_product(
             file_path=stored_path,
             content_hash=content_hash,
             format=ext.lstrip("."),
-            metadata=metadata,
+            # Return the stored metadata (incl. minio_object_key) so callers
+            # see where the blob landed, not just the extracted fields.
+            metadata=wp_metadata,
             project_id=project_id,
             created_at=now.isoformat(),
         )

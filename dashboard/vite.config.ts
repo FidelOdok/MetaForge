@@ -33,6 +33,14 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Hosts allowed to reach the dev server. Vite returns 403 for an
+    // unknown Host header, which blocks access via a remote/Tailscale
+    // hostname (e.g. fidel-dev). Default to localhost + fidel-dev;
+    // override with VITE_ALLOWED_HOSTS="host1,host2" (MET-483).
+    allowedHosts: (process.env.VITE_ALLOWED_HOSTS || 'localhost,fidel-dev')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean),
     watch: {
       // Enable polling for WSL2 — inotify events don't cross the
       // Windows ↔ Linux filesystem boundary.

@@ -57,6 +57,15 @@ class TestInferDomain:
     def test_fcstd(self):
         assert infer_domain(".fcstd") == "mechanical"
 
+    def test_firmware_sources(self):
+        assert infer_domain(".c") == "firmware"
+        assert infer_domain(".h") == "firmware"
+
+    def test_docs_and_data(self):
+        assert infer_domain(".md") == "systems"
+        assert infer_domain(".json") == "systems"
+        assert infer_domain(".csv") == "electronics"
+
 
 class TestInferWpType:
     def test_step(self):
@@ -67,6 +76,13 @@ class TestInferWpType:
 
     def test_kicad_pcb(self):
         assert infer_wp_type(".kicad_pcb") == WorkProductType.PCB_LAYOUT
+
+    def test_met483_modalities(self):
+        assert infer_wp_type(".c") == WorkProductType.FIRMWARE_SOURCE
+        assert infer_wp_type(".csv") == WorkProductType.BOM
+        assert infer_wp_type(".gbr") == WorkProductType.GERBER
+        assert infer_wp_type(".md") == WorkProductType.DOCUMENTATION
+        assert infer_wp_type(".json") == WorkProductType.DOCUMENTATION
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +330,10 @@ class TestImportEndpoint:
         async with client:
             resp = await client.post(
                 "/v1/twin/import",
-                files={"file": ("model.stl", b"solid data", "application/octet-stream")},
+                # .exe is not a recognised work-product modality (MET-483
+                # widened the allow-list to docs/data/firmware/mfg formats,
+                # so use something genuinely outside it here).
+                files={"file": ("malware.exe", b"MZ\x90\x00", "application/octet-stream")},
             )
         assert resp.status_code == 400
         assert "Unsupported file type" in resp.json()["detail"]
@@ -370,6 +389,34 @@ class TestImportEndpoint:
         assert body["domain"] == "electronics"
         assert body["wp_type"] == "schematic"
         assert body["format"] == "kicad_sch"
+
+    async def test_import_uploads_blob_to_minio(self, client):
+        """MET-483: a successful import records the MinIO object key."""
+        with patch(
+            "api_gateway.twin.blob_store.store_work_product_blob",
+            return_value="work-products/abc/drone.kicad_sch",
+        ):
+            async with client:
+                resp = await client.post(
+                    "/v1/twin/import",
+                    files={"file": ("drone.kicad_sch", b"(kicad_sch)", "application/octet-stream")},
+                )
+        assert resp.status_code == 201
+        assert resp.json()["metadata"]["minio_object_key"] == "work-products/abc/drone.kicad_sch"
+
+    async def test_import_graceful_when_minio_unavailable(self, client):
+        """Import still succeeds (local file_path) if the MinIO upload fails."""
+        with patch(
+            "api_gateway.twin.blob_store.store_work_product_blob",
+            side_effect=RuntimeError("minio down"),
+        ):
+            async with client:
+                resp = await client.post(
+                    "/v1/twin/import",
+                    files={"file": ("drone.kicad_sch", b"(kicad_sch)", "application/octet-stream")},
+                )
+        assert resp.status_code == 201
+        assert "minio_object_key" not in resp.json()["metadata"]
 
     async def test_custom_domain_overrides_inference(self, client):
         with patch(

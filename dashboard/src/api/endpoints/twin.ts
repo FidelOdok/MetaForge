@@ -133,3 +133,20 @@ export async function getNodeVersionHistory(nodeId: string): Promise<Record<stri
   const { data } = await apiClient.get<Record<string, unknown>[]>(`/twin/nodes/${nodeId}/versions`);
   return data;
 }
+
+// ── Work-product file download / open / preview (MET-483) ───────────────────
+// The browser fetches blobs directly from the gateway via the Vite proxy, so
+// these are full ``/api/v1`` URLs (not the apiClient baseURL-relative paths)
+// suitable for <a href>, <img src>, and <iframe src>.
+const FILE_API_BASE = '/api/v1';
+
+/** URL the browser hits to open (inline) or download a work product's file. */
+export function nodeFileUrl(nodeId: string, download = false): string {
+  return `${FILE_API_BASE}/twin/nodes/${nodeId}/file${download ? '?download=true' : ''}`;
+}
+
+/** Fetch a text-previewable work-product blob as a string (for inline preview). */
+export async function fetchNodeFileText(nodeId: string): Promise<string> {
+  const { data } = await apiClient.get(`/twin/nodes/${nodeId}/file`, { responseType: 'text' });
+  return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
