@@ -62,6 +62,12 @@ class ProjectBackend(ABC):
         wp_type: str,
     ) -> None: ...
 
+    @abstractmethod
+    async def unlink_work_product(self, project_id: str, wp_id: str) -> bool:
+        """Remove a work-product link from a project. Returns True if any
+        link row was removed (MET-484)."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation
@@ -138,6 +144,22 @@ class InMemoryProjectBackend(ProjectBackend):
             project_id=project_id,
             work_product_id=wp_id,
         )
+
+    async def unlink_work_product(self, project_id: str, wp_id: str) -> bool:
+        project = self.projects.get(project_id)
+        if project is None:
+            return False
+        before = len(project.work_products)
+        project.work_products = [wp for wp in project.work_products if wp.id != wp_id]
+        removed = len(project.work_products) != before
+        if removed:
+            project.last_updated = datetime.now(UTC).isoformat()
+            logger.info(
+                "work_product_unlinked_from_project",
+                project_id=project_id,
+                work_product_id=wp_id,
+            )
+        return removed
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +285,33 @@ class PgProjectBackend(ProjectBackend):
                 project_id=project_id,
                 work_product_id=wp_id,
             )
+
+    async def unlink_work_product(self, project_id: str, wp_id: str) -> bool:
+        from sqlalchemy import delete
+
+        from api_gateway.db.engine import get_session
+        from api_gateway.db.models import ProjectRow, ProjectWorkProductRow
+
+        async with get_session() as session:
+            result = await session.execute(
+                delete(ProjectWorkProductRow).where(
+                    ProjectWorkProductRow.project_id == project_id,
+                    ProjectWorkProductRow.work_product_id == wp_id,
+                )
+            )
+            removed = (result.rowcount or 0) > 0
+            if removed:
+                row = await session.get(ProjectRow, project_id)
+                if row is not None:
+                    row.last_updated = datetime.now(UTC)
+                await session.flush()
+                logger.info(
+                    "work_product_unlinked_pg",
+                    project_id=project_id,
+                    work_product_id=wp_id,
+                    removed=result.rowcount,
+                )
+            return removed
 
     @staticmethod
     def _row_to_response(row, wp_rows) -> ProjectResponse:  # noqa: ANN001
