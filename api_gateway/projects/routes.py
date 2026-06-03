@@ -151,3 +151,23 @@ async def delete_project(project_id: str) -> None:
         if not deleted:
             raise HTTPException(status_code=404, detail="Project not found")
         logger.info("project_deleted", project_id=project_id)
+
+
+@router.delete("/{project_id}/work-products/{work_product_id}", status_code=204)
+async def unlink_work_product(project_id: str, work_product_id: str) -> None:
+    """Remove a work-product link from a project (MET-484).
+
+    Lets callers clean up duplicate/stale work-product references without
+    deleting the project. 404 if no matching link exists.
+    """
+    with tracer.start_as_current_span("projects.unlink_work_product") as span:
+        span.set_attribute("project.id", project_id)
+        span.set_attribute("work_product.id", work_product_id)
+        removed = await _backend.unlink_work_product(project_id, work_product_id)
+        if not removed:
+            raise HTTPException(status_code=404, detail="Work product not linked to project")
+        logger.info(
+            "work_product_unlinked",
+            project_id=project_id,
+            work_product_id=work_product_id,
+        )
