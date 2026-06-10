@@ -69,6 +69,15 @@ async def link_work_product_to_project(
     await _backend.link_work_product(project_id, wp_id, wp_name, wp_type)
 
 
+async def unlink_work_product_from_all_projects(wp_id: str) -> int:
+    """Remove a work product's links from every project (MET-484).
+
+    Called when a work-product node is deleted so no dangling project
+    references remain. Returns the number of links removed.
+    """
+    return await _backend.unlink_work_product_everywhere(wp_id)
+
+
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
 

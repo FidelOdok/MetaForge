@@ -106,3 +106,18 @@ def fetch_work_product_blob(
             response.release_conn()
         span.set_attribute("storage.size", len(data))
         return data
+
+
+def delete_work_product_blob(
+    object_key: str,
+    *,
+    client: Any = None,
+    settings: MinIOSettings | None = None,
+) -> None:
+    """Remove a work-product blob from MinIO by object key (idempotent)."""
+    resolved = settings or MinIOSettings.from_env()
+    cl = client or _build_client(resolved)
+    with tracer.start_as_current_span("blob_store.delete") as span:
+        span.set_attribute("storage.key", object_key)
+        cl.remove_object(resolved.bucket, object_key)
+        logger.info("wp_blob_deleted", key=object_key, bucket=resolved.bucket)

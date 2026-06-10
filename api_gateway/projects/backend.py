@@ -68,6 +68,12 @@ class ProjectBackend(ABC):
         link row was removed (MET-484)."""
         ...
 
+    @abstractmethod
+    async def unlink_work_product_everywhere(self, wp_id: str) -> int:
+        """Remove a work product's links from every project. Returns the
+        number of links removed (MET-484 — used when deleting the node)."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation
@@ -160,6 +166,20 @@ class InMemoryProjectBackend(ProjectBackend):
                 work_product_id=wp_id,
             )
         return removed
+
+    async def unlink_work_product_everywhere(self, wp_id: str) -> int:
+        count = 0
+        now = datetime.now(UTC).isoformat()
+        for project in self.projects.values():
+            before = len(project.work_products)
+            project.work_products = [wp for wp in project.work_products if wp.id != wp_id]
+            dropped = before - len(project.work_products)
+            if dropped:
+                project.last_updated = now
+                count += dropped
+        if count:
+            logger.info("work_product_unlinked_everywhere", work_product_id=wp_id, removed=count)
+        return count
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +332,26 @@ class PgProjectBackend(ProjectBackend):
                     removed=result.rowcount,
                 )
             return removed
+
+    async def unlink_work_product_everywhere(self, wp_id: str) -> int:
+        from sqlalchemy import delete
+
+        from api_gateway.db.engine import get_session
+        from api_gateway.db.models import ProjectWorkProductRow
+
+        async with get_session() as session:
+            result = await session.execute(
+                delete(ProjectWorkProductRow).where(ProjectWorkProductRow.work_product_id == wp_id)
+            )
+            count = result.rowcount or 0
+            await session.flush()
+            if count:
+                logger.info(
+                    "work_product_unlinked_everywhere_pg",
+                    work_product_id=wp_id,
+                    removed=count,
+                )
+            return count
 
     @staticmethod
     def _row_to_response(row, wp_rows) -> ProjectResponse:  # noqa: ANN001

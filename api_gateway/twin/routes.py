@@ -48,7 +48,7 @@ from api_gateway.twin.version_schemas import (
 from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
 from shared.storage import default_storage
-from twin_core.api import InMemoryTwinAPI
+from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
 from twin_core.models.enums import WorkProductType
 from twin_core.models.work_product import WorkProduct
 
@@ -364,6 +364,57 @@ async def download_node_file(
             content=content,
             media_type=media_type,
             headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+        )
+
+
+@router.delete("/nodes/{node_id}", status_code=204)
+async def delete_node(
+    node_id: str,
+    cascade: bool = Query(False, description="Also delete dependents that would orphan"),
+) -> None:
+    """Delete a work-product node, its project links, and its MinIO blob (MET-484).
+
+    Without ``cascade`` a delete that would orphan dependents returns 409.
+    Best-effort on the blob (a storage failure doesn't block the delete).
+    """
+    with tracer.start_as_current_span("twin.delete_node") as span:
+        span.set_attribute("twin.node_id", node_id)
+        try:
+            uid = UUID(node_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid node ID format")
+
+        wp = await _twin.get_work_product(uid)
+        if wp is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+
+        # Best-effort: remove the MinIO blob so deleting the node doesn't
+        # orphan its object. A storage hiccup must not block the delete.
+        object_key = wp.metadata.get("minio_object_key")
+        if isinstance(object_key, str) and object_key:
+            try:
+                from api_gateway.twin.blob_store import delete_work_product_blob
+
+                delete_work_product_blob(object_key)
+            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                logger.warning("wp_blob_delete_failed", key=object_key, error=str(exc))
+
+        try:
+            await _twin.delete_work_product(uid, cascade=cascade)
+        except OrphanWouldBeCreatedError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Delete would orphan dependents; retry with ?cascade=true ({exc})",
+            ) from exc
+
+        from api_gateway.projects.routes import unlink_work_product_from_all_projects
+
+        links_removed = await unlink_work_product_from_all_projects(str(uid))
+        logger.info(
+            "twin_node_deleted",
+            node_id=node_id,
+            cascade=cascade,
+            links_removed=links_removed,
         )
 
 
