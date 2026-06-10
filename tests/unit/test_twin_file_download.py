@@ -197,3 +197,51 @@ def test_blob_store_put_get_roundtrip() -> None:
     assert "metaforge-kb" in fake.buckets  # bucket auto-created
     got = blob_store.fetch_work_product_blob(key, client=fake, settings=settings)
     assert got == b"ref,mpn\n"
+
+
+# ---------------------------------------------------------------------------
+# DELETE /v1/twin/nodes/{id} (MET-484)
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_node_removes_it() -> None:
+    node_id = await _seed(_wp(file_path=""))
+    await routes.delete_node(node_id, cascade=False)
+    with pytest.raises(HTTPException) as exc:
+        await routes.get_twin_node(node_id)
+    assert exc.value.status_code == 404
+
+
+async def test_delete_unknown_node_404() -> None:
+    await _seed(_wp(file_path=""))
+    with pytest.raises(HTTPException) as exc:
+        await routes.delete_node(str(uuid4()), cascade=False)
+    assert exc.value.status_code == 404
+
+
+async def test_delete_bad_id_400() -> None:
+    await _seed(_wp(file_path=""))
+    with pytest.raises(HTTPException) as exc:
+        await routes.delete_node("not-a-uuid", cascade=False)
+    assert exc.value.status_code == 400
+
+
+async def test_delete_calls_blob_delete(monkeypatch) -> None:
+    node_id = await _seed(_wp(metadata={"minio_object_key": "work-products/x/y.pdf"}, fmt="pdf"))
+    called = {}
+    monkeypatch.setattr(
+        blob_store, "delete_work_product_blob", lambda key: called.setdefault("key", key)
+    )
+    await routes.delete_node(node_id, cascade=False)
+    assert called.get("key") == "work-products/x/y.pdf"
+
+
+async def test_delete_removes_project_link() -> None:
+    from api_gateway.projects import routes as proutes
+
+    node_id = await _seed(_wp(file_path=""))
+    project = await proutes._backend.create_project(name="P", description="", status="draft")
+    await proutes._backend.link_work_product(project.id, node_id, "WP", "bom")
+    await routes.delete_node(node_id, cascade=False)
+    refreshed = await proutes._backend.get_project(project.id)
+    assert all(w.id != node_id for w in refreshed.work_products)
