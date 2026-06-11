@@ -9,11 +9,15 @@ construction path.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from metaforge.mcp.__main__ import _build_knowledge_service, _close_knowledge_service
+from metaforge.mcp.__main__ import (
+    _build_knowledge_service,
+    _close_knowledge_service,
+    _parse_args,
+)
 
 
 class TestBuildKnowledgeService:
@@ -111,3 +115,49 @@ class TestCloseKnowledgeService:
         svc.close.side_effect = RuntimeError("driver already shut down")
         # Must not raise — teardown failures are best-effort.
         await _close_knowledge_service(svc)
+
+
+class TestAllowTwinMutationsFlag:
+    """``--allow-twin-mutations`` CLI flag → twin adapter (MET-488)."""
+
+    def test_flag_absent_defaults_false(self) -> None:
+        # Read-only twin is the safe default; the flag must opt in.
+        assert _parse_args(["--transport", "http"]).allow_twin_mutations is False
+
+    def test_flag_sets_true(self) -> None:
+        args = _parse_args(["--transport", "http", "--allow-twin-mutations"])
+        assert args.allow_twin_mutations is True
+
+
+class TestBuildUnifiedServerTwinMutations:
+    """``build_unified_server`` forwards the flag to ``bootstrap_tool_registry``."""
+
+    async def test_forwards_allow_mutations_true(self) -> None:
+        from metaforge.mcp import server as server_mod
+
+        fake_registry = MagicMock()
+        fake_registry.list_adapter_servers.return_value = []
+        with patch.object(
+            server_mod,
+            "bootstrap_tool_registry",
+            AsyncMock(return_value=fake_registry),
+        ) as mock_boot:
+            await server_mod.build_unified_server(twin_allow_mutations=True)
+
+        _, kwargs = mock_boot.call_args
+        assert kwargs["twin_allow_mutations"] is True
+
+    async def test_defaults_to_readonly(self) -> None:
+        from metaforge.mcp import server as server_mod
+
+        fake_registry = MagicMock()
+        fake_registry.list_adapter_servers.return_value = []
+        with patch.object(
+            server_mod,
+            "bootstrap_tool_registry",
+            AsyncMock(return_value=fake_registry),
+        ) as mock_boot:
+            await server_mod.build_unified_server()
+
+        _, kwargs = mock_boot.call_args
+        assert kwargs["twin_allow_mutations"] is False

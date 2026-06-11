@@ -390,6 +390,7 @@ async def build_unified_server(
     project_backend: Any = None,
     memory_client: Any = None,
     memory_insight_store: Any = None,
+    twin_allow_mutations: bool = False,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -403,6 +404,12 @@ async def build_unified_server(
     Memory adapter is included only when a ``MemoryClient`` is
     supplied (MET-453); the optional ``memory_insight_store`` is
     forwarded so ``memory.list_insights`` works (MET-477).
+
+    ``twin_allow_mutations`` (MET-488) forwards to the twin adapter:
+    when True, ``twin.query_cypher`` accepts mutating Cypher
+    (CREATE / MERGE / SET / DELETE) so work-products can be created and
+    the digital thread built over MCP. Off by default; every call is
+    audit-logged by the adapter regardless.
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -412,5 +419,6 @@ async def build_unified_server(
         project_backend=project_backend,
         memory_client=memory_client,
         memory_insight_store=memory_insight_store,
+        twin_allow_mutations=twin_allow_mutations,
     )
     return UnifiedMcpServer(adapters=registry.list_adapter_servers())
