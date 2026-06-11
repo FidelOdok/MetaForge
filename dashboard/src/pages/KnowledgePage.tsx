@@ -171,11 +171,18 @@ export function KnowledgePage() {
   // via the state initialiser so flipping back to "All projects" after
   // load stays sticky for the rest of the session.
   const [autoSelected, setAutoSelected] = useState(false);
+  // Track which project was auto-selected + whether the user has chosen,
+  // so the empty-fallback below only fires for the auto-selection (never
+  // overrides a deliberate pick). MET-486.
+  const [autoSelectedId, setAutoSelectedId] = useState<string | null>(null);
+  const [userPicked, setUserPicked] = useState(false);
+  const [autoFellBack, setAutoFellBack] = useState(false);
   useEffect(() => {
     if (autoSelected) return;
     const newest = projectOptions[0];
     if (!newest) return;
     setProjectId(newest.id);
+    setAutoSelectedId(newest.id);
     setAutoSelected(true);
   }, [autoSelected, projectOptions]);
 
@@ -190,6 +197,19 @@ export function KnowledgePage() {
       }),
     staleTime: 30_000,
   });
+
+  // MET-486: if the auto-selected project has no scoped knowledge, fall
+  // back to "All projects (default tenant)" so the page never looks
+  // empty-by-surprise. Fires once, only for the auto-selection, and never
+  // after the user has picked (so a deliberate empty project stays put).
+  useEffect(() => {
+    if (userPicked || autoFellBack) return;
+    if (isLoading || sources === undefined) return;
+    if (projectId && projectId === autoSelectedId && sources.length === 0) {
+      setProjectId('');
+      setAutoFellBack(true);
+    }
+  }, [userPicked, autoFellBack, isLoading, sources, projectId, autoSelectedId]);
 
   const sortedSources = useMemo(() => {
     if (!sources) return [];
@@ -301,8 +321,10 @@ export function KnowledgePage() {
               setProjectId(e.target.value);
               // Lock auto-select once the user has picked anything —
               // including switching back to "All projects" — so a later
-              // ``useProjects`` refetch doesn't yank them back.
+              // ``useProjects`` refetch doesn't yank them back, and the
+              // empty-fallback (MET-486) never overrides a deliberate pick.
               setAutoSelected(true);
+              setUserPicked(true);
             }}
             style={{
               flex: 1,
