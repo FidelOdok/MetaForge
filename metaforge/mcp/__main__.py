@@ -86,6 +86,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "(e.g. ``cadquery,calculix``). Default: every enabled adapter."
         ),
     )
+    parser.add_argument(
+        "--allow-twin-mutations",
+        action="store_true",
+        default=False,
+        help=(
+            "Permit mutating Cypher (CREATE / MERGE / SET / DELETE) through "
+            "``twin.query_cypher`` so work-products can be created and the "
+            "digital thread built over MCP (MET-488). Off by default; every "
+            "mutating call is audit-logged. Do NOT enable on a publicly "
+            "reachable endpoint without API-key auth."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -882,6 +894,7 @@ async def _bootstrap(
         project_backend=project_backend,
         memory_client=memory_client,
         memory_insight_store=insight_store,
+        twin_allow_mutations=getattr(args, "allow_twin_mutations", False),
     )
     return server, twin, knowledge_service, memory_store, insight_store
 

@@ -69,6 +69,7 @@ services:
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
       --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey
+      --allow-twin-mutations
     ports:
       - "8765:8765"
     environment:
