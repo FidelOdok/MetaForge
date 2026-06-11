@@ -247,4 +247,90 @@ describe('KnowledgePage', () => {
       expect(select.value).toBe('');
     });
   });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // MET-486: empty-project fallback
+  // ──────────────────────────────────────────────────────────────────────
+
+  it('falls back to "All projects" when the auto-selected project has no knowledge', async () => {
+    mockUseProjects.mockReturnValue({
+      data: [
+        {
+          id: '44444444-4444-4444-4444-444444444444',
+          name: 'Empty Kit',
+          description: '',
+          status: 'active',
+          work_products: [],
+          agentCount: 0,
+          lastUpdated: '2026-05-22T00:00:00Z',
+          createdAt: '2026-05-22T00:00:00Z',
+        },
+      ],
+      isLoading: false,
+    });
+    // The auto-selected project has no scoped knowledge; the default
+    // tenant ("All projects", project_id undefined) does.
+    mockListSources.mockImplementation(async (q) =>
+      q?.project_id === '44444444-4444-4444-4444-444444444444' ? [] : [SOURCE_COMPONENT],
+    );
+
+    render(<KnowledgePage />);
+
+    const select = (await screen.findByLabelText(/^project$/i)) as HTMLSelectElement;
+    // Auto-selects the project → empty → falls back to "All projects".
+    await waitFor(() => {
+      expect(select.value).toBe('');
+    });
+    // And the fallback surfaces the default-tenant sources instead of empty.
+    await waitFor(() => {
+      expect(screen.getByText(SOURCE_COMPONENT.source_path)).toBeInTheDocument();
+    });
+  });
+
+  it('does not fall back when the user deliberately picks an empty project', async () => {
+    mockUseProjects.mockReturnValue({
+      data: [
+        {
+          id: '55555555-5555-5555-5555-555555555555',
+          name: 'Has Knowledge',
+          description: '',
+          status: 'active',
+          work_products: [],
+          agentCount: 0,
+          lastUpdated: '2026-05-22T00:00:00Z',
+          createdAt: '2026-05-22T00:00:00Z',
+        },
+        {
+          id: '66666666-6666-6666-6666-666666666666',
+          name: 'Empty Project',
+          description: '',
+          status: 'active',
+          work_products: [],
+          agentCount: 0,
+          lastUpdated: '2026-01-01T00:00:00Z',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+      isLoading: false,
+    });
+    // Newest (5555…) has knowledge → auto-select sticks; the older empty
+    // project (6666…) has none.
+    mockListSources.mockImplementation(async (q) =>
+      q?.project_id === '66666666-6666-6666-6666-666666666666' ? [] : [SOURCE_COMPONENT],
+    );
+
+    render(<KnowledgePage />);
+
+    const select = (await screen.findByLabelText(/^project$/i)) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(select.value).toBe('55555555-5555-5555-5555-555555555555');
+    });
+
+    // User deliberately switches to the empty project — it must stay put.
+    fireEvent.change(select, { target: { value: '66666666-6666-6666-6666-666666666666' } });
+    await waitFor(() => {
+      expect(screen.getByText('No sources ingested yet')).toBeInTheDocument();
+    });
+    expect(select.value).toBe('66666666-6666-6666-6666-666666666666');
+  });
 });
