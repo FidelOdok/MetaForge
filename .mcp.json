@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "metaforge": {
-      "transport": "http",
+      "type": "http",
       "url": "http://fidel-dev:8765/mcp"
     }
   }
