@@ -38,16 +38,18 @@ def test_metaforge_entry_uses_supported_transport() -> None:
     * **stdio launcher** — ``command`` + ``args`` with ``-m metaforge.mcp
       --transport stdio``. Used when Claude Code spawns the MCP as a
       local subprocess.
-    * **http / sse transport** — ``transport`` in ``{"http", "sse"}``
-      plus a ``url``. Used when Claude Code connects to a remote MCP
-      server (MET-479 — the dev sidecar at ``fidel-dev:8765``).
+    * **http / sse remote** — ``type`` in ``{"http", "sse"}`` plus a
+      ``url``. Used when Claude Code connects to a remote MCP server
+      (MET-479 — the dev sidecar at ``fidel-dev:8765``). Note the key is
+      ``type``, not ``transport`` — Claude Code's config validator
+      rejects ``transport`` and falls back to demanding a ``command``.
     """
     entry = _load()["mcpServers"]["metaforge"]
 
-    if "transport" in entry:
-        assert entry["transport"] in {"http", "sse"}, entry["transport"]
+    if "type" in entry:
+        assert entry["type"] in {"http", "sse"}, entry["type"]
         assert isinstance(entry.get("url"), str) and entry["url"], (
-            "http/sse transport requires a non-empty url"
+            "http/sse remote requires a non-empty url"
         )
         return
 
