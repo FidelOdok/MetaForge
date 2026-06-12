@@ -300,6 +300,32 @@ class TestNodeOperations:
         call_args = mock_session.run.call_args
         assert "node_type" in call_args.kwargs
 
+    async def test_list_nodes_skips_invalid_node(self, engine, mock_session):
+        """MET-489: one malformed work_product (missing required fields)
+        must not blank the whole list — it's skipped, valid rows returned."""
+        good = _make_work_product("good")
+        good_props = Neo4jGraphEngine._node_to_props(good)
+        # Hand-crafted bad node: typed work_product but missing the required
+        # content_hash / file_path and an unknown ``type`` enum — exactly the
+        # raw-Cypher shape that crashed list_nodes before the fix.
+        bad_props = {
+            "id": "063f83ea-1222-4b60-8545-94fb95dda73a",
+            "node_type": "work_product",
+            "type": "design_decision",
+            "name": "Clip Slot Remodel — Design Decision",
+            "domain": "mechanical",
+            "format": "md",
+        }
+
+        mock_result = AsyncMock()
+        mock_result.data = AsyncMock(return_value=[{"n": bad_props}, {"n": good_props}])
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        result = await engine.list_nodes()
+        # The bad node is dropped; the valid one survives.
+        assert len(result) == 1
+        assert result[0].id == good.id
+
 
 # ---------------------------------------------------------------------------
 # Edge operation tests
