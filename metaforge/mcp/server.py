@@ -468,6 +468,7 @@ async def build_unified_server(
         memory_client=memory_client,
         memory_insight_store=memory_insight_store,
         twin_allow_mutations=twin_allow_mutations,
+        agent_session_store=agent_session_store,
     )
     capture = (
         SessionCapture(agent_session_store)

@@ -186,6 +186,7 @@ async def bootstrap_tool_registry(
     project_backend: Any = None,
     memory_client: Any = None,
     memory_insight_store: Any = None,
+    agent_session_store: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -397,6 +398,36 @@ async def bootstrap_tool_registry(
                 reason=(
                     "no project_backend supplied"
                     if project_backend is None
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Session MCP adapter (MET-494) -----
+        # Runtime-injected like project: depends on the agent-session store
+        # the gateway/sidecar share. Lets external agents record their own
+        # narrative; pairs with the MET-496 auto-capture takeover.
+        if agent_session_store is not None and _is_adapter_enabled("session"):
+            try:
+                from tool_registry.tools.session.adapter import SessionServer
+
+                server = SessionServer(store=agent_session_store)
+                await registry.register_adapter(server)
+                registered.append("session")
+                logger.info(
+                    "session_mcp_adapter_registered",
+                    store=type(agent_session_store).__name__,
+                )
+            except Exception as exc:
+                logger.error("session_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("session")
+        else:
+            skipped.append("session")
+            logger.info(
+                "session_mcp_adapter_skipped",
+                reason=(
+                    "no agent_session_store supplied"
+                    if agent_session_store is None
                     else "disabled via config"
                 ),
             )
