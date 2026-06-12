@@ -656,6 +656,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
 
     project_backend = await _create_pb()
 
+    # MET-493: externally-recorded agent-session store (MCP/CLI agents).
+    # Shares the same DATABASE_URL-selected backend as the rest of the
+    # gateway; read by the /v1/sessions routes via app.state.
+    from api_gateway.sessions.backend import create_agent_session_store as _create_ass
+
+    app.state.agent_session_store = await _create_ass()
+
     # Bootstrap tool adapters into the registry and create real MCP bridge.
     # The knowledge MCP adapter is included only when a KnowledgeService is
     # available on app.state.

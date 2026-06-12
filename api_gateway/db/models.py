@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -129,6 +129,54 @@ class ProjectWorkProductRow(Base):
     type: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False, default="created")
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+# ── Agent session tables (MET-493) ──────────────────────────────────
+# Externally-recorded agent sessions (MCP/CLI agents). Internal Temporal
+# WorkflowRuns are NOT stored here — they're merged in at the route layer.
+
+
+class AgentSessionRow(Base):
+    """``agent_sessions`` table — one externally-recorded agent session."""
+
+    __tablename__ = "agent_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agent_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    task_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="external")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        default=lambda: datetime.now(UTC),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
+
+class AgentSessionEventRow(Base):
+    """``agent_session_events`` table — one event in a session timeline."""
+
+    __tablename__ = "agent_session_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
