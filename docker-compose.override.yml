@@ -87,6 +87,14 @@ services:
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
+      # MET-495: same MinIO config as the gateway so twin.record_decision can
+      # store decision blobs in the shared work-products bucket (without it,
+      # the blob client hangs on a misconfigured endpoint).
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
       - WATCHFILES_FORCE_POLLING=true
       # Static API-key auth (MET-338). Once the Cloudflare tunnel (MET-482)
       # makes :8765 publicly reachable, set this in .env so the endpoint
