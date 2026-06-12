@@ -187,6 +187,7 @@ async def bootstrap_tool_registry(
     memory_client: Any = None,
     memory_insight_store: Any = None,
     agent_session_store: Any = None,
+    decision_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -354,7 +355,11 @@ async def bootstrap_tool_registry(
             try:
                 from tool_registry.tools.twin.adapter import TwinServer
 
-                server = TwinServer(twin=twin, allow_mutations=twin_allow_mutations)
+                server = TwinServer(
+                    twin=twin,
+                    allow_mutations=twin_allow_mutations,
+                    decision_recorder=decision_recorder,
+                )
                 await registry.register_adapter(server)
                 registered.append("twin")
                 logger.info(

@@ -37,6 +37,9 @@ class WorkProductType(StrEnum):
     GERBER = "gerber"
     PICK_AND_PLACE = "pick_and_place"
     DOCUMENTATION = "documentation"
+    # MET-495: a recorded design decision (ADR-style), rendered to markdown
+    # and persisted as a first-class work product via twin.record_decision.
+    DESIGN_DECISION = "design_decision"
 
 
 class ConstraintSeverity(StrEnum):
