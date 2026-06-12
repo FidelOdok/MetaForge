@@ -318,9 +318,7 @@ class TestNodeOperations:
         }
 
         mock_result = AsyncMock()
-        mock_result.data = AsyncMock(
-            return_value=[{"n": bad_props}, {"n": good_props}]
-        )
+        mock_result.data = AsyncMock(return_value=[{"n": bad_props}, {"n": good_props}])
         mock_session.run = AsyncMock(return_value=mock_result)
 
         result = await engine.list_nodes()
