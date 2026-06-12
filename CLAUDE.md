@@ -347,6 +347,16 @@ Loki logs are labeled with `service_name` (currently `metaforge-gateway`) and `d
 
 Scoped to **gateway** and **dashboard** services only. Never auto-files bugs without user confirmation.
 
+## Agent Session Capture (MET-492)
+
+When an external agent (this CLI, Cursor, …) drives MetaForge over MCP, its work is captured into the digital thread's `/sessions` so reasoning + actions are reviewable. Three layers:
+
+- **Layer A — server-side auto-capture (MET-496)**: the MCP sidecar records every tool call as an `action` event into an agent session. Enforced, zero cooperation; enabled via `--capture-sessions` on the dev `mcp-http`. Works for any client.
+- **Layer B — client capture core + hooks (MET-497)**: `tools/session_capture/` (`metaforge-capture`, stdlib+httpx, no MetaForge imports) pushes `thought`/`action`/`decision` events to `/v1/sessions`. The checked-in Claude Code adapter (`.claude/hooks/metaforge_session_push.py` + `.claude/settings.json`) captures the model's *reasoning* from the transcript on `Stop`, actions on `PostToolUse`, and completes on `SessionEnd`. Per-client adapters (Cursor/OpenCode/Codex) + a transcript-tailer fallback are MET-498. Kill-switch: `METAFORGE_SESSION_CAPTURE=off`.
+- **Layer C — explicit tools (MET-494/495)**: call `session.start` / `session.log_event` (`type=decision` for design choices) / `session.complete`, and `twin.record_decision` to persist a typed ADR. `session.start` takes over the Layer-A binding so auto-actions attach to your session.
+
+Store is Postgres (`agent_sessions` / `agent_session_events`), shared by the gateway and sidecar via `DATABASE_URL` (MET-493). Capture is always best-effort — it never fails or blocks a tool call.
+
 ## Critical Constraints
 
 1. Never claim Phase 1 has KiCad schematic generation (that's Phase 2 write capability)
