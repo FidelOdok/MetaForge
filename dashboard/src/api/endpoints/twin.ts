@@ -23,8 +23,10 @@ interface TwinNodeListApiResponse {
   total: number;
 }
 
-export async function getTwinNodes(): Promise<TwinNode[]> {
-  const response = await apiClient.get<TwinNodeListApiResponse>('/twin/nodes');
+export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
+  // MET-491: scope to a project when one is selected; omit for all projects.
+  const params = projectId ? { project_id: projectId } : undefined;
+  const response = await apiClient.get<TwinNodeListApiResponse>('/twin/nodes', { params });
   return response.data.nodes.map((node): TwinNode => ({
     id: node.id,
     name: node.name,
