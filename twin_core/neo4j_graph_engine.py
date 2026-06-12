@@ -470,9 +470,30 @@ class Neo4jGraphEngine(GraphEngine):
                 async with self._driver.session(database=self._database) as session:
                     result = await session.run(query, **params)
                     records = await result.data()
-                    nodes = [self._props_to_node(dict(r["n"])) for r in records]
+                    # MET-489: deserialize per-node so one malformed node
+                    # (e.g. a hand-crafted ``work_product`` missing required
+                    # fields like content_hash/file_path, or an unknown
+                    # ``type`` enum) can't blank the entire twin view. Skip
+                    # + log the bad ones; return everything that validates.
+                    nodes: list[NodeBase] = []
+                    skipped = 0
+                    for r in records:
+                        raw = dict(r["n"])
+                        try:
+                            nodes.append(self._props_to_node(raw))
+                        except Exception as exc:  # noqa: BLE001 — isolate bad rows
+                            skipped += 1
+                            logger.warning(
+                                "neo4j_list_nodes_skipped_invalid",
+                                node_id=raw.get("id"),
+                                node_type=raw.get("node_type"),
+                                error=str(exc),
+                            )
 
                 span.set_attribute("neo4j.result_count", len(nodes))
+                if skipped:
+                    span.set_attribute("neo4j.skipped_invalid", skipped)
+                    logger.warning("neo4j_list_nodes_skipped_total", skipped=skipped)
                 return nodes
             except Exception as exc:
                 span.record_exception(exc)
