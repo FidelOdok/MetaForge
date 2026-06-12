@@ -474,6 +474,4 @@ async def build_unified_server(
         if capture_sessions and agent_session_store is not None
         else None
     )
-    return UnifiedMcpServer(
-        adapters=registry.list_adapter_servers(), session_capture=capture
-    )
+    return UnifiedMcpServer(adapters=registry.list_adapter_servers(), session_capture=capture)
