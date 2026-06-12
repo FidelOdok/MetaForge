@@ -98,6 +98,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "reachable endpoint without API-key auth."
         ),
     )
+    parser.add_argument(
+        "--capture-sessions",
+        action="store_true",
+        default=False,
+        help=(
+            "Record every tool call as an action event in an agent session "
+            "so MCP/CLI work shows up in /sessions with no client cooperation "
+            "(MET-496). Requires a DATABASE_URL-backed session store; degrades "
+            "to a no-op without one."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -790,6 +801,23 @@ async def _close_memory_store(store: Any) -> None:
         logger.warning("mcp_memory_store_close_failed", error=str(exc))
 
 
+async def _build_agent_session_store() -> Any:
+    """Build the agent-session store for MET-496 auto-capture.
+
+    Returns a ``DATABASE_URL``-selected store (Pg in the sidecar, where it
+    shares Postgres with the gateway so captured sessions surface in
+    ``/sessions``; in-memory otherwise). Errors degrade to ``None`` — capture
+    must never block server boot.
+    """
+    try:
+        from api_gateway.sessions.backend import create_agent_session_store
+
+        return await create_agent_session_store()
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.warning("mcp_agent_session_store_init_failed", error=str(exc))
+        return None
+
+
 async def _build_insight_store() -> Any:
     """Construct the consolidation insight store (MET-477 / G1).
 
@@ -886,6 +914,10 @@ async def _bootstrap(
     # "set_insight_store was never called". The gateway has the full
     # consolidation pipeline; the MCP server only needs the read side.
     insight_store = await _build_insight_store()
+    # MET-496: the agent-session store the auto-capture middleware writes to.
+    # Shares the DATABASE_URL-selected backend with the gateway so captured
+    # sessions land in the same Postgres the /sessions routes read.
+    agent_session_store = await _build_agent_session_store()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -895,6 +927,8 @@ async def _bootstrap(
         memory_client=memory_client,
         memory_insight_store=insight_store,
         twin_allow_mutations=getattr(args, "allow_twin_mutations", False),
+        agent_session_store=agent_session_store,
+        capture_sessions=getattr(args, "capture_sessions", False),
     )
     return server, twin, knowledge_service, memory_store, insight_store
 

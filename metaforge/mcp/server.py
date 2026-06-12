@@ -22,11 +22,13 @@ than inheritance.
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
+from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from tool_registry.bootstrap import bootstrap_tool_registry
 from tool_registry.mcp_server.handlers import (
@@ -65,10 +67,14 @@ class UnifiedMcpServer:
         self,
         adapters: list[McpToolServer],
         version: str = "0.1.0",
+        session_capture: SessionCapture | None = None,
     ) -> None:
         self._adapters = list(adapters)
         self._version = version
         self._start_time = datetime.now(UTC)
+        # MET-496: when set, every tool call is recorded into the agent
+        # session store as an action/error event. None = capture off.
+        self._capture = session_capture
         # tool_id → adapter (built once at construction; tool sets are
         # static after each adapter's ``__init__``).
         self._tool_index: dict[str, McpToolServer] = {}
@@ -320,6 +326,41 @@ class UnifiedMcpServer:
         return {"tools": manifests}
 
     async def _tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Route + capture. Single funnel for ``tools/call`` and ``tool/call``.
+
+        Wraps :meth:`_dispatch_tool_call` with MET-496 auto-capture: records
+        an ``action`` event on success / ``error`` event on a handler failure
+        into the bound agent session. Capture is best-effort and never alters
+        the tool result or masks an error. ``ToolNotFoundError`` is not
+        captured (no such tool ran).
+        """
+        if self._capture is None:
+            return await self._dispatch_tool_call(params)
+
+        tool_id = params.get("tool_id", "")
+        arguments = params.get("arguments", {}) or {}
+        t0 = time.monotonic()
+        try:
+            result = await self._dispatch_tool_call(params)
+        except ToolHandlerError as exc:
+            await self._capture.on_tool_call(
+                tool_id,
+                arguments,
+                status="error",
+                duration_ms=(time.monotonic() - t0) * 1000,
+                error=exc.details,
+            )
+            raise
+        await self._capture.on_tool_call(
+            tool_id,
+            arguments,
+            status="ok",
+            duration_ms=(time.monotonic() - t0) * 1000,
+            result=result,
+        )
+        return result
+
+    async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
         tool_id = params.get("tool_id", "")
         adapter = self._tool_index.get(tool_id)
@@ -391,6 +432,8 @@ async def build_unified_server(
     memory_client: Any = None,
     memory_insight_store: Any = None,
     twin_allow_mutations: bool = False,
+    agent_session_store: Any = None,
+    capture_sessions: bool = False,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -410,6 +453,11 @@ async def build_unified_server(
     (CREATE / MERGE / SET / DELETE) so work-products can be created and
     the digital thread built over MCP. Off by default; every call is
     audit-logged by the adapter regardless.
+
+    ``capture_sessions`` (MET-496) turns on server-side auto-capture: when
+    True *and* ``agent_session_store`` is supplied, every tool call is
+    recorded as an action/error event in an agent session, so MCP/CLI work
+    shows up in ``/sessions`` with no client cooperation.
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -421,4 +469,9 @@ async def build_unified_server(
         memory_insight_store=memory_insight_store,
         twin_allow_mutations=twin_allow_mutations,
     )
-    return UnifiedMcpServer(adapters=registry.list_adapter_servers())
+    capture = (
+        SessionCapture(agent_session_store)
+        if capture_sessions and agent_session_store is not None
+        else None
+    )
+    return UnifiedMcpServer(adapters=registry.list_adapter_servers(), session_capture=capture)
