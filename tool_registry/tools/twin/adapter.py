@@ -35,7 +35,13 @@ tracer = get_tracer("tool_registry.tools.twin.adapter")
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
-    def __init__(self, twin: Any, *, allow_mutations: bool = False) -> None:
+    def __init__(
+        self,
+        twin: Any,
+        *,
+        allow_mutations: bool = False,
+        decision_recorder: Any = None,
+    ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
         # ``query_cypher`` rejects mutating Cypher unless this flag is
@@ -43,7 +49,13 @@ class TwinServer(McpToolServer):
         # rather than per-call so callers can't escalate by passing a
         # parameter; flag must be set by the deployment.
         self._allow_mutations = allow_mutations
+        # MET-495: an injected async ``record(...)`` callable (built in the
+        # api_gateway layer). When present, ``twin.record_decision`` is
+        # registered. None keeps tool_registry free of api_gateway imports.
+        self._decision_recorder = decision_recorder
         self._register_tools()
+        if decision_recorder is not None:
+            self._register_record_decision()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -440,3 +452,90 @@ class TwinServer(McpToolServer):
             row_list = list(rows or [])
             span.set_attribute("twin.row_count", len(row_list))
             return {"rows": row_list, "count": len(row_list)}
+
+    # ------------------------------------------------------------------
+    # twin.record_decision (MET-495)
+    # ------------------------------------------------------------------
+
+    def _register_record_decision(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_decision",
+                adapter_id="twin",
+                name="Record Design Decision",
+                description=(
+                    "Persist a design decision as a first-class DESIGN_DECISION "
+                    "work product: renders an ADR-style markdown doc, stores it "
+                    "in MinIO, and links it to a project. Use to capture WHY a "
+                    "choice was made (with alternatives considered)."
+                ),
+                capability="twin_decision",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Short decision title.",
+                        },
+                        "rationale": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Why this decision was made.",
+                        },
+                        "alternatives": {
+                            "type": "array",
+                            "description": "Options considered + why rejected.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "option": {"type": "string"},
+                                    "reason_rejected": {"type": "string"},
+                                },
+                            },
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                        "supersedes": {
+                            "type": "string",
+                            "description": "Node id of a decision this replaces.",
+                        },
+                    },
+                    "required": ["title", "rationale"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_decision,
+        )
+
+    async def record_decision(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        title = arguments.get("title")
+        rationale = arguments.get("rationale")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.record_decision: 'title' is required (non-empty string)")
+        if not rationale or not isinstance(rationale, str):
+            raise ValueError("twin.record_decision: 'rationale' is required (non-empty string)")
+        alternatives = arguments.get("alternatives")
+        if alternatives is not None and not isinstance(alternatives, list):
+            raise ValueError("twin.record_decision: 'alternatives' must be an array")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        supersedes = arguments.get("supersedes")
+        return await self._decision_recorder(
+            title=title,
+            rationale=rationale,
+            alternatives=alternatives,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
+            supersedes=supersedes if isinstance(supersedes, str) else None,
+        )

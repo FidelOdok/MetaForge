@@ -666,6 +666,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Bootstrap tool adapters into the registry and create real MCP bridge.
     # The knowledge MCP adapter is included only when a KnowledgeService is
     # available on app.state.
+    from api_gateway.twin.decision_recorder import make_decision_recorder
+
     tool_registry = await bootstrap_tool_registry(
         knowledge_service=getattr(app.state, "knowledge_service", None),
         twin=twin,
@@ -674,6 +676,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         memory_client=getattr(app.state, "memory_client", None),
         memory_insight_store=getattr(app.state, "consolidation_insight_store", None),
         agent_session_store=getattr(app.state, "agent_session_store", None),
+        decision_recorder=make_decision_recorder(twin, project_backend),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

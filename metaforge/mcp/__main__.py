@@ -918,6 +918,16 @@ async def _bootstrap(
     # Shares the DATABASE_URL-selected backend with the gateway so captured
     # sessions land in the same Postgres the /sessions routes read.
     agent_session_store = await _build_agent_session_store()
+    # MET-495: the decision recorder composes twin + project backend + MinIO
+    # blob store; built here (api_gateway is importable) and injected so the
+    # twin adapter exposes twin.record_decision without layer violations.
+    decision_recorder = None
+    try:
+        from api_gateway.twin.decision_recorder import make_decision_recorder
+
+        decision_recorder = make_decision_recorder(twin, project_backend)
+    except Exception as exc:  # noqa: BLE001 — degrade; record_decision just absent
+        logger.warning("mcp_decision_recorder_init_failed", error=str(exc))
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -929,6 +939,7 @@ async def _bootstrap(
         twin_allow_mutations=getattr(args, "allow_twin_mutations", False),
         agent_session_store=agent_session_store,
         capture_sessions=getattr(args, "capture_sessions", False),
+        decision_recorder=decision_recorder,
     )
     return server, twin, knowledge_service, memory_store, insight_store
 
