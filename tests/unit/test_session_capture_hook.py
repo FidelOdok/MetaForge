@@ -15,12 +15,7 @@ from typing import Any
 
 import pytest
 
-_HOOK = (
-    Path(__file__).resolve().parents[2]
-    / "tools"
-    / "session_capture"
-    / "claude_code_adapter.py"
-)
+_HOOK = Path(__file__).resolve().parents[2] / "tools" / "session_capture" / "claude_code_adapter.py"
 
 
 def _load_hook():  # noqa: ANN202
