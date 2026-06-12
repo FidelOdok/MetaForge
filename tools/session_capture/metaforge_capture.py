@@ -228,6 +228,60 @@ class CaptureClient:
         self._save_state(client_session_id, state)
         return pushed
 
+    def push_delta(
+        self,
+        client_session_id: str,
+        transcript_path: str,
+        parser: Any,
+        *,
+        agent_code: str = "agent",
+        task_type: str = "session",
+    ) -> int:
+        """Parser-driven transcript delta (MET-498).
+
+        Reads new bytes since the cached cursor and runs ``parser(entry)`` →
+        list of ``(type, message, data)`` per JSONL line, pushing each as an
+        event. The byte cursor is keyed per ``(client, client_session_id)`` so
+        a restarted tailer never re-emits old lines. Returns events pushed.
+        """
+        path = Path(transcript_path)
+        if not path.exists():
+            return 0
+        cursor_key = f"cursor::{path.name}"
+        state = self._load_state(client_session_id)
+        cursor = int(state.get(cursor_key, 0) or 0)
+        size = path.stat().st_size
+        if size <= cursor:
+            return 0
+        with path.open("rb") as fh:
+            fh.seek(cursor)
+            chunk = fh.read()
+        pushed = 0
+        for raw in chunk.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(entry, dict):
+                continue
+            for event_type, message, data in parser(entry):
+                self.push_event(
+                    client_session_id,
+                    type=event_type,
+                    message=message,
+                    data=data,
+                    agent_code=agent_code,
+                    task_type=task_type,
+                )
+                pushed += 1
+        state = self._load_state(client_session_id)
+        state[cursor_key] = cursor + len(chunk)
+        self._save_state(client_session_id, state)
+        return pushed
+
     def complete(
         self,
         client_session_id: str,
@@ -252,10 +306,24 @@ class CaptureClient:
 # ---------------------------------------------------------------------------
 
 
+def _load_parsers() -> Any:
+    """Load the sibling ``parsers`` module by path (works as a plain script)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "metaforge_capture_parsers", Path(__file__).resolve().parent / "parsers.py"
+    )
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="metaforge-capture", description="Agent-session capture.")
     p.add_argument("--client", default="agent", help="Client name (e.g. claude-code).")
-    p.add_argument("--session", required=True, help="Client-side session id (binding key).")
+    p.add_argument("--session", default=None, help="Client-side session id (binding key).")
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("ensure-session")
@@ -279,6 +347,15 @@ def _build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("complete")
     c.add_argument("--status", default="completed")
     c.add_argument("--summary", default=None)
+
+    # MET-498: parser-driven tailer — one MetaForge session per transcript file.
+    tl = sub.add_parser("tail")
+    tl.add_argument("--path", required=True, help="Glob of transcript files to tail.")
+    tl.add_argument("--parser", default=None, help="Parser name (defaults to --client).")
+    tl.add_argument("--follow", action="store_true", help="Keep watching (else one-shot).")
+    tl.add_argument("--interval", type=float, default=2.0, help="Follow poll interval (s).")
+    tl.add_argument("--agent-code", default="agent")
+    tl.add_argument("--task-type", default="session")
     return p
 
 
@@ -289,6 +366,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         args = _build_parser().parse_args(argv)
         client = CaptureClient(args.client)
+        # The tail command derives a session per transcript file; everything
+        # else needs an explicit --session binding key.
+        if args.command != "tail" and not args.session:
+            return 0
         if args.command == "ensure-session":
             client.ensure_session(
                 args.session,
@@ -321,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "complete":
             client.complete(args.session, status=args.status, summary=args.summary)
+        elif args.command == "tail":
+            _run_tail(client, args)
     except SystemExit:
         # argparse usage error — still exit 0 so a misconfigured hook is silent.
         return 0
@@ -328,6 +411,34 @@ def main(argv: list[str] | None = None) -> int:
         _log_error(exc)
         return 0
     return 0
+
+
+def _run_tail(client: CaptureClient, args: Any) -> None:
+    """Tail transcript files matching a glob, one session per file (MET-498)."""
+    import glob as _glob
+    import time as _time
+
+    parsers = _load_parsers()
+    if parsers is None:
+        return
+    parser = parsers.get_parser(args.parser or args.client)
+    if parser is None:
+        return
+    while True:
+        for filepath in sorted(_glob.glob(args.path)):
+            # One MetaForge session per transcript file; its name is the
+            # stable binding key, so a restarted tailer resumes the cursor.
+            session_key = Path(filepath).stem or filepath
+            client.push_delta(
+                session_key,
+                filepath,
+                parser,
+                agent_code=args.agent_code,
+                task_type=args.task_type,
+            )
+        if not args.follow:
+            return
+        _time.sleep(args.interval)
 
 
 def _log_error(exc: Exception) -> None:
