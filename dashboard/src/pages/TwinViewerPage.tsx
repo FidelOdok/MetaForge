@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
 import { useTwinNodes, useTwinNode, useTwinRelationships } from '../hooks/use-twin';
+import { useProjects } from '../hooks/use-projects';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
@@ -458,8 +459,23 @@ export function TwinViewerPage() {
   const [quality, setQuality] = useState('standard');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── project scope (MET-491) ──
+  // Default to "All projects" ('') — the twin view favours seeing the whole
+  // graph, and an all-default avoids the auto-select empty-surprise that bit
+  // the Knowledge page (MET-486). The user can scope to one project.
+  const [projectId, setProjectId] = useState('');
+  const { data: projects } = useProjects();
+  const projectOptions = useMemo(() => {
+    if (!projects) return [];
+    return [...projects].sort((a, b) => {
+      const ta = new Date(a.lastUpdated).getTime() || 0;
+      const tb = new Date(b.lastUpdated).getTime() || 0;
+      return tb - ta;
+    });
+  }, [projects]);
+
   // ── data ──
-  const { data: nodes, isLoading } = useTwinNodes();
+  const { data: nodes, isLoading } = useTwinNodes(projectId || undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
   useTwinRelationships();  // prefetch
   const items = nodes ?? [];
@@ -731,6 +747,32 @@ export function TwinViewerPage() {
             {isGraphMode ? 'GRAPH' : '3D'}
           </span>
         </div>
+
+        {/* Project scope selector (MET-491) */}
+        <select
+          aria-label="project"
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          style={{
+            height: 28,
+            maxWidth: 220,
+            padding: '0 8px',
+            fontSize: 12,
+            color: KC.onSurface,
+            background: 'rgba(30,31,38,0.7)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: `1px solid ${KC.border}`,
+            borderRadius: 4,
+          }}
+        >
+          <option value="">All projects</option>
+          {projectOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* ═══════════════════════════════════════════

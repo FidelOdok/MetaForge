@@ -109,14 +109,28 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
 @router.get("/nodes", response_model=TwinNodeListResponse)
 async def list_twin_nodes(
     domain: str | None = None,
+    project_id: str | None = None,
 ) -> TwinNodeListResponse:
-    """List all work-product nodes in the Digital Twin."""
+    """List work-product nodes in the Digital Twin.
+
+    ``project_id`` scopes the view to a single project (MET-491). Omitted
+    or empty returns every node (including unscoped legacy nodes) —
+    preserving the prior global behaviour. A specific ``project_id``
+    returns only that project's nodes; unscoped nodes are excluded.
+    """
     with tracer.start_as_current_span("twin.list_nodes") as span:
         if domain is not None:
             span.set_attribute("twin.filter.domain", domain)
-        work_products = await _twin.list_work_products(domain=domain)
+        scoped_project: UUID | None = None
+        if project_id:
+            try:
+                scoped_project = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("twin.filter.project_id", project_id)
+        work_products = await _twin.list_work_products(domain=domain, project_id=scoped_project)
         nodes = [_wp_to_response(wp) for wp in work_products]
-        logger.info("twin_nodes_listed", count=len(nodes), domain=domain)
+        logger.info("twin_nodes_listed", count=len(nodes), domain=domain, project_id=project_id)
         return TwinNodeListResponse(nodes=nodes, total=len(nodes))
 
 

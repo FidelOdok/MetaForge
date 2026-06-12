@@ -7,10 +7,12 @@ export const twinKeys = {
   relationships: ['twin', 'relationships'] as const,
 };
 
-export function useTwinNodes() {
+export function useTwinNodes(projectId?: string) {
   return useQuery({
-    queryKey: twinKeys.all,
-    queryFn: getTwinNodes,
+    // MET-491: project scope is part of the cache key so switching
+    // projects refetches the scoped node list.
+    queryKey: [...twinKeys.all, 'project', projectId ?? ''] as const,
+    queryFn: () => getTwinNodes(projectId || undefined),
     staleTime: 30_000,
   });
 }
