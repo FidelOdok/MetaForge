@@ -30,14 +30,19 @@ flowchart LR
 
 ## Phase 1 — what works today
 
-- **30 MCP tools** across 7 adapters (knowledge, twin, constraint,
-  cadquery, calculix, freecad, kicad). UAT-tested.
+- **41 MCP tools** across 10 adapters (knowledge, twin, constraint,
+  cadquery, calculix, freecad, kicad, project, memory, session). UAT-tested.
 - **Python CLI** at `cli/forge_cli/` — `run`, `status`, `twin`,
   `proposals`, `approve`, `reject`, `ingest`, `sources`.
 - **Dashboard** with 11 routes (projects, sessions, approvals, BOM,
   3D twin viewer, knowledge sources, …). Vite + React.
 - **Gateway HTTP API** with 8 routers; backed by Postgres + Neo4j
   (with in-memory fallback for laptops).
+- **Agent session capture** — every agent that drives MetaForge over MCP
+  leaves a reviewable trail in `/sessions`: tool *actions* (auto, any
+  client), *reasoning* (Claude Code hook / transcript tailer), and typed
+  *design decisions* (`twin.record_decision`). See
+  [`docs/session-capture.md`](docs/session-capture.md).
 - **3 IDE assistants** — VS Code, KiCad, FreeCAD plugins.
 - **6–7 specialist domain agents** — focused on electronics-heavy
   products (IoT, drones, embedded). Phase 2 adds 12 more.
@@ -66,6 +71,14 @@ python -m cli.forge_cli sources list
 drive MetaForge from a Claude Code session — the repo's `.mcp.json`
 is already wired.
 
+To capture your agent sessions (thoughts, actions, decisions) into the
+digital thread from any repo:
+
+```bash
+pipx install "git+https://github.com/FidelOdok/MetaForge.git#subdirectory=tools/session_capture"
+metaforge-capture install --user --gateway-url http://localhost:8000
+```
+
 Five-minute walkthrough: **[`docs/getting-started.md`](docs/getting-started.md)**.
 
 ## Documentation
@@ -73,6 +86,7 @@ Five-minute walkthrough: **[`docs/getting-started.md`](docs/getting-started.md)*
 - **User Guide:** [getting started](docs/getting-started.md) ·
   [CLI reference](docs/cli-reference.md) ·
   [dashboard tour](docs/dashboard-tour.md) ·
+  [session capture](docs/session-capture.md) ·
   [project structure](docs/project-structure.md) ·
   [capability matrix](docs/capability-matrix.md) ·
   [troubleshooting](docs/troubleshooting.md)

@@ -2,28 +2,32 @@
 
 > **Status:** Phase 1 (v0.1). What MetaForge can do today, what it
 > can't yet, and where each capability is exercised end-to-end.
-> Last verified against `main` on 2026-05-10.
+> Last verified against `main` on 2026-06-14.
 
 If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (30 across 7 adapters)
+## MCP tools (41 across 10 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
 `knowledge,twin,constraint,cadquery,calculix` (19 tools). FreeCAD and
-KiCad adapters are opt-in.
+KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
+(registered when the gateway supplies their backend).
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
 | `knowledge` (default) | `knowledge.ingest` | Index a file or text into the LightRAG-backed KB | [`tier1/ingest.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/ingest.md) |
 | `knowledge` | `knowledge.search` | Semantic + fulltext search over indexed sources | [`tier1/retrieval.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/retrieval.md) |
+| `knowledge` | `knowledge.extract` | Resolve an MPN → current Datasheet work product | [`tier1/retrieval.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/retrieval.md) |
+| `knowledge` | `knowledge.populate_bom` | Enrich a BOM from indexed datasheets | _none yet_ |
 | `twin` (default) | `twin.get_node` | Fetch a Twin node by id with first-hop neighbors | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
 | `twin` | `twin.thread_for` | Walk the digital thread for a work product | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
 | `twin` | `twin.find_by_property` | Find nodes matching a property predicate | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
 | `twin` | `twin.constraint_violations` | List active constraint violations on a project | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
-| `twin` | `twin.query_cypher` | Run a read-only Cypher query against the Twin | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.query_cypher` | Run a Cypher query against the Twin (mutating Cypher gated by `--allow-twin-mutations`) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
+| `twin` | `twin.record_decision` | Record a design decision as a typed DESIGN_DECISION work product (markdown blob + project link) | live-verified (MET-495) |
 | `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |
 | `cadquery` (default) | `cadquery.create_parametric` | Generate a parametric solid (box, cylinder, …) → STEP | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
@@ -47,6 +51,18 @@ KiCad adapters are opt-in.
 | `kicad` | `kicad.export_netlist` | Netlist export | _none yet_ |
 | `kicad` | `kicad.export_gerber` | Gerber set for fab | _none yet_ |
 | `kicad` | `kicad.get_pin_mapping` | Connector pinmap → JSON | _none yet_ |
+| `project` (injected) | `project.create` | Create a project | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
+| `project` | `project.list` | List projects the caller can see | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
+| `project` | `project.get` | Fetch a project by id or name | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
+| `memory` (injected) | `memory.retrieve_similar_experience` | Semantic recall of past agent experiences | _none yet_ |
+| `memory` | `memory.list_insights` | List consolidated memory insights | _none yet_ |
+| `session` (injected) | `session.start` | Open an agent session to record narrative (MET-494) | live-verified |
+| `session` | `session.log_event` | Append a thought / action / decision / … to a session | live-verified |
+| `session` | `session.complete` | Close a session with terminal status + summary | live-verified |
+
+Session capture also runs **server-side** (every tool call → an `action`
+event, MET-496) — see [`session-capture.md`](session-capture.md) for the full
+three-layer model and install.
 
 **MCP resources** (read-only, addressable):
 

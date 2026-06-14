@@ -21,7 +21,7 @@ flowchart TB
     orch["Orchestrator<br/>workflow + DAG"]
     agents["Domain Agents<br/>per discipline"]
     skills["Skill Registry<br/>schema-validated units"]
-    mcp["MCP Tool Registry<br/>30 tools · 7 adapters"]
+    mcp["MCP Tool Registry<br/>41 tools · 10 adapters"]
     tools["Tool Adapters<br/>KiCad · FreeCAD<br/>CalculiX · CadQuery"]
     twin[("Digital Twin<br/>Neo4j · pgvector")]
 
@@ -46,8 +46,9 @@ the docs you need.
 | [Getting Started](getting-started.md) | 5-step quickstart from a fresh clone. Three parallel tracks: CLI, Claude Code MCP, dashboard. |
 | [CLI Reference](cli-reference.md) | Every `python -m cli.forge_cli` subcommand with flags, examples, output shapes. |
 | [Dashboard Tour](dashboard-tour.md) | One section per route — what it shows, what data drives it. |
+| [Session Capture](session-capture.md) | Capture agent sessions (actions + reasoning + decisions) into the digital thread; 3-layer model, per-client matrix, one-command install. |
 | [Project Structure](project-structure.md) | The on-disk layout MetaForge expects (PRD.md, constraints.json, eda/, bom/, .forge/…). |
-| [Capability Matrix](capability-matrix.md) | What works in Phase 1: 30 MCP tools, 11 dashboard routes, Phase-1 limits. |
+| [Capability Matrix](capability-matrix.md) | What works in Phase 1: 41 MCP tools, 11 dashboard routes, Phase-1 limits. |
 | [Troubleshooting](troubleshooting.md) | Common errors and recovery — backend fallback, WSL2 file locks, MCP issues, missing optional deps. |
 
 ## Integrations
