@@ -9,6 +9,6 @@ Hard guarantee: capture must never break the host agent. Every operation is
 best-effort — failures are logged locally and swallowed; the CLI always exits 0.
 """
 
-from tools.session_capture.metaforge_capture import CaptureClient, assistant_texts
+from .metaforge_capture import CaptureClient, assistant_texts
 
 __all__ = ["CaptureClient", "assistant_texts"]

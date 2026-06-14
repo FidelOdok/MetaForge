@@ -1,0 +1,31 @@
+# Standalone, pip-installable build of the capture tool (MET-500).
+#
+# Install without cloning the monorepo:
+#   pipx install "git+https://github.com/FidelOdok/MetaForge.git#subdirectory=tools/session_capture"
+#   pip   install "git+https://github.com/FidelOdok/MetaForge.git#subdirectory=tools/session_capture"
+#
+# Then:  metaforge-capture install --user --gateway-url http://<gateway-or-tunnel>
+#
+# The flat module files here are mapped to the importable package
+# ``session_capture`` via package-dir, so they install standalone while the
+# monorepo keeps importing them as ``tools.session_capture.*`` (intra-package
+# imports are relative, so both names resolve).
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metaforge-capture"
+version = "0.1.0"
+description = "Client-agnostic agent-session capture for MetaForge (MET-492)."
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.27"]
+
+[project.scripts]
+metaforge-capture = "session_capture.metaforge_capture:main"
+
+[tool.setuptools]
+# Map the importable package ``session_capture`` onto this directory's flat
+# module files (no file moves; keeps the monorepo layout intact).
+packages = ["session_capture"]
+package-dir = {"session_capture" = "."}

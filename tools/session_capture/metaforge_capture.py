@@ -400,7 +400,7 @@ def _settings_path(args: argparse.Namespace) -> Path:
 
 def _run_admin(args: argparse.Namespace) -> int:
     """Handle install/uninstall — user-invoked, so surface errors (not silent)."""
-    from tools.session_capture import installer
+    from . import installer
 
     settings_path = _settings_path(args)
     try:

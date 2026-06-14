@@ -10,9 +10,18 @@ in your local `.claude/settings.json`.
 
 ## Install
 
-Merge `settings.snippet.json` (in this directory) into `.claude/settings.json`
-at the repo root. It registers three hooks, all pointing at the tracked
-adapter:
+**Easiest (no clone):**
+
+```
+pipx install "git+https://github.com/FidelOdok/MetaForge.git#subdirectory=tools/session_capture"
+metaforge-capture install --user --gateway-url http://fidel-dev:8000
+```
+
+**From a clone:** `python -m tools.session_capture.metaforge_capture install --user --gateway-url …`
+
+**Manual:** merge `settings.snippet.json` (in this directory) into
+`.claude/settings.json` at the repo root. It registers three hooks, all
+pointing at the tracked adapter:
 
 - `PostToolUse` matcher `mcp__metaforge__.*` → `action` event
 - `Stop` → push new assistant text from the transcript as `thought` events
