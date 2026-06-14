@@ -60,6 +60,24 @@ point `tail` at their transcript directory and add a parser. Native adapters
 
 ## Install (Claude Code)
 
+### From the cloud — no clone (MET-500)
+
+Install the tool straight from the repo (private → uses your GitHub auth):
+
+```
+pipx install "git+https://github.com/FidelOdok/MetaForge.git#subdirectory=tools/session_capture"
+metaforge-capture install --user --gateway-url http://fidel-dev:8000
+```
+
+`pip install "git+…#subdirectory=tools/session_capture"` works too. This puts a
+`metaforge-capture` console script on PATH — handy on a fresh machine or a
+**cloud Claude Code** sandbox (point `--gateway-url` at the Cloudflare tunnel
+hostname, MET-482, so the sandbox can reach the gateway). Note: the claude.ai
+**web** connector can't run a local install — it's covered by Layer A
+server-side capture over the tunnel.
+
+### From a clone
+
 One command sets up the hook across **every** Claude Code session in **every**
 repo (MET-499):
 
