@@ -30,9 +30,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
+if TYPE_CHECKING:
+    import httpx  # only needed for type hints; the runtime import is lazy so
+    # admin commands (install/uninstall) and parsers don't require httpx.
 
 DEFAULT_GATEWAY = "http://localhost:8000"
 _DEFAULT_STATE_ROOT = Path.home() / ".metaforge" / "capture"
@@ -44,13 +46,31 @@ def capture_enabled() -> bool:
     return os.environ.get("METAFORGE_SESSION_CAPTURE", "").strip().lower() != "off"
 
 
+def _config() -> dict[str, Any]:
+    """Read ~/.metaforge/capture/config.json (written by ``install``).
+
+    A fallback for ``METAFORGE_GATEWAY_URL`` / ``METAFORGE_MCP_API_KEY`` so the
+    hook reaches the gateway without editing shell profiles (MET-499). Env wins.
+    """
+    path = Path.home() / ".metaforge" / "capture" / "config.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
 def _gateway_url() -> str:
-    return os.environ.get("METAFORGE_GATEWAY_URL", DEFAULT_GATEWAY).rstrip("/")
+    env = os.environ.get("METAFORGE_GATEWAY_URL")
+    url = env or _config().get("gateway_url") or DEFAULT_GATEWAY
+    return str(url).rstrip("/")
 
 
 def _auth_headers() -> dict[str, str]:
-    key = os.environ.get("METAFORGE_MCP_API_KEY")
-    return {"X-API-Key": key} if key else {}
+    key = os.environ.get("METAFORGE_MCP_API_KEY") or _config().get("api_key")
+    return {"X-API-Key": str(key)} if key else {}
 
 
 def assistant_texts(entry: Any) -> list[str]:
@@ -101,9 +121,11 @@ class CaptureClient:
     ) -> None:
         self.client_name = client_name
         self.gateway = (gateway or _gateway_url()).rstrip("/")
-        self.http = http or httpx.Client(
-            base_url=self.gateway, timeout=2.0, headers=_auth_headers()
-        )
+        if http is None:
+            import httpx  # lazy — only the actual push path needs httpx
+
+            http = httpx.Client(base_url=self.gateway, timeout=2.0, headers=_auth_headers())
+        self.http = http
         self.state_root = state_root or _DEFAULT_STATE_ROOT
 
     # -- state --------------------------------------------------------------
@@ -356,15 +378,72 @@ def _build_parser() -> argparse.ArgumentParser:
     tl.add_argument("--interval", type=float, default=2.0, help="Follow poll interval (s).")
     tl.add_argument("--agent-code", default="agent")
     tl.add_argument("--task-type", default="session")
+
+    # MET-499: install/uninstall the Claude Code capture hook.
+    for name in ("install", "uninstall"):
+        a = sub.add_parser(name)
+        scope = a.add_mutually_exclusive_group()
+        scope.add_argument("--user", action="store_true", help="~/.claude/settings.json (default).")
+        scope.add_argument("--project", action="store_true", help="./.claude/settings.json.")
+        if name == "install":
+            a.add_argument("--mode", choices=("copy", "link"), default="copy")
+            a.add_argument("--gateway-url", default=None)
+            a.add_argument("--api-key", default=None)
     return p
 
 
+def _settings_path(args: argparse.Namespace) -> Path:
+    if getattr(args, "project", False):
+        return Path.cwd() / ".claude" / "settings.json"
+    return Path.home() / ".claude" / "settings.json"
+
+
+def _run_admin(args: argparse.Namespace) -> int:
+    """Handle install/uninstall — user-invoked, so surface errors (not silent)."""
+    from tools.session_capture import installer
+
+    settings_path = _settings_path(args)
+    try:
+        if args.command == "install":
+            summary = installer.install(
+                source_dir=Path(__file__).resolve().parent,
+                settings_path=settings_path,
+                metaforge_home=Path.home() / ".metaforge",
+                mode=args.mode,
+                gateway_url=args.gateway_url,
+                api_key=args.api_key,
+            )
+            print("metaforge-capture installed:")
+            print(f"  settings : {summary['settings_path']}")
+            print(f"  adapter  : {summary['adapter_path']} ({summary['mode']})")
+            print(f"  hooks    : {', '.join(summary['events'])}")
+            if summary["gateway_url"]:
+                print(f"  gateway  : {summary['gateway_url']}")
+            print("Restart Claude Code to load the hooks.")
+        else:
+            installer.uninstall(settings_path)
+            print(f"metaforge-capture hooks removed from {settings_path}")
+        return 0
+    except Exception as exc:  # noqa: BLE001 — admin command: show the failure
+        print(f"metaforge-capture {args.command} failed: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry. ALWAYS returns 0 — capture must never break the host."""
+    """CLI entry. Capture commands ALWAYS return 0 (never break the host);
+    install/uninstall are user-invoked and surface errors."""
+    try:
+        args = _build_parser().parse_args(argv)
+    except SystemExit:
+        return 0
+
+    # Admin commands run regardless of the capture kill-switch and report errors.
+    if args.command in ("install", "uninstall"):
+        return _run_admin(args)
+
     try:
         if not capture_enabled():
             return 0
-        args = _build_parser().parse_args(argv)
         client = CaptureClient(args.client)
         # The tail command derives a session per transcript file; everything
         # else needs an explicit --session binding key.

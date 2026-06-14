@@ -60,5 +60,22 @@ point `tail` at their transcript directory and add a parser. Native adapters
 
 ## Install (Claude Code)
 
-See `tools/session_capture/claude_code/README.md` — merge `settings.snippet.json`
-into `.claude/settings.json`.
+One command sets up the hook across **every** Claude Code session in **every**
+repo (MET-499):
+
+```
+python -m tools.session_capture.metaforge_capture install --user --gateway-url http://fidel-dev:8000
+```
+
+- `--user` (default) registers in `~/.claude/settings.json` → fires in any repo.
+  `--project` scopes to the current repo's `.claude/settings.json`.
+- `--mode copy` (default) stages the tool under `~/.metaforge/capture-tool/` and
+  points the hook there; `--mode link` points at this checkout in place.
+- `--gateway-url` / `--api-key` are written to `~/.metaforge/capture/config.json`,
+  so the hook reaches the gateway without editing your shell profile (the env
+  vars `METAFORGE_GATEWAY_URL` / `METAFORGE_MCP_API_KEY` still override).
+- Idempotent — re-run to update; preserves your other hooks. Restart Claude Code
+  to load. Remove with `… metaforge_capture uninstall [--user|--project]`.
+
+Manual alternative: merge `tools/session_capture/claude_code/settings.snippet.json`
+into `.claude/settings.json` yourself.
