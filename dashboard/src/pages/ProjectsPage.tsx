@@ -317,6 +317,16 @@ export function ProjectsPage() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [filter, setFilter] = useState('');
+
+  const q = filter.trim().toLowerCase();
+  const filteredProjects = q
+    ? (projects ?? []).filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.description ?? '').toLowerCase().includes(q),
+      )
+    : (projects ?? []);
 
   const now = new Date();
   const lastSyncTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
@@ -422,7 +432,8 @@ export function ProjectsPage() {
             placeholder="Filter projects..."
             className="bg-surface-high border border-[rgba(65,72,90,0.3)] text-on-surface text-xs rounded px-3 py-1.5 placeholder:text-on-surface-variant outline-none focus:border-[rgba(65,72,90,0.6)]"
             style={{ width: '220px' }}
-            disabled
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
           />
         </div>
         <button
@@ -510,7 +521,7 @@ export function ProjectsPage() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {projects.map((project) => (
+          {filteredProjects.map((project) => (
             <Link key={project.id} to={`/projects/${project.id}`}>
               <div
                 className="glass rounded p-4 cursor-pointer transition-colors hover:bg-[rgba(40,42,48,0.85)]"
