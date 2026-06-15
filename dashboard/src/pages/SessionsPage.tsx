@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSessions } from '../hooks/use-sessions';
+import { useProposals, useDecideProposal } from '../hooks/use-assistant';
 import type { AgentSession } from '../types/session';
 
 // KC color tokens
@@ -417,6 +418,13 @@ function ExecutionLogPanel({ sessions }: { sessions: AgentSession[] }) {
 // --- Pending Approval card ---
 
 function PendingApprovalCard() {
+  const { data } = useProposals();
+  const decide = useDecideProposal();
+  const pending = (data?.proposals ?? []).filter((p) => p.status === 'pending');
+  const proposal = pending[0];
+  // No phantom data: render nothing when there are no real pending proposals.
+  if (!proposal) return null;
+
   return (
     <div style={{ ...glassPanel }}>
       {/* Header */}
@@ -430,7 +438,7 @@ function PendingApprovalCard() {
             color: KC.onSurfaceVariant,
           }}
         >
-          PENDING APPROVAL
+          Pending Approval{pending.length > 1 ? ` · ${pending.length}` : ''}
         </span>
         <span
           style={{
@@ -444,25 +452,42 @@ function PendingApprovalCard() {
         />
       </div>
 
-      {/* Diff preview */}
+      {/* Real proposal summary */}
       <div
         style={{
           padding: '10px 14px',
-          fontFamily: 'Roboto Mono, monospace',
           fontSize: 11,
-          lineHeight: 1.9,
+          lineHeight: 1.6,
           background: KC.logBg,
           borderBottom: `1px solid ${KC.surfaceBorder}`,
         }}
       >
-        <div style={{ color: '#3dd68c' }}>+ NET STM32_PA9 (PWR_FLAG)</div>
-        <div style={{ color: '#3dd68c' }}>+ COMPONENT U3 STM32H743VIT6</div>
-        <div style={{ color: '#ffb4ab' }}>- COMPONENT U3 STM32F405RGT6</div>
+        <div style={{ color: KC.onSurface }}>{proposal.description}</div>
+        <div
+          style={{
+            marginTop: 6,
+            fontFamily: 'Roboto Mono, monospace',
+            fontSize: 10,
+            color: KC.onSurfaceVariant,
+          }}
+        >
+          {proposal.agent_code} · {proposal.work_products_affected.length} work product
+          {proposal.work_products_affected.length === 1 ? '' : 's'}
+        </div>
       </div>
 
-      {/* Buttons */}
+      {/* Buttons — wired to the real decide mutation (mirrors /approvals) */}
       <div style={{ padding: '10px 14px', display: 'flex', gap: 8 }}>
         <button
+          onClick={() =>
+            decide.mutate({
+              changeId: proposal.change_id,
+              decision: 'approve',
+              reason: 'Approved via dashboard',
+              reviewer: 'dashboard-user',
+            })
+          }
+          disabled={decide.isPending}
           style={{
             flex: 1,
             height: 30,
@@ -483,6 +508,15 @@ function PendingApprovalCard() {
           Approve
         </button>
         <button
+          onClick={() =>
+            decide.mutate({
+              changeId: proposal.change_id,
+              decision: 'reject',
+              reason: 'Rejected via dashboard',
+              reviewer: 'dashboard-user',
+            })
+          }
+          disabled={decide.isPending}
           style={{
             flex: 1,
             height: 30,
