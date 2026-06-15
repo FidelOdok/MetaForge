@@ -95,11 +95,10 @@ function ToolBtn({
         alignItems: 'center',
         justifyContent: 'center',
         background: active ? 'rgba(40,42,48,0.9)' : 'transparent',
-        borderLeft: `2px solid ${active ? KC.orange : 'transparent'}`,
+        // Left accent via inset box-shadow — avoids mixing the `border`/`borderLeft`
+        // shorthands with their longhands (React rerender warning, MET-511).
         border: 'none',
-        borderLeftWidth: 2,
-        borderLeftStyle: 'solid',
-        borderLeftColor: active ? KC.orange : 'transparent',
+        boxShadow: active ? `inset 2px 0 0 ${KC.orange}` : 'none',
         color: active ? KC.orange : KC.onSurfaceVariant,
         cursor: 'pointer',
         transition: 'color 0.12s, background 0.12s',
@@ -124,9 +123,17 @@ const _PREVIEW_TEXT_FORMATS = new Set([
   'txt', 'md', 'json', 'csv', 'log', 'kicad_sch', 'kicad_pcb', 'net', 'gbr', 'c', 'h',
 ]);
 
-function FileActionBtn({ icon, label }: { icon: string; label: string }) {
+function FileActionBtn({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  onClick?: () => void;
+}) {
   return (
-    <Button variant="secondary" size="sm" className="text-xs">
+    <Button variant="secondary" size="sm" className="text-xs" onClick={onClick}>
       <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>{icon}</span>
       {label}
     </Button>
@@ -188,9 +195,7 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
       <div className="flex gap-1.5">
         <a href={downloadUrl} download style={{ textDecoration: 'none' }}><FileActionBtn icon="download" label="Download" /></a>
         <a href={inlineUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><FileActionBtn icon="open_in_new" label="Open" /></a>
-        <button type="button" onClick={togglePreview} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}>
-          <FileActionBtn icon="visibility" label={preview ? 'Hide' : 'Preview'} />
-        </button>
+        <FileActionBtn icon="visibility" label={preview ? 'Hide' : 'Preview'} onClick={togglePreview} />
       </div>
       {preview && (
         <div className="mt-2" style={{ border: `1px solid ${KC.border}`, borderRadius: 4, overflow: 'hidden', maxHeight: 320 }}>
@@ -415,14 +420,11 @@ function SceneDropdown({
                     style={{
                       padding: '6px 12px',
                       background: isActive ? KC.orangeFaint : 'transparent',
-                      borderLeft: `2px solid ${isActive ? KC.orange : 'transparent'}`,
                       color: isActive ? KC.orange : KC.onSurfaceVariant,
                       fontSize: 12,
                       cursor: 'pointer',
                       border: 'none',
-                      borderLeftWidth: 2,
-                      borderLeftStyle: 'solid',
-                      borderLeftColor: isActive ? KC.orange : 'transparent',
+                      boxShadow: isActive ? `inset 2px 0 0 ${KC.orange}` : 'none',
                       width: '100%',
                       fontFamily: 'Inter, sans-serif',
                     }}
@@ -617,12 +619,9 @@ export function TwinViewerPage() {
                       height: 36,
                       padding: '0 12px',
                       background: active ? 'rgba(40,42,48,1)' : 'transparent',
-                      borderLeft: 'none',
-                      borderLeftWidth: 2,
-                      borderLeftStyle: 'solid',
-                      borderLeftColor: active ? KC.orange : 'transparent',
                       cursor: 'pointer',
                       border: 'none',
+                      boxShadow: active ? `inset 2px 0 0 ${KC.orange}` : 'none',
                       outline: 'none',
                       width: '100%',
                     }}

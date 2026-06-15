@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { TopbarChatToggle } from './TopbarChatToggle';
 import { RunAgentDialog } from '../shared/RunAgentDialog';
+import { useProjects } from '../../hooks/use-projects';
+import { useSessions } from '../../hooks/use-sessions';
 
 // ---------------------------------------------------------------------------
 // Route → page name mapping
@@ -30,18 +32,42 @@ interface BreadcrumbSegment {
 function useBreadcrumbs(): { segments: BreadcrumbSegment[]; pageTitle: string } {
   const { pathname } = useLocation();
   const params = useParams();
+  // Cached lists (shared with the Projects/Sessions pages) — used to show a
+  // human name instead of a raw id in the breadcrumb (MET-512).
+  const { data: projects } = useProjects();
+  const { data: sessions } = useSessions();
 
   const parts = pathname.replace(/^\//, '').split('/').filter(Boolean);
 
+  const decode = (s: string): string => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+
+  const resolveName = (parent: string | undefined, id: string): string | undefined => {
+    if (parent === 'projects') return projects?.find((p) => p.id === id)?.name;
+    if (parent === 'sessions') {
+      const s = sessions?.find((x) => x.id === id);
+      return s ? s.taskType || s.agentCode : undefined;
+    }
+    return undefined;
+  };
+
   const segments: BreadcrumbSegment[] = parts.map((part, idx) => {
     const isLast = idx === parts.length - 1;
+    const decoded = decode(part);
     const isId = /^[0-9a-f-]{8,}$/i.test(part) || Object.values(params).includes(part);
 
     let label: string;
     if (isId) {
-      label = part.length > 8 ? `${part.slice(0, 8)}…` : part;
+      // Prefer the resolved entity name; fall back to a short id.
+      const name = resolveName(parts[idx - 1], decoded);
+      label = name ?? (decoded.length > 8 ? `${decoded.slice(0, 8)}…` : decoded);
     } else {
-      label = SEGMENT_LABELS[part] ?? part.charAt(0).toUpperCase() + part.slice(1);
+      label = SEGMENT_LABELS[part] ?? decoded.charAt(0).toUpperCase() + decoded.slice(1);
     }
 
     return { label, isCurrent: isLast };
