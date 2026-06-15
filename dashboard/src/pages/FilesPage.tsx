@@ -222,16 +222,12 @@ export function FilesPage() {
     return matchTool && matchSearch;
   });
 
-  // By-tool breakdown
+  // By-tool breakdown — real counts from the links, zeros when there are none
+  // (no hardcoded fallback: it contradicted the "0 linked" empty state, MET-508).
   const toolCounts: Record<string, number> = { kicad: 0, freecad: 0, spice: 0, other: 0 };
-  if (total > 0) {
-    for (const l of links!) {
-      const k = toolKey(l.tool);
-      toolCounts[k] = (toolCounts[k] ?? 0) + 1;
-    }
-  } else {
-    // static fallback
-    toolCounts.kicad = 12; toolCounts.freecad = 8; toolCounts.spice = 4; toolCounts.other = 6;
+  for (const l of links ?? []) {
+    const k = toolKey(l.tool);
+    toolCounts[k] = (toolCounts[k] ?? 0) + 1;
   }
   const toolTotal = Object.values(toolCounts).reduce((a, b) => a + b, 0);
 
