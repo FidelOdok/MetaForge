@@ -705,11 +705,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Initialize chat backend (PG or in-memory). Project backend is
     # already initialised above (before the tool registry) so the
     # project MCP adapter can pick it up.
+    from api_gateway.bom.routes import init_twin as init_bom_twin
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
-    from api_gateway.bom.routes import init_twin as init_bom_twin
     from api_gateway.twin.routes import init_twin as init_twin_viewer
 
     chat_backend = await create_backend()
