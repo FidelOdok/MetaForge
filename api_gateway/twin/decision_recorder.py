@@ -21,7 +21,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -86,6 +86,39 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             content_hash = hashlib.sha256(content).hexdigest()
             filename = f"{_slug(title)}.md"
             span.set_attribute("decision.title", title)
+
+            # 0. Dedup (MET-506): an identical decision (same rendered content)
+            #    in the same project is the same decision — return the existing
+            #    node instead of creating a duplicate. Skipped when ``supersedes``
+            #    is set (a deliberate new record). Best-effort: a query failure
+            #    must never block recording.
+            if not supersedes:
+                try:
+                    scope = UUID(project_id) if project_id else None
+                    existing = await twin.list_work_products(
+                        work_product_type=WorkProductType.DESIGN_DECISION,
+                        project_id=scope,
+                    )
+                    for prior in existing:
+                        if getattr(prior, "content_hash", None) == content_hash:
+                            prior_id = str(getattr(prior, "id", ""))
+                            prior_meta = getattr(prior, "metadata", {}) or {}
+                            span.set_attribute("decision.deduplicated", True)
+                            logger.info(
+                                "decision_deduplicated",
+                                node_id=prior_id,
+                                project_id=project_id,
+                                content_hash=content_hash,
+                            )
+                            return {
+                                "node_id": prior_id,
+                                "minio_object_key": prior_meta.get("minio_object_key"),
+                                "content_hash": content_hash,
+                                "project_linked": bool(project_id),
+                                "deduplicated": True,
+                            }
+                except Exception as exc:  # noqa: BLE001 — dedup never blocks recording
+                    logger.warning("decision_dedup_check_failed", error=str(exc))
 
             # 1. blob → MinIO (graceful: keep the node even if storage is down).
             minio_object_key: str | None = None
@@ -154,6 +187,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
                 "project_linked": linked,
+                "deduplicated": False,
             }
 
     return record

@@ -105,6 +105,37 @@ class TestRecorder:
         assert r2["project_linked"] is False
         assert be2.links == []
 
+    async def test_identical_decision_is_deduplicated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MET-506: recording the same decision twice returns the same node."""
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+
+        first = await record(title="Slot remodel", rationale="slots beat holes", project_id=pid)
+        second = await record(title="Slot remodel", rationale="slots beat holes", project_id=pid)
+
+        assert first["deduplicated"] is False
+        assert second["deduplicated"] is True
+        assert second["node_id"] == first["node_id"]
+        # Only one node exists for that project.
+        decisions = await twin.list_work_products(
+            work_product_type=WorkProductType.DESIGN_DECISION, project_id=UUID(pid)
+        )
+        assert len([d for d in decisions if d.content_hash == first["content_hash"]]) == 1
+
+    async def test_supersedes_bypasses_dedup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A superseding record is deliberate — never deduplicated."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+        first = await record(title="D", rationale="r")
+        again = await record(title="D", rationale="r", supersedes=first["node_id"])
+        assert again["deduplicated"] is False
+        assert again["node_id"] != first["node_id"]
+
     async def test_blob_failure_degrades_gracefully(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_blob(monkeypatch, fail=True)
         twin = InMemoryTwinAPI.create()
