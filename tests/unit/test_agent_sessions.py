@@ -101,6 +101,24 @@ class TestInMemoryStore:
         with pytest.raises(SessionClosedError):
             await store.complete_session(s.id, status="failed")
 
+    async def test_abandon_stale_sessions(self) -> None:
+        """MET-510: old running sessions are retired; fresh/closed ones aren't."""
+        store = InMemoryAgentSessionStore.create()
+        stale = await store.create_session(agent_code="a", task_type="t")
+        # Backdate it past the cutoff.
+        store._sessions[stale.id].started_at = "2020-01-01T00:00:00+00:00"
+        fresh = await store.create_session(agent_code="a", task_type="t")
+        done = await store.create_session(agent_code="a", task_type="t")
+        store._sessions[done.id].started_at = "2020-01-01T00:00:00+00:00"
+        await store.complete_session(done.id, status="completed")
+
+        n = await store.abandon_stale_sessions(older_than_seconds=3600)
+        assert n == 1
+        assert store._sessions[stale.id].status == "abandoned"
+        assert store._sessions[stale.id].completed_at is not None
+        assert store._sessions[fresh.id].status == "running"  # too recent
+        assert store._sessions[done.id].status == "completed"  # already terminal
+
 
 # ---------------------------------------------------------------------------
 # Routes
