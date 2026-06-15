@@ -15,6 +15,12 @@ Config (env):
     METAFORGE_GATEWAY_URL    default http://localhost:8000
     METAFORGE_MCP_API_KEY    sent as X-API-Key when set
     METAFORGE_SESSION_CAPTURE=off   global kill-switch
+    METAFORGE_PROJECT_ID     overrides the active-project pointer (MET-501)
+
+Active project (MET-501): capture is bound to a project, set per repo with
+``metaforge-capture use <project_id>``. Hook capture only fires when a project
+is active, and one client session may drive several projects (each gets its own
+MetaForge session). See ``set_active_project`` / ``read_active_project``.
 
 The normalized event contract is exactly MET-493's ``SessionEventCreateRequest``:
 ``{type, message, data}`` where type ∈ thought|action|decision|observation|error|result.
@@ -26,6 +32,7 @@ must not break the host agent's turn.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -71,6 +78,80 @@ def _gateway_url() -> str:
 def _auth_headers() -> dict[str, str]:
     key = os.environ.get("METAFORGE_MCP_API_KEY") or _config().get("api_key")
     return {"X-API-Key": str(key)} if key else {}
+
+
+# ---------------------------------------------------------------------------
+# Active project (MET-501)
+#
+# Binding is per-event, not per-session: one Claude session may touch several
+# projects, so each hook firing resolves the project at that moment. The
+# "active project" is set per repo (cwd-keyed) so concurrent sessions in
+# different repos never cross-contaminate, and capture is COMPULSORY-bound —
+# no active project means no capture (most agent sessions aren't project work).
+#
+# The pointer is a local file because that is the only carrier a hook
+# subprocess can read at fire time and that a CLI/tool can rewrite mid-session.
+# ---------------------------------------------------------------------------
+
+_ACTIVE_ROOT = _DEFAULT_STATE_ROOT / "active"
+
+
+def _cwd_key(cwd: str | None) -> str:
+    """Stable filename-safe key for a directory (its resolved absolute path)."""
+    try:
+        resolved = str(Path(cwd).resolve()) if cwd else str(Path.cwd())
+    except OSError:
+        resolved = cwd or "."
+    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+
+
+def _active_path(cwd: str | None) -> Path:
+    return _ACTIVE_ROOT / f"{_cwd_key(cwd)}.json"
+
+
+def set_active_project(project_id: str, *, cwd: str | None = None) -> Path:
+    """Mark ``project_id`` active for ``cwd`` (default: the process cwd)."""
+    target = str(Path(cwd).resolve()) if cwd else str(Path.cwd())
+    path = _active_path(target)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"project_id": project_id, "cwd": target}))
+    return path
+
+
+def clear_active_project(cwd: str | None = None) -> bool:
+    """Drop the active-project pointer for ``cwd``. Returns True if one existed."""
+    path = _active_path(cwd)
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def read_active_project(cwd: str | None = None) -> str | None:
+    """Resolve the active project id for ``cwd``.
+
+    ``METAFORGE_PROJECT_ID`` env wins (explicit override). Otherwise walk up
+    from ``cwd`` so a pointer set at the repo root is visible from any subdir;
+    the first ancestor with a pointer wins. Returns None when nothing is set —
+    the signal to the caller that this session is not project work.
+    """
+    env = os.environ.get("METAFORGE_PROJECT_ID")
+    if env and env.strip():
+        return env.strip()
+    try:
+        start = Path(cwd).resolve() if cwd else Path.cwd()
+    except OSError:
+        return None
+    for d in (start, *start.parents):
+        path = _active_path(str(d))
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+            pid = data.get("project_id") if isinstance(data, dict) else None
+            return str(pid) if pid else None
+    return None
 
 
 def assistant_texts(entry: Any) -> list[str]:
@@ -164,11 +245,27 @@ class CaptureClient:
         title: str | None = None,
         project_id: str | None = None,
     ) -> str | None:
-        """Return the MetaForge session id, creating it on first use."""
+        """Return the MetaForge session id, creating it on first use.
+
+        Bindings are per ``(client_session, project)``: one client session may
+        drive several projects, each getting its own MetaForge session so events
+        attribute to the right project (MET-501). ``project_id=None`` keeps the
+        legacy single-session binding under ``session_id`` for unbound callers
+        (e.g. the tailer).
+        """
         state = self._load_state(client_session_id)
-        sid = state.get("session_id")
-        if isinstance(sid, str) and sid:
-            return sid
+        key = project_id or None
+        if key is not None:
+            sessions = state.get("sessions")
+            if not isinstance(sessions, dict):
+                sessions = {}
+            existing = sessions.get(key)
+            if isinstance(existing, str) and existing:
+                return existing
+        else:
+            sid = state.get("session_id")
+            if isinstance(sid, str) and sid:
+                return sid
         body: dict[str, Any] = {"agent_code": agent_code, "task_type": task_type}
         if title:
             body["title"] = title
@@ -177,7 +274,16 @@ class CaptureClient:
         resp = self.http.post("/v1/sessions", json=body)
         resp.raise_for_status()
         sid = str(resp.json()["id"])
-        state["session_id"] = sid
+        # Re-load: a sibling hook firing may have written state meanwhile.
+        state = self._load_state(client_session_id)
+        if key is not None:
+            sessions = state.get("sessions")
+            if not isinstance(sessions, dict):
+                sessions = {}
+            sessions[key] = sid
+            state["sessions"] = sessions
+        else:
+            state["session_id"] = sid
         state.setdefault("cursor", 0)
         self._save_state(client_session_id, state)
         return sid
@@ -191,10 +297,16 @@ class CaptureClient:
         data: dict[str, Any] | None = None,
         agent_code: str = "agent",
         task_type: str = "session",
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
         if type not in _EVENT_TYPES:
             type = "observation"
-        sid = self.ensure_session(client_session_id, agent_code=agent_code, task_type=task_type)
+        sid = self.ensure_session(
+            client_session_id,
+            agent_code=agent_code,
+            task_type=task_type,
+            project_id=project_id,
+        )
         if sid is None:
             return None
         payload = {"type": type, "message": message[:_MAX_TEXT], "data": data or {}}
@@ -210,6 +322,7 @@ class CaptureClient:
         *,
         agent_code: str = "agent",
         task_type: str = "session",
+        project_id: str | None = None,
     ) -> int:
         """Read new transcript bytes since the cached cursor; push assistant
         text as ``thought`` events. Returns the number of events pushed."""
@@ -241,6 +354,7 @@ class CaptureClient:
                     data={"origin": "transcript", "source": self.client_name},
                     agent_code=agent_code,
                     task_type=task_type,
+                    project_id=project_id,
                 )
                 pushed += 1
         # Advance the cursor even if no thoughts were extracted, so we don't
@@ -311,16 +425,32 @@ class CaptureClient:
         status: str = "completed",
         summary: str | None = None,
     ) -> bool:
+        """Close every MetaForge session bound to this client session.
+
+        Because one client session may have spawned several project-bound
+        sessions (MET-501), complete patches all of them — the legacy
+        ``session_id`` plus every entry in the ``sessions`` map. Returns True if
+        at least one session was closed.
+        """
         state = self._load_state(client_session_id)
-        sid = state.get("session_id")
-        if not isinstance(sid, str) or not sid:
+        ids: list[str] = []
+        legacy = state.get("session_id")
+        if isinstance(legacy, str) and legacy:
+            ids.append(legacy)
+        sessions = state.get("sessions")
+        if isinstance(sessions, dict):
+            ids.extend(str(v) for v in sessions.values() if isinstance(v, str) and v)
+        if not ids:
             return False
         body: dict[str, Any] = {"status": status}
         if summary:
             body["summary"] = summary[:_MAX_TEXT]
-        resp = self.http.patch(f"/v1/sessions/{sid}", json=body)
-        resp.raise_for_status()
-        return True
+        closed = False
+        for sid in dict.fromkeys(ids):  # de-dupe, preserve order
+            resp = self.http.patch(f"/v1/sessions/{sid}", json=body)
+            resp.raise_for_status()
+            closed = True
+        return closed
 
 
 # ---------------------------------------------------------------------------
@@ -360,11 +490,24 @@ def _build_parser() -> argparse.ArgumentParser:
     e.add_argument("--data", default=None, help="JSON object string.")
     e.add_argument("--agent-code", default="agent")
     e.add_argument("--task-type", default="session")
+    e.add_argument("--project-id", default=None)
 
     t = sub.add_parser("push-transcript-delta")
     t.add_argument("--transcript", required=True)
     t.add_argument("--agent-code", default="agent")
     t.add_argument("--task-type", default="session")
+    t.add_argument("--project-id", default=None)
+
+    # MET-501: active-project pointer (cwd-keyed). Capture is bound to it.
+    u = sub.add_parser("use", help="Set the active project for this repo/dir.")
+    u.add_argument("project_id")
+    u.add_argument("--cwd", default=None, help="Directory to bind (default: cwd).")
+
+    cl = sub.add_parser("clear", help="Clear the active project for this repo/dir.")
+    cl.add_argument("--cwd", default=None)
+
+    ac = sub.add_parser("active", help="Print the active project for this repo/dir.")
+    ac.add_argument("--cwd", default=None)
 
     c = sub.add_parser("complete")
     c.add_argument("--status", default="completed")
@@ -429,6 +572,27 @@ def _run_admin(args: argparse.Namespace) -> int:
         return 1
 
 
+def _run_active(args: argparse.Namespace) -> int:
+    """Handle use/clear/active — user-invoked config for the active project."""
+    try:
+        if args.command == "use":
+            path = set_active_project(args.project_id, cwd=args.cwd)
+            target = args.cwd or str(Path.cwd())
+            print(f"active project for {target}: {args.project_id}")
+            print(f"  pointer: {path}")
+        elif args.command == "clear":
+            existed = clear_active_project(args.cwd)
+            target = args.cwd or str(Path.cwd())
+            print(f"active project cleared for {target}" if existed else "no active project set")
+        else:  # active
+            pid = read_active_project(args.cwd)
+            print(pid if pid else "(none)")
+        return 0
+    except Exception as exc:  # noqa: BLE001 — config command: show the failure
+        print(f"metaforge-capture {args.command} failed: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry. Capture commands ALWAYS return 0 (never break the host);
     install/uninstall are user-invoked and surface errors."""
@@ -440,6 +604,11 @@ def main(argv: list[str] | None = None) -> int:
     # Admin commands run regardless of the capture kill-switch and report errors.
     if args.command in ("install", "uninstall"):
         return _run_admin(args)
+
+    # Active-project pointer commands are config, not capture: run regardless of
+    # the kill-switch and surface output to the user.
+    if args.command in ("use", "clear", "active"):
+        return _run_active(args)
 
     try:
         if not capture_enabled():
@@ -471,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
                 data=data,
                 agent_code=args.agent_code,
                 task_type=args.task_type,
+                project_id=args.project_id,
             )
         elif args.command == "push-transcript-delta":
             client.push_transcript_delta(
@@ -478,6 +648,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.transcript,
                 agent_code=args.agent_code,
                 task_type=args.task_type,
+                project_id=args.project_id,
             )
         elif args.command == "complete":
             client.complete(args.session, status=args.status, summary=args.summary)

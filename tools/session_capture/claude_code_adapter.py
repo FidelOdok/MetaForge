@@ -12,6 +12,12 @@ Registered for three events:
 * ``Stop``                                        → transcript delta → thoughts
 * ``SessionEnd``                                  → complete the session
 
+Capture is bound to an *active project* resolved from the session's ``cwd``
+(MET-501): ``PostToolUse``/``Stop`` capture only when a project is active, and
+the event is attributed to it. No active project → no capture (most Claude
+sessions aren't project work). ``SessionEnd`` still completes any sessions that
+were opened. Set the active project with ``metaforge-capture use <project_id>``.
+
 Never raises and always exits 0 — capture must not break the turn. Config via
 ``METAFORGE_GATEWAY_URL`` / ``METAFORGE_SESSION_CAPTURE=off`` (see the core).
 
@@ -64,6 +70,12 @@ def main() -> int:
     try:
         client = core.CaptureClient(_CLIENT)
         event = payload.get("hook_event_name", "")
+        # Resolve the active project from the session's working directory.
+        # Capture is compulsory-bound: no active project → don't capture.
+        cwd = payload.get("cwd")
+        project_id = core.read_active_project(cwd if isinstance(cwd, str) else None)
+        if event in ("PostToolUse", "Stop") and not project_id:
+            return 0
         if event == "PostToolUse":
             tool = str(payload.get("tool_name", "") or "tool")
             tool_input = payload.get("tool_input")
@@ -75,12 +87,17 @@ def main() -> int:
                 data={"source": "claude-code-hook", "tool": tool, "tool_input": summary},
                 agent_code=_AGENT_CODE,
                 task_type=_TASK_TYPE,
+                project_id=project_id,
             )
         elif event == "Stop":
             transcript = payload.get("transcript_path")
             if isinstance(transcript, str) and transcript:
                 client.push_transcript_delta(
-                    sid, transcript, agent_code=_AGENT_CODE, task_type=_TASK_TYPE
+                    sid,
+                    transcript,
+                    agent_code=_AGENT_CODE,
+                    task_type=_TASK_TYPE,
+                    project_id=project_id,
                 )
         elif event == "SessionEnd":
             client.complete(sid, status="completed")
