@@ -54,6 +54,44 @@ _TOOL_EXECUTION_ERROR = -32001
 _AUTH_DENIED = -32002
 
 
+# MET-503: returned in the ``initialize`` handshake so any MCP client learns
+# how to drive MetaForge on connect — the conventions that aren't discoverable
+# from tool schemas alone. Kept self-contained (it's the only channel every
+# client is guaranteed to receive; a remote/other-repo client cannot open repo
+# files), with deeper docs linked by public URL rather than filesystem path.
+_SERVER_INSTRUCTIONS = """\
+MetaForge is a local-first control plane for hardware design. You drive these \
+tools to turn engineer intent into reviewable, manufacturable deliverables \
+(schematics, BOMs, CAD/FEA, design decisions) recorded in a versioned Digital Twin.
+
+Operating rules:
+- Read-only by default. Reads (twin.get_node, twin.thread_for, knowledge.search, \
+*.get_properties) are safe. Writes — mutating the twin, creating work products, \
+recording decisions — need explicit user intent; don't perform them unprompted.
+- Each tool result is an envelope: check `status` ("ok"/"error") and read the \
+`data` field for the payload. Adapter tools (cadquery, calculix, freecad, kicad) \
+may return error code -32001 when their containers are down — report it, don't \
+retry blindly.
+- Scope work to a project: create or fetch one with project.create / project.get \
+/ project.list, and pass its `project_id` when ingesting knowledge or recording \
+decisions.
+
+Your work is captured for review:
+- Every tool call you make is auto-captured server-side as an action.
+- BEFORE working on a project, set the active project so your actions attribute \
+correctly: run `metaforge-capture use <project_id>` (CLI) or call session.start \
+with the project_id. If you don't know which project, ask the user. With no \
+active project, capture stays unbound.
+- Record design choices with twin.record_decision (title, rationale, alternatives) \
+so they persist as typed, reviewable decisions.
+- Capturing your reasoning (not just actions) is an optional client-side add-on \
+(Claude Code hooks or a transcript tailer): \
+https://github.com/FidelOdok/MetaForge/blob/main/docs/session-capture.md
+
+Full tool catalog and Phase-1 limits: \
+https://github.com/FidelOdok/MetaForge/blob/main/docs/capability-matrix.md"""
+
+
 class UnifiedMcpServer:
     """Holds a set of ``McpToolServer`` adapters and dispatches across them.
 
@@ -225,6 +263,8 @@ class UnifiedMcpServer:
                 "name": "metaforge-mcp",
                 "version": self._version,
             },
+            # MET-503: usage guidance every client receives on connect.
+            "instructions": _SERVER_INSTRUCTIONS,
         }
 
     async def _mcp_tools_list(self, params: dict[str, Any]) -> dict[str, Any]:

@@ -194,6 +194,28 @@ class TestMcpStandardProtocol:
         assert "tools" in result["capabilities"]
 
     @pytest.mark.asyncio
+    async def test_initialize_includes_usage_instructions(self, server: UnifiedMcpServer) -> None:
+        """MET-503: the handshake teaches clients how to drive MetaForge.
+
+        Must be self-contained (the only channel every client receives) and
+        cover the non-obvious conventions, so assert the load-bearing phrases.
+        """
+        raw = await server.handle_request(_request("initialize"))
+        result = json.loads(raw)["result"]
+        instructions = result["instructions"]
+        assert isinstance(instructions, str) and instructions
+        lowered = instructions.lower()
+        assert "active project" in lowered  # the MET-501 binding step
+        assert "read-only" in lowered  # the approval philosophy
+        assert "metaforge-capture use" in lowered  # the actionable command
+        # Deeper docs referenced by public URL (a remote client can't open a
+        # repo-relative path), so any session-capture.md mention must be a URL.
+        assert "https://github.com/FidelOdok/MetaForge" in instructions
+        for line in instructions.splitlines():
+            if "session-capture.md" in line:
+                assert "https://" in line
+
+    @pytest.mark.asyncio
     async def test_tools_list_returns_spec_shape(self, server: UnifiedMcpServer) -> None:
         raw = await server.handle_request(_request("tools/list"))
         body = json.loads(raw)
