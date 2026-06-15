@@ -19,7 +19,13 @@ dependencies = [
     # builds finish in minutes not hours.
     "pydantic-ai-slim[openai,anthropic]>=0.1",
     "structlog>=24.0",
-    "fastapi>=0.100",
+    # Cap below FastAPI 0.137 / Starlette 1.0: Starlette 1.x wraps
+    # ``include_router`` results in ``_IncludedRouter`` objects without a
+    # ``.path``, breaking ``app.routes`` introspection that the route tests
+    # (and gateway wiring assumptions) rely on. Pin to the 0.x line until a
+    # deliberate Starlette 1.x migration (MET-502).
+    "fastapi>=0.100,<0.137",
+    "starlette<1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
     "httpx>=0.27",
