@@ -20,6 +20,7 @@ from twin_core.constraint_engine.models import ConstraintEvaluationResult
 from twin_core.constraint_engine.validator import ConstraintEngine, InMemoryConstraintEngine
 from twin_core.graph_engine import GraphEngine, InMemoryGraphEngine
 from twin_core.models.base import EdgeBase
+from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
@@ -156,6 +157,11 @@ class TwinAPI(ABC):
 
     @abstractmethod
     async def find_components(self, query: dict[str, Any]) -> list[Component]: ...
+
+    @abstractmethod
+    async def list_bom_items(self, project_id: UUID | None = None) -> list[BOMItem]:
+        """List Bill-of-Materials line items, optionally scoped to a project."""
+        ...
 
     # --- Datasheets (MET-430) ---
 
@@ -547,6 +553,15 @@ class InMemoryTwinAPI(TwinAPI):
         return await self._constraints.evaluate_all()
 
     # --- Components ---
+
+    async def list_bom_items(self, project_id: UUID | None = None) -> list[BOMItem]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.BOM_ITEM, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
 
     async def add_component(self, component: Component) -> Component:
         result = await self._graph.add_node(component)

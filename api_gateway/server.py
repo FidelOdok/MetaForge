@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api_gateway.assistant.routes import router as assistant_router
+from api_gateway.bom.routes import router as bom_router
 from api_gateway.chat.routes import router as chat_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.convert.routes import router as convert_router
@@ -704,6 +705,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Initialize chat backend (PG or in-memory). Project backend is
     # already initialised above (before the tool registry) so the
     # project MCP adapter can pick it up.
+    from api_gateway.bom.routes import init_twin as init_bom_twin
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
     from api_gateway.projects.routes import init_project_backend
@@ -730,6 +732,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_twin(twin)
     init_projects_twin(twin)
     init_twin_viewer(twin)
+    init_bom_twin(twin)
 
     event_bus = create_default_bus(
         workflow_engine,
@@ -992,6 +995,7 @@ def create_app(
     app.include_router(projects_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
+    app.include_router(bom_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:
