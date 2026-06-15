@@ -13,8 +13,9 @@ build the store from the same env, so they share one Postgres table.
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -87,9 +88,32 @@ class AgentSessionStore(ABC):
     @abstractmethod
     async def list_sessions(self) -> list[SessionResponse]: ...
 
+    @abstractmethod
+    async def abandon_stale_sessions(self, *, older_than_seconds: float) -> int:
+        """Mark ``running`` sessions older than the cutoff as ``abandoned``.
+
+        Returns the count transitioned. A gateway restart orphans any session
+        still ``running`` (its driver is gone), leaving it stuck forever; this
+        retires them so the dashboard reflects reality (MET-510).
+        """
+        ...
+
+
+# Default staleness cutoff for the startup sweep (override via env). Generous
+# so a session from a concurrent/very-recent process isn't retired by mistake.
+_DEFAULT_STALE_SECONDS = float(os.environ.get("METAFORGE_SESSION_STALE_SECONDS", "3600"))
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _parse_iso(value: str) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +211,21 @@ class InMemoryAgentSessionStore(AgentSessionStore):
 
     async def list_sessions(self) -> list[SessionResponse]:
         return list(self._sessions.values())
+
+    async def abandon_stale_sessions(self, *, older_than_seconds: float) -> int:
+        cutoff = datetime.now(UTC) - timedelta(seconds=older_than_seconds)
+        count = 0
+        for session in self._sessions.values():
+            if session.status != "running":
+                continue
+            started = _parse_iso(session.started_at)
+            if started is not None and started < cutoff:
+                session.status = "abandoned"
+                session.completed_at = _now_iso()
+                count += 1
+        if count:
+            logger.info("agent_sessions_abandoned", count=count)
+        return count
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +361,28 @@ class PgAgentSessionStore(AgentSessionStore):
                 out.append(self._row_to_response(row, events))
             return out
 
+    async def abandon_stale_sessions(self, *, older_than_seconds: float) -> int:
+        from sqlalchemy import update
+
+        from api_gateway.db.engine import get_session
+        from api_gateway.db.models import AgentSessionRow
+
+        cutoff = datetime.now(UTC) - timedelta(seconds=older_than_seconds)
+        now = datetime.now(UTC)
+        async with get_session() as session:
+            result = await session.execute(
+                update(AgentSessionRow)
+                .where(
+                    AgentSessionRow.status == "running",
+                    AgentSessionRow.started_at < cutoff,
+                )
+                .values(status="abandoned", completed_at=now)
+            )
+            count = int(getattr(result, "rowcount", 0) or 0)
+            if count:
+                logger.info("agent_sessions_abandoned_pg", count=count)
+            return count
+
     @staticmethod
     async def _load_events(session: Any, session_id: str) -> Any:
         from sqlalchemy import select
@@ -372,16 +433,31 @@ class PgAgentSessionStore(AgentSessionStore):
 
 
 async def create_agent_session_store() -> AgentSessionStore:
-    """Create the appropriate agent-session store based on environment."""
+    """Create the appropriate agent-session store based on environment.
+
+    On creation we sweep stale ``running`` sessions (MET-510): a restart orphans
+    any session whose driver is gone, so retire them once at startup. Best-effort
+    — a sweep failure must not block store init / gateway boot.
+    """
+    store: AgentSessionStore
     try:
         from api_gateway.db import HAS_SQLALCHEMY
         from api_gateway.db.engine import get_engine
 
         if HAS_SQLALCHEMY and get_engine() is not None:
             logger.info("agent_session_store_pg_initialized")
-            return PgAgentSessionStore()
+            store = PgAgentSessionStore()
+        else:
+            logger.info("agent_session_store_in_memory_initialized")
+            store = InMemoryAgentSessionStore.create()
     except Exception as exc:  # noqa: BLE001 — degrade to in-memory
         logger.warning("agent_session_store_pg_failed_fallback", error=str(exc))
+        logger.info("agent_session_store_in_memory_initialized")
+        store = InMemoryAgentSessionStore.create()
 
-    logger.info("agent_session_store_in_memory_initialized")
-    return InMemoryAgentSessionStore.create()
+    try:
+        await store.abandon_stale_sessions(older_than_seconds=_DEFAULT_STALE_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — never block startup on the sweep
+        logger.warning("agent_session_stale_sweep_failed", error=str(exc))
+
+    return store
