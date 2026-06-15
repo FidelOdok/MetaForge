@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
@@ -460,6 +460,11 @@ export function TwinViewerPage() {
   const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
   const [quality, setQuality] = useState('standard');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Track which node's model is loaded so the auto-loader (MET-505) doesn't refetch.
+  const [loadedModelNodeId, setLoadedModelNodeId] = useState<string | null>(null);
+  // Deep-link: /twin?node=<id> preselects a node (e.g. from a project's work
+  // product list, MET-514).
+  const [searchParams] = useSearchParams();
 
   // ── project scope (MET-491) ──
   // Default to "All projects" ('') — the twin view favours seeing the whole
@@ -492,6 +497,49 @@ export function TwinViewerPage() {
   const loadModel = useViewerStore((s) => s.loadModel);
 
   const uploadMutation = useUploadAndConvert();
+
+  // MET-514: preselect a node from the ?node= deep link.
+  useEffect(() => {
+    const nodeParam = searchParams.get('node');
+    if (nodeParam) setSelectedId(nodeParam);
+  }, [searchParams]);
+
+  // MET-505: in MODEL view, auto-load the selected node's geometry. Previously
+  // the viewer only loaded via the graph-mode "View in 3D" button, so picking a
+  // CAD node from the scene dropdown left the "upload a STEP file" placeholder.
+  useEffect(() => {
+    if (viewMode !== '3d') return;
+    const n = selectedNode;
+    if (!n || n.properties.wp_type !== 'cad_model') return;
+    if (loadedModelNodeId === n.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getNodeModel(n.id);
+        if (cancelled) return;
+        const m: ModelManifest = {
+          parts: result.metadata.parts.map((p) => ({
+            name: p.name,
+            meshName: p.meshName ?? p.name,
+            children: (p.children ?? []) as ModelManifest['parts'],
+            boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
+          })),
+          meshToNodeMap: {},
+          materials: result.metadata.materials ?? [],
+          stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
+        };
+        const url = result.glb_url.startsWith('/v1/') ? `/api${result.glb_url}` : result.glb_url;
+        loadModel(url, m);
+        setLoadedModelNodeId(n.id);
+      } catch (err) {
+        // No GLB for this node yet — leave the placeholder, don't crash.
+        if (!cancelled) console.error('Failed to auto-load 3D model:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, selectedNode, loadedModelNodeId, loadModel]);
 
   useEffect(() => {
     if (!uploadMutation.isPending) {
