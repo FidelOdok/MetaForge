@@ -97,3 +97,38 @@ python -m tools.session_capture.metaforge_capture install --user --gateway-url h
 
 Manual alternative: merge `tools/session_capture/claude_code/settings.snippet.json`
 into `.claude/settings.json` yourself.
+
+## Scope: bind capture to a project (MET-501)
+
+The hook is installed `--user`, so it *fires* in every session — but capture is
+**bound to an active project**, and most sessions aren't project work, so by
+default **nothing is captured**. You declare a project before working on it:
+
+```
+metaforge-capture use <project_id>     # set active project for this repo
+metaforge-capture active               # show what's active here
+metaforge-capture clear                # stop capturing for this repo
+```
+
+Key properties:
+
+- **Compulsory binding.** With no active project the `PostToolUse`/`Stop` hooks
+  no-op — no orphan sessions in the global firehose. `SessionEnd` still closes
+  anything that was opened.
+- **Per repo (cwd-keyed).** The pointer lives at
+  `~/.metaforge/capture/active/<cwd-hash>.json`, set at the repo root and
+  resolved by walking up — so it's visible from any subdirectory, and two repos
+  open at once never cross-contaminate.
+- **Per-event, multi-project.** Each hook firing resolves the project at that
+  moment, so one Claude session can drive several projects — switch with another
+  `use` and later events attach to the new project's MetaForge session.
+- **Override.** `METAFORGE_PROJECT_ID` wins over the pointer for a shell/CI run.
+
+Once bound, a session's actions, thoughts, and decisions show up **under that
+project** on `/projects` instead of only in the global `/sessions` stream.
+
+> **In-session setting (MCP tool).** A `project.use` MCP tool that sets the
+> active project from inside a conversation only works when the MCP server runs
+> **locally** (stdio) — a remote `mcp-http` sidecar can't write your laptop's
+> filesystem. For a remote sidecar, set it from the agent via Bash
+> (`metaforge-capture use <id>`). Tracked as a follow-up to MET-501.

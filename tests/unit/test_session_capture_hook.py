@@ -40,8 +40,9 @@ class _Recorder:
 
 
 class _FakeCore:
-    def __init__(self) -> None:
+    def __init__(self, active: str | None = "proj-1") -> None:
         self.recorder = _Recorder()
+        self.active = active
 
     def capture_enabled(self) -> bool:
         return True
@@ -49,9 +50,18 @@ class _FakeCore:
     def CaptureClient(self, *a: Any, **k: Any) -> _Recorder:  # noqa: N802
         return self.recorder
 
+    def read_active_project(self, cwd: str | None = None) -> str | None:
+        return self.active
 
-def _run(hook, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    core = _FakeCore()
+
+def _run(
+    hook,
+    payload: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    active: str | None = "proj-1",
+) -> _Recorder:
+    core = _FakeCore(active=active)
     monkeypatch.setattr(hook, "_load_core", lambda: core)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
     rc = hook.main()
@@ -74,6 +84,43 @@ def test_post_tool_use_pushes_action(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rec.calls[0][0] == "push_event"
     assert rec.calls[0][1]["type"] == "action"
     assert rec.calls[0][1]["message"] == "mcp__metaforge__twin_query_cypher"
+    assert rec.calls[0][1]["project_id"] == "proj-1"  # attributed to the active project
+
+
+def test_no_active_project_skips_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No active project → PostToolUse / Stop capture nothing (MET-501)."""
+    hook = _load_hook()
+    rec = _run(
+        hook,
+        {
+            "hook_event_name": "PostToolUse",
+            "session_id": "cc-1",
+            "tool_name": "mcp__metaforge__twin_query_cypher",
+            "tool_input": {},
+        },
+        monkeypatch,
+        active=None,
+    )
+    assert rec.calls == []
+    rec2 = _run(
+        hook,
+        {"hook_event_name": "Stop", "session_id": "cc-1", "transcript_path": "/tmp/t.jsonl"},
+        monkeypatch,
+        active=None,
+    )
+    assert rec2.calls == []
+
+
+def test_session_end_completes_even_without_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SessionEnd still closes opened sessions regardless of active project."""
+    hook = _load_hook()
+    rec = _run(
+        hook,
+        {"hook_event_name": "SessionEnd", "session_id": "cc-1"},
+        monkeypatch,
+        active=None,
+    )
+    assert rec.calls[0][0] == "complete"
 
 
 def test_stop_pushes_transcript_delta(monkeypatch: pytest.MonkeyPatch) -> None:

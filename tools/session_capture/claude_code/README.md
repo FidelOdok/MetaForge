@@ -30,10 +30,28 @@ pointing at the tracked adapter:
 That's it — the adapter shells to the core, which talks to the gateway at
 `METAFORGE_GATEWAY_URL` (default `http://localhost:8000`).
 
+## Active project (what gets captured)
+
+Capture is **bound to an active project** — and most Claude sessions aren't
+project work, so by default nothing is captured. Before working on a project:
+
+```
+metaforge-capture use <project_id>     # set the active project for this repo
+metaforge-capture active               # show it
+metaforge-capture clear                # stop capturing for this repo
+```
+
+The pointer is **per repo** (keyed by cwd, set at the repo root, visible from
+subdirs). While a project is active, the `PostToolUse` and `Stop` hooks attach
+their events to that project; with none active they no-op. One session can drive
+several projects — switch with another `use`, and later events go to the new
+project's session. `METAFORGE_PROJECT_ID` overrides the pointer for a shell.
+
 ## Config / safety
 
 - `METAFORGE_GATEWAY_URL` — gateway base URL (e.g. `http://fidel-dev:8000`).
 - `METAFORGE_MCP_API_KEY` — sent as `X-API-Key` when set.
+- `METAFORGE_PROJECT_ID` — active-project override (wins over `use`).
 - `METAFORGE_SESSION_CAPTURE=off` — global kill-switch.
 
 Capture is best-effort: every failure is swallowed and the hook always exits 0,

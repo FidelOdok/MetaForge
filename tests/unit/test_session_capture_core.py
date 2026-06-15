@@ -24,13 +24,15 @@ class _FakeGateway:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict[str, Any]]] = []
         self._seq: dict[str, int] = {}
+        self._sessions = 0
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else {}
         self.requests.append((request.method, request.url.path, body))
         path = request.url.path
         if request.method == "POST" and path == "/v1/sessions":
-            return httpx.Response(201, json={"id": "sess-1", "status": "running"})
+            self._sessions += 1
+            return httpx.Response(201, json={"id": f"sess-{self._sessions}", "status": "running"})
         if request.method == "POST" and path.endswith("/events"):
             sid = path.split("/")[3]
             self._seq[sid] = self._seq.get(sid, 0) + 1
@@ -44,6 +46,18 @@ class _FakeGateway:
 
     def session_posts(self) -> int:
         return sum(1 for (m, p, _) in self.requests if m == "POST" and p == "/v1/sessions")
+
+    def session_bodies(self) -> list[dict[str, Any]]:
+        return [b for (m, p, b) in self.requests if m == "POST" and p == "/v1/sessions"]
+
+    def event_targets(self) -> list[str]:
+        """Session id each event POST was routed to (the path's 3rd segment)."""
+        return [
+            p.split("/")[3] for (m, p, _) in self.requests if m == "POST" and p.endswith("/events")
+        ]
+
+    def patched(self) -> list[str]:
+        return [p.split("/")[3] for (m, p, _) in self.requests if m == "PATCH"]
 
 
 def _client(gw: _FakeGateway, tmp: Path) -> CaptureClient:
@@ -178,6 +192,19 @@ class TestCli:
             == 0
         )
 
+    def test_use_active_clear_roundtrip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(mc, "_ACTIVE_ROOT", tmp_path / "active")
+        monkeypatch.delenv("METAFORGE_PROJECT_ID", raising=False)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert mc.main(["use", "proj-9", "--cwd", str(repo)]) == 0
+        assert mc.read_active_project(str(repo)) == "proj-9"
+        assert mc.main(["active", "--cwd", str(repo)]) == 0
+        assert mc.main(["clear", "--cwd", str(repo)]) == 0
+        assert mc.read_active_project(str(repo)) is None
+
     def test_failure_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("METAFORGE_SESSION_CAPTURE", raising=False)
 
@@ -203,3 +230,102 @@ class TestCli:
             ]
         )
         assert rc == 0
+
+
+class TestProjectBinding:
+    """Per-(client_session, project) session binding (MET-501)."""
+
+    def test_event_creates_project_bound_session(self, tmp_path: Path) -> None:
+        gw = _FakeGateway()
+        c = _client(gw, tmp_path)
+        c.push_event("cc-1", type="action", message="x", project_id="proj-A")
+        bodies = gw.session_bodies()
+        assert len(bodies) == 1
+        assert bodies[0]["project_id"] == "proj-A"
+
+    def test_same_project_reuses_session(self, tmp_path: Path) -> None:
+        gw = _FakeGateway()
+        c = _client(gw, tmp_path)
+        c.push_event("cc-1", type="action", message="a", project_id="proj-A")
+        c.push_event("cc-1", type="action", message="b", project_id="proj-A")
+        assert gw.session_posts() == 1  # one session for the project
+        assert gw.event_targets() == ["sess-1", "sess-1"]
+
+    def test_multiple_projects_one_client_session(self, tmp_path: Path) -> None:
+        """One Claude session touching two projects → two bound sessions."""
+        gw = _FakeGateway()
+        c = _client(gw, tmp_path)
+        c.push_event("cc-1", type="action", message="a", project_id="proj-A")
+        c.push_event("cc-1", type="action", message="b", project_id="proj-B")
+        c.push_event("cc-1", type="action", message="c", project_id="proj-A")
+        assert gw.session_posts() == 2
+        # A→sess-1, B→sess-2, A reuses sess-1.
+        assert gw.event_targets() == ["sess-1", "sess-2", "sess-1"]
+        projects = {b["project_id"] for b in gw.session_bodies()}
+        assert projects == {"proj-A", "proj-B"}
+
+    def test_complete_closes_all_bound_sessions(self, tmp_path: Path) -> None:
+        gw = _FakeGateway()
+        c = _client(gw, tmp_path)
+        c.push_event("cc-1", type="action", message="a", project_id="proj-A")
+        c.push_event("cc-1", type="action", message="b", project_id="proj-B")
+        assert c.complete("cc-1", status="completed") is True
+        assert sorted(gw.patched()) == ["sess-1", "sess-2"]
+
+    def test_unbound_path_still_works(self, tmp_path: Path) -> None:
+        """project_id=None keeps the legacy single-session binding (tailer)."""
+        gw = _FakeGateway()
+        c = _client(gw, tmp_path)
+        c.push_event("cc-1", type="action", message="a")
+        c.push_event("cc-1", type="action", message="b")
+        assert gw.session_posts() == 1
+        assert gw.event_targets() == ["sess-1", "sess-1"]
+
+
+class TestActiveProject:
+    """cwd-keyed active-project pointer + walk-up + env override (MET-501)."""
+
+    def test_set_read_clear(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(mc, "_ACTIVE_ROOT", tmp_path / "active")
+        monkeypatch.delenv("METAFORGE_PROJECT_ID", raising=False)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert mc.read_active_project(str(repo)) is None
+        mc.set_active_project("proj-7", cwd=str(repo))
+        assert mc.read_active_project(str(repo)) == "proj-7"
+        assert mc.clear_active_project(str(repo)) is True
+        assert mc.read_active_project(str(repo)) is None
+
+    def test_read_walks_up_from_subdir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(mc, "_ACTIVE_ROOT", tmp_path / "active")
+        monkeypatch.delenv("METAFORGE_PROJECT_ID", raising=False)
+        repo = tmp_path / "repo"
+        sub = repo / "src" / "deep"
+        sub.mkdir(parents=True)
+        mc.set_active_project("proj-root", cwd=str(repo))
+        # A pointer set at the repo root is visible from a nested subdir.
+        assert mc.read_active_project(str(sub)) == "proj-root"
+
+    def test_env_overrides_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(mc, "_ACTIVE_ROOT", tmp_path / "active")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        mc.set_active_project("file-proj", cwd=str(repo))
+        monkeypatch.setenv("METAFORGE_PROJECT_ID", "env-proj")
+        assert mc.read_active_project(str(repo)) == "env-proj"
+
+    def test_distinct_repos_dont_collide(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(mc, "_ACTIVE_ROOT", tmp_path / "active")
+        monkeypatch.delenv("METAFORGE_PROJECT_ID", raising=False)
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        mc.set_active_project("proj-A", cwd=str(a))
+        mc.set_active_project("proj-B", cwd=str(b))
+        assert mc.read_active_project(str(a)) == "proj-A"
+        assert mc.read_active_project(str(b)) == "proj-B"
