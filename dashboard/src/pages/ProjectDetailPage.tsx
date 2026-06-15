@@ -222,9 +222,10 @@ export function ProjectDetailPage() {
             </div>
           ) : (
             project.work_products.map((wp) => (
-              <div
+              <Link
                 key={wp.id}
-                className="flex items-center gap-3 px-4 hover:bg-surface-high cursor-default"
+                to={`/twin?node=${wp.id}`}
+                className="flex items-center gap-3 px-4 hover:bg-surface-high cursor-pointer"
                 style={{ height: '40px' }}
               >
                 {/* Status dot */}
@@ -273,7 +274,7 @@ export function ProjectDetailPage() {
                 >
                   {formatRelativeTime(wp.updatedAt)}
                 </span>
-              </div>
+              </Link>
             ))
           )}
         </div>
