@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { useBom } from '../hooks/use-bom';
+import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { ComponentChatPanel } from '../components/chat/integrations/ComponentChatPanel';
 import type { BomComponent } from '../types/bom';
@@ -82,7 +83,8 @@ function BomRow({ component }: { component: BomComponent }) {
 }
 
 export function BomPage() {
-  const { data: components, isLoading } = useBom();
+  const [projectId, setProjectId] = useState('');
+  const { data: components, isLoading } = useBom(projectId || undefined);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -235,6 +237,7 @@ export function BomPage() {
             <option value="alternate_needed">Alternate Needed</option>
           </select>
         </div>
+        <ProjectScopePicker value={projectId} onChange={setProjectId} />
         {(search || statusFilter) && (
           <span className="font-mono text-xs text-on-surface-variant">
             {sorted.length} of {items.length}
