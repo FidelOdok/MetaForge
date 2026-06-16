@@ -159,6 +159,10 @@ class DesignChangeProposal(BaseModel):
         default_factory=uuid4,
         description="Session under which this proposal was created",
     )
+    project_id: str | None = Field(
+        default=None,
+        description="Project this proposal belongs to (for dashboard scoping, MET-518)",
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the proposal was created",

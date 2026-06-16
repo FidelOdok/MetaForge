@@ -173,9 +173,10 @@ async def get_run_status(run_id: str, request: Request) -> RunStatusResponse:
 @router.get("/proposals", response_model=ProposalListResponse)
 async def list_proposals(
     session_id: UUID | None = None,
+    project_id: str | None = None,
 ) -> ProposalListResponse:
-    """List pending design-change proposals, optionally filtered by session."""
-    proposals = workflow.get_pending_proposals(session_id=session_id)
+    """List pending design-change proposals, optionally filtered by session/project."""
+    proposals = workflow.get_pending_proposals(session_id=session_id, project_id=project_id)
     return ProposalListResponse(proposals=proposals, total=len(proposals))
 
 
