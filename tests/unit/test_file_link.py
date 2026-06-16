@@ -176,6 +176,53 @@ class TestFileLinkEndpoints:
         assert body["sync_status"] == "synced"
         assert body["source_hash"]  # non-empty
 
+    async def test_list_links_scoped_by_project(self, client, temp_file):
+        """MET-517: /v1/twin/links?project_id= keeps only that project's links."""
+        from api_gateway.twin.file_link import FileLink, _file_hash, link_store
+        from api_gateway.twin.routes import _twin
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
+
+        pa = "11111111-1111-1111-1111-111111111111"
+        pb = "22222222-2222-2222-2222-222222222222"
+        wp_a = await _twin.create_work_product(
+            WorkProduct(
+                name="a",
+                type=WorkProductType.SCHEMATIC,
+                domain="electronics",
+                file_path="/a",
+                content_hash="a",
+                format="kicad_sch",
+                created_by="t",
+                project_id=pa,
+            )
+        )
+        wp_b = await _twin.create_work_product(
+            WorkProduct(
+                name="b",
+                type=WorkProductType.SCHEMATIC,
+                domain="electronics",
+                file_path="/b",
+                content_hash="b",
+                format="kicad_sch",
+                created_by="t",
+                project_id=pb,
+            )
+        )
+        h = _file_hash(temp_file)
+        link_store.create(
+            FileLink(work_product_id=str(wp_a.id), source_path=temp_file, source_hash=h)
+        )
+        link_store.create(
+            FileLink(work_product_id=str(wp_b.id), source_path=temp_file, source_hash=h)
+        )
+
+        async with client:
+            resp = await client.get("/v1/twin/links", params={"project_id": pa})
+        assert resp.status_code == 200
+        ids = [link["work_product_id"] for link in resp.json()]
+        assert ids == [str(wp_a.id)]
+
     async def test_create_link_file_not_found(self, client):
         from api_gateway.twin.routes import _twin
         from twin_core.models.enums import WorkProductType

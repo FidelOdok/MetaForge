@@ -10,6 +10,7 @@ import type { FileLinkTool } from '../types/twin';
 
 export const linkKeys = {
   all: ['links'] as const,
+  project: (projectId: string) => ['links', 'project', projectId] as const,
   node: (nodeId: string) => ['link', nodeId] as const,
 };
 
@@ -22,10 +23,10 @@ export function useNodeLink(nodeId: string | undefined) {
   });
 }
 
-export function useAllLinks() {
+export function useAllLinks(projectId?: string) {
   return useQuery({
-    queryKey: linkKeys.all,
-    queryFn: getAllLinks,
+    queryKey: projectId ? linkKeys.project(projectId) : linkKeys.all,
+    queryFn: () => getAllLinks(projectId),
     staleTime: 30_000,
   });
 }

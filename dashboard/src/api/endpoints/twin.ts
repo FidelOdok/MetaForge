@@ -117,8 +117,9 @@ export async function getNodeLink(nodeId: string): Promise<FileLink | null> {
   }
 }
 
-export async function getAllLinks(): Promise<FileLink[]> {
-  const { data } = await apiClient.get<FileLink[]>('/twin/links');
+export async function getAllLinks(projectId?: string): Promise<FileLink[]> {
+  const params = projectId ? { project_id: projectId } : {};
+  const { data } = await apiClient.get<FileLink[]>('/twin/links', { params });
   return data;
 }
 

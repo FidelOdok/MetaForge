@@ -737,9 +737,21 @@ async def delete_file_link(node_id: str) -> None:
 
 
 @router.get("/links", response_model=list[FileLinkResponse])
-async def list_file_links() -> list[FileLinkResponse]:
-    """List all file links with live sync status."""
+async def list_file_links(project_id: str | None = None) -> list[FileLinkResponse]:
+    """List file links with live sync status, optionally scoped to a project.
+
+    A link has no project of its own; scoping (MET-517) keeps only links whose
+    linked work product belongs to ``project_id``.
+    """
     links = link_store.list_all()
+    if project_id:
+        try:
+            scoped = UUID(project_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid project_id format")
+        wps = await _twin.list_work_products(project_id=scoped)
+        allowed = {str(wp.id) for wp in wps}
+        links = [link for link in links if link.work_product_id in allowed]
     results = []
     for link in links:
         link.sync_status = check_sync_status(link)

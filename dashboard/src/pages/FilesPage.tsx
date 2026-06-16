@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAllLinks, useDeleteLink, useSyncNode } from '../hooks/use-links';
+import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
 import type { FileLink, FileLinkStatus, FileLinkTool } from '../types/twin';
 
 // ── Status dot colours ────────────────────────────────────────────────────────
@@ -206,7 +207,8 @@ const STATIC_PIPELINE = [
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export function FilesPage() {
-  const { data: links, isLoading } = useAllLinks();
+  const [projectId, setProjectId] = useState('');
+  const { data: links, isLoading } = useAllLinks(projectId || undefined);
   const [filterTool, setFilterTool] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -256,6 +258,7 @@ export function FilesPage() {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ProjectScopePicker value={projectId} onChange={setProjectId} />
           {synced > 0 && (
             <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#3dd68c', background: 'rgba(61,214,140,0.1)', padding: '2px 8px', borderRadius: 4 }}>
               {synced} synced
