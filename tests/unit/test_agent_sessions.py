@@ -101,6 +101,17 @@ class TestInMemoryStore:
         with pytest.raises(SessionClosedError):
             await store.complete_session(s.id, status="failed")
 
+    async def test_list_sessions_filters_by_project(self) -> None:
+        """MET-516: list_sessions(project_id) scopes to one project."""
+        store = InMemoryAgentSessionStore.create()
+        a = await store.create_session(agent_code="a", task_type="t", project_id="p1")
+        await store.create_session(agent_code="b", task_type="t", project_id="p2")
+        await store.create_session(agent_code="c", task_type="t")  # unscoped
+        scoped = await store.list_sessions("p1")
+        assert [s.id for s in scoped] == [a.id]
+        assert scoped[0].project_id == "p1"
+        assert len(await store.list_sessions()) == 3  # no filter → all
+
     async def test_abandon_stale_sessions(self) -> None:
         """MET-510: old running sessions are retired; fresh/closed ones aren't."""
         store = InMemoryAgentSessionStore.create()

@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSessions } from '../hooks/use-sessions';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
+import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
 import type { AgentSession } from '../types/session';
 
 // KC color tokens
@@ -715,7 +717,8 @@ function SessionRow({ session }: { session: AgentSession }) {
 // --- Main Page ---
 
 export function SessionsPage() {
-  const { data: sessions, isLoading } = useSessions();
+  const [projectId, setProjectId] = useState('');
+  const { data: sessions, isLoading } = useSessions(projectId || undefined);
 
   if (isLoading) {
     return (
@@ -772,16 +775,18 @@ export function SessionsPage() {
               DAG executor · {runningCount} workflow{runningCount !== 1 ? 's' : ''} running
             </span>
           </div>
-          <span
-            style={{
-              fontFamily: 'Roboto Mono, monospace',
-              fontSize: 11,
-              color: KC.onSurfaceVariant,
-              marginTop: 4,
-            }}
-          >
-            {now}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
+            <ProjectScopePicker value={projectId} onChange={setProjectId} />
+            <span
+              style={{
+                fontFamily: 'Roboto Mono, monospace',
+                fontSize: 11,
+                color: KC.onSurfaceVariant,
+              }}
+            >
+              {now}
+            </span>
+          </div>
         </div>
 
         {/* Two-column layout */}

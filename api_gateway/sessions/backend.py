@@ -86,7 +86,9 @@ class AgentSessionStore(ABC):
     async def get_session(self, session_id: str) -> SessionResponse | None: ...
 
     @abstractmethod
-    async def list_sessions(self) -> list[SessionResponse]: ...
+    async def list_sessions(self, project_id: str | None = None) -> list[SessionResponse]:
+        """List sessions, optionally scoped to a project (MET-516)."""
+        ...
 
     @abstractmethod
     async def abandon_stale_sessions(self, *, older_than_seconds: float) -> int:
@@ -141,9 +143,8 @@ class InMemoryAgentSessionStore(AgentSessionStore):
         source: str = "external",
     ) -> SessionResponse:
         session_id = str(uuid4())
-        # title / project_id are persisted by the Pg row for future use but
-        # are not part of SessionResponse today (dashboard doesn't read them),
-        # so the in-memory store accepts and drops them — same observable shape.
+        # title isn't part of SessionResponse (dashboard doesn't read it) so it's
+        # dropped here; project_id is retained for project scoping (MET-516).
         session = SessionResponse(
             id=session_id,
             agent_code=agent_code,
@@ -155,6 +156,7 @@ class InMemoryAgentSessionStore(AgentSessionStore):
             run_id=None,
             summary=None,
             source=source,
+            project_id=project_id,
         )
         self._sessions[session_id] = session
         logger.info("agent_session_created", session_id=session_id, agent_code=agent_code)
@@ -209,8 +211,11 @@ class InMemoryAgentSessionStore(AgentSessionStore):
     async def get_session(self, session_id: str) -> SessionResponse | None:
         return self._sessions.get(session_id)
 
-    async def list_sessions(self) -> list[SessionResponse]:
-        return list(self._sessions.values())
+    async def list_sessions(self, project_id: str | None = None) -> list[SessionResponse]:
+        sessions = list(self._sessions.values())
+        if project_id:
+            sessions = [s for s in sessions if s.project_id == project_id]
+        return sessions
 
     async def abandon_stale_sessions(self, *, older_than_seconds: float) -> int:
         cutoff = datetime.now(UTC) - timedelta(seconds=older_than_seconds)
@@ -346,7 +351,7 @@ class PgAgentSessionStore(AgentSessionStore):
             events = await self._load_events(session, session_id)
             return self._row_to_response(row, events)
 
-    async def list_sessions(self) -> list[SessionResponse]:
+    async def list_sessions(self, project_id: str | None = None) -> list[SessionResponse]:
         from sqlalchemy import select
 
         from api_gateway.db.engine import get_session
@@ -354,6 +359,8 @@ class PgAgentSessionStore(AgentSessionStore):
 
         async with get_session() as session:
             stmt = select(AgentSessionRow).order_by(AgentSessionRow.started_at.desc())
+            if project_id:
+                stmt = stmt.where(AgentSessionRow.project_id == project_id)
             rows = (await session.execute(stmt)).scalars().all()
             out: list[SessionResponse] = []
             for row in rows:
@@ -424,6 +431,7 @@ class PgAgentSessionStore(AgentSessionStore):
             run_id=None,
             summary=row.summary,
             source=row.source,
+            project_id=row.project_id,
         )
 
 

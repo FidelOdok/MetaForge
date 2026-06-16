@@ -35,6 +35,8 @@ class SessionResponse(BaseModel):
     # recorded by MCP/CLI agents. None keeps the legacy shape for workflow
     # runs so the dashboard renders unchanged.
     source: str | None = None
+    # MET-516: project this session belongs to (None for unscoped / workflow runs).
+    project_id: str | None = None
 
 
 class SessionListResponse(BaseModel):
