@@ -334,6 +334,18 @@ class TestApprovalWorkflow:
         assert pending[0].agent_code == "mech"
 
     @pytest.mark.asyncio
+    async def test_get_pending_by_project(self) -> None:
+        """MET-518: proposals filter by project_id."""
+        wf = ApprovalWorkflow()
+        await wf.propose_change("mech", "a", {}, [], project_id="proj-A")
+        await wf.propose_change("elec", "b", {}, [], project_id="proj-B")
+        scoped = wf.get_pending_proposals(project_id="proj-A")
+        assert len(scoped) == 1
+        assert scoped[0].agent_code == "mech"
+        assert scoped[0].project_id == "proj-A"
+        assert len(wf.get_pending_proposals()) == 2  # no filter → all
+
+    @pytest.mark.asyncio
     async def test_approve_proposal(self) -> None:
         wf = ApprovalWorkflow()
         proposal = await wf.propose_change("mech", "test", {}, [])

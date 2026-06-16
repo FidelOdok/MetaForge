@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
+import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
@@ -274,7 +275,8 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
 
 // ─── ApprovalsPage ───────────────────────────────────────────────────────────
 export function ApprovalsPage() {
-  const { data, isLoading } = useProposals();
+  const [projectId, setProjectId] = useState('');
+  const { data, isLoading } = useProposals(projectId || undefined);
 
   if (isLoading) {
     return (
@@ -329,18 +331,20 @@ export function ApprovalsPage() {
             Human-in-the-loop review · {total} proposal{total !== 1 ? 's' : ''}
           </span>
         </div>
-        <span
-          className="font-mono rounded px-2 py-0.5"
-          style={{
-            fontSize: 10,
-            backgroundColor: KC.surfaceContainer,
-            color: KC.onSurfaceVariant,
-            border: `1px solid ${KC.border}`,
-            marginTop: 3,
-          }}
-        >
-          W3 Gate Check
-        </span>
+        <div className="flex items-center gap-2" style={{ marginTop: 3 }}>
+          <ProjectScopePicker value={projectId} onChange={setProjectId} />
+          <span
+            className="font-mono rounded px-2 py-0.5"
+            style={{
+              fontSize: 10,
+              backgroundColor: KC.surfaceContainer,
+              color: KC.onSurfaceVariant,
+              border: `1px solid ${KC.border}`,
+            }}
+          >
+            W3 Gate Check
+          </span>
+        </div>
       </div>
 
       {/* ── 3-column regime cards ────────────────────────────────────────── */}

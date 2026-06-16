@@ -81,6 +81,7 @@ class ApprovalWorkflow:
         work_products: list[UUID],
         *,
         session_id: UUID | None = None,
+        project_id: str | None = None,
         requires_approval: bool = True,
     ) -> DesignChangeProposal:
         """Create a new design-change proposal and notify listeners.
@@ -95,6 +96,7 @@ class ApprovalWorkflow:
             work_products_affected=work_products,
             requires_approval=requires_approval,
             session_id=session_id or uuid4(),
+            project_id=project_id,
         )
         self._proposals[proposal.change_id] = proposal
 
@@ -119,15 +121,19 @@ class ApprovalWorkflow:
 
         return proposal
 
-    def get_pending_proposals(self, session_id: UUID | None = None) -> list[DesignChangeProposal]:
+    def get_pending_proposals(
+        self, session_id: UUID | None = None, project_id: str | None = None
+    ) -> list[DesignChangeProposal]:
         """Return proposals with ``status == pending``.
 
-        If *session_id* is given, only proposals for that session are
-        returned.
+        If *session_id* / *project_id* are given, only proposals matching them
+        are returned (project scoping: MET-518).
         """
         proposals = [p for p in self._proposals.values() if p.status == ChangeStatus.PENDING]
         if session_id is not None:
             proposals = [p for p in proposals if p.session_id == session_id]
+        if project_id:
+            proposals = [p for p in proposals if p.project_id == project_id]
         return proposals
 
     def get_proposal(self, change_id: UUID) -> DesignChangeProposal | None:

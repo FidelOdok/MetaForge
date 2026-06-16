@@ -9,14 +9,15 @@ import {
 
 export const assistantKeys = {
   all: ['assistant'] as const,
-  proposals: () => [...assistantKeys.all, 'proposals'] as const,
+  proposals: (projectId?: string) =>
+    [...assistantKeys.all, 'proposals', projectId ?? 'all'] as const,
   runStatus: (runId: string) => [...assistantKeys.all, 'run', runId] as const,
 };
 
-export function useProposals(sessionId?: string) {
+export function useProposals(projectId?: string) {
   return useQuery({
-    queryKey: assistantKeys.proposals(),
-    queryFn: () => getProposals(sessionId),
+    queryKey: assistantKeys.proposals(projectId),
+    queryFn: () => getProposals(projectId),
     staleTime: 10_000,
   });
 }
