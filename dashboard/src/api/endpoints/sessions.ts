@@ -44,8 +44,9 @@ function mapSession(raw: SessionResponseRaw): AgentSession {
   };
 }
 
-export async function getSessions(): Promise<AgentSession[]> {
-  const { data } = await apiClient.get<SessionListResponseRaw>('/sessions');
+export async function getSessions(projectId?: string): Promise<AgentSession[]> {
+  const params = projectId ? { project_id: projectId } : {};
+  const { data } = await apiClient.get<SessionListResponseRaw>('/sessions', { params });
   return data.sessions.map(mapSession);
 }
 

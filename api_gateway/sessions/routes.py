@@ -121,27 +121,33 @@ def _run_to_session(run: WorkflowRun) -> SessionResponse:
 
 
 @router.get("", response_model=SessionListResponse)
-async def list_sessions(request: Request) -> SessionListResponse:
+async def list_sessions(request: Request, project_id: str | None = None) -> SessionListResponse:
     """List all agent sessions.
 
     Merges internal Temporal ``WorkflowRun``s with externally-recorded
     agent sessions (MET-493) so MCP/CLI-driven work shows up alongside
     autonomous runs. Most-recent-first.
+
+    ``project_id`` scopes to one project (MET-516). Internal Temporal runs
+    carry no project, so they're excluded when a project filter is set.
     """
-    with tracer.start_as_current_span("sessions.list"):
+    with tracer.start_as_current_span("sessions.list") as span:
         sessions: list[SessionResponse] = []
 
+        # Workflow runs have no project — only include them in the unscoped view.
         workflow_engine = getattr(request.app.state, "workflow_engine", None)
-        if workflow_engine is not None:
+        if workflow_engine is not None and not project_id:
             runs = await workflow_engine.list_runs()
             sessions.extend(_run_to_session(run) for run in runs)
 
         store = _store(request)
         external = 0
         if store is not None:
-            ext = await store.list_sessions()
+            ext = await store.list_sessions(project_id)
             sessions.extend(ext)
             external = len(ext)
+        if project_id:
+            span.set_attribute("sessions.project_id", project_id)
 
         # Most recent first (ISO timestamps sort lexically)
         sessions.sort(key=lambda s: s.started_at, reverse=True)
