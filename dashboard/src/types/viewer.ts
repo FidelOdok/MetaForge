@@ -17,6 +17,27 @@ export interface ModelManifest {
   meshToNodeMap: Record<string, string>;
   materials: { name: string; color?: string }[];
   stats: { triangleCount: number; fileSize: number };
+  /** Rigid groups for interactive manipulation (MET-519). Optional — when
+   * absent the viewer treats each top-level part as its own single-part group. */
+  rigidGroups?: RigidGroup[];
+}
+
+/**
+ * A rigidly-constrained cluster of parts that move together (MET-519).
+ * Wire shape in the GLB manifest; `partIndices` index into
+ * {@link ModelManifest.parts}. `transform` is an optional 16-float
+ * column-major base matrix (defaults to identity).
+ */
+export interface RigidGroup {
+  name: string;
+  partIndices: number[];
+  transform?: number[];
+}
+
+/** A rigid group resolved to scene-graph mesh names, ready for the gizmo. */
+export interface ResolvedRigidGroup {
+  name: string;
+  meshNames: string[];
 }
 
 /** Explode direction modes for the 3D assembly viewer. */
