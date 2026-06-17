@@ -1,8 +1,11 @@
-import { useRef, useMemo, useEffect } from 'react';
+import { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useViewerStore } from '../../store/viewer-store';
+import { useTransientTransform } from '../../store/transient-transform-store';
+import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
+import { TransformGizmo } from './TransformGizmo';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
 const HIGHLIGHT_COLOR = new THREE.Color(0x3b82f6);
@@ -30,6 +33,20 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
   const explodeFactor = useViewerStore((s) => s.explodeFactor);
+
+  // Rigid-group manipulation (MET-519). Subscribe only to the selected group
+  // (changes rarely); the per-frame delta is read via getState() in useFrame to
+  // avoid a React re-render on every drag tick.
+  const resolvedGroups = useMemo(() => parseRigidGroups(manifest), [manifest]);
+  const selectedGroup = useTransientTransform((s) => s.selectedGroup);
+  const selectGroup = useTransientTransform((s) => s.selectGroup);
+  const setDelta = useTransientTransform((s) => s.setDelta);
+  const [gizmoCentroid, setGizmoCentroid] = useState<[number, number, number] | null>(null);
+
+  const memberMeshes = useMemo(() => {
+    const g = resolvedGroups.find((rg) => rg.name === selectedGroup);
+    return new Set(g?.meshNames ?? []);
+  }, [resolvedGroups, selectedGroup]);
 
   const highlightMaterial = useMemo(
     () =>
@@ -100,8 +117,27 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
     }
   }, [selectedMeshName, hiddenMeshes, highlightMaterial]);
 
+  // Gizmo centroid = mean of the selected group's member-mesh centers (MET-519).
+  useEffect(() => {
+    if (!selectedGroup || memberMeshes.size === 0) {
+      setGizmoCentroid(null);
+      return;
+    }
+    const acc = new THREE.Vector3();
+    let n = 0;
+    for (const name of memberMeshes) {
+      const entry = meshMapRef.current.get(name);
+      if (entry) {
+        acc.add(entry.center);
+        n += 1;
+      }
+    }
+    setGizmoCentroid(n > 0 ? [acc.x / n, acc.y / n, acc.z / n] : null);
+  }, [selectedGroup, memberMeshes, scene]);
+
   // Smooth exploded view animation
   const targetPositions = useRef(new Map<string, THREE.Vector3>());
+  const tmpTarget = useRef(new THREE.Vector3());
 
   useEffect(() => {
     const targets = new Map<string, THREE.Vector3>();
@@ -113,11 +149,17 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   }, [explodeFactor, assemblyCenter]);
 
   useFrame(() => {
+    // Read the live drag delta without subscribing (avoids per-frame React renders).
+    const delta = useTransientTransform.getState().delta;
     for (const [name, entry] of meshMapRef.current) {
-      const target = targetPositions.current.get(name);
-      if (target) {
-        entry.mesh.position.lerp(target, 0.1);
+      const base = targetPositions.current.get(name);
+      const t = tmpTarget.current.set(base?.x ?? 0, base?.y ?? 0, base?.z ?? 0);
+      if (memberMeshes.has(name)) {
+        t.x += delta[0];
+        t.y += delta[1];
+        t.z += delta[2];
       }
+      entry.mesh.position.lerp(t, 0.3);
     }
   });
 
@@ -126,15 +168,15 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
     const mesh = e.object as THREE.Mesh;
     const meshName = mesh.name || mesh.parent?.name || '';
     const entry = meshMapRef.current.get(meshName);
+    // Select the rigid group this mesh belongs to so the gizmo can drive it.
+    selectGroup(groupForMesh(resolvedGroups, meshName)?.name ?? null);
     if (entry && onPartClick) {
       const nodeId = manifest.meshToNodeMap[meshName];
       onPartClick({
         meshName,
         name: entry.name,
         nodeId,
-        boundingBox: entry.center
-          ? undefined
-          : undefined,
+        boundingBox: entry.center ? undefined : undefined,
       });
     }
   };
@@ -142,6 +184,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   return (
     <group ref={groupRef}>
       <primitive object={scene} onClick={handleClick} />
+      {gizmoCentroid && <TransformGizmo centroid={gizmoCentroid} onDelta={setDelta} />}
     </group>
   );
 }
