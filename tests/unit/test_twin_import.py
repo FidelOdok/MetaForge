@@ -357,6 +357,34 @@ class TestImportEndpoint:
         assert resp.status_code == 400
         assert "Invalid wp_type" in resp.json()["detail"]
 
+    async def test_import_stamps_project_id_for_twin_scoping(self, client):
+        """MET-491 regression: an imported node must carry ``project_id`` so the
+        twin's project-scoped read path finds it. Before the fix the node was
+        only linked in Postgres and ``/twin/nodes?project_id=`` returned 0,
+        leaving the project's twin view empty."""
+        import uuid as _uuid
+        from unittest.mock import patch
+
+        from twin_core.api import InMemoryTwinAPI
+
+        pid = str(_uuid.uuid4())
+        twin = InMemoryTwinAPI.create()
+        with patch("api_gateway.twin.routes._twin", twin):
+            async with client:
+                resp = await client.post(
+                    "/v1/twin/import",
+                    files={
+                        "file": ("part.step", b"ISO-10303-21;\nfake\nENDSEC;\n", "application/step")
+                    },
+                    data={"project_id": pid, "domain": "mechanical", "wp_type": "cad_model"},
+                )
+            assert resp.status_code == 201, resp.text
+            nid = resp.json()["id"]
+            scoped = await twin.list_work_products(project_id=_uuid.UUID(pid))
+            assert any(str(w.id) == nid for w in scoped), "imported node missing from project scope"
+            wp = await twin.get_work_product(_uuid.UUID(nid))
+            assert str(wp.project_id) == pid
+
     async def test_imports_step_file(self, client):
         with patch(
             "api_gateway.twin.import_service.ImportService.extract_metadata",
