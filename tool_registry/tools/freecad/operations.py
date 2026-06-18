@@ -540,11 +540,13 @@ class FreecadOperations:
         body: Any,
         plane: str = "XY",
         elements: list[dict[str, Any]] | None = None,
+        offset: float = 0.0,
     ) -> Any:
         """Create a Sketch on a body's origin plane and add 2D geometry.
 
         Supported element ``type`` values: ``rectangle`` (x,y,width,height),
-        ``circle`` (cx,cy,r), ``line`` (x1,y1,x2,y2).
+        ``circle`` (cx,cy,r), ``line`` (x1,y1,x2,y2). ``offset`` shifts the sketch
+        along the plane normal (e.g. a second loft profile at z=20 on XY).
         """
         self._require_partdesign()
         sketch = body.newObject("Sketcher::SketchObject", "Sketch")
@@ -554,10 +556,36 @@ class FreecadOperations:
         origin_plane = self._origin_feature(body, plane_map.get(plane.upper(), "XY_Plane"))
         sketch.AttachmentSupport = [(origin_plane, "")]
         sketch.MapMode = "FlatFace"
+        if offset:
+            import FreeCAD as FC  # type: ignore[import-untyped]
+
+            sketch.AttachmentOffset = FC.Placement(FC.Vector(0, 0, float(offset)), FC.Rotation())
         for el in elements or []:
             self._add_sketch_element(sketch, el)
         document.recompute()
         return sketch
+
+    def loft_sketches(self, document: Any, body: Any, profile: Any, sections: list[Any]) -> Any:
+        """Loft a profile sketch through one or more section sketches (additive)."""
+        self._require_partdesign()
+        loft = body.newObject("PartDesign::AdditiveLoft", "Loft")
+        loft.Profile = profile
+        loft.Sections = list(sections)
+        for sk in [profile, *sections]:
+            sk.Visibility = False
+        document.recompute()
+        return loft
+
+    def sweep_sketch(self, document: Any, body: Any, profile: Any, path: Any) -> Any:
+        """Sweep a profile sketch along a path sketch (additive pipe)."""
+        self._require_partdesign()
+        sweep = body.newObject("PartDesign::AdditivePipe", "Sweep")
+        sweep.Profile = profile
+        sweep.Spine = (path, [])
+        profile.Visibility = False
+        path.Visibility = False
+        document.recompute()
+        return sweep
 
     def _add_sketch_element(self, sketch: Any, el: dict[str, Any]) -> None:
         import FreeCAD as FC  # type: ignore[import-untyped]
