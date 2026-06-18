@@ -158,6 +158,13 @@ class TestAuthoringVertical:
         assert gear.Shape.isValid()
         assert abs(outer - 2.0 * (20 + 2)) < 0.5, outer  # addendum diameter = 44.0
 
+    def test_lattice_perforation_skill(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
+        body = _box_body(ops, doc, "Lat", w=60, h=8)
+        solid = ops.shape_props(body)["volume_mm3"]
+        _, count = ops.lattice_perforation(doc, body, 12, 5, margin=8)
+        assert count > 1  # multiple cells placed
+        assert ops.shape_props(body)["volume_mm3"] < solid  # lightened
+
     def test_inspection(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
         box = ops.create_primitive(doc, "box", {"length": 20, "width": 10, "height": 5})
         m = ops.measure(box)
