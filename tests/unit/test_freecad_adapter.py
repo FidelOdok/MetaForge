@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring + 8 features + 4 assembly + 2 inspect + 2 parametric + 1 script.
-        assert len(server.tool_ids) == 33
+        # 5 stateless + 8 authoring + 8 feature + 4 assembly + 2 inspect + 2 param + script + skill.
+        assert len(server.tool_ids) == 34
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -164,6 +164,7 @@ class TestFreecadServer:
             "freecad.loft_sketches",
             "freecad.sweep_sketch",
             "freecad.execute_code",
+            "freecad.generate_enclosure",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.shell_solid",
@@ -458,6 +459,7 @@ class TestStatefulAuthoring:
         ops.measure.return_value = {"volume_mm3": 1000.0, "edge_count": 12, "face_count": 6}
         ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
         ops.execute_code.return_value = None  # script touched the doc, surfaced nothing
+        ops.generate_enclosure.return_value = _FakeObj("enclosure")
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -639,6 +641,22 @@ class TestStatefulAuthoring:
                     "count": 3,
                 }
             )
+
+    async def test_generate_enclosure_skill(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        out = await s.generate_enclosure(
+            {"session_id": sid, "length": 80, "width": 50, "height": 30, "wall_thickness": 2}
+        )
+        assert out["skill"] == "enclosure" and out["kind"] == "feature"
+        call = s._ops.generate_enclosure.call_args  # type: ignore[attr-defined]
+        assert call[0][1:5] == (80.0, 50.0, 30.0, 2.0)  # length, width, height, wall
+
+    async def test_generate_enclosure_requires_dims(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        with pytest.raises(ValueError, match="height is required"):
+            await s.generate_enclosure({"session_id": sid, "length": 80, "width": 50})
 
     async def test_execute_code_forwards_and_reports(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -908,7 +926,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 33
+        assert len(response["result"]["tools"]) == 34
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -955,7 +973,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 33
+        assert response["result"]["tools_available"] == 34
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

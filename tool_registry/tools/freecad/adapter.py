@@ -50,6 +50,8 @@ class FreecadServer(McpToolServer):
     list_joints.
 
     Parametric (MET-531): create_variable_set, set_expression.
+
+    Skills (composite generators, MET-527/531): generate_enclosure.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -737,6 +739,22 @@ class FreecadServer(McpToolServer):
                 self.shell_solid,
             ),
             (
+                "generate_enclosure",
+                "Skill: parametric electronics enclosure (hollow box, open top)",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "length": {"type": "number"},
+                        "width": {"type": "number"},
+                        "height": {"type": "number"},
+                        "wall_thickness": {"type": "number"},
+                    },
+                    ["session_id", "length", "width", "height"],
+                ),
+                self.generate_enclosure,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1100,6 +1118,27 @@ class FreecadServer(McpToolServer):
         )
         obj_id = self._sessions.register_object(session_id, mir, "feature", "Mirrored")
         return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def generate_enclosure(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        for k in ("length", "width", "height"):
+            if arguments.get(k) is None:
+                raise ValueError(f"{k} is required")
+        session = self._sessions.get(session_id)
+        shell = self._ops.generate_enclosure(
+            session.document,
+            float(arguments["length"]),
+            float(arguments["width"]),
+            float(arguments["height"]),
+            float(arguments.get("wall_thickness", 2.0)),
+        )
+        obj_id = self._sessions.register_object(session_id, shell, "feature", "Enclosure")
+        return {
+            "obj_id": obj_id,
+            "kind": "feature",
+            "skill": "enclosure",
+            **self._ops.shape_props(shell),
+        }
 
     async def execute_code(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

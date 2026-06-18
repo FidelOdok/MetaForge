@@ -130,6 +130,12 @@ class TestAuthoringVertical:
         length = box.Length
         assert (length.Value if hasattr(length, "Value") else float(length)) == pytest.approx(40.0)
 
+    def test_generate_enclosure_skill(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
+        shell = ops.generate_enclosure(doc, 80, 50, 30, 2.0)
+        props = ops.shape_props(shell)
+        # A hollow box: smaller than the solid 80*50*30 envelope.
+        assert 0 < props["volume_mm3"] < 80 * 50 * 30
+
     def test_inspection(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
         box = ops.create_primitive(doc, "box", {"length": 20, "width": 10, "height": 5})
         m = ops.measure(box)
