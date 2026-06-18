@@ -34,10 +34,17 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
   const explodeFactor = useViewerStore((s) => s.explodeFactor);
 
-  // Rigid-group manipulation (MET-519). Subscribe only to the selected group
+  // Rigid-group manipulation (MET-519). Groups resolve against the *actual*
+  // GLB scene mesh names (captured below), not the manifest part names — the
+  // OCCT converter names parts Part_N but meshes mesh_N, so name-matching never
+  // found the clicked mesh (MET-522). Subscribe only to the selected group
   // (changes rarely); the per-frame delta is read via getState() in useFrame to
   // avoid a React re-render on every drag tick.
-  const resolvedGroups = useMemo(() => parseRigidGroups(manifest), [manifest]);
+  const [sceneMeshNames, setSceneMeshNames] = useState<string[]>([]);
+  const resolvedGroups = useMemo(
+    () => parseRigidGroups(manifest, sceneMeshNames),
+    [manifest, sceneMeshNames],
+  );
   const selectedGroup = useTransientTransform((s) => s.selectedGroup);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
   const setDelta = useTransientTransform((s) => s.setDelta);
@@ -76,6 +83,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   useEffect(() => {
     const map = new Map<string, MeshEntry>();
     const partLookup = new Map<string, string>();
+    const orderedNames: string[] = [];
 
     // Build a lookup from mesh scene name to manifest part name
     for (const part of manifest.parts) {
@@ -99,10 +107,13 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
           originalMaterial: mesh.material,
           center,
         });
+        orderedNames.push(meshName);
       }
     });
 
     meshMapRef.current = map;
+    // Ordered scene mesh names back the rigid-group resolution (MET-522).
+    setSceneMeshNames(orderedNames);
   }, [scene, manifest]);
 
   // Update highlight and visibility
