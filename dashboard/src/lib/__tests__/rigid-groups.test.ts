@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { parseRigidGroups, groupForMesh } from '../rigid-groups';
 import type { ModelManifest } from '../../types/viewer';
 
+// Scene mesh names as the GLB exposes them (OCCT names them mesh_0..N-1).
+const SCENE = ['mesh_0', 'mesh_1', 'mesh_2'];
+
 function manifest(over: Partial<ModelManifest> = {}): ModelManifest {
   return {
     parts: [
-      { name: 'Motor', meshName: 'mesh_motor', children: [] },
-      { name: 'Shaft', meshName: 'mesh_shaft', children: [] },
-      { name: 'Bracket', meshName: 'mesh_bracket', children: [] },
+      { name: 'Motor', meshName: 'Part_1', children: [] },
+      { name: 'Shaft', meshName: 'Part_2', children: [] },
+      { name: 'Bracket', meshName: 'Part_3', children: [] },
     ],
     meshToNodeMap: {},
     materials: [],
@@ -17,7 +20,7 @@ function manifest(over: Partial<ModelManifest> = {}): ModelManifest {
 }
 
 describe('parseRigidGroups', () => {
-  it('resolves declared groups by partIndices → meshNames', () => {
+  it('resolves declared groups by partIndices → scene mesh names (by index)', () => {
     const groups = parseRigidGroups(
       manifest({
         rigidGroups: [
@@ -25,10 +28,11 @@ describe('parseRigidGroups', () => {
           { name: 'bracket', partIndices: [2] },
         ],
       }),
+      SCENE,
     );
     expect(groups).toEqual([
-      { name: 'motor_assembly', meshNames: ['mesh_motor', 'mesh_shaft'] },
-      { name: 'bracket', meshNames: ['mesh_bracket'] },
+      { name: 'motor_assembly', meshNames: ['mesh_0', 'mesh_1'] },
+      { name: 'bracket', meshNames: ['mesh_2'] },
     ]);
   });
 
@@ -40,32 +44,41 @@ describe('parseRigidGroups', () => {
           { name: 'empty', partIndices: [42] },
         ],
       }),
+      SCENE,
     );
-    expect(groups).toEqual([{ name: 'partial', meshNames: ['mesh_motor'] }]);
+    expect(groups).toEqual([{ name: 'partial', meshNames: ['mesh_0'] }]);
   });
 
-  it('falls back to one single-part group per part when none declared', () => {
-    const groups = parseRigidGroups(manifest());
+  it('falls back to one group per scene mesh, labelled from the manifest part', () => {
+    const groups = parseRigidGroups(manifest(), SCENE);
     expect(groups).toEqual([
-      { name: 'Motor_group', meshNames: ['mesh_motor'] },
-      { name: 'Shaft_group', meshNames: ['mesh_shaft'] },
-      { name: 'Bracket_group', meshNames: ['mesh_bracket'] },
+      { name: 'Motor_group', meshNames: ['mesh_0'] },
+      { name: 'Shaft_group', meshNames: ['mesh_1'] },
+      { name: 'Bracket_group', meshNames: ['mesh_2'] },
     ]);
   });
 
-  it('falls back when rigidGroups is an empty array', () => {
-    const groups = parseRigidGroups(manifest({ rigidGroups: [] }));
-    expect(groups).toHaveLength(3);
-    expect(groups[0]?.name).toBe('Motor_group');
+  it('falls back to the mesh name when there is no matching manifest part', () => {
+    const groups = parseRigidGroups(manifest({ parts: [] }), SCENE);
+    expect(groups).toEqual([
+      { name: 'mesh_0_group', meshNames: ['mesh_0'] },
+      { name: 'mesh_1_group', meshNames: ['mesh_1'] },
+      { name: 'mesh_2_group', meshNames: ['mesh_2'] },
+    ]);
+  });
+
+  it('returns nothing when the scene has no meshes', () => {
+    expect(parseRigidGroups(manifest(), [])).toEqual([]);
   });
 });
 
 describe('groupForMesh', () => {
-  it('finds the group owning a mesh, or null', () => {
+  it('finds the group owning a scene mesh, or null', () => {
     const groups = parseRigidGroups(
       manifest({ rigidGroups: [{ name: 'motor_assembly', partIndices: [0, 1] }] }),
+      SCENE,
     );
-    expect(groupForMesh(groups, 'mesh_shaft')?.name).toBe('motor_assembly');
-    expect(groupForMesh(groups, 'mesh_nope')).toBeNull();
+    expect(groupForMesh(groups, 'mesh_1')?.name).toBe('motor_assembly');
+    expect(groupForMesh(groups, 'mesh_9')).toBeNull();
   });
 });
