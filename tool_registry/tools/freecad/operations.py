@@ -39,14 +39,34 @@ except ImportError:
     Mesh = None  # type: ignore[assignment]
     HAS_MESH = False
 
+# Importing the Sketcher + PartDesign workbench modules registers their object
+# types (``Sketcher::SketchObject``, ``PartDesign::Body`` / ``Pad`` / ``Pocket``
+# / ``Revolution``) with the FreeCAD application, so ``addObject``/``newObject``
+# for them work. ``freecadcmd`` auto-loads these; a plain ``python3`` process
+# does not, so we load them explicitly here. Kept separate from HAS_FREECAD —
+# the Part-based primitive/boolean/export ops work even if these are absent.
+if HAS_FREECAD:
+    try:
+        import PartDesign  # type: ignore[import-untyped]  # noqa: F401
+        import Sketcher  # type: ignore[import-untyped]  # noqa: F401
+
+        HAS_PARTDESIGN = True
+    except ImportError:
+        HAS_PARTDESIGN = False
+else:
+    HAS_PARTDESIGN = False
+
 
 class FreecadNotAvailableError(RuntimeError):
-    """Raised when FreeCAD Python bindings are not available."""
+    """Raised when FreeCAD Python bindings (or a required workbench) are unavailable."""
 
-    def __init__(self) -> None:
+    def __init__(self, message: str | None = None) -> None:
         super().__init__(
-            "FreeCAD Python bindings are not installed. "
-            "Run inside the FreeCAD Docker container or install FreeCAD with Python support."
+            message
+            or (
+                "FreeCAD Python bindings are not installed. "
+                "Run inside the FreeCAD Docker container or install FreeCAD with Python support."
+            )
         )
 
 
@@ -84,6 +104,16 @@ class FreecadOperations:
         """Raise if FreeCAD is not available."""
         if not HAS_FREECAD:
             raise FreecadNotAvailableError
+
+    def _require_partdesign(self) -> None:
+        """Raise if the PartDesign/Sketcher workbenches aren't loaded."""
+        self._require_freecad()
+        if not HAS_PARTDESIGN:
+            raise FreecadNotAvailableError(
+                "FreeCAD PartDesign/Sketcher workbenches are not importable. "
+                "Ensure the FreeCAD Mod dirs (/usr/lib/freecad/Mod, "
+                "/usr/share/freecad/Mod) are on PYTHONPATH."
+            )
 
     def _ensure_output_dir(self, file_path: str) -> None:
         """Create parent directories for the output file if needed."""
@@ -499,7 +529,7 @@ class FreecadOperations:
 
     def create_body(self, document: Any, name: str = "Body") -> Any:
         """Create a PartDesign Body for parametric (sketch-based) modelling."""
-        self._require_freecad()
+        self._require_partdesign()
         body = document.addObject("PartDesign::Body", name or "Body")
         document.recompute()
         return body
@@ -516,7 +546,7 @@ class FreecadOperations:
         Supported element ``type`` values: ``rectangle`` (x,y,width,height),
         ``circle`` (cx,cy,r), ``line`` (x1,y1,x2,y2).
         """
-        self._require_freecad()
+        self._require_partdesign()
         sketch = body.newObject("Sketcher::SketchObject", "Sketch")
         plane_map = {"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}
         plane_name = plane_map.get(plane.upper(), "XY_Plane")
@@ -569,7 +599,7 @@ class FreecadOperations:
         midplane: bool = False,
     ) -> Any:
         """Extrude (pad) a sketch into a solid on its PartDesign body."""
-        self._require_freecad()
+        self._require_partdesign()
         pad = body.newObject("PartDesign::Pad", "Pad")
         pad.Profile = sketch
         pad.Length = float(length)
@@ -589,7 +619,7 @@ class FreecadOperations:
         reversed: bool = False,
     ) -> Any:
         """Cut a pocket from a sketch on its PartDesign body (the inverse of pad)."""
-        self._require_freecad()
+        self._require_partdesign()
         pocket = body.newObject("PartDesign::Pocket", "Pocket")
         pocket.Profile = sketch
         pocket.Length = float(depth)
@@ -609,7 +639,7 @@ class FreecadOperations:
         reversed: bool = False,
     ) -> Any:
         """Revolve a sketch around one of its axes (V_Axis / H_Axis)."""
-        self._require_freecad()
+        self._require_partdesign()
         rev = body.newObject("PartDesign::Revolution", "Revolution")
         rev.Profile = sketch
         rev.Angle = float(angle)
