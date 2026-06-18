@@ -700,6 +700,24 @@ class FreecadServer(McpToolServer):
                 self.list_joints,
             ),
             (
+                "measure",
+                "Measure a session object: volume, area, bbox, CoM, vertex/edge/face counts",
+                "cad_inspect",
+                obj_schema(
+                    {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
+                ),
+                self.measure,
+            ),
+            (
+                "describe_model",
+                "Geometry summary of a session object: dimensions, solid/hollow, counts",
+                "cad_inspect",
+                obj_schema(
+                    {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
+                ),
+                self.describe_model,
+            ),
+            (
                 "create_variable_set",
                 "Create a VarSet of named parametric variables in a session",
                 "cad_parametric",
@@ -957,6 +975,16 @@ class FreecadServer(McpToolServer):
     async def list_joints(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
         return {"joints": self._sessions.joints(session_id)}
+
+    async def measure(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj = self._sessions.get_object(session_id, self._require(arguments, "obj_id"))
+        return self._ops.measure(obj)
+
+    async def describe_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj = self._sessions.get_object(session_id, self._require(arguments, "obj_id"))
+        return self._ops.describe_model(obj)
 
     # ---- parametric modelling (MET-531) -------------------------------
 

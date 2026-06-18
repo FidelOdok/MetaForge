@@ -731,6 +731,54 @@ class FreecadOperations:
             "bounding_box": self._bbox_dict(shape.BoundBox),
         }
 
+    # ------------------------------------------------------------------
+    # Inspection (MET-527): read-only geometry queries so agents can reason
+    # about what they've authored. Work on any object with a ``.Shape`` (no
+    # PartDesign needed).
+    # ------------------------------------------------------------------
+
+    def measure(self, obj: Any) -> dict[str, Any]:
+        """Full geometric measurement of an object's shape."""
+        self._require_freecad()
+        shape = obj.Shape
+        com = shape.CenterOfMass
+        return {
+            "volume_mm3": round(shape.Volume, 2),
+            "surface_area_mm2": round(shape.Area, 2),
+            "bounding_box": self._bbox_dict(shape.BoundBox),
+            "center_of_mass": [round(com.x, 3), round(com.y, 3), round(com.z, 3)],
+            "vertex_count": len(shape.Vertexes),
+            "edge_count": len(shape.Edges),
+            "face_count": len(shape.Faces),
+            "solid_count": len(shape.Solids),
+        }
+
+    def describe_model(self, obj: Any) -> dict[str, Any]:
+        """Human-oriented geometry summary: dimensions, solid/hollow, counts."""
+        self._require_freecad()
+        shape = obj.Shape
+        bb = shape.BoundBox
+        solids = shape.Solids
+        # A solid whose volume is well below its bounding box is likely hollow/thin.
+        bbox_vol = bb.XLength * bb.YLength * bb.ZLength
+        fill_ratio = (shape.Volume / bbox_vol) if bbox_vol > 1e-9 else 0.0
+        return {
+            "name": getattr(obj, "Label", getattr(obj, "Name", "object")),
+            "dimensions_mm": {
+                "x": round(bb.XLength, 2),
+                "y": round(bb.YLength, 2),
+                "z": round(bb.ZLength, 2),
+            },
+            "volume_mm3": round(shape.Volume, 2),
+            "surface_area_mm2": round(shape.Area, 2),
+            "solid_count": len(solids),
+            "is_solid": len(solids) > 0 and bool(getattr(shape, "isClosed", lambda: True)()),
+            "fill_ratio": round(fill_ratio, 3),
+            "likely_hollow": bool(0.0 < fill_ratio < 0.5),
+            "face_count": len(shape.Faces),
+            "edge_count": len(shape.Edges),
+        }
+
     def export_object_step_bytes(self, obj: Any) -> bytes:
         """Export a live object's shape to STEP and return the bytes.
 
