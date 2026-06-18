@@ -437,29 +437,13 @@ async def bootstrap_tool_registry(
                 ),
             )
 
-        # ----- FreeCAD AI MCP adapter (MET-525/526) -----
-        # Opt-in and factory-built: it forwards to an external FreeCAD AI server
-        # over an injected transport rather than a config, so it lives outside
-        # _ADAPTER_REGISTRY. create_freecad_ai_server() returns None unless
-        # FREECAD_AI_URL is set, so it's skipped by default.
-        if _is_adapter_enabled("freecad_ai"):
-            try:
-                from tool_registry.tools.freecad_ai.adapter import create_freecad_ai_server
-
-                fc_ai_server = create_freecad_ai_server()
-                if fc_ai_server is not None:
-                    await registry.register_adapter(fc_ai_server)
-                    registered.append("freecad_ai")
-                    logger.info("freecad_ai_mcp_adapter_registered")
-                else:
-                    skipped.append("freecad_ai")
-                    logger.info("freecad_ai_mcp_adapter_skipped", reason="FREECAD_AI_URL not set")
-            except Exception as exc:
-                logger.error("freecad_ai_mcp_adapter_failed", error=str(exc))
-                span.record_exception(exc)
-                failed.append("freecad_ai")
-        else:
-            skipped.append("freecad_ai")
+        # NOTE: the rich FreeCAD authoring surface (PartDesign bodies, sketches,
+        # pads/pockets, assemblies with joints, parametric expressions) is built
+        # *into the `freecad` adapter above* — headless FreeCAD run in-process /
+        # in its container, not an external server. The earlier MET-526
+        # external-transport `freecad_ai` adapter was retired (MET-528). Authored
+        # geometry is persisted via the twin adapter's `commit_geometry` tool
+        # (injected geometry_recorder), mirroring `record_decision`.
 
         # ----- Memory MCP adapter (MET-453) -----
         # Runtime-injected like knowledge / twin: the gateway holds the
