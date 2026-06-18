@@ -142,9 +142,11 @@ async def test_kicad_tools_register_in_unified_bootstrap(mcp_client):
 
 
 async def test_total_cad_sim_tool_count(mcp_client):
-    """Adapter-level total: cadquery=7 + freecad=5 + calculix=4 + kicad=6 = 22.
+    """Adapter-level total: cadquery=7 + freecad=13 + calculix=4 + kicad=6 = 30.
 
-    The kicad slice landed with MET-478 (unified MCP bootstrap wire-up).
+    The kicad slice landed with MET-478 (unified MCP bootstrap wire-up). freecad
+    grew to 13 with the MET-528 stateful PartDesign authoring tools (5 stateless
+    + 8 authoring).
     """
     result = await rpc(mcp_client, "tools/list")
     tool_ids = {t.get("name") for t in result.get("tools", [])}
@@ -153,7 +155,7 @@ async def test_total_cad_sim_tool_count(mcp_client):
         for tid in tool_ids
         if tid and tid.split(".", 1)[0] in {"cadquery", "freecad", "calculix", "kicad"}
     }
-    assert len(cad_ids) == 22, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
+    assert len(cad_ids) == 30, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
 
 
 # ---------------------------------------------------------------------------
