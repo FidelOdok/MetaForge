@@ -681,6 +681,46 @@ class FreecadOperations:
         document.recompute()
         return obj
 
+    # ------------------------------------------------------------------
+    # Dress-up features (MET-527): fillet / chamfer / shell. They operate on a
+    # PartDesign body's tip; edges/faces are caller-supplied selectors (e.g.
+    # ["Edge1", "Edge3"]). Default = all edges (fillet/chamfer) so a simple call
+    # rounds the whole solid; shell requires the face(s) to open.
+    # ------------------------------------------------------------------
+
+    def _tip(self, body: Any) -> Any:
+        """The body's current tip feature (the solid dress-ups attach to)."""
+        tip = getattr(body, "Tip", None)
+        if tip is None:
+            raise ValueError("body has no tip feature to dress up (pad a sketch first)")
+        return tip
+
+    def fillet_edges(
+        self, document: Any, body: Any, radius: float, edges: list[str] | None = None
+    ) -> Any:
+        """Round edges of the body's tip. Defaults to all edges."""
+        self._require_partdesign()
+        tip = self._tip(body)
+        names = edges or [f"Edge{i + 1}" for i in range(len(tip.Shape.Edges))]
+        fillet = body.newObject("PartDesign::Fillet", "Fillet")
+        fillet.Base = (tip, names)
+        fillet.Radius = float(radius)
+        document.recompute()
+        return fillet
+
+    def chamfer_edges(
+        self, document: Any, body: Any, size: float, edges: list[str] | None = None
+    ) -> Any:
+        """Chamfer edges of the body's tip. Defaults to all edges."""
+        self._require_partdesign()
+        tip = self._tip(body)
+        names = edges or [f"Edge{i + 1}" for i in range(len(tip.Shape.Edges))]
+        chamfer = body.newObject("PartDesign::Chamfer", "Chamfer")
+        chamfer.Base = (tip, names)
+        chamfer.Size = float(size)
+        document.recompute()
+        return chamfer
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()

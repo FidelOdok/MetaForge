@@ -41,7 +41,7 @@ class FreecadServer(McpToolServer):
     Stateful authoring tools (operate on a live session document, MET-528/527):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
-    transform_object, export_model.
+    transform_object, fillet_edges, chamfer_edges, export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -610,6 +610,36 @@ class FreecadServer(McpToolServer):
                 self.transform_object,
             ),
             (
+                "fillet_edges",
+                "Round edges of a body's tip (defaults to all edges)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "radius": {"type": "number"},
+                        "edges": {"type": "array", "items": {"type": "string"}},
+                    },
+                    ["session_id", "body_id", "radius"],
+                ),
+                self.fillet_edges,
+            ),
+            (
+                "chamfer_edges",
+                "Chamfer edges of a body's tip (defaults to all edges)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "size": {"type": "number"},
+                        "edges": {"type": "array", "items": {"type": "string"}},
+                    },
+                    ["session_id", "body_id", "size"],
+                ),
+                self.chamfer_edges,
+            ),
+            (
                 "export_model",
                 "Export a session object to STEP and return the bytes (base64)",
                 "cad_export",
@@ -829,6 +859,31 @@ class FreecadServer(McpToolServer):
             rotation if isinstance(rotation, dict) else None,
         )
         return {"obj_id": obj_id, "transformed": True}
+
+    async def _dress_up(
+        self, arguments: dict[str, Any], op: str, param_key: str, sel_key: str
+    ) -> dict[str, Any]:
+        """Shared fillet/chamfer/shell handler: run the op on a body's tip, register
+        the resulting feature, return the body's new shape props."""
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        amount = arguments.get(param_key)
+        if amount is None:
+            raise ValueError(f"{param_key} is required")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        selectors = arguments.get(sel_key)
+        feature = getattr(self._ops, op)(
+            session.document, body, float(amount), selectors if selectors else None
+        )
+        obj_id = self._sessions.register_object(session_id, feature, "feature", op)
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def fillet_edges(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._dress_up(arguments, "fillet_edges", "radius", "edges")
+
+    async def chamfer_edges(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._dress_up(arguments, "chamfer_edges", "size", "edges")
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
