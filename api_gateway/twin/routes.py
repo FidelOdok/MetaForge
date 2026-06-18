@@ -527,6 +527,12 @@ async def import_work_product(
             created_at=now,
             updated_at=now,
             created_by="import-api",
+            # MET-491: stamp project_id on the node itself so the twin's
+            # project-scoped read path (list_work_products(project_id=...)) finds
+            # it. The Postgres project junction below is separate and only feeds
+            # the Projects page; without this the /twin project filter returns 0
+            # for imported nodes (decision/geometry-recorder nodes already set it).
+            project_id=project_id or None,
         )
 
         created_wp = await _twin.create_work_product(wp)
