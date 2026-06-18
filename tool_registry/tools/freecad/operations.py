@@ -1085,6 +1085,43 @@ class FreecadOperations:
         document.recompute()
         return body
 
+    def generate_gear(
+        self,
+        document: Any,
+        module: float,
+        teeth: int,
+        thickness: float,
+        pressure_angle: float = 20.0,
+    ) -> Any:
+        """Generate a spur gear with a true involute tooth profile.
+
+        The ``/gear`` skill — uses FreeCAD's bundled ``fcgear`` involute generator
+        (``CreateExternalGear``), so the tooth profile is correct, not an
+        approximation. Pitch diameter = module·teeth; addendum (outer) diameter =
+        module·(teeth+2). Returns a ``Part::Feature``.
+        """
+        self._require_freecad()
+        import math
+        import sys
+
+        # The gear generator ships with FreeCAD under Mod/PartDesign/fcgear.
+        mod_dir = os.path.join(FreeCAD.getResourceDir(), "Mod", "PartDesign")
+        if mod_dir not in sys.path:
+            sys.path.insert(0, mod_dir)
+        from fcgear import involute  # type: ignore[import-untyped]
+        from fcgear.fcgear import FCWireBuilder  # type: ignore[import-untyped]
+
+        builder = FCWireBuilder()
+        involute.CreateExternalGear(
+            builder, float(module), int(teeth), math.radians(pressure_angle), True
+        )
+        profile = Part.Wire([seg.toShape() for seg in builder.wire])
+        solid = Part.Face(profile).extrude(FreeCAD.Vector(0, 0, float(thickness)))
+        feat = document.addObject("Part::Feature", "Gear")
+        feat.Shape = solid
+        document.recompute()
+        return feat
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()

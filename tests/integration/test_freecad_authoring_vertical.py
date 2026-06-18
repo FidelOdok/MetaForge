@@ -149,6 +149,15 @@ class TestAuthoringVertical:
         # boss adds material then a pilot hole removes some → net still > original solid
         assert ops.shape_props(body)["volume_mm3"] > solid
 
+    def test_generate_gear_skill(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
+        # Rigor: a correct involute gear's outer (addendum) diameter == module*(teeth+2),
+        # so this verifies geometric correctness, not just "a valid solid".
+        gear = ops.generate_gear(doc, 2.0, 20, 5.0)
+        bb = gear.Shape.BoundBox
+        outer = max(bb.XLength, bb.YLength)
+        assert gear.Shape.isValid()
+        assert abs(outer - 2.0 * (20 + 2)) < 0.5, outer  # addendum diameter = 44.0
+
     def test_inspection(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
         box = ops.create_primitive(doc, "box", {"length": 20, "width": 10, "height": 5})
         m = ops.measure(box)

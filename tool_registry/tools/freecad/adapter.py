@@ -52,7 +52,7 @@ class FreecadServer(McpToolServer):
     Parametric (MET-531): create_variable_set, set_expression.
 
     Skills (composite generators, MET-527/531): generate_enclosure, fastener_hole,
-    thread_insert.
+    thread_insert, generate_gear.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -803,6 +803,22 @@ class FreecadServer(McpToolServer):
                 self.thread_insert,
             ),
             (
+                "generate_gear",
+                "Skill: spur gear with a true involute tooth profile (module, teeth)",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "module": {"type": "number"},
+                        "teeth": {"type": "integer"},
+                        "thickness": {"type": "number"},
+                        "pressure_angle": {"type": "number"},
+                    },
+                    ["session_id", "module", "teeth", "thickness"],
+                ),
+                self.generate_gear,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1220,6 +1236,31 @@ class FreecadServer(McpToolServer):
         body = self._sessions.get_object(session_id, body_id)
         self._ops.thread_insert(session.document, body, *(float(arguments[k]) for k in keys))
         return {"body_id": body_id, "skill": "thread_insert", **self._ops.shape_props(body)}
+
+    async def generate_gear(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        for k in ("module", "teeth", "thickness"):
+            if arguments.get(k) is None:
+                raise ValueError(f"{k} is required")
+        module = float(arguments["module"])
+        teeth = int(arguments["teeth"])
+        session = self._sessions.get(session_id)
+        gear = self._ops.generate_gear(
+            session.document,
+            module,
+            teeth,
+            float(arguments["thickness"]),
+            float(arguments.get("pressure_angle", 20.0)),
+        )
+        obj_id = self._sessions.register_object(session_id, gear, "feature", "Gear")
+        return {
+            "obj_id": obj_id,
+            "kind": "feature",
+            "skill": "gear",
+            "pitch_diameter_mm": round(module * teeth, 3),
+            "addendum_diameter_mm": round(module * (teeth + 2), 3),
+            **self._ops.shape_props(gear),
+        }
 
     async def execute_code(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
