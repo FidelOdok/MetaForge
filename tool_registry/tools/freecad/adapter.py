@@ -51,7 +51,7 @@ class FreecadServer(McpToolServer):
 
     Parametric (MET-531): create_variable_set, set_expression.
 
-    Skills (composite generators, MET-527/531): generate_enclosure.
+    Skills (composite generators, MET-527/531): generate_enclosure, fastener_hole.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -755,6 +755,25 @@ class FreecadServer(McpToolServer):
                 self.generate_enclosure,
             ),
             (
+                "fastener_hole",
+                "Skill: drill a (optionally counterbored) fastener hole in a body's top",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "diameter": {"type": "number"},
+                        "depth": {"type": "number"},
+                        "counterbore_diameter": {"type": "number"},
+                        "counterbore_depth": {"type": "number"},
+                    },
+                    ["session_id", "body_id", "x", "y", "diameter"],
+                ),
+                self.fastener_hole,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1139,6 +1158,27 @@ class FreecadServer(McpToolServer):
             "skill": "enclosure",
             **self._ops.shape_props(shell),
         }
+
+    async def fastener_hole(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        for k in ("x", "y", "diameter"):
+            if arguments.get(k) is None:
+                raise ValueError(f"{k} is required")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        depth = arguments.get("depth")
+        self._ops.fastener_hole(
+            session.document,
+            body,
+            float(arguments["x"]),
+            float(arguments["y"]),
+            float(arguments["diameter"]),
+            float(depth) if depth is not None else None,
+            float(arguments.get("counterbore_diameter", 0.0)),
+            float(arguments.get("counterbore_depth", 0.0)),
+        )
+        return {"body_id": body_id, "skill": "fastener_hole", **self._ops.shape_props(body)}
 
     async def execute_code(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

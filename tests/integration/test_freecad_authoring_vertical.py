@@ -136,6 +136,12 @@ class TestAuthoringVertical:
         # A hollow box: smaller than the solid 80*50*30 envelope.
         assert 0 < props["volume_mm3"] < 80 * 50 * 30
 
+    def test_fastener_hole_skill(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
+        body = _box_body(ops, doc, "Drilled", w=40, h=20)
+        solid = ops.shape_props(body)["volume_mm3"]
+        ops.fastener_hole(doc, body, 20, 20, 6, counterbore_diameter=10, counterbore_depth=6)
+        assert ops.shape_props(body)["volume_mm3"] < solid  # material removed
+
     def test_inspection(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
         box = ops.create_primitive(doc, "box", {"length": 20, "width": 10, "height": 5})
         m = ops.measure(box)

@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring + 8 feature + 4 assembly + 2 inspect + 2 param + script + skill.
-        assert len(server.tool_ids) == 34
+        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 2 skills = 35.
+        assert len(server.tool_ids) == 35
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -165,6 +165,7 @@ class TestFreecadServer:
             "freecad.sweep_sketch",
             "freecad.execute_code",
             "freecad.generate_enclosure",
+            "freecad.fastener_hole",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.shell_solid",
@@ -460,6 +461,7 @@ class TestStatefulAuthoring:
         ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
         ops.execute_code.return_value = None  # script touched the doc, surfaced nothing
         ops.generate_enclosure.return_value = _FakeObj("enclosure")
+        ops.fastener_hole.return_value = _FakeObj("body")
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -657,6 +659,25 @@ class TestStatefulAuthoring:
         sid = (await s.open_session({}))["session_id"]
         with pytest.raises(ValueError, match="height is required"):
             await s.generate_enclosure({"session_id": sid, "length": 80, "width": 50})
+
+    async def test_fastener_hole_skill(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        out = await s.fastener_hole(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "x": 10,
+                "y": 10,
+                "diameter": 6,
+                "counterbore_diameter": 10,
+                "counterbore_depth": 4,
+            }
+        )
+        assert out["skill"] == "fastener_hole"
+        call = s._ops.fastener_hole.call_args  # type: ignore[attr-defined]
+        assert call[0][2:5] == (10.0, 10.0, 6.0)  # x, y, diameter
 
     async def test_execute_code_forwards_and_reports(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -926,7 +947,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 34
+        assert len(response["result"]["tools"]) == 35
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -973,7 +994,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 34
+        assert response["result"]["tools_available"] == 35
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
