@@ -51,7 +51,8 @@ class FreecadServer(McpToolServer):
 
     Parametric (MET-531): create_variable_set, set_expression.
 
-    Skills (composite generators, MET-527/531): generate_enclosure, fastener_hole.
+    Skills (composite generators, MET-527/531): generate_enclosure, fastener_hole,
+    thread_insert.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -774,6 +775,34 @@ class FreecadServer(McpToolServer):
                 self.fastener_hole,
             ),
             (
+                "thread_insert",
+                "Skill: add a screw boss (heat-set insert) at (x,y) on a body's top",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "boss_diameter": {"type": "number"},
+                        "boss_height": {"type": "number"},
+                        "hole_diameter": {"type": "number"},
+                        "hole_depth": {"type": "number"},
+                    },
+                    [
+                        "session_id",
+                        "body_id",
+                        "x",
+                        "y",
+                        "boss_diameter",
+                        "boss_height",
+                        "hole_diameter",
+                        "hole_depth",
+                    ],
+                ),
+                self.thread_insert,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1179,6 +1208,18 @@ class FreecadServer(McpToolServer):
             float(arguments.get("counterbore_depth", 0.0)),
         )
         return {"body_id": body_id, "skill": "fastener_hole", **self._ops.shape_props(body)}
+
+    async def thread_insert(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        keys = ("x", "y", "boss_diameter", "boss_height", "hole_diameter", "hole_depth")
+        for k in keys:
+            if arguments.get(k) is None:
+                raise ValueError(f"{k} is required")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        self._ops.thread_insert(session.document, body, *(float(arguments[k]) for k in keys))
+        return {"body_id": body_id, "skill": "thread_insert", **self._ops.shape_props(body)}
 
     async def execute_code(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

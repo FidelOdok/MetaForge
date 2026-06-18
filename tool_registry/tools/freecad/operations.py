@@ -1047,6 +1047,44 @@ class FreecadOperations:
         document.recompute()
         return body
 
+    def thread_insert(
+        self,
+        document: Any,
+        body: Any,
+        x: float,
+        y: float,
+        boss_diameter: float,
+        boss_height: float,
+        hole_diameter: float,
+        hole_depth: float,
+    ) -> Any:
+        """Add a screw boss for a heat-set thread insert at (x, y) on a body's top.
+
+        The ``/thread-insert`` skill: pads a cylindrical boss up from the top face,
+        then pockets a pilot hole down through it. Modifies and returns the body.
+        """
+        self._require_partdesign()
+        top_z = self._tip(body).Shape.BoundBox.ZMax
+        boss_sk = self.create_sketch(
+            document,
+            body,
+            "XY",
+            [{"type": "circle", "cx": x, "cy": y, "r": boss_diameter / 2.0}],
+            offset=top_z,
+        )
+        self.pad_sketch(document, body, boss_sk, float(boss_height))
+        boss_top = self._tip(body).Shape.BoundBox.ZMax
+        hole_sk = self.create_sketch(
+            document,
+            body,
+            "XY",
+            [{"type": "circle", "cx": x, "cy": y, "r": hole_diameter / 2.0}],
+            offset=boss_top,
+        )
+        self.pocket_sketch(document, body, hole_sk, float(hole_depth))
+        document.recompute()
+        return body
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()

@@ -142,6 +142,13 @@ class TestAuthoringVertical:
         ops.fastener_hole(doc, body, 20, 20, 6, counterbore_diameter=10, counterbore_depth=6)
         assert ops.shape_props(body)["volume_mm3"] < solid  # material removed
 
+    def test_thread_insert_skill(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
+        body = _box_body(ops, doc, "Bossed", w=40, h=10)
+        solid = ops.shape_props(body)["volume_mm3"]
+        ops.thread_insert(doc, body, 20, 20, 10, 8, 4, 8)
+        # boss adds material then a pilot hole removes some → net still > original solid
+        assert ops.shape_props(body)["volume_mm3"] > solid
+
     def test_inspection(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
         box = ops.create_primitive(doc, "box", {"length": 20, "width": 10, "height": 5})
         m = ops.measure(box)
