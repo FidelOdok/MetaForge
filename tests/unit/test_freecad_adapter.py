@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 2 skills = 35.
-        assert len(server.tool_ids) == 35
+        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 3 skills = 36.
+        assert len(server.tool_ids) == 36
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -166,6 +166,7 @@ class TestFreecadServer:
             "freecad.execute_code",
             "freecad.generate_enclosure",
             "freecad.fastener_hole",
+            "freecad.thread_insert",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.shell_solid",
@@ -462,6 +463,7 @@ class TestStatefulAuthoring:
         ops.execute_code.return_value = None  # script touched the doc, surfaced nothing
         ops.generate_enclosure.return_value = _FakeObj("enclosure")
         ops.fastener_hole.return_value = _FakeObj("body")
+        ops.thread_insert.return_value = _FakeObj("body")
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -678,6 +680,50 @@ class TestStatefulAuthoring:
         assert out["skill"] == "fastener_hole"
         call = s._ops.fastener_hole.call_args  # type: ignore[attr-defined]
         assert call[0][2:5] == (10.0, 10.0, 6.0)  # x, y, diameter
+
+    async def test_thread_insert_skill(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        out = await s.thread_insert(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "x": 10,
+                "y": 10,
+                "boss_diameter": 10,
+                "boss_height": 8,
+                "hole_diameter": 4,
+                "hole_depth": 8,
+            }
+        )
+        assert out["skill"] == "thread_insert"
+        # x, y, boss_d, boss_h, hole_d, hole_depth reach the geometry layer.
+        assert s._ops.thread_insert.call_args[0][2:] == (  # type: ignore[attr-defined]
+            10.0,
+            10.0,
+            10.0,
+            8.0,
+            4.0,
+            8.0,
+        )
+
+    async def test_thread_insert_requires_all_dims(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        with pytest.raises(ValueError, match="hole_depth is required"):
+            await s.thread_insert(
+                {
+                    "session_id": sid,
+                    "body_id": body["obj_id"],
+                    "x": 10,
+                    "y": 10,
+                    "boss_diameter": 10,
+                    "boss_height": 8,
+                    "hole_diameter": 4,
+                }
+            )
 
     async def test_execute_code_forwards_and_reports(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -947,7 +993,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 35
+        assert len(response["result"]["tools"]) == 36
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -994,7 +1040,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 35
+        assert response["result"]["tools_available"] == 36
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
