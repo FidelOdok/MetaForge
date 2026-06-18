@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring (MET-528) + 4 assembly (MET-530) + 2 parametric (MET-531).
-        assert len(server.tool_ids) == 19
+        # 5 stateless + 8 authoring + 3 features + 4 assembly + 2 parametric (528/527/530/531).
+        assert len(server.tool_ids) == 22
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -155,6 +155,9 @@ class TestFreecadServer:
             "freecad.create_body",
             "freecad.create_sketch",
             "freecad.pad_sketch",
+            "freecad.pocket_sketch",
+            "freecad.revolve_sketch",
+            "freecad.transform_object",
             "freecad.export_model",
             # assembly authoring (MET-530)
             "freecad.create_assembly",
@@ -432,6 +435,9 @@ class TestStatefulAuthoring:
         ops.export_object_step_bytes.return_value = b"ISO-10303-21;\nfake-step\n"
         ops.create_assembly.return_value = _FakeObj("assembly")
         ops.add_part_to_assembly.return_value = _FakeObj("part")
+        ops.pocket_sketch.return_value = _FakeObj("pocket")
+        ops.revolve_sketch.return_value = _FakeObj("revolution")
+        ops.transform_object.return_value = _FakeObj("moved")
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -509,6 +515,65 @@ class TestStatefulAuthoring:
         sid = (await s.open_session({}))["session_id"]
         assert (await s.close_session({"session_id": sid}))["closed"] is True
         assert (await s.close_session({"session_id": sid}))["closed"] is False
+
+    async def test_pocket_and_revolve_register_features(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        sketch = await s.create_sketch({"session_id": sid, "body_id": body["obj_id"]})
+        pocket = await s.pocket_sketch(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "sketch_id": sketch["obj_id"],
+                "depth": 4,
+            }
+        )
+        rev = await s.revolve_sketch(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "sketch_id": sketch["obj_id"],
+                "angle": 270,
+                "axis": "H",
+            }
+        )
+        assert pocket["kind"] == "feature" and rev["kind"] == "feature"
+        # depth + angle/axis reach the geometry layer.
+        assert s._ops.pocket_sketch.call_args[0][3] == 4.0  # type: ignore[attr-defined]
+        assert s._ops.revolve_sketch.call_args[0][3] == 270.0  # type: ignore[attr-defined]
+        assert s._ops.revolve_sketch.call_args[1]["axis"] == "H"  # type: ignore[attr-defined]
+
+    async def test_pocket_requires_depth(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        sketch = await s.create_sketch({"session_id": sid, "body_id": body["obj_id"]})
+        with pytest.raises(ValueError, match="depth is required"):
+            await s.pocket_sketch(
+                {"session_id": sid, "body_id": body["obj_id"], "sketch_id": sketch["obj_id"]}
+            )
+
+    async def test_transform_object_forwards_placement(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        prim = await s.create_primitive({"session_id": sid, "kind": "box"})
+        out = await s.transform_object(
+            {
+                "session_id": sid,
+                "obj_id": prim["obj_id"],
+                "position": [10, 0, 5],
+                "rotation": {"axis": [0, 0, 1], "angle_deg": 90},
+            }
+        )
+        assert out["transformed"] is True
+        call = s._ops.transform_object.call_args  # type: ignore[attr-defined]
+        assert call[0][2] == [10, 0, 5]  # position
+        assert call[0][3] == {"axis": [0, 0, 1], "angle_deg": 90}  # rotation
 
 
 class TestAssemblyAuthoring:
@@ -716,7 +781,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 19
+        assert len(response["result"]["tools"]) == 22
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -763,7 +828,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 19
+        assert response["result"]["tools_available"] == 22
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

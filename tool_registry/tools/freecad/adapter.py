@@ -38,9 +38,10 @@ class FreecadServer(McpToolServer):
     Stateless tools (file-in/file-out): export_geometry, generate_mesh,
     boolean_operation, get_properties, create_parametric.
 
-    Stateful authoring tools (operate on a live session document, MET-528):
+    Stateful authoring tools (operate on a live session document, MET-528/527):
     open_session, close_session, describe_session, create_primitive,
-    create_body, create_sketch, pad_sketch, export_model.
+    create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
+    transform_object, export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -561,6 +562,54 @@ class FreecadServer(McpToolServer):
                 self.pad_sketch,
             ),
             (
+                "pocket_sketch",
+                "Cut a pocket from a sketch on its body",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "sketch_id": {"type": "string"},
+                        "depth": {"type": "number"},
+                        "reversed": {"type": "boolean"},
+                    },
+                    ["session_id", "body_id", "sketch_id", "depth"],
+                ),
+                self.pocket_sketch,
+            ),
+            (
+                "revolve_sketch",
+                "Revolve a sketch around an axis (V/H) into a solid",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "sketch_id": {"type": "string"},
+                        "angle": {"type": "number"},
+                        "axis": {"type": "string", "enum": ["V", "H"]},
+                        "reversed": {"type": "boolean"},
+                    },
+                    ["session_id", "body_id", "sketch_id"],
+                ),
+                self.revolve_sketch,
+            ),
+            (
+                "transform_object",
+                "Move and/or rotate a session object (set its placement)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "obj_id": {"type": "string"},
+                        "position": {"type": "array", "items": {"type": "number"}},
+                        "rotation": {"type": "object"},
+                    },
+                    ["session_id", "obj_id"],
+                ),
+                self.transform_object,
+            ),
+            (
                 "export_model",
                 "Export a session object to STEP and return the bytes (base64)",
                 "cad_export",
@@ -728,6 +777,58 @@ class FreecadServer(McpToolServer):
         )
         obj_id = self._sessions.register_object(session_id, pad, "feature", "Pad")
         return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def pocket_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        sketch_id = self._require(arguments, "sketch_id")
+        depth = arguments.get("depth")
+        if depth is None:
+            raise ValueError("depth is required")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        sketch = self._sessions.get_object(session_id, sketch_id)
+        pocket = self._ops.pocket_sketch(
+            session.document,
+            body,
+            sketch,
+            float(depth),
+            reversed=bool(arguments.get("reversed", False)),
+        )
+        obj_id = self._sessions.register_object(session_id, pocket, "feature", "Pocket")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def revolve_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        sketch_id = self._require(arguments, "sketch_id")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        sketch = self._sessions.get_object(session_id, sketch_id)
+        rev = self._ops.revolve_sketch(
+            session.document,
+            body,
+            sketch,
+            float(arguments.get("angle", 360.0)),
+            axis=str(arguments.get("axis", "V")),
+            reversed=bool(arguments.get("reversed", False)),
+        )
+        obj_id = self._sessions.register_object(session_id, rev, "feature", "Revolution")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def transform_object(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj_id = self._require(arguments, "obj_id")
+        session = self._sessions.get(session_id)
+        obj = self._sessions.get_object(session_id, obj_id)
+        rotation = arguments.get("rotation")
+        self._ops.transform_object(
+            session.document,
+            obj,
+            arguments.get("position"),
+            rotation if isinstance(rotation, dict) else None,
+        )
+        return {"obj_id": obj_id, "transformed": True}
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

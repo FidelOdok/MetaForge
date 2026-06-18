@@ -579,6 +579,78 @@ class FreecadOperations:
         document.recompute()
         return pad
 
+    def pocket_sketch(
+        self,
+        document: Any,
+        body: Any,
+        sketch: Any,
+        depth: float,
+        *,
+        reversed: bool = False,
+    ) -> Any:
+        """Cut a pocket from a sketch on its PartDesign body (the inverse of pad)."""
+        self._require_freecad()
+        pocket = body.newObject("PartDesign::Pocket", "Pocket")
+        pocket.Profile = sketch
+        pocket.Length = float(depth)
+        pocket.Reversed = bool(reversed)
+        sketch.Visibility = False
+        document.recompute()
+        return pocket
+
+    def revolve_sketch(
+        self,
+        document: Any,
+        body: Any,
+        sketch: Any,
+        angle: float = 360.0,
+        *,
+        axis: str = "V",
+        reversed: bool = False,
+    ) -> Any:
+        """Revolve a sketch around one of its axes (V_Axis / H_Axis)."""
+        self._require_freecad()
+        rev = body.newObject("PartDesign::Revolution", "Revolution")
+        rev.Profile = sketch
+        rev.Angle = float(angle)
+        rev.Reversed = bool(reversed)
+        axis_ref = {"V": "V_Axis", "H": "H_Axis"}.get(axis.upper(), "V_Axis")
+        try:
+            rev.ReferenceAxis = (sketch, [axis_ref])
+        except Exception as exc:  # noqa: BLE001 — axis ref is version-sensitive
+            logger.warning("freecad_revolve_axis_ref_failed", error=str(exc))
+        sketch.Visibility = False
+        document.recompute()
+        return rev
+
+    def transform_object(
+        self,
+        document: Any,
+        obj: Any,
+        position: list[float] | None = None,
+        rotation: dict[str, Any] | None = None,
+    ) -> Any:
+        """Move and/or rotate an object by setting its Placement.
+
+        ``rotation`` is ``{"axis": [x, y, z], "angle_deg": <deg>}``.
+        """
+        self._require_freecad()
+        import FreeCAD as FC  # type: ignore[import-untyped]
+
+        current = obj.Placement
+        base = current.Base
+        pos = FC.Vector(*position) if position else FC.Vector(base.x, base.y, base.z)
+        rot = current.Rotation
+        if rotation:
+            axis = rotation.get("axis", [0.0, 0.0, 1.0])
+            rot = FC.Rotation(
+                FC.Vector(float(axis[0]), float(axis[1]), float(axis[2])),
+                float(rotation.get("angle_deg", 0.0)),
+            )
+        obj.Placement = FC.Placement(pos, rot)
+        document.recompute()
+        return obj
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
