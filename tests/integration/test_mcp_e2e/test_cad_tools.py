@@ -155,7 +155,7 @@ async def test_total_cad_sim_tool_count(mcp_client):
         for tid in tool_ids
         if tid and tid.split(".", 1)[0] in {"cadquery", "freecad", "calculix", "kicad"}
     }
-    assert len(cad_ids) == 48, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
+    assert len(cad_ids) == 49, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
 
 
 # ---------------------------------------------------------------------------

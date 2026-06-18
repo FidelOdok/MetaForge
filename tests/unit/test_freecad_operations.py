@@ -133,3 +133,23 @@ class TestFreecadNotAvailableError:
         err = FreecadNotAvailableError()
         assert "FreeCAD Python bindings" in str(err)
         assert "Docker container" in str(err)
+
+
+class TestExecuteCodeSandbox:
+    """execute_code source-level guarding is validated before any FreeCAD call,
+    so the sandbox policy is testable without FreeCAD bindings (MET-527)."""
+
+    def test_blocks_dangerous_names(self) -> None:
+        from tool_registry.tools.freecad.operations import FreecadOperations, ScriptSandboxError
+
+        ops = FreecadOperations()
+        for snippet in ("import os", "open('/etc/passwd')", "eval('1')", "__import__('sys')"):
+            with pytest.raises(ScriptSandboxError):
+                ops.execute_code(None, snippet)
+
+    def test_rejects_oversize_script(self) -> None:
+        from tool_registry.tools.freecad.operations import FreecadOperations, ScriptSandboxError
+
+        ops = FreecadOperations()
+        with pytest.raises(ScriptSandboxError, match="exceeds"):
+            ops.execute_code(None, "\n".join(f"a{i} = {i}" for i in range(201)), max_lines=200)

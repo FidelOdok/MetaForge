@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring + 7 features + 4 assembly + 2 inspect + 2 parametric.
-        assert len(server.tool_ids) == 31
+        # 5 stateless + 8 authoring + 7 features + 4 assembly + 2 inspect + 2 parametric + 1 script.
+        assert len(server.tool_ids) == 32
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -163,6 +163,7 @@ class TestFreecadServer:
             "freecad.mirror_feature",
             "freecad.loft_sketches",
             "freecad.sweep_sketch",
+            "freecad.execute_code",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.export_model",
@@ -454,6 +455,7 @@ class TestStatefulAuthoring:
         ops.mirror_feature.return_value = _FakeObj("mirror")
         ops.measure.return_value = {"volume_mm3": 1000.0, "edge_count": 12, "face_count": 6}
         ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
+        ops.execute_code.return_value = None  # script touched the doc, surfaced nothing
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -635,6 +637,15 @@ class TestStatefulAuthoring:
                     "count": 3,
                 }
             )
+
+    async def test_execute_code_forwards_and_reports(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        out = await s.execute_code({"session_id": sid, "code": "result = doc"})
+        assert out["executed"] is True
+        assert "session" in out  # no shape surfaced → session summary
+        # The session document + code reach the geometry layer.
+        assert s._ops.execute_code.call_args[0][1] == "result = doc"  # type: ignore[attr-defined]
 
     async def test_measure_and_describe(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -879,7 +890,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 31
+        assert len(response["result"]["tools"]) == 32
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -926,7 +937,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 31
+        assert response["result"]["tools_available"] == 32
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
