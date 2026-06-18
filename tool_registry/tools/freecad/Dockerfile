@@ -48,7 +48,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
     "pydantic>=2.0" \
     "structlog>=24.0" \
-    "opentelemetry-api>=1.20"
+    "opentelemetry-api>=1.20" \
+    "aiohttp>=3.9"
 
 # Copy adapter source code (only what the adapter needs)
 COPY mcp_core/ ./mcp_core/
@@ -81,10 +82,11 @@ ENV QT_QPA_PLATFORM=offscreen
 
 WORKDIR /workspace
 
-# Health = the adapter's interpreter can actually import FreeCAD (the real
-# failure mode), not just that the freecadcmd binary exists.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD /usr/bin/python3 -c "import FreeCAD" || exit 1
+# Health = the HTTP MCP server is up AND the interpreter can import FreeCAD (the
+# real failure mode that MET-527 fixed) — both, so a regression on either fails.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD /usr/bin/python3 -c "import FreeCAD, urllib.request; \
+        urllib.request.urlopen('http://localhost:${FREECAD_HTTP_PORT:-8102}/health')" || exit 1
 
 # Run under the system python3 (FreeCAD-capable), NOT a python.org interpreter.
 ENTRYPOINT ["/usr/bin/python3", "/app/entrypoint.py"]

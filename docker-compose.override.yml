@@ -86,6 +86,7 @@ services:
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
