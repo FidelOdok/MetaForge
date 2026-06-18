@@ -1,54 +1,54 @@
-# MetaForge FreeCAD Adapter — multi-stage build
+# MetaForge FreeCAD Adapter — single-interpreter build
 # Usage:  docker build -f tool_registry/tools/freecad/Dockerfile -t metaforge/freecad-adapter .
 #
 # Provides FreeCAD headless (freecadcmd) for CAD export, mesh generation,
-# boolean operations, and geometry property extraction.
-# Note: FreeCAD images are larger (~1-2GB) due to OpenCASCADE dependencies.
+# boolean operations, parametric/PartDesign authoring, assemblies, and geometry
+# property extraction.
+# Note: FreeCAD images are larger (~2-3GB) due to OpenCASCADE dependencies.
+#
+# CRITICAL — interpreter alignment: the FreeCAD module (``FreeCAD.so``) is a
+# compiled extension built for Debian's *system* python3 and installed under
+# ``/usr/lib/freecad-python3/lib``. It can only be imported by that interpreter,
+# with that directory on ``PYTHONPATH``. So the adapter MUST run under
+# ``/usr/bin/python3`` (not a python.org base image), and its pip deps must be
+# installed for that same interpreter. An earlier multi-stage build ran the
+# adapter under python.org python3.11 while FreeCAD targeted Debian python3.13 —
+# ``import FreeCAD`` failed at runtime (every tool → FreecadNotAvailableError)
+# even though ``freecadcmd`` worked. This single-interpreter build fixes that.
 
-# ── Stage 1: dependencies ────────────────────────────────────────────
-FROM python:3.11-slim AS deps
-
-WORKDIR /build
-
-# Install system deps needed for building Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install minimal Python dependencies for the adapter
-RUN pip install --no-cache-dir \
-    pydantic>=2.0 \
-    structlog>=24.0 \
-    opentelemetry-api>=1.20
-
-# ── Stage 2: runtime ─────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 LABEL maintainer="MetaForge <team@metaforge.dev>"
-LABEL version="0.1.0"
+LABEL version="0.2.0"
 LABEL description="FreeCAD headless adapter for MetaForge MCP tool registry"
 LABEL org.opencontainers.image.source="https://github.com/MetaForge-HA/MetaForge"
 
 WORKDIR /app
 
-# Install FreeCAD headless and OpenCASCADE dependencies
-# FreeCAD pulls in libocct (OpenCASCADE) automatically as a dependency.
-# We use --no-install-recommends to skip GUI packages where possible.
+# FreeCAD headless + OpenCASCADE + the system python3 it targets, plus pip so we
+# can install the adapter's Python deps for that *same* interpreter.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        # FreeCAD headless (provides freecadcmd binary)
+        # FreeCAD headless (provides freecadcmd + /usr/lib/freecad-python3/lib/FreeCAD.so)
         freecad \
         # Meshing libraries used by FreeCAD FEM workbench
         gmsh \
         netgen \
+        # System python3 (the interpreter FreeCAD.so is built for) + pip
+        python3 \
+        python3-pip \
         # Required runtime libraries for OpenCASCADE
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from deps stage
-COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=deps /usr/local/bin /usr/local/bin
+# Install the adapter's Python deps for the SYSTEM python3 (the one that can
+# import FreeCAD). --break-system-packages is safe + required inside the
+# container (PEP-668 externally-managed marker).
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    "pydantic>=2.0" \
+    "structlog>=24.0" \
+    "opentelemetry-api>=1.20"
 
 # Copy adapter source code (only what the adapter needs)
 COPY mcp_core/ ./mcp_core/
@@ -69,7 +69,11 @@ RUN groupadd --gid 1000 metaforge \
 USER metaforge
 
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
+# /app for the adapter package; the freecad lib dir so `import FreeCAD` resolves;
+# the Mod dirs so the workbench modules (Sketcher, PartDesign, ...) import and
+# their object types (`PartDesign::Body`, `Sketcher::SketchObject`) register —
+# freecadcmd auto-loads these, but a plain `python3 entrypoint.py` does not.
+ENV PYTHONPATH=/app:/usr/lib/freecad-python3/lib:/usr/lib/freecad/Mod:/usr/share/freecad/Mod
 ENV METAFORGE_ENV=docker
 ENV FREECAD_WORK_DIR=/workspace
 # Disable FreeCAD GUI initialization in headless mode
@@ -77,7 +81,10 @@ ENV QT_QPA_PLATFORM=offscreen
 
 WORKDIR /workspace
 
+# Health = the adapter's interpreter can actually import FreeCAD (the real
+# failure mode), not just that the freecadcmd binary exists.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD freecadcmd --version || python3 -c "import FreeCAD; print(FreeCAD.Version())" || exit 1
+    CMD /usr/bin/python3 -c "import FreeCAD" || exit 1
 
-ENTRYPOINT ["python", "/app/entrypoint.py"]
+# Run under the system python3 (FreeCAD-capable), NOT a python.org interpreter.
+ENTRYPOINT ["/usr/bin/python3", "/app/entrypoint.py"]
