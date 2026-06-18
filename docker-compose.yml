@@ -32,6 +32,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -375,12 +376,14 @@ services:
       context: .
       dockerfile: tool_registry/tools/freecad/Dockerfile
     image: metaforge/freecad-adapter:latest
-    stdin_open: true
+    ports:
+      - "8102:8102"
     volumes:
       - adapter-workspace:/workspace
     environment:
       - METAFORGE_ENV=docker
       - FREECAD_WORK_DIR=/workspace
+      - FREECAD_HTTP_PORT=8102
       - QT_QPA_PLATFORM=offscreen
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     deploy:
@@ -389,11 +392,11 @@ services:
           memory: 2G
           cpus: '4'
     healthcheck:
-      test: ["CMD", "freecadcmd", "--version"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 40s
     networks:
       - metaforge
     restart: unless-stopped
