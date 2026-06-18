@@ -977,6 +977,36 @@ class FreecadOperations:
         document.recompute()
         return feat
 
+    # ------------------------------------------------------------------
+    # Composite skills (MET-527/531): higher-level generators that compose the
+    # primitive authoring ops into a finished part in one call.
+    # ------------------------------------------------------------------
+
+    def generate_enclosure(
+        self,
+        document: Any,
+        length: float,
+        width: float,
+        height: float,
+        wall_thickness: float = 2.0,
+    ) -> Any:
+        """Parametric electronics enclosure: a hollow box open at the top.
+
+        Composes create_body → create_sketch → pad_sketch → shell_solid (the
+        FreeCAD ``/enclosure`` skill; replaces the cadquery_generate_enclosure
+        stub, MET-531). Returns the hollow ``Part::Feature``.
+        """
+        self._require_partdesign()
+        body = self.create_body(document, "Enclosure")
+        sketch = self.create_sketch(
+            document,
+            body,
+            "XY",
+            [{"type": "rectangle", "x": 0, "y": 0, "width": length, "height": width}],
+        )
+        self.pad_sketch(document, body, sketch, height)
+        return self.shell_solid(document, body, wall_thickness)
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
