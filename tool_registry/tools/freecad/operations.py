@@ -952,6 +952,31 @@ class FreecadOperations:
         document.recompute()
         return namespace.get("result")
 
+    def shell_solid(
+        self, document: Any, body: Any, thickness: float, faces: list[str] | None = None
+    ) -> Any:
+        """Hollow the body's tip to a wall thickness, opening ``faces`` (default:
+        the topmost face by Z). Uses the Part-workbench ``makeThickness`` (which
+        works headless, unlike PartDesign::Thickness — MET-533); the result is a
+        ``Part::Feature`` and the source body is hidden."""
+        self._require_partdesign()
+        tip = self._tip(body)
+        shape = tip.Shape
+        shape_faces = shape.Faces
+        if faces:
+            idxs = [int(f.replace("Face", "")) - 1 for f in faces]
+        else:
+            idxs = [max(range(len(shape_faces)), key=lambda i: shape_faces[i].CenterOfMass.z)]
+        remove = [shape_faces[i] for i in idxs if 0 <= i < len(shape_faces)]
+        if not remove:
+            raise ValueError("no valid faces to open for the shell")
+        hollow = shape.makeThickness(remove, -abs(float(thickness)), 1e-3)
+        feat = document.addObject("Part::Feature", "Shell")
+        feat.Shape = hollow
+        body.Visibility = False
+        document.recompute()
+        return feat
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()

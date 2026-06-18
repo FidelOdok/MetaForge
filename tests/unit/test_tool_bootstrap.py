@@ -161,7 +161,7 @@ class TestBootstrapToolRegistry:
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 49
+        assert len(tools) == 50
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

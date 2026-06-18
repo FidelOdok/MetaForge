@@ -84,6 +84,12 @@ class TestAuthoringVertical:
         ops.fillet_edges(doc, _box_body(ops, doc, "Fil"), 1.5)
         ops.chamfer_edges(doc, _box_body(ops, doc, "Cha"), 1.0)
 
+    def test_shell(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
+        body = _box_body(ops, doc, "Shell", w=20, h=10)
+        solid_vol = ops.shape_props(body)["volume_mm3"]
+        shell = ops.shell_solid(doc, body, 1.5)
+        assert 0 < ops.shape_props(shell)["volume_mm3"] < solid_vol  # hollowed
+
     def test_patterns_and_mirror(self, ops: FreecadOperations, doc) -> None:  # type: ignore[no-untyped-def]
         body = _box_body(ops, doc, "Pat", w=60, h=10)
         s2 = ops.create_sketch(doc, body, "XY", [{"type": "circle", "cx": 8, "cy": 8, "r": 2}])

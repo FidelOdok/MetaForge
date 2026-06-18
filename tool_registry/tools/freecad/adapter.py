@@ -41,8 +41,9 @@ class FreecadServer(McpToolServer):
     Stateful authoring tools (operate on a live session document, MET-528/527):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
-    transform_object, fillet_edges, chamfer_edges, linear_pattern, polar_pattern,
-    mirror_feature, loft_sketches, sweep_sketch, execute_code, export_model.
+    transform_object, fillet_edges, chamfer_edges, shell_solid, linear_pattern,
+    polar_pattern, mirror_feature, loft_sketches, sweep_sketch, execute_code,
+    export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -721,6 +722,21 @@ class FreecadServer(McpToolServer):
                 self.sweep_sketch,
             ),
             (
+                "shell_solid",
+                "Hollow a body's tip to a wall thickness, opening a face (Part makeThickness)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "thickness": {"type": "number"},
+                        "faces": {"type": "array", "items": {"type": "string"}},
+                    },
+                    ["session_id", "body_id", "thickness"],
+                ),
+                self.shell_solid,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1018,6 +1034,22 @@ class FreecadServer(McpToolServer):
 
     async def chamfer_edges(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return await self._dress_up(arguments, "chamfer_edges", "size", "edges")
+
+    async def shell_solid(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body = self._sessions.get_object(session_id, self._require(arguments, "body_id"))
+        thickness = arguments.get("thickness")
+        if thickness is None:
+            raise ValueError("thickness is required")
+        session = self._sessions.get(session_id)
+        faces = arguments.get("faces")
+        shell = self._ops.shell_solid(
+            session.document, body, float(thickness), faces if faces else None
+        )
+        # makeThickness yields a standalone Part::Feature (not a body feature),
+        # so report the shell's own shape props, not the (now-hidden) body's.
+        obj_id = self._sessions.register_object(session_id, shell, "feature", "Shell")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(shell)}
 
     async def linear_pattern(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
