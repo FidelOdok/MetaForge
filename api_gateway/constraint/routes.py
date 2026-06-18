@@ -18,6 +18,7 @@ import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from api_gateway.constraint.kinematics import Joint, solve_joint
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -106,26 +107,47 @@ async def synthesize_constraint(body: SynthesizeRequest) -> SynthesizeResponse:
 
 
 # ---------------------------------------------------------------------------
-# Tier-3 live solve streaming (MET-521) — DE-RISKING PROTOTYPE
+# Tier-3 live solve streaming (MET-521 protocol, MET-530 joint kinematics)
 #
-# Proves the 10 Hz drag→solve→stream round-trip and the cascade/violation
-# protocol shape with a *stub* solver (no real geometry/kinematics yet). The
-# real incremental constraint solver replaces `_stub_solve` later; the wire
-# protocol and session lifecycle are what this slice de-risks.
+# The 10 Hz drag→solve→stream round-trip (session lifecycle + wire protocol)
+# landed in MET-521 with a fixed-fraction stub. MET-530 swaps the solver:
+# when the client supplies assembly `joints`, each tick runs analytic single-DOF
+# kinematics (api_gateway/constraint/kinematics.py) — the dragged follower's
+# motion is constrained to what its joint permits, and the allowed-DOF hint is
+# streamed back for gizmo clamping (Tier-2, MET-520). With no joints it falls
+# back to the original passthrough+follower-fraction stub (backward compatible).
+# The authoritative FreeCAD full solve + collision check runs on Apply, not per
+# tick (the hybrid model) — that's the follow-up slice.
 # ---------------------------------------------------------------------------
 
-# Fraction of the drag delta a constraint-linked "follower" group inherits —
-# stand-in for a real distance/mate constraint pulling an adjacent part.
+# Fraction of the drag delta a constraint-linked "follower" group inherits in
+# the *no-joints* fallback — stand-in for a real mate pulling an adjacent part.
 _FOLLOWER_FRACTION = 0.5
 
 # Transient, in-memory only (never persisted to Neo4j) — session id → opened-at.
 _solve_sessions: dict[str, float] = {}
 
 
+def _clearance_constraint(mag: float) -> dict[str, Any]:
+    """Feasibility/clearance status for a net displacement magnitude (mm)."""
+    if mag > _FEASIBLE_LIMIT_MM:
+        return {
+            "status": "violated",
+            "type": "clearance",
+            "value": -round(mag - _FEASIBLE_LIMIT_MM, 2),
+            "severity": "warning",
+        }
+    return {
+        "status": "satisfied",
+        "type": "clearance",
+        "value": round(_FEASIBLE_LIMIT_MM - mag, 2),
+    }
+
+
 def _stub_solve(
     drag_group: str, delta: tuple[float, float, float], follower: str | None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Stub incremental solve: dragged group takes the full delta; an optional
+    """No-joints fallback: dragged group takes the full delta; an optional
     follower cascades at a fixed fraction; flag a clearance violation past the
     feasible limit. Returns (transforms, constraints)."""
     dx, dy, dz = delta
@@ -133,42 +155,77 @@ def _stub_solve(
     if follower:
         f = _FOLLOWER_FRACTION
         transforms.append({"group_name": follower, "delta": [dx * f, dy * f, dz * f]})
-
     mag = max(abs(dx), abs(dy), abs(dz))
-    if mag > _FEASIBLE_LIMIT_MM:
-        constraints = [
-            {
-                "status": "violated",
-                "type": "clearance",
-                "value": -round(mag - _FEASIBLE_LIMIT_MM, 2),
-                "severity": "warning",
-            }
-        ]
-    else:
-        constraints = [
-            {
-                "status": "satisfied",
-                "type": "clearance",
-                "value": round(_FEASIBLE_LIMIT_MM - mag, 2),
-            }
-        ]
-    return transforms, constraints
+    return transforms, [_clearance_constraint(mag)]
+
+
+def _joint_solve(
+    drag_group: str,
+    delta: tuple[float, float, float],
+    grab_point: tuple[float, float, float] | None,
+    joints: list[Joint],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
+    """Joint-aware solve (MET-530): constrain the dragged follower to its joint's
+    DOF via analytic kinematics, and report the allowed-DOF hint. Falls through to
+    a free move (full delta) when the dragged group has no joint.
+
+    Returns (transforms, constraints, dof_hint).
+    """
+    joint = next((j for j in joints if j.follower == drag_group), None)
+    if joint is None:
+        # Dragged group isn't a constrained follower → move freely.
+        dx, dy, dz = delta
+        mag = max(abs(dx), abs(dy), abs(dz))
+        return (
+            [{"group_name": drag_group, "delta": [dx, dy, dz]}],
+            [_clearance_constraint(mag)],
+            None,
+        )
+
+    sol = solve_joint(joint, delta, grab_point)
+    transforms = [sol.transform_dict()]
+    # Net realised displacement magnitude (post-constraint) for the clearance check.
+    mag = max(abs(c) for c in sol.delta) if any(sol.delta) else 0.0
+    constraints = [
+        _clearance_constraint(mag),
+        {"status": "satisfied", "type": "joint", "joint": joint.name, "dof": joint.type},
+    ]
+    return transforms, constraints, sol.dof.to_dict()
+
+
+def _parse_joints(raw: Any) -> list[Joint]:
+    """Parse a list of joint dicts from the init message; skip malformed ones."""
+    if not isinstance(raw, list):
+        return []
+    joints: list[Joint] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            joints.append(Joint.from_dict(item))
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning("solve_stream_bad_joint", error=str(exc))
+    return joints
 
 
 @router.websocket("/solve/stream")
 async def solve_stream(ws: WebSocket) -> None:
     """Live solve session (MET-521 prototype).
 
-    Client sends an optional init `{group_name, follower}`, then ~10 Hz ticks
-    `{delta: [dx, dy, dz]}`. Server streams back a solve result per tick with
-    cascading transforms, constraint statuses, a human-readable recommendation,
-    and `solve_ms`. Session state is transient (in-memory); closed on disconnect.
+    Client sends an optional init `{group_name, follower, joints: [...]}`, then
+    ~10 Hz ticks `{delta: [dx, dy, dz], grab_point: [x, y, z]}`. When `joints` are
+    supplied the dragged follower is constrained to its joint's DOF (MET-530) and
+    the response carries a `dof` hint; otherwise the original stub cascade runs.
+    Server streams a solve result per tick with transforms, constraint statuses,
+    an optional `dof` hint, a recommendation, and `solve_ms`. Session state is
+    transient (in-memory); closed on disconnect.
     """
     await ws.accept()
     session_id = str(uuid4())
     _solve_sessions[session_id] = time.time()
     drag_group = "group"
     follower: str | None = None
+    joints: list[Joint] = []
     await ws.send_json({"type": "session", "session_id": session_id})
     logger.info("solve_stream_opened", session_id=session_id)
     try:
@@ -178,25 +235,37 @@ async def solve_stream(ws: WebSocket) -> None:
                 drag_group = str(msg["group_name"])
             if "follower" in msg:
                 follower = msg["follower"] or None
+            if "joints" in msg:
+                joints = _parse_joints(msg["joints"])
             raw = msg.get("delta")
             if not raw:
                 continue  # handshake / no-op tick
             vals = [float(x) for x in raw] + [0.0, 0.0, 0.0]
             d = (vals[0], vals[1], vals[2])
+            grab_raw = msg.get("grab_point")
+            grab_point: tuple[float, float, float] | None = None
+            if isinstance(grab_raw, (list, tuple)) and len(grab_raw) >= 3:
+                grab_point = (float(grab_raw[0]), float(grab_raw[1]), float(grab_raw[2]))
+
             t0 = time.perf_counter()
-            transforms, constraints = _stub_solve(drag_group, d, follower)
+            dof: dict[str, Any] | None = None
+            if joints:
+                transforms, constraints, dof = _joint_solve(drag_group, d, grab_point, joints)
+            else:
+                transforms, constraints = _stub_solve(drag_group, d, follower)
             rec = _suggest(drag_group, *d)
-            await ws.send_json(
-                {
-                    "type": "solve",
-                    "session_id": session_id,
-                    "timestamp": time.time(),
-                    "transforms": transforms,
-                    "constraints": constraints,
-                    "recommendation": rec.suggestion,
-                    "solve_ms": round((time.perf_counter() - t0) * 1000, 3),
-                }
-            )
+            payload: dict[str, Any] = {
+                "type": "solve",
+                "session_id": session_id,
+                "timestamp": time.time(),
+                "transforms": transforms,
+                "constraints": constraints,
+                "recommendation": rec.suggestion,
+                "solve_ms": round((time.perf_counter() - t0) * 1000, 3),
+            }
+            if dof is not None:
+                payload["dof"] = dof
+            await ws.send_json(payload)
     except WebSocketDisconnect:
         pass
     finally:
