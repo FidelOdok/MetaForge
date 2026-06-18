@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring + 7 features + 4 assembly + 2 inspect + 2 parametric + 1 script.
-        assert len(server.tool_ids) == 32
+        # 5 stateless + 8 authoring + 8 features + 4 assembly + 2 inspect + 2 parametric + 1 script.
+        assert len(server.tool_ids) == 33
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -166,6 +166,7 @@ class TestFreecadServer:
             "freecad.execute_code",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
+            "freecad.shell_solid",
             "freecad.export_model",
             # assembly authoring (MET-530)
             "freecad.create_assembly",
@@ -450,6 +451,7 @@ class TestStatefulAuthoring:
         ops.transform_object.return_value = _FakeObj("moved")
         ops.fillet_edges.return_value = _FakeObj("fillet")
         ops.chamfer_edges.return_value = _FakeObj("chamfer")
+        ops.shell_solid.return_value = _FakeObj("shell")
         ops.linear_pattern.return_value = _FakeObj("lpat")
         ops.polar_pattern.return_value = _FakeObj("ppat")
         ops.mirror_feature.return_value = _FakeObj("mirror")
@@ -657,6 +659,22 @@ class TestStatefulAuthoring:
         assert d["dimensions_mm"]["x"] == 10
         # both resolved the session object and forwarded to the geometry layer
         assert s._ops.measure.called and s._ops.describe_model.called  # type: ignore[attr-defined]
+
+    async def test_shell_solid(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        out = await s.shell_solid({"session_id": sid, "body_id": body["obj_id"], "thickness": 1.5})
+        assert out["kind"] == "feature"
+        # shell reports its own (Part::Feature) props, not the hidden body's
+        assert s._ops.shell_solid.call_args[0][2] == 1.5  # type: ignore[attr-defined]
+
+    async def test_shell_requires_thickness(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        with pytest.raises(ValueError, match="thickness is required"):
+            await s.shell_solid({"session_id": sid, "body_id": body["obj_id"]})
 
     async def test_fillet_requires_radius(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -890,7 +908,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 32
+        assert len(response["result"]["tools"]) == 33
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -937,7 +955,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 32
+        assert response["result"]["tools_available"] == 33
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
