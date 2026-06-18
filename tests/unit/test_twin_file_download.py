@@ -119,6 +119,42 @@ async def test_download_from_minio_object_key(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Route: get_node_model resolves the source blob durably (MET-522/489)
+# ---------------------------------------------------------------------------
+
+
+async def test_node_model_uses_minio_blob_when_local_missing(monkeypatch) -> None:
+    """A recreated gateway loses the ephemeral local file; the model still
+    converts because the source blob is fetched from MinIO."""
+    node_id = await _seed(
+        _wp(
+            file_path="/root/.metaforge/work_products/gone/a.step",  # ephemeral, vanished
+            metadata={
+                "minio_object_key": "work-products/x/a.step",
+                "original_filename": "a.step",
+            },
+            fmt="step",
+        )
+    )
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: b"ISO-10303-21; fake")
+
+    captured: dict = {}
+
+    def _fake_convert(self, content, filename, quality):  # noqa: ANN001
+        captured["content"] = content
+        captured["filename"] = filename
+        return {"glb_url": "/v1/convert/abc/glb", "metadata": {"parts": [{"name": "Part_1"}]}}
+
+    monkeypatch.setattr("api_gateway.convert.service.ConversionService.convert", _fake_convert)
+
+    result = await routes.get_node_model(node_id)
+
+    assert captured["content"] == b"ISO-10303-21; fake"  # came from MinIO, not the dead local path
+    assert captured["filename"] == "a.step"
+    assert result["metadata"]["parts"][0]["name"] == "Part_1"
+
+
+# ---------------------------------------------------------------------------
 # Content-type mapping
 # ---------------------------------------------------------------------------
 
