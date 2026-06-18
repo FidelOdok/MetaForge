@@ -31,11 +31,12 @@ class TestRegistryMcpBridge:
     async def test_list_tools_all(self):
         """List all tools returns expected count.
 
-        Post-MET-478: cadquery=7 + freecad=5 + calculix=4 + kicad=6 = 22.
+        Post-MET-528: cadquery=7 + freecad=13 + calculix=4 + kicad=6 = 30
+        (freecad +8 stateful PartDesign authoring tools).
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 22
+        assert len(tools) == 30
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""
