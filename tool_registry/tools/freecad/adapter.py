@@ -23,6 +23,14 @@ from tool_registry.tools.freecad.session import FreecadSessionStore
 
 logger = structlog.get_logger()
 
+# Joint types the live solver understands. Mirrors
+# ``api_gateway.constraint.kinematics._JOINT_TYPES`` — duplicated (not imported)
+# because tool_registry (Layer 3) must not import api_gateway (Layer 4). Keep in
+# sync with the kinematics module.
+_VALID_JOINT_TYPES: frozenset[str] = frozenset(
+    {"fixed", "revolute", "slider", "cylindrical", "ball"}
+)
+
 
 class FreecadServer(McpToolServer):
     """FreeCAD tool adapter for CAD operations via MCP.
@@ -33,6 +41,10 @@ class FreecadServer(McpToolServer):
     Stateful authoring tools (operate on a live session document, MET-528):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, export_model.
+
+    Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
+    add_assembly_joint (emits the joint model the live solver consumes),
+    list_joints.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -555,6 +567,57 @@ class FreecadServer(McpToolServer):
                 ),
                 self.export_model,
             ),
+            (
+                "create_assembly",
+                "Create an assembly container to group parts in a session",
+                "cad_assembly",
+                obj_schema({"session_id": sid, "name": {"type": "string"}}, ["session_id"]),
+                self.create_assembly,
+            ),
+            (
+                "add_part_to_assembly",
+                "Add a session part to an assembly, optionally placing it",
+                "cad_assembly",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "assembly_id": {"type": "string"},
+                        "part_id": {"type": "string"},
+                        "position": {"type": "array", "items": {"type": "number"}},
+                    },
+                    ["session_id", "assembly_id", "part_id"],
+                ),
+                self.add_part_to_assembly,
+            ),
+            (
+                "add_assembly_joint",
+                "Joint two assembly parts (fixed/revolute/slider/cylindrical/ball) — "
+                "drives the live kinematic solver",
+                "cad_assembly",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "assembly_id": {"type": "string"},
+                        "base_id": {"type": "string"},
+                        "follower_id": {"type": "string"},
+                        "type": {
+                            "type": "string",
+                            "enum": sorted(_VALID_JOINT_TYPES),
+                        },
+                        "axis": {"type": "array", "items": {"type": "number"}},
+                        "anchor": {"type": "array", "items": {"type": "number"}},
+                    },
+                    ["session_id", "assembly_id", "base_id", "follower_id", "type"],
+                ),
+                self.add_assembly_joint,
+            ),
+            (
+                "list_joints",
+                "List the assembly joints authored in a session (live-solver shape)",
+                "cad_inspect",
+                obj_schema({"session_id": sid}, ["session_id"]),
+                self.list_joints,
+            ),
         ]
 
         for name, description, capability, input_schema, handler in specs:
@@ -647,6 +710,66 @@ class FreecadServer(McpToolServer):
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
             **self._ops.shape_props(obj),
         }
+
+    # ---- assembly authoring (MET-530) ---------------------------------
+
+    async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        session = self._sessions.get(session_id)
+        name = arguments.get("name", "Assembly")
+        assembly = self._ops.create_assembly(session.document, name)
+        obj_id = self._sessions.register_object(session_id, assembly, "assembly", name)
+        return {"obj_id": obj_id, "kind": "assembly"}
+
+    async def add_part_to_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        assembly_id = self._require(arguments, "assembly_id")
+        part_id = self._require(arguments, "part_id")
+        session = self._sessions.get(session_id)
+        assembly = self._sessions.get_object(session_id, assembly_id)
+        part = self._sessions.get_object(session_id, part_id)
+        position = arguments.get("position")
+        placement = {"position": position} if position else None
+        self._ops.add_part_to_assembly(session.document, assembly, part, placement)
+        return {"assembly_id": assembly_id, "part_id": part_id}
+
+    async def add_assembly_joint(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Joint two parts. The joint metadata (type/axis/anchor/base/follower) is
+        recorded in the kinematics-solver shape; the live solver (MET-530) consumes
+        it via list_joints. A real FreeCAD ``Assembly::Joint`` for the on-Apply full
+        solve is the FreeCAD-runtime follow-up."""
+        session_id = self._require(arguments, "session_id")
+        assembly_id = self._require(arguments, "assembly_id")
+        base_id = self._require(arguments, "base_id")
+        follower_id = self._require(arguments, "follower_id")
+        jtype = self._require(arguments, "type").lower()
+        if jtype not in _VALID_JOINT_TYPES:
+            raise ValueError(
+                f"unknown joint type {jtype!r}; expected one of {sorted(_VALID_JOINT_TYPES)}"
+            )
+        # Resolve part references to the names the viewer/manifest uses as group names.
+        base = self._sessions.get_entry(session_id, base_id)
+        follower = self._sessions.get_entry(session_id, follower_id)
+        axis = arguments.get("axis") or [0.0, 0.0, 1.0]
+        anchor = arguments.get("anchor") or [0.0, 0.0, 0.0]
+        joint_name = str(arguments.get("name") or f"{base.name}-{follower.name}")
+        joint_meta: dict[str, Any] = {
+            "name": joint_name,
+            "type": jtype,
+            "base": base.name,
+            "follower": follower.name,
+            "axis": [float(axis[0]), float(axis[1]), float(axis[2])],
+            "anchor": [float(anchor[0]), float(anchor[1]), float(anchor[2])],
+            "assembly_id": assembly_id,
+        }
+        obj_id = self._sessions.register_object(
+            session_id, None, "joint", joint_name, metadata=joint_meta
+        )
+        return {"obj_id": obj_id, "kind": "joint", "joint": joint_meta}
+
+    async def list_joints(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        return {"joints": self._sessions.joints(session_id)}
 
     @staticmethod
     def _require(arguments: dict[str, Any], key: str) -> str:

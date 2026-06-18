@@ -619,3 +619,34 @@ class FreecadOperations:
             "max_y": round(bb.YMax, 2),
             "max_z": round(bb.ZMax, 2),
         }
+
+    # ------------------------------------------------------------------
+    # Assembly authoring (MET-530). The container is an ``App::Part`` (stable
+    # across FreeCAD versions); the durable, solver-relevant joint output is
+    # metadata recorded by the adapter. Building a real ``Assembly::Joint`` for
+    # the on-Apply full solve is the FreeCAD-runtime follow-up.
+    # ------------------------------------------------------------------
+
+    def create_assembly(self, document: Any, name: str = "Assembly") -> Any:
+        """Create an assembly container (an ``App::Part``) to group parts."""
+        self._require_freecad()
+        assembly = document.addObject("App::Part", name or "Assembly")
+        document.recompute()
+        return assembly
+
+    def add_part_to_assembly(
+        self, document: Any, assembly: Any, part: Any, placement: dict[str, Any] | None = None
+    ) -> Any:
+        """Add an existing part object to the assembly, optionally placing it."""
+        self._require_freecad()
+        if placement:
+            import FreeCAD as FC  # type: ignore[import-untyped]
+
+            pos = placement.get("position", [0.0, 0.0, 0.0])
+            part.Placement = FC.Placement(
+                FC.Vector(float(pos[0]), float(pos[1]), float(pos[2])),
+                part.Placement.Rotation,
+            )
+        assembly.addObject(part)
+        document.recompute()
+        return part
