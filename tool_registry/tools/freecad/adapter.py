@@ -418,9 +418,7 @@ class FreecadServer(McpToolServer):
     ) -> dict[str, Any]:
         """Export a CAD file via FreeCAD (headless). STEP today; raises for others."""
         if output_format != "step":
-            raise ValueError(
-                f"FreeCAD adapter currently exports STEP only, not {output_format!r}"
-            )
+            raise ValueError(f"FreeCAD adapter currently exports STEP only, not {output_format!r}")
         return self._ops.export_step(input_file, output_path)
 
     async def _execute_meshing(

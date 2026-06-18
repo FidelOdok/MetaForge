@@ -204,9 +204,7 @@ class FreecadSessionStore:
 
     # ---- object registry ----------------------------------------------
 
-    def register_object(
-        self, session_id: str, obj: Any, kind: str, name: str = ""
-    ) -> str:
+    def register_object(self, session_id: str, obj: Any, kind: str, name: str = "") -> str:
         """Register a newly-authored object and return its stable obj_id."""
         session = self.get(session_id)
         with self._lock:
@@ -236,9 +234,7 @@ class FreecadSessionStore:
         """Drop sessions idle beyond the TTL. Caller holds the lock."""
         if self._ttl <= 0:
             return
-        expired = [
-            sid for sid, s in self._sessions.items() if (now - s.last_access) > self._ttl
-        ]
+        expired = [sid for sid, s in self._sessions.items() if (now - s.last_access) > self._ttl]
         for sid in expired:
             session = self._sessions.pop(sid, None)
             if session is not None:

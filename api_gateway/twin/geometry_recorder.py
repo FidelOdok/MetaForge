@@ -135,9 +135,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
             linked = False
             if project_id and project_backend is not None:
                 try:
-                    await project_backend.link_work_product(
-                        project_id, node_id, name, "cad_model"
-                    )
+                    await project_backend.link_work_product(project_id, node_id, name, "cad_model")
                     linked = True
                 except Exception as exc:  # noqa: BLE001 — link is best-effort
                     logger.warning("geometry_project_link_failed", error=str(exc))

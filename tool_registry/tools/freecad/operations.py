@@ -550,9 +550,7 @@ class FreecadOperations:
                 sketch.addGeometry(Part.LineSegment(a, b), False)
         elif kind == "circle":
             cx, cy, r = float(el["cx"]), float(el["cy"]), float(el["r"])
-            sketch.addGeometry(
-                Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r), False
-            )
+            sketch.addGeometry(Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r), False)
         elif kind == "line":
             a = FC.Vector(float(el["x1"]), float(el["y1"]), 0)
             b = FC.Vector(float(el["x2"]), float(el["y2"]), 0)
