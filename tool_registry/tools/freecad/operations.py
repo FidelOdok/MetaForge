@@ -57,6 +57,75 @@ else:
     HAS_PARTDESIGN = False
 
 
+class ScriptSandboxError(RuntimeError):
+    """Raised when an execute_code script violates sandbox restrictions."""
+
+
+class ScriptTimeoutError(RuntimeError):
+    """Raised when an execute_code script exceeds the allowed execution time."""
+
+
+# Sandbox policy for execute_code — mirrors the reviewed cadquery.execute_script
+# model. NOTE: this is best-effort source-level guarding; the real isolation
+# boundary is the container (non-root, resource-limited, no network needed).
+# FreeCAD's own API can still touch the filesystem, so execute_code is a power
+# tool gated by that container boundary, not a hard sandbox.
+_SAFE_BUILTINS = {
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "dict",
+    "enumerate",
+    "filter",
+    "float",
+    "frozenset",
+    "getattr",
+    "hasattr",
+    "int",
+    "isinstance",
+    "issubclass",
+    "iter",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "next",
+    "print",
+    "range",
+    "repr",
+    "reversed",
+    "round",
+    "set",
+    "slice",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "type",
+    "zip",
+}
+_BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
+_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the namespace
+import re as _re  # noqa: E402
+
+_IMPORT_RE = _re.compile(
+    r"^(?:import\s+(?P<mod>\w+)(?:\s+as\s+\w+)?|from\s+(?P<from_mod>\w+)\s+import\s+.+)$"
+)
+
+
+def _strip_sandbox_imports(script: str) -> str:
+    """Drop top-level import lines for modules already injected (FreeCAD/App/Part)."""
+    out = []
+    for line in script.splitlines():
+        m = _IMPORT_RE.match(line.strip())
+        if m and (m.group("mod") or m.group("from_mod")) in _SANDBOX_MODULES:
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 class FreecadNotAvailableError(RuntimeError):
     """Raised when FreeCAD Python bindings (or a required workbench) are unavailable."""
 
@@ -815,6 +884,73 @@ class FreecadOperations:
         mir.MirrorPlane = (self._origin_feature(body, plane_name), [""])
         document.recompute()
         return mir
+
+    def execute_code(
+        self,
+        document: Any,
+        code: str,
+        *,
+        max_lines: int = 200,
+        timeout: float = 30.0,
+    ) -> Any:
+        """Run a sandboxed FreeCAD Python script against the session ``doc``.
+
+        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``math`` and
+        the active ``doc``. Assign the object to surface to a variable named
+        ``result`` (it gets registered + returned). Source-level guarding mirrors
+        cadquery.execute_script; the real isolation boundary is the container.
+        """
+        # Sandbox policy is validated first (no FreeCAD needed) so it's unit-testable.
+        lines = code.strip().splitlines()
+        if len(lines) > max_lines:
+            raise ScriptSandboxError(f"Script exceeds {max_lines} lines (has {len(lines)})")
+        for blocked in _BLOCKED_NAMES:
+            if _re.search(r"\b" + _re.escape(blocked) + r"\b", code):
+                raise ScriptSandboxError(f"Script contains blocked name: {blocked!r}")
+        code = _strip_sandbox_imports(code)
+
+        self._require_freecad()
+        import builtins as _builtins_module
+        import math
+        import signal
+        import threading
+
+        safe_builtins = {
+            k: getattr(_builtins_module, k) for k in _SAFE_BUILTINS if hasattr(_builtins_module, k)
+        }
+        namespace: dict[str, Any] = {
+            "__builtins__": safe_builtins,
+            "FreeCAD": FreeCAD,
+            "App": FreeCAD,
+            "Part": Part,
+            "math": math,
+            "doc": document,
+        }
+
+        is_main = threading.current_thread() is threading.main_thread()
+        old_handler = None
+
+        def _timeout(_signum: int, _frame: Any) -> None:
+            raise ScriptTimeoutError(f"Script exceeded {timeout}s")
+
+        with tracer.start_as_current_span("freecad.execute_code"):
+            try:
+                if is_main and hasattr(signal, "SIGALRM"):
+                    old_handler = signal.signal(signal.SIGALRM, _timeout)
+                    signal.alarm(int(timeout))
+                exec(compile(code, "<freecad_script>", "exec"), namespace)  # noqa: S102
+            except (ScriptTimeoutError, ScriptSandboxError):
+                raise
+            except Exception as exc:
+                raise RuntimeError(f"Script execution failed: {exc}") from exc
+            finally:
+                if is_main and hasattr(signal, "SIGALRM"):
+                    signal.alarm(0)
+                    if old_handler is not None:
+                        signal.signal(signal.SIGALRM, old_handler)
+
+        document.recompute()
+        return namespace.get("result")
 
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""

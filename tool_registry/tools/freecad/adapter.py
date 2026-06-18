@@ -42,7 +42,7 @@ class FreecadServer(McpToolServer):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
     transform_object, fillet_edges, chamfer_edges, linear_pattern, polar_pattern,
-    mirror_feature, loft_sketches, sweep_sketch, export_model.
+    mirror_feature, loft_sketches, sweep_sketch, execute_code, export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -721,6 +721,17 @@ class FreecadServer(McpToolServer):
                 self.sweep_sketch,
             ),
             (
+                "execute_code",
+                "Run a sandboxed FreeCAD Python script against the session doc "
+                "(escape hatch; assign `result` to surface an object)",
+                "cad_scripting",
+                obj_schema(
+                    {"session_id": sid, "code": {"type": "string"}},
+                    ["session_id", "code"],
+                ),
+                self.execute_code,
+            ),
+            (
                 "export_model",
                 "Export a session object to STEP and return the bytes (base64)",
                 "cad_export",
@@ -1057,6 +1068,23 @@ class FreecadServer(McpToolServer):
         )
         obj_id = self._sessions.register_object(session_id, mir, "feature", "Mirrored")
         return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def execute_code(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        code = self._require(arguments, "code")
+        session = self._sessions.get(session_id)
+        result = self._ops.execute_code(session.document, code)
+        if result is not None and hasattr(result, "Shape"):
+            obj_id = self._sessions.register_object(
+                session_id, result, "feature", getattr(result, "Name", "Result")
+            )
+            out: dict[str, Any] = {"executed": True, "obj_id": obj_id}
+            try:
+                out.update(self._ops.shape_props(result))
+            except Exception:  # noqa: BLE001 — result may have no solid shape
+                pass
+            return out
+        return {"executed": True, "session": self._sessions.describe(session_id)}
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
