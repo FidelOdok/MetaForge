@@ -36,7 +36,7 @@ class TestRegistryMcpBridge:
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 46
+        assert len(tools) == 48
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

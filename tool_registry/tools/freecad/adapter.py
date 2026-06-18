@@ -42,7 +42,7 @@ class FreecadServer(McpToolServer):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
     transform_object, fillet_edges, chamfer_edges, linear_pattern, polar_pattern,
-    mirror_feature, export_model.
+    mirror_feature, loft_sketches, sweep_sketch, export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -532,7 +532,7 @@ class FreecadServer(McpToolServer):
             ),
             (
                 "create_sketch",
-                "Create a sketch on a body's plane with 2D geometry (rectangle/circle/line)",
+                "Create a sketch on a body's plane (offset along normal) with 2D geometry",
                 "cad_author",
                 obj_schema(
                     {
@@ -540,6 +540,7 @@ class FreecadServer(McpToolServer):
                         "body_id": {"type": "string"},
                         "plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
                         "elements": {"type": "array", "items": {"type": "object"}},
+                        "offset": {"type": "number"},
                     },
                     ["session_id", "body_id"],
                 ),
@@ -688,6 +689,36 @@ class FreecadServer(McpToolServer):
                     ["session_id", "body_id", "feature_id"],
                 ),
                 self.mirror_feature,
+            ),
+            (
+                "loft_sketches",
+                "Loft a profile sketch through section sketches into a solid",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "profile_id": {"type": "string"},
+                        "section_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    ["session_id", "body_id", "profile_id", "section_ids"],
+                ),
+                self.loft_sketches,
+            ),
+            (
+                "sweep_sketch",
+                "Sweep a profile sketch along a path sketch into a solid",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "profile_id": {"type": "string"},
+                        "path_id": {"type": "string"},
+                    },
+                    ["session_id", "body_id", "profile_id", "path_id"],
+                ),
+                self.sweep_sketch,
             ),
             (
                 "export_model",
@@ -851,9 +882,33 @@ class FreecadServer(McpToolServer):
             body,
             plane=arguments.get("plane", "XY"),
             elements=arguments.get("elements", []),
+            offset=float(arguments.get("offset", 0.0)),
         )
         obj_id = self._sessions.register_object(session_id, sketch, "sketch", "Sketch")
         return {"obj_id": obj_id, "kind": "sketch", "body_id": body_id}
+
+    async def loft_sketches(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body = self._sessions.get_object(session_id, self._require(arguments, "body_id"))
+        profile = self._sessions.get_object(session_id, self._require(arguments, "profile_id"))
+        section_ids = arguments.get("section_ids") or []
+        if not section_ids:
+            raise ValueError("section_ids is required (at least one section sketch)")
+        sections = [self._sessions.get_object(session_id, s) for s in section_ids]
+        session = self._sessions.get(session_id)
+        loft = self._ops.loft_sketches(session.document, body, profile, sections)
+        obj_id = self._sessions.register_object(session_id, loft, "feature", "Loft")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def sweep_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body = self._sessions.get_object(session_id, self._require(arguments, "body_id"))
+        profile = self._sessions.get_object(session_id, self._require(arguments, "profile_id"))
+        path = self._sessions.get_object(session_id, self._require(arguments, "path_id"))
+        session = self._sessions.get(session_id)
+        sweep = self._ops.sweep_sketch(session.document, body, profile, path)
+        obj_id = self._sessions.register_object(session_id, sweep, "feature", "Sweep")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
 
     async def pad_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
