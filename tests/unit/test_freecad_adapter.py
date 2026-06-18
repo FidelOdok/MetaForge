@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring + 2 features + 4 assembly + 2 parametric (528/527/530/531).
-        assert len(server.tool_ids) == 24
+        # 5 stateless + 8 authoring + 2 features + 4 assembly + 2 inspect + 2 parametric.
+        assert len(server.tool_ids) == 26
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -166,6 +166,8 @@ class TestFreecadServer:
             "freecad.add_part_to_assembly",
             "freecad.add_assembly_joint",
             "freecad.list_joints",
+            "freecad.measure",
+            "freecad.describe_model",
             # parametric (MET-531)
             "freecad.create_variable_set",
             "freecad.set_expression",
@@ -442,6 +444,8 @@ class TestStatefulAuthoring:
         ops.transform_object.return_value = _FakeObj("moved")
         ops.fillet_edges.return_value = _FakeObj("fillet")
         ops.chamfer_edges.return_value = _FakeObj("chamfer")
+        ops.measure.return_value = {"volume_mm3": 1000.0, "edge_count": 12, "face_count": 6}
+        ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -573,6 +577,17 @@ class TestStatefulAuthoring:
         assert s._ops.fillet_edges.call_args[0][2] == 2.0  # type: ignore[attr-defined]
         assert s._ops.fillet_edges.call_args[0][3] is None  # default all edges
         assert s._ops.chamfer_edges.call_args[0][2] == 1.0  # type: ignore[attr-defined]
+
+    async def test_measure_and_describe(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        prim = await s.create_primitive({"session_id": sid, "kind": "box"})
+        m = await s.measure({"session_id": sid, "obj_id": prim["obj_id"]})
+        assert m["edge_count"] == 12 and m["face_count"] == 6
+        d = await s.describe_model({"session_id": sid, "obj_id": prim["obj_id"]})
+        assert d["dimensions_mm"]["x"] == 10
+        # both resolved the session object and forwarded to the geometry layer
+        assert s._ops.measure.called and s._ops.describe_model.called  # type: ignore[attr-defined]
 
     async def test_fillet_requires_radius(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -806,7 +821,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 24
+        assert len(response["result"]["tools"]) == 26
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -853,7 +868,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 24
+        assert response["result"]["tools_available"] == 26
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
