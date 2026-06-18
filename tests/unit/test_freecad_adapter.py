@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 3 skills = 36.
-        assert len(server.tool_ids) == 36
+        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 4 skills = 37.
+        assert len(server.tool_ids) == 37
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -167,6 +167,7 @@ class TestFreecadServer:
             "freecad.generate_enclosure",
             "freecad.fastener_hole",
             "freecad.thread_insert",
+            "freecad.generate_gear",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.shell_solid",
@@ -464,6 +465,7 @@ class TestStatefulAuthoring:
         ops.generate_enclosure.return_value = _FakeObj("enclosure")
         ops.fastener_hole.return_value = _FakeObj("body")
         ops.thread_insert.return_value = _FakeObj("body")
+        ops.generate_gear.return_value = _FakeObj("gear")
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -724,6 +726,22 @@ class TestStatefulAuthoring:
                     "hole_diameter": 4,
                 }
             )
+
+    async def test_generate_gear_skill(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        out = await s.generate_gear({"session_id": sid, "module": 2, "teeth": 20, "thickness": 5})
+        assert out["skill"] == "gear"
+        # Reports the standard gear diameters (pitch = m·z, addendum = m·(z+2)).
+        assert out["pitch_diameter_mm"] == 40.0
+        assert out["addendum_diameter_mm"] == 44.0
+        assert s._ops.generate_gear.call_args[0][1:4] == (2.0, 20, 5.0)  # type: ignore[attr-defined]
+
+    async def test_generate_gear_requires_params(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        with pytest.raises(ValueError, match="teeth is required"):
+            await s.generate_gear({"session_id": sid, "module": 2, "thickness": 5})
 
     async def test_execute_code_forwards_and_reports(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -993,7 +1011,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 36
+        assert len(response["result"]["tools"]) == 37
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1040,7 +1058,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 36
+        assert response["result"]["tools_available"] == 37
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
