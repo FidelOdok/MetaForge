@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless file-based + 8 stateful authoring (MET-528) + 4 assembly (MET-530).
-        assert len(server.tool_ids) == 17
+        # 5 stateless + 8 authoring (MET-528) + 4 assembly (MET-530) + 2 parametric (MET-531).
+        assert len(server.tool_ids) == 19
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -161,6 +161,9 @@ class TestFreecadServer:
             "freecad.add_part_to_assembly",
             "freecad.add_assembly_joint",
             "freecad.list_joints",
+            # parametric (MET-531)
+            "freecad.create_variable_set",
+            "freecad.set_expression",
         }
         assert set(server.tool_ids) == expected
 
@@ -623,6 +626,75 @@ class TestAssemblyAuthoring:
         assert joint_obj["metadata"]["type"] == "fixed"
 
 
+class TestParametric:
+    """VarSet + set_expression (MET-531) with FreeCAD geometry mocked out."""
+
+    @pytest.fixture()
+    def server(self) -> FreecadServer:
+        from unittest.mock import MagicMock
+
+        from tool_registry.tools.freecad.session import FreecadSessionStore
+
+        s = FreecadServer()
+        s._sessions = FreecadSessionStore(
+            doc_factory=lambda name: MagicMock(name=f"doc:{name}"),
+            doc_closer=lambda doc: None,
+        )
+        ops = MagicMock()
+        ops.create_primitive.return_value = _FakeObj("box")
+        ops.create_variable_set.return_value = _FakeObj("varset")
+        s._ops = ops  # type: ignore[assignment]
+        return s
+
+    async def test_create_variable_set_registers_and_forwards(self, server: FreecadServer) -> None:
+        s = server
+        sid = (await s.open_session({}))["session_id"]
+        out = await s.create_variable_set(
+            {
+                "session_id": sid,
+                "name": "Params",
+                "variables": {"width": {"value": 40, "type": "length"}, "n": 3},
+            }
+        )
+        assert out["kind"] == "varset"
+        assert set(out["variables"]) == {"width", "n"}
+        # Variables reached the geometry layer.
+        call = s._ops.create_variable_set.call_args  # type: ignore[attr-defined]
+        assert call[0][1] == "Params"
+        assert "width" in call[0][2]
+
+    async def test_create_variable_set_requires_variables(self, server: FreecadServer) -> None:
+        sid = (await server.open_session({}))["session_id"]
+        with pytest.raises(ValueError, match="variables is required"):
+            await server.create_variable_set({"session_id": sid, "variables": {}})
+
+    async def test_set_expression_binds_property(self, server: FreecadServer) -> None:
+        s = server
+        sid = (await s.open_session({}))["session_id"]
+        prim = await s.create_primitive({"session_id": sid, "kind": "box"})
+        out = await s.set_expression(
+            {
+                "session_id": sid,
+                "obj_id": prim["obj_id"],
+                "property": "Length",
+                "expression": "Params.width * 2",
+            }
+        )
+        assert out["property"] == "Length"
+        assert out["expression"] == "Params.width * 2"
+        call = s._ops.set_expression.call_args  # type: ignore[attr-defined]
+        assert call[0][2] == "Length"
+        assert call[0][3] == "Params.width * 2"
+
+    async def test_set_expression_requires_fields(self, server: FreecadServer) -> None:
+        sid = (await server.open_session({}))["session_id"]
+        prim = await server.create_primitive({"session_id": sid, "kind": "box"})
+        with pytest.raises(ValueError, match="property is required"):
+            await server.set_expression(
+                {"session_id": sid, "obj_id": prim["obj_id"], "expression": "x"}
+            )
+
+
 def _make_jsonrpc(
     method: str,
     params: dict[str, Any] | None = None,
@@ -644,7 +716,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 17
+        assert len(response["result"]["tools"]) == 19
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -691,7 +763,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 17
+        assert response["result"]["tools_available"] == 19
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

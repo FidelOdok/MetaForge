@@ -650,3 +650,42 @@ class FreecadOperations:
         assembly.addObject(part)
         document.recompute()
         return part
+
+    # ------------------------------------------------------------------
+    # Parametric modelling (MET-531): a VarSet of named variables + property
+    # expressions that bind model dimensions to them, so a drag/Apply can
+    # re-parameterise and re-solve instead of just suggesting a number.
+    # ------------------------------------------------------------------
+
+    _PROP_TYPES: dict[str, str] = {
+        "length": "App::PropertyLength",
+        "float": "App::PropertyFloat",
+        "int": "App::PropertyInteger",
+        "angle": "App::PropertyAngle",
+    }
+
+    def create_variable_set(self, document: Any, name: str, variables: dict[str, Any]) -> Any:
+        """Create an ``App::VarSet`` of named parametric variables.
+
+        ``variables`` maps ``var_name -> {"value": <num>, "type": length|float|int|angle}``
+        (a bare number is treated as a float).
+        """
+        self._require_freecad()
+        varset = document.addObject("App::VarSet", name or "Params")
+        for var_name, spec in variables.items():
+            if isinstance(spec, dict):
+                value = spec.get("value", 0.0)
+                vtype = str(spec.get("type", "float")).lower()
+            else:
+                value, vtype = spec, "float"
+            prop_type = self._PROP_TYPES.get(vtype, "App::PropertyFloat")
+            varset.addProperty(prop_type, var_name, "Variables", f"{var_name} parameter")
+            setattr(varset, var_name, value)
+        document.recompute()
+        return varset
+
+    def set_expression(self, document: Any, obj: Any, property_path: str, expression: str) -> None:
+        """Bind an object property to a FreeCAD expression (parametric link)."""
+        self._require_freecad()
+        obj.setExpression(property_path, expression)
+        document.recompute()
