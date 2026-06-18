@@ -45,6 +45,8 @@ class FreecadServer(McpToolServer):
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
     list_joints.
+
+    Parametric (MET-531): create_variable_set, set_expression.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -618,6 +620,35 @@ class FreecadServer(McpToolServer):
                 obj_schema({"session_id": sid}, ["session_id"]),
                 self.list_joints,
             ),
+            (
+                "create_variable_set",
+                "Create a VarSet of named parametric variables in a session",
+                "cad_parametric",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "name": {"type": "string"},
+                        "variables": {"type": "object"},
+                    },
+                    ["session_id", "variables"],
+                ),
+                self.create_variable_set,
+            ),
+            (
+                "set_expression",
+                "Bind an object property to an expression (parametric link)",
+                "cad_parametric",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "obj_id": {"type": "string"},
+                        "property": {"type": "string"},
+                        "expression": {"type": "string"},
+                    },
+                    ["session_id", "obj_id", "property", "expression"],
+                ),
+                self.set_expression,
+            ),
         ]
 
         for name, description, capability, input_schema, handler in specs:
@@ -770,6 +801,31 @@ class FreecadServer(McpToolServer):
     async def list_joints(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
         return {"joints": self._sessions.joints(session_id)}
+
+    # ---- parametric modelling (MET-531) -------------------------------
+
+    async def create_variable_set(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        variables = arguments.get("variables")
+        if not isinstance(variables, dict) or not variables:
+            raise ValueError("variables is required (a non-empty object)")
+        name = arguments.get("name", "Params")
+        session = self._sessions.get(session_id)
+        varset = self._ops.create_variable_set(session.document, name, variables)
+        obj_id = self._sessions.register_object(
+            session_id, varset, "varset", name, metadata={"variables": variables}
+        )
+        return {"obj_id": obj_id, "kind": "varset", "variables": list(variables)}
+
+    async def set_expression(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj_id = self._require(arguments, "obj_id")
+        prop = self._require(arguments, "property")
+        expression = self._require(arguments, "expression")
+        session = self._sessions.get(session_id)
+        obj = self._sessions.get_object(session_id, obj_id)
+        self._ops.set_expression(session.document, obj, prop, expression)
+        return {"obj_id": obj_id, "property": prop, "expression": expression}
 
     @staticmethod
     def _require(arguments: dict[str, Any], key: str) -> str:
