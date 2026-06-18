@@ -1007,6 +1007,46 @@ class FreecadOperations:
         self.pad_sketch(document, body, sketch, height)
         return self.shell_solid(document, body, wall_thickness)
 
+    def fastener_hole(
+        self,
+        document: Any,
+        body: Any,
+        x: float,
+        y: float,
+        diameter: float,
+        depth: float | None = None,
+        counterbore_diameter: float = 0.0,
+        counterbore_depth: float = 0.0,
+    ) -> Any:
+        """Drill a (optionally counterbored) fastener hole into a body's top face.
+
+        The ``/fastener-hole`` skill: pockets a clearance hole at (x, y) from the
+        top face down ``depth`` (default: through), plus an optional counterbore.
+        Modifies and returns the ``body``.
+        """
+        self._require_partdesign()
+        top_z = self._tip(body).Shape.BoundBox.ZMax
+        through = top_z if depth is None else float(depth)
+        clr = self.create_sketch(
+            document,
+            body,
+            "XY",
+            [{"type": "circle", "cx": x, "cy": y, "r": diameter / 2.0}],
+            offset=top_z,
+        )
+        self.pocket_sketch(document, body, clr, through)
+        if counterbore_diameter and counterbore_depth:
+            cb = self.create_sketch(
+                document,
+                body,
+                "XY",
+                [{"type": "circle", "cx": x, "cy": y, "r": counterbore_diameter / 2.0}],
+                offset=top_z,
+            )
+            self.pocket_sketch(document, body, cb, float(counterbore_depth))
+        document.recompute()
+        return body
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
