@@ -51,3 +51,77 @@ class TestSolveStream:
             r = ws.receive_json()  # reply is for the delta tick
             assert r["type"] == "solve"
             assert [t["group_name"] for t in r["transforms"]] == ["g"]  # no follower
+
+
+class TestJointAwareSolveStream:
+    """MET-530: when joints are supplied the solver constrains the dragged
+    follower to its joint's DOF and streams a `dof` hint."""
+
+    def test_slider_clamps_drag_to_axis(self) -> None:
+        with _client().websocket_connect("/v1/constraint/solve/stream") as ws:
+            ws.receive_json()  # session
+            ws.send_json(
+                {
+                    "group_name": "carriage",
+                    "joints": [
+                        {
+                            "name": "rail",
+                            "type": "slider",
+                            "base": "frame",
+                            "follower": "carriage",
+                            "axis": [1, 0, 0],
+                        }
+                    ],
+                }
+            )
+            ws.send_json({"delta": [10, 7, 3]})  # off-axis drag
+            r = ws.receive_json()
+            t = next(t for t in r["transforms"] if t["group_name"] == "carriage")
+            # Clamped to the X slide axis.
+            assert t["delta"] == [10.0, 0.0, 0.0]
+            assert r["dof"]["translation_axes"] == [[1.0, 0.0, 0.0]]
+            assert r["dof"]["rotation_axes"] == []
+            # A joint-status constraint is reported.
+            assert any(c.get("type") == "joint" for c in r["constraints"])
+
+    def test_revolute_produces_rotation_with_grab_point(self) -> None:
+        with _client().websocket_connect("/v1/constraint/solve/stream") as ws:
+            ws.receive_json()
+            ws.send_json(
+                {
+                    "group_name": "arm",
+                    "joints": [
+                        {
+                            "name": "hinge",
+                            "type": "revolute",
+                            "base": "body",
+                            "follower": "arm",
+                            "axis": [0, 0, 1],
+                            "anchor": [0, 0, 0],
+                        }
+                    ],
+                }
+            )
+            ws.send_json({"delta": [0, 1, 0], "grab_point": [10, 0, 0]})
+            r = ws.receive_json()
+            t = next(t for t in r["transforms"] if t["group_name"] == "arm")
+            assert "rotation" in t
+            assert t["rotation"]["angle_deg"] > 0
+            assert r["dof"]["rotation_axes"] == [[0.0, 0.0, 1.0]]
+
+    def test_unjointed_group_moves_freely_no_dof(self) -> None:
+        with _client().websocket_connect("/v1/constraint/solve/stream") as ws:
+            ws.receive_json()
+            ws.send_json(
+                {
+                    "group_name": "loose",
+                    "joints": [
+                        {"type": "slider", "base": "a", "follower": "other", "axis": [1, 0, 0]}
+                    ],
+                }
+            )
+            ws.send_json({"delta": [4, 5, 6]})
+            r = ws.receive_json()
+            t = next(t for t in r["transforms"] if t["group_name"] == "loose")
+            assert t["delta"] == [4.0, 5.0, 6.0]  # free move
+            assert "dof" not in r  # no joint governs the dragged group
