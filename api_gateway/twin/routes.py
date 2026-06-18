@@ -207,40 +207,19 @@ async def get_node_model(
         if wp is None:
             raise HTTPException(status_code=404, detail="Node not found")
 
-        # Find the STEP file in the workspace
-        file_path = wp.file_path
-        if not file_path:
-            # Try to find a STEP file matching the WP name pattern
-            candidates = list(_WORKSPACE_DIR.glob("*.step"))
-            if not candidates:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No STEP file found for this work product",
-                )
-            # Use the most recently modified STEP file
-            candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            file_path = str(candidates[0])
+        # Resolve the source blob durably: MinIO first (the architecture's
+        # source of truth, survives gateway container recreation), then the
+        # local/workspace file. Previously this read only `wp.file_path`, so a
+        # recreated gateway that lost its ephemeral import storage produced a
+        # 404 / empty model even though the blob was safe in MinIO (MET-522/489).
+        content, filename = _resolve_blob(wp)
+        span.set_attribute("model.filename", filename)
 
-        step_path = Path(file_path)
-        if not step_path.is_absolute():
-            step_path = _WORKSPACE_DIR / step_path
-
-        if not step_path.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"STEP file not found: {step_path.name}",
-            )
-
-        span.set_attribute("step.file", str(step_path))
-        file_bytes = step_path.read_bytes()
-
-        service = ConversionService()
-        result = service.convert(file_bytes, step_path.name, quality)
-
+        result = ConversionService().convert(content, filename, quality)
         logger.info(
             "node_model_converted",
             node_id=node_id,
-            step_file=step_path.name,
+            filename=filename,
             cached=result.get("cached", False),
         )
         return result
