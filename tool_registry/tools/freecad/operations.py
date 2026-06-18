@@ -721,6 +721,71 @@ class FreecadOperations:
         document.recompute()
         return chamfer
 
+    # ------------------------------------------------------------------
+    # Patterns + mirror (MET-527): replicate a feature across a body. The
+    # direction/axis/plane reference the body's origin features (stable across
+    # versions). Validated headless against FreeCAD 1.0.0.
+    # ------------------------------------------------------------------
+
+    def _origin_feature(self, body: Any, name: str) -> Any:
+        """Return a body origin feature (e.g. X_Axis / Z_Axis / YZ_Plane)."""
+        feat = next((f for f in body.Origin.OriginFeatures if f.Name == name), None)
+        if feat is None:
+            raise ValueError(f"origin feature {name!r} not found on body")
+        return feat
+
+    def linear_pattern(
+        self,
+        document: Any,
+        body: Any,
+        feature: Any,
+        count: int,
+        spacing: float,
+        axis: str = "X",
+    ) -> Any:
+        """Replicate ``feature`` ``count`` times along an axis (X/Y/Z), ``spacing`` apart."""
+        self._require_partdesign()
+        axis_name = {"X": "X_Axis", "Y": "Y_Axis", "Z": "Z_Axis"}.get(axis.upper(), "X_Axis")
+        pat = body.newObject("PartDesign::LinearPattern", "LinearPattern")
+        pat.Originals = [feature]
+        pat.Direction = (self._origin_feature(body, axis_name), [""])
+        pat.Length = float(spacing) * max(int(count) - 1, 1)
+        pat.Occurrences = int(count)
+        document.recompute()
+        return pat
+
+    def polar_pattern(
+        self,
+        document: Any,
+        body: Any,
+        feature: Any,
+        count: int,
+        angle: float = 360.0,
+        axis: str = "Z",
+    ) -> Any:
+        """Replicate ``feature`` ``count`` times around an axis (X/Y/Z) over ``angle``."""
+        self._require_partdesign()
+        axis_name = {"X": "X_Axis", "Y": "Y_Axis", "Z": "Z_Axis"}.get(axis.upper(), "Z_Axis")
+        pat = body.newObject("PartDesign::PolarPattern", "PolarPattern")
+        pat.Originals = [feature]
+        pat.Axis = (self._origin_feature(body, axis_name), [""])
+        pat.Angle = float(angle)
+        pat.Occurrences = int(count)
+        document.recompute()
+        return pat
+
+    def mirror_feature(self, document: Any, body: Any, feature: Any, plane: str = "YZ") -> Any:
+        """Mirror ``feature`` across a body origin plane (XY/XZ/YZ)."""
+        self._require_partdesign()
+        plane_name = {"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}.get(
+            plane.upper(), "YZ_Plane"
+        )
+        mir = body.newObject("PartDesign::Mirrored", "Mirrored")
+        mir.Originals = [feature]
+        mir.MirrorPlane = (self._origin_feature(body, plane_name), [""])
+        document.recompute()
+        return mir
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()

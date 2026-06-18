@@ -41,7 +41,8 @@ class FreecadServer(McpToolServer):
     Stateful authoring tools (operate on a live session document, MET-528/527):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
-    transform_object, fillet_edges, chamfer_edges, export_model.
+    transform_object, fillet_edges, chamfer_edges, linear_pattern, polar_pattern,
+    mirror_feature, export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -640,6 +641,55 @@ class FreecadServer(McpToolServer):
                 self.chamfer_edges,
             ),
             (
+                "linear_pattern",
+                "Replicate a feature N times along an axis (X/Y/Z)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "feature_id": {"type": "string"},
+                        "count": {"type": "integer"},
+                        "spacing": {"type": "number"},
+                        "axis": {"type": "string", "enum": ["X", "Y", "Z"]},
+                    },
+                    ["session_id", "body_id", "feature_id", "count", "spacing"],
+                ),
+                self.linear_pattern,
+            ),
+            (
+                "polar_pattern",
+                "Replicate a feature N times around an axis (X/Y/Z)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "feature_id": {"type": "string"},
+                        "count": {"type": "integer"},
+                        "angle": {"type": "number"},
+                        "axis": {"type": "string", "enum": ["X", "Y", "Z"]},
+                    },
+                    ["session_id", "body_id", "feature_id", "count"],
+                ),
+                self.polar_pattern,
+            ),
+            (
+                "mirror_feature",
+                "Mirror a feature across a body plane (XY/XZ/YZ)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "feature_id": {"type": "string"},
+                        "plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
+                    },
+                    ["session_id", "body_id", "feature_id"],
+                ),
+                self.mirror_feature,
+            ),
+            (
                 "export_model",
                 "Export a session object to STEP and return the bytes (base64)",
                 "cad_export",
@@ -902,6 +952,56 @@ class FreecadServer(McpToolServer):
 
     async def chamfer_edges(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return await self._dress_up(arguments, "chamfer_edges", "size", "edges")
+
+    async def linear_pattern(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body = self._sessions.get_object(session_id, self._require(arguments, "body_id"))
+        feature = self._sessions.get_object(session_id, self._require(arguments, "feature_id"))
+        count = arguments.get("count")
+        spacing = arguments.get("spacing")
+        if count is None or spacing is None:
+            raise ValueError("count and spacing are required")
+        session = self._sessions.get(session_id)
+        pat = self._ops.linear_pattern(
+            session.document,
+            body,
+            feature,
+            int(count),
+            float(spacing),
+            axis=str(arguments.get("axis", "X")),
+        )
+        obj_id = self._sessions.register_object(session_id, pat, "feature", "LinearPattern")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def polar_pattern(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body = self._sessions.get_object(session_id, self._require(arguments, "body_id"))
+        feature = self._sessions.get_object(session_id, self._require(arguments, "feature_id"))
+        count = arguments.get("count")
+        if count is None:
+            raise ValueError("count is required")
+        session = self._sessions.get(session_id)
+        pat = self._ops.polar_pattern(
+            session.document,
+            body,
+            feature,
+            int(count),
+            angle=float(arguments.get("angle", 360.0)),
+            axis=str(arguments.get("axis", "Z")),
+        )
+        obj_id = self._sessions.register_object(session_id, pat, "feature", "PolarPattern")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def mirror_feature(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body = self._sessions.get_object(session_id, self._require(arguments, "body_id"))
+        feature = self._sessions.get_object(session_id, self._require(arguments, "feature_id"))
+        session = self._sessions.get(session_id)
+        mir = self._ops.mirror_feature(
+            session.document, body, feature, plane=str(arguments.get("plane", "YZ"))
+        )
+        obj_id = self._sessions.register_object(session_id, mir, "feature", "Mirrored")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

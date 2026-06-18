@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 authoring + 2 features + 4 assembly + 2 inspect + 2 parametric.
-        assert len(server.tool_ids) == 26
+        # 5 stateless + 8 authoring + 5 features + 4 assembly + 2 inspect + 2 parametric.
+        assert len(server.tool_ids) == 29
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -158,6 +158,9 @@ class TestFreecadServer:
             "freecad.pocket_sketch",
             "freecad.revolve_sketch",
             "freecad.transform_object",
+            "freecad.linear_pattern",
+            "freecad.polar_pattern",
+            "freecad.mirror_feature",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.export_model",
@@ -444,6 +447,9 @@ class TestStatefulAuthoring:
         ops.transform_object.return_value = _FakeObj("moved")
         ops.fillet_edges.return_value = _FakeObj("fillet")
         ops.chamfer_edges.return_value = _FakeObj("chamfer")
+        ops.linear_pattern.return_value = _FakeObj("lpat")
+        ops.polar_pattern.return_value = _FakeObj("ppat")
+        ops.mirror_feature.return_value = _FakeObj("mirror")
         ops.measure.return_value = {"volume_mm3": 1000.0, "edge_count": 12, "face_count": 6}
         ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
         s._ops = ops  # type: ignore[assignment]
@@ -577,6 +583,56 @@ class TestStatefulAuthoring:
         assert s._ops.fillet_edges.call_args[0][2] == 2.0  # type: ignore[attr-defined]
         assert s._ops.fillet_edges.call_args[0][3] is None  # default all edges
         assert s._ops.chamfer_edges.call_args[0][2] == 1.0  # type: ignore[attr-defined]
+
+    async def test_patterns_and_mirror_register_features(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        feat = await s.create_primitive({"session_id": sid, "kind": "box"})
+        lp = await s.linear_pattern(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "feature_id": feat["obj_id"],
+                "count": 3,
+                "spacing": 10,
+                "axis": "Y",
+            }
+        )
+        pp = await s.polar_pattern(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "feature_id": feat["obj_id"],
+                "count": 6,
+            }
+        )
+        mr = await s.mirror_feature(
+            {"session_id": sid, "body_id": body["obj_id"], "feature_id": feat["obj_id"]}
+        )
+        assert lp["kind"] == pp["kind"] == mr["kind"] == "feature"
+        assert s._ops.linear_pattern.call_args[0][3] == 3  # count  # type: ignore[attr-defined]
+        assert s._ops.linear_pattern.call_args[1]["axis"] == "Y"  # type: ignore[attr-defined]
+        assert s._ops.polar_pattern.call_args[0][3] == 6  # type: ignore[attr-defined]
+
+    async def test_linear_pattern_requires_count_spacing(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        feat = await s.create_primitive({"session_id": sid, "kind": "box"})
+        with pytest.raises(ValueError, match="count and spacing"):
+            await s.linear_pattern(
+                {
+                    "session_id": sid,
+                    "body_id": body["obj_id"],
+                    "feature_id": feat["obj_id"],
+                    "count": 3,
+                }
+            )
 
     async def test_measure_and_describe(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
@@ -821,7 +877,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 26
+        assert len(response["result"]["tools"]) == 29
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -868,7 +924,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 26
+        assert response["result"]["tools_available"] == 29
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
