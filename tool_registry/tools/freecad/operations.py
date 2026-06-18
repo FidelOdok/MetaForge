@@ -1085,6 +1085,38 @@ class FreecadOperations:
         document.recompute()
         return body
 
+    def lattice_perforation(
+        self,
+        document: Any,
+        body: Any,
+        cell_size: float,
+        hole_diameter: float,
+        margin: float = 5.0,
+    ) -> Any:
+        """Lighten a body's top face with a square grid of through-holes.
+
+        The ``/lattice`` skill (a grid-perforation lightening pattern — not a
+        gyroid implicit surface, which isn't reliably headless). Pockets an N×M
+        grid of circles through the body. Modifies and returns the body.
+        """
+        self._require_partdesign()
+        bb = self._tip(body).Shape.BoundBox
+        top_z = bb.ZMax
+        elements: list[dict[str, Any]] = []
+        x = bb.XMin + margin
+        while x <= bb.XMax - margin:
+            y = bb.YMin + margin
+            while y <= bb.YMax - margin:
+                elements.append({"type": "circle", "cx": x, "cy": y, "r": hole_diameter / 2.0})
+                y += cell_size
+            x += cell_size
+        if not elements:
+            raise ValueError("no lattice cells fit — reduce cell_size/margin")
+        sketch = self.create_sketch(document, body, "XY", elements, offset=top_z)
+        self.pocket_sketch(document, body, sketch, bb.ZLength)
+        document.recompute()
+        return body, len(elements)
+
     def generate_gear(
         self,
         document: Any,

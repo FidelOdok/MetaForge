@@ -52,7 +52,7 @@ class FreecadServer(McpToolServer):
     Parametric (MET-531): create_variable_set, set_expression.
 
     Skills (composite generators, MET-527/531): generate_enclosure, fastener_hole,
-    thread_insert, generate_gear.
+    thread_insert, generate_gear, lattice_perforation.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
@@ -819,6 +819,22 @@ class FreecadServer(McpToolServer):
                 self.generate_gear,
             ),
             (
+                "lattice_perforation",
+                "Skill: lighten a body's top with a square grid of through-holes",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "cell_size": {"type": "number"},
+                        "hole_diameter": {"type": "number"},
+                        "margin": {"type": "number"},
+                    },
+                    ["session_id", "body_id", "cell_size", "hole_diameter"],
+                ),
+                self.lattice_perforation,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1260,6 +1276,28 @@ class FreecadServer(McpToolServer):
             "pitch_diameter_mm": round(module * teeth, 3),
             "addendum_diameter_mm": round(module * (teeth + 2), 3),
             **self._ops.shape_props(gear),
+        }
+
+    async def lattice_perforation(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        for k in ("cell_size", "hole_diameter"):
+            if arguments.get(k) is None:
+                raise ValueError(f"{k} is required")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        _, cell_count = self._ops.lattice_perforation(
+            session.document,
+            body,
+            float(arguments["cell_size"]),
+            float(arguments["hole_diameter"]),
+            float(arguments.get("margin", 5.0)),
+        )
+        return {
+            "body_id": body_id,
+            "skill": "lattice",
+            "cell_count": cell_count,
+            **self._ops.shape_props(body),
         }
 
     async def execute_code(self, arguments: dict[str, Any]) -> dict[str, Any]:

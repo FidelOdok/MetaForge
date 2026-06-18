@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 4 skills = 37.
-        assert len(server.tool_ids) == 37
+        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 5 skills = 38.
+        assert len(server.tool_ids) == 38
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -168,6 +168,7 @@ class TestFreecadServer:
             "freecad.fastener_hole",
             "freecad.thread_insert",
             "freecad.generate_gear",
+            "freecad.lattice_perforation",
             "freecad.fillet_edges",
             "freecad.chamfer_edges",
             "freecad.shell_solid",
@@ -466,6 +467,7 @@ class TestStatefulAuthoring:
         ops.fastener_hole.return_value = _FakeObj("body")
         ops.thread_insert.return_value = _FakeObj("body")
         ops.generate_gear.return_value = _FakeObj("gear")
+        ops.lattice_perforation.return_value = (_FakeObj("body"), 9)
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -743,6 +745,16 @@ class TestStatefulAuthoring:
         with pytest.raises(ValueError, match="teeth is required"):
             await s.generate_gear({"session_id": sid, "module": 2, "thickness": 5})
 
+    async def test_lattice_perforation_skill(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        body = await s.create_body({"session_id": sid})
+        out = await s.lattice_perforation(
+            {"session_id": sid, "body_id": body["obj_id"], "cell_size": 10, "hole_diameter": 5}
+        )
+        assert out["skill"] == "lattice" and out["cell_count"] == 9
+        assert s._ops.lattice_perforation.call_args[0][2:4] == (10.0, 5.0)  # type: ignore[attr-defined]
+
     async def test_execute_code_forwards_and_reports(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
         sid = (await s.open_session({}))["session_id"]
@@ -1011,7 +1023,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 37
+        assert len(response["result"]["tools"]) == 38
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1058,7 +1070,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 37
+        assert response["result"]["tools_available"] == 38
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
