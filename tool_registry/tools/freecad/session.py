@@ -77,6 +77,7 @@ class ObjectEntry:
     name: str
     obj: Any  # the live FreeCAD object — opaque to the store
     order: int
+    metadata: dict[str, Any] = field(default_factory=dict)  # e.g. joint params (MET-530)
 
 
 @dataclass
@@ -97,10 +98,25 @@ class Session:
             "name": self.name,
             "object_count": len(self.objects),
             "objects": [
-                {"obj_id": e.obj_id, "kind": e.kind, "name": e.name, "order": e.order}
+                {
+                    "obj_id": e.obj_id,
+                    "kind": e.kind,
+                    "name": e.name,
+                    "order": e.order,
+                    **({"metadata": e.metadata} if e.metadata else {}),
+                }
                 for e in sorted(self.objects.values(), key=lambda e: e.order)
             ],
         }
+
+    def joints(self) -> list[dict[str, Any]]:
+        """Return assembly joints in the kinematics ``Joint.from_dict`` shape
+        (so the live solver / dashboard can consume them directly)."""
+        return [
+            e.metadata
+            for e in sorted(self.objects.values(), key=lambda e: e.order)
+            if e.kind == "joint" and e.metadata
+        ]
 
 
 def _default_doc_factory(name: str) -> Any:
@@ -204,8 +220,19 @@ class FreecadSessionStore:
 
     # ---- object registry ----------------------------------------------
 
-    def register_object(self, session_id: str, obj: Any, kind: str, name: str = "") -> str:
-        """Register a newly-authored object and return its stable obj_id."""
+    def register_object(
+        self,
+        session_id: str,
+        obj: Any,
+        kind: str,
+        name: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Register a newly-authored object and return its stable obj_id.
+
+        ``metadata`` carries kind-specific structured data — e.g. a joint's
+        ``{type, axis, anchor, base, follower}`` for the live solver (MET-530).
+        """
         session = self.get(session_id)
         with self._lock:
             session._counter += 1
@@ -216,17 +243,26 @@ class FreecadSessionStore:
                 name=name or obj_id,
                 obj=obj,
                 order=session._counter,
+                metadata=metadata or {},
             )
         logger.info("freecad_object_registered", session_id=session_id, obj_id=obj_id, kind=kind)
         return obj_id
 
     def get_object(self, session_id: str, obj_id: str) -> Any:
         """Return the live FreeCAD object for an obj_id. Raises if missing."""
+        return self.get_entry(session_id, obj_id).obj
+
+    def get_entry(self, session_id: str, obj_id: str) -> ObjectEntry:
+        """Return the full registry entry (obj + metadata) for an obj_id."""
         session = self.get(session_id)
         entry = session.objects.get(obj_id)
         if entry is None:
             raise ObjectNotFoundError(session_id, obj_id)
-        return entry.obj
+        return entry
+
+    def joints(self, session_id: str) -> list[dict[str, Any]]:
+        """Joints authored in the session, in the kinematics ``Joint`` shape."""
+        return self.get(session_id).joints()
 
     # ---- internals ----------------------------------------------------
 

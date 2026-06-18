@@ -136,8 +136,8 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless file-based + 8 stateful authoring (MET-528).
-        assert len(server.tool_ids) == 13
+        # 5 stateless file-based + 8 stateful authoring (MET-528) + 4 assembly (MET-530).
+        assert len(server.tool_ids) == 17
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -156,6 +156,11 @@ class TestFreecadServer:
             "freecad.create_sketch",
             "freecad.pad_sketch",
             "freecad.export_model",
+            # assembly authoring (MET-530)
+            "freecad.create_assembly",
+            "freecad.add_part_to_assembly",
+            "freecad.add_assembly_joint",
+            "freecad.list_joints",
         }
         assert set(server.tool_ids) == expected
 
@@ -422,6 +427,8 @@ class TestStatefulAuthoring:
             "bounding_box": {"min_x": 0, "max_x": 10},
         }
         ops.export_object_step_bytes.return_value = b"ISO-10303-21;\nfake-step\n"
+        ops.create_assembly.return_value = _FakeObj("assembly")
+        ops.add_part_to_assembly.return_value = _FakeObj("part")
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -501,6 +508,121 @@ class TestStatefulAuthoring:
         assert (await s.close_session({"session_id": sid}))["closed"] is False
 
 
+class TestAssemblyAuthoring:
+    """Assembly + joint authoring (MET-530) — verifies joint metadata is recorded
+    in the shape the live solver consumes, with FreeCAD geometry mocked out."""
+
+    @pytest.fixture()
+    def server(self) -> FreecadServer:
+        from unittest.mock import MagicMock
+
+        from tool_registry.tools.freecad.session import FreecadSessionStore
+
+        s = FreecadServer()
+        s._sessions = FreecadSessionStore(
+            doc_factory=lambda name: MagicMock(name=f"doc:{name}"),
+            doc_closer=lambda doc: None,
+        )
+        ops = MagicMock()
+        ops.create_primitive.return_value = _FakeObj("prim")
+        ops.create_assembly.return_value = _FakeObj("assembly")
+        ops.add_part_to_assembly.return_value = _FakeObj("part")
+        ops.shape_props.return_value = {"volume_mm3": 1.0}
+        s._ops = ops  # type: ignore[assignment]
+        return s
+
+    async def _two_parts(self, s: FreecadServer, sid: str) -> tuple[str, str, str]:
+        asm = (await s.create_assembly({"session_id": sid, "name": "robot"}))["obj_id"]
+        base = (await s.create_primitive({"session_id": sid, "kind": "box"}))["obj_id"]
+        arm = (await s.create_primitive({"session_id": sid, "kind": "cylinder"}))["obj_id"]
+        await s.add_part_to_assembly(
+            {"session_id": sid, "assembly_id": asm, "part_id": base, "position": [0, 0, 0]}
+        )
+        await s.add_part_to_assembly({"session_id": sid, "assembly_id": asm, "part_id": arm})
+        return asm, base, arm
+
+    async def test_add_joint_records_solver_shape(self, server: FreecadServer) -> None:
+        s = server
+        sid = (await s.open_session({}))["session_id"]
+        asm, base, arm = await self._two_parts(s, sid)
+
+        out = await s.add_assembly_joint(
+            {
+                "session_id": sid,
+                "assembly_id": asm,
+                "base_id": base,
+                "follower_id": arm,
+                "type": "Revolute",
+                "axis": [0, 0, 1],
+                "anchor": [5, 0, 0],
+            }
+        )
+        joint = out["joint"]
+        assert joint["type"] == "revolute"  # normalised
+        # base/follower resolved to the part names (the viewer's group names).
+        assert joint["base"] == "box"
+        assert joint["follower"] == "cylinder"
+        assert joint["axis"] == [0.0, 0.0, 1.0]
+        assert joint["anchor"] == [5.0, 0.0, 0.0]
+
+    async def test_list_joints_round_trips_through_kinematics(self, server: FreecadServer) -> None:
+        # The keystone: what add_assembly_joint emits must be consumable by the
+        # merged live solver (api_gateway.constraint.kinematics).
+        from api_gateway.constraint.kinematics import Joint, solve_joint
+
+        s = server
+        sid = (await s.open_session({}))["session_id"]
+        asm, base, arm = await self._two_parts(s, sid)
+        await s.add_assembly_joint(
+            {
+                "session_id": sid,
+                "assembly_id": asm,
+                "base_id": base,
+                "follower_id": arm,
+                "type": "slider",
+                "axis": [1, 0, 0],
+            }
+        )
+        listed = await s.list_joints({"session_id": sid})
+        assert len(listed["joints"]) == 1
+        # Feed it straight into the solver — no translation needed.
+        joint = Joint.from_dict(listed["joints"][0])
+        sol = solve_joint(joint, (10.0, 7.0, 0.0))
+        assert sol.delta == pytest.approx((10.0, 0.0, 0.0))  # slider clamps to X
+
+    async def test_unknown_joint_type_raises(self, server: FreecadServer) -> None:
+        s = server
+        sid = (await s.open_session({}))["session_id"]
+        asm, base, arm = await self._two_parts(s, sid)
+        with pytest.raises(ValueError, match="unknown joint type"):
+            await s.add_assembly_joint(
+                {
+                    "session_id": sid,
+                    "assembly_id": asm,
+                    "base_id": base,
+                    "follower_id": arm,
+                    "type": "weld",
+                }
+            )
+
+    async def test_describe_session_surfaces_joint_metadata(self, server: FreecadServer) -> None:
+        s = server
+        sid = (await s.open_session({}))["session_id"]
+        asm, base, arm = await self._two_parts(s, sid)
+        await s.add_assembly_joint(
+            {
+                "session_id": sid,
+                "assembly_id": asm,
+                "base_id": base,
+                "follower_id": arm,
+                "type": "fixed",
+            }
+        )
+        desc = await s.describe_session({"session_id": sid})
+        joint_obj = next(o for o in desc["objects"] if o["kind"] == "joint")
+        assert joint_obj["metadata"]["type"] == "fixed"
+
+
 def _make_jsonrpc(
     method: str,
     params: dict[str, Any] | None = None,
@@ -522,7 +644,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 13
+        assert len(response["result"]["tools"]) == 17
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -569,7 +691,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 13
+        assert response["result"]["tools_available"] == 17
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
