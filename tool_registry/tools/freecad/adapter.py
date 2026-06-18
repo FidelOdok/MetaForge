@@ -41,7 +41,7 @@ class FreecadServer(McpToolServer):
     Stateful authoring tools (operate on a live session document, MET-528/527):
     open_session, close_session, describe_session, create_primitive,
     create_body, create_sketch, pad_sketch, pocket_sketch, revolve_sketch,
-    transform_object, fillet_edges, chamfer_edges, shell_solid, export_model.
+    transform_object, fillet_edges, chamfer_edges, export_model.
 
     Assembly authoring (MET-530): create_assembly, add_part_to_assembly,
     add_assembly_joint (emits the joint model the live solver consumes),
@@ -640,21 +640,6 @@ class FreecadServer(McpToolServer):
                 self.chamfer_edges,
             ),
             (
-                "shell_solid",
-                "Hollow a body's tip to a wall thickness, opening a face",
-                "cad_author",
-                obj_schema(
-                    {
-                        "session_id": sid,
-                        "body_id": {"type": "string"},
-                        "thickness": {"type": "number"},
-                        "faces": {"type": "array", "items": {"type": "string"}},
-                    },
-                    ["session_id", "body_id", "thickness"],
-                ),
-                self.shell_solid,
-            ),
-            (
                 "export_model",
                 "Export a session object to STEP and return the bytes (base64)",
                 "cad_export",
@@ -899,9 +884,6 @@ class FreecadServer(McpToolServer):
 
     async def chamfer_edges(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return await self._dress_up(arguments, "chamfer_edges", "size", "edges")
-
-    async def shell_solid(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return await self._dress_up(arguments, "shell_solid", "thickness", "faces")
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

@@ -721,26 +721,6 @@ class FreecadOperations:
         document.recompute()
         return chamfer
 
-    def shell_solid(
-        self, document: Any, body: Any, thickness: float, faces: list[str] | None = None
-    ) -> Any:
-        """Hollow the body's tip to a wall thickness, opening ``faces`` (default:
-        the topmost face by Z). Negative thickness shells inward."""
-        self._require_partdesign()
-        tip = self._tip(body)
-        if not faces:
-            shape_faces = tip.Shape.Faces
-            top = max(
-                range(len(shape_faces)),
-                key=lambda i: shape_faces[i].CenterOfMass.z,
-            )
-            faces = [f"Face{top + 1}"]
-        thick = body.newObject("PartDesign::Thickness", "Thickness")
-        thick.Base = (tip, faces)
-        thick.Value = float(thickness)
-        document.recompute()
-        return thick
-
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
