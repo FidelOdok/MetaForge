@@ -153,12 +153,15 @@ class TestBootstrapToolRegistry:
     async def test_bootstrap_tool_count(self):
         """Verify total tool count across all adapters.
 
-        Post-MET-478: cadquery=7 + freecad=5 + calculix=4 + kicad=6 = 22.
+        Post-MET-528: cadquery=7 + freecad=13 + calculix=4 + kicad=6 = 30.
+        freecad gained the 8 stateful PartDesign authoring tools (open_session,
+        close_session, describe_session, create_primitive, create_body,
+        create_sketch, pad_sketch, export_model) on top of the 5 stateless ones.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 22
+        assert len(tools) == 30
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

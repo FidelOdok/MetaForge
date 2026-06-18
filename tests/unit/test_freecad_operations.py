@@ -25,7 +25,7 @@ class TestShapeDefaults:
     """Verify shape defaults cover expected shape types."""
 
     def test_all_expected_shapes_present(self) -> None:
-        expected = {"box", "cylinder", "sphere", "cone", "bracket", "plate", "enclosure"}
+        expected = {"box", "cylinder", "sphere", "cone", "torus", "bracket", "plate", "enclosure"}
         assert expected == set(_SHAPE_DEFAULTS.keys())
 
     def test_box_defaults(self) -> None:

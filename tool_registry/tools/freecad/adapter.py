@@ -1,7 +1,15 @@
-"""FreeCAD CAD tool adapter -- MCP server for CAD operations."""
+"""FreeCAD CAD tool adapter -- MCP server for CAD operations.
+
+Runs FreeCAD headless (in-process, or in the freecad-adapter container) and
+exposes both the legacy stateless file-in/file-out tools and a stateful
+PartDesign authoring surface (MET-528): open a session → create a body →
+sketch on it → pad the sketch → export the authored solid. Stateful tools
+address prior objects by a stable ``obj_id`` held in the session store.
+"""
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +18,8 @@ import structlog
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.freecad.config import FreecadConfig
+from tool_registry.tools.freecad.operations import FreecadOperations
+from tool_registry.tools.freecad.session import FreecadSessionStore
 
 logger = structlog.get_logger()
 
@@ -17,21 +27,26 @@ logger = structlog.get_logger()
 class FreecadServer(McpToolServer):
     """FreeCAD tool adapter for CAD operations via MCP.
 
-    Provides 5 tools:
-    - freecad.export_geometry: Export CAD model to STEP/STL/OBJ format
-    - freecad.generate_mesh: Generate finite element mesh from CAD geometry
-    - freecad.boolean_operation: Perform CSG boolean operations (union, subtract, intersect)
-    - freecad.get_properties: Extract geometric properties (volume, area, etc.)
-    - freecad.create_parametric: Generate parametric CAD geometry from shape parameters
+    Stateless tools (file-in/file-out): export_geometry, generate_mesh,
+    boolean_operation, get_properties, create_parametric.
+
+    Stateful authoring tools (operate on a live session document, MET-528):
+    open_session, close_session, describe_session, create_primitive,
+    create_body, create_sketch, pad_sketch, export_model.
     """
 
     def __init__(self, config: FreecadConfig | None = None) -> None:
-        super().__init__(adapter_id="freecad", version="0.1.0")
+        super().__init__(adapter_id="freecad", version="0.2.0")
         self.config = config or FreecadConfig()
+        self._ops = FreecadOperations(
+            work_dir=self.config.work_dir, timeout=float(self.config.max_operation_time)
+        )
+        self._sessions = FreecadSessionStore()
         self._register_tools()
+        self._register_authoring_tools()
 
     def _register_tools(self) -> None:
-        """Register all FreeCAD tools."""
+        """Register the stateless file-based FreeCAD tools."""
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="freecad.export_geometry",
@@ -401,28 +416,12 @@ class FreecadServer(McpToolServer):
     async def _execute_export(
         self, input_file: str, output_format: str, output_path: str
     ) -> dict[str, Any]:
-        """Execute FreeCAD geometry export. In production, runs FreeCAD headless.
-
-        This method is designed to be easily mockable in tests.
-        The actual implementation would:
-        1. Load the CAD file in FreeCAD headless mode
-        2. Export to the target format
-        3. Return the output file path and metadata
-        """
-        _stem = Path(input_file).stem
-
-        # This would be the actual FreeCAD call in production:
-        # result = await asyncio.create_subprocess_exec(
-        #     self.config.freecad_binary, "--console", export_script,
-        #     cwd=self.config.work_dir,
-        #     stdout=asyncio.subprocess.PIPE,
-        #     stderr=asyncio.subprocess.PIPE,
-        # )
-
-        raise NotImplementedError(
-            "FreeCAD export requires the freecadcmd binary. "
-            "Use mock in tests or install FreeCAD for production use."
-        )
+        """Export a CAD file via FreeCAD (headless). STEP today; raises for others."""
+        if output_format != "step":
+            raise ValueError(
+                f"FreeCAD adapter currently exports STEP only, not {output_format!r}"
+            )
+        return self._ops.export_step(input_file, output_path)
 
     async def _execute_meshing(
         self,
@@ -431,11 +430,8 @@ class FreecadServer(McpToolServer):
         algorithm: str,
         output_format: str,
     ) -> dict[str, Any]:
-        """Execute FreeCAD mesh generation. See _execute_export for notes."""
-        raise NotImplementedError(
-            "FreeCAD meshing requires the freecadcmd binary. "
-            "Use mock in tests or install FreeCAD for production use."
-        )
+        """Generate a mesh via FreeCAD (headless)."""
+        return self._ops.generate_mesh(input_file, element_size, algorithm, output_format)
 
     async def _execute_boolean(
         self,
@@ -444,18 +440,12 @@ class FreecadServer(McpToolServer):
         operation: str,
         output_path: str,
     ) -> dict[str, Any]:
-        """Execute FreeCAD boolean operation. See _execute_export for notes."""
-        raise NotImplementedError(
-            "FreeCAD boolean operations require the freecadcmd binary. "
-            "Use mock in tests or install FreeCAD for production use."
-        )
+        """Perform a boolean op via FreeCAD (headless)."""
+        return self._ops.boolean_operation(file_a, file_b, operation, output_path)
 
     async def _execute_analysis(self, input_file: str, properties: list[str]) -> dict[str, Any]:
-        """Execute FreeCAD property analysis. See _execute_export for notes."""
-        raise NotImplementedError(
-            "FreeCAD property analysis requires the freecadcmd binary. "
-            "Use mock in tests or install FreeCAD for production use."
-        )
+        """Extract geometric properties via FreeCAD (headless)."""
+        return self._ops.get_properties(input_file, properties)
 
     async def _execute_parametric(
         self,
@@ -464,8 +454,205 @@ class FreecadServer(McpToolServer):
         material: str,
         output_path: str,
     ) -> dict[str, Any]:
-        """Execute FreeCAD parametric generation. See _execute_export for notes."""
-        raise NotImplementedError(
-            "FreeCAD parametric CAD generation requires the freecadcmd binary. "
-            "Use mock in tests or install FreeCAD for production use."
+        """Generate a parametric shape via FreeCAD (headless)."""
+        return self._ops.create_parametric(shape_type, parameters, material, output_path)
+
+    # ------------------------------------------------------------------
+    # Stateful authoring surface (MET-528)
+    # ------------------------------------------------------------------
+
+    def _register_authoring_tools(self) -> None:
+        """Register session-lifecycle + PartDesign authoring tools."""
+        limits = ResourceLimits(max_memory_mb=2048, max_cpu_seconds=120, max_disk_mb=512)
+
+        def obj_schema(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
+            return {"type": "object", "properties": props, "required": required}
+
+        sid = {"type": "string", "description": "Session id from freecad.open_session"}
+
+        specs: list[tuple[str, str, str, dict[str, Any], Any]] = [
+            (
+                "open_session",
+                "Open a stateful FreeCAD authoring session (live document)",
+                "cad_session",
+                obj_schema({"name": {"type": "string"}}, []),
+                self.open_session,
+            ),
+            (
+                "close_session",
+                "Close a FreeCAD session and free its document",
+                "cad_session",
+                obj_schema({"session_id": sid}, ["session_id"]),
+                self.close_session,
+            ),
+            (
+                "describe_session",
+                "List the objects authored in a session",
+                "cad_inspect",
+                obj_schema({"session_id": sid}, ["session_id"]),
+                self.describe_session,
+            ),
+            (
+                "create_primitive",
+                "Create a primitive solid (box/cylinder/sphere/cone/torus) in a session",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "kind": {
+                            "type": "string",
+                            "enum": ["box", "cylinder", "sphere", "cone", "torus"],
+                        },
+                        "parameters": {"type": "object"},
+                    },
+                    ["session_id", "kind"],
+                ),
+                self.create_primitive,
+            ),
+            (
+                "create_body",
+                "Create a PartDesign Body for parametric modelling",
+                "cad_author",
+                obj_schema({"session_id": sid, "name": {"type": "string"}}, ["session_id"]),
+                self.create_body,
+            ),
+            (
+                "create_sketch",
+                "Create a sketch on a body's plane with 2D geometry (rectangle/circle/line)",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
+                        "elements": {"type": "array", "items": {"type": "object"}},
+                    },
+                    ["session_id", "body_id"],
+                ),
+                self.create_sketch,
+            ),
+            (
+                "pad_sketch",
+                "Extrude (pad) a sketch into a solid on its body",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "body_id": {"type": "string"},
+                        "sketch_id": {"type": "string"},
+                        "length": {"type": "number"},
+                        "reversed": {"type": "boolean"},
+                        "midplane": {"type": "boolean"},
+                    },
+                    ["session_id", "body_id", "sketch_id", "length"],
+                ),
+                self.pad_sketch,
+            ),
+            (
+                "export_model",
+                "Export a session object to STEP and return the bytes (base64)",
+                "cad_export",
+                obj_schema(
+                    {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
+                ),
+                self.export_model,
+            ),
+        ]
+
+        for name, description, capability, input_schema, handler in specs:
+            self.register_tool(
+                manifest=ToolManifest(
+                    tool_id=f"freecad.{name}",
+                    adapter_id="freecad",
+                    name=name.replace("_", " ").title(),
+                    description=description,
+                    capability=capability,
+                    input_schema=input_schema,
+                    phase=2,
+                    resource_limits=limits,
+                ),
+                handler=handler,
+            )
+
+    async def open_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._sessions.open_session(name=arguments.get("name", ""))
+        return {"session_id": session_id}
+
+    async def close_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        return {"closed": self._sessions.close_session(session_id)}
+
+    async def describe_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._sessions.describe(self._require(arguments, "session_id"))
+
+    async def create_primitive(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        kind = self._require(arguments, "kind")
+        session = self._sessions.get(session_id)
+        obj = self._ops.create_primitive(session.document, kind, arguments.get("parameters", {}))
+        obj_id = self._sessions.register_object(session_id, obj, "primitive", kind)
+        return {"obj_id": obj_id, "kind": kind, **self._ops.shape_props(obj)}
+
+    async def create_body(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        session = self._sessions.get(session_id)
+        body = self._ops.create_body(session.document, arguments.get("name", "Body"))
+        obj_id = self._sessions.register_object(
+            session_id, body, "body", arguments.get("name", "Body")
         )
+        return {"obj_id": obj_id, "kind": "body"}
+
+    async def create_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        sketch = self._ops.create_sketch(
+            session.document,
+            body,
+            plane=arguments.get("plane", "XY"),
+            elements=arguments.get("elements", []),
+        )
+        obj_id = self._sessions.register_object(session_id, sketch, "sketch", "Sketch")
+        return {"obj_id": obj_id, "kind": "sketch", "body_id": body_id}
+
+    async def pad_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        body_id = self._require(arguments, "body_id")
+        sketch_id = self._require(arguments, "sketch_id")
+        length = arguments.get("length")
+        if length is None:
+            raise ValueError("length is required")
+        session = self._sessions.get(session_id)
+        body = self._sessions.get_object(session_id, body_id)
+        sketch = self._sessions.get_object(session_id, sketch_id)
+        pad = self._ops.pad_sketch(
+            session.document,
+            body,
+            sketch,
+            float(length),
+            reversed=bool(arguments.get("reversed", False)),
+            midplane=bool(arguments.get("midplane", False)),
+        )
+        obj_id = self._sessions.register_object(session_id, pad, "feature", "Pad")
+        return {"obj_id": obj_id, "kind": "feature", **self._ops.shape_props(body)}
+
+    async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj_id = self._require(arguments, "obj_id")
+        obj = self._sessions.get_object(session_id, obj_id)
+        step_bytes = self._ops.export_object_step_bytes(obj)
+        return {
+            "obj_id": obj_id,
+            "format": "step",
+            "size_bytes": len(step_bytes),
+            "step_base64": base64.b64encode(step_bytes).decode("ascii"),
+            **self._ops.shape_props(obj),
+        }
+
+    @staticmethod
+    def _require(arguments: dict[str, Any], key: str) -> str:
+        value = arguments.get(key, "")
+        if not value:
+            raise ValueError(f"{key} is required")
+        return str(value)

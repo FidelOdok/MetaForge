@@ -41,6 +41,7 @@ class TwinServer(McpToolServer):
         *,
         allow_mutations: bool = False,
         decision_recorder: Any = None,
+        geometry_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -53,9 +54,16 @@ class TwinServer(McpToolServer):
         # api_gateway layer). When present, ``twin.record_decision`` is
         # registered. None keeps tool_registry free of api_gateway imports.
         self._decision_recorder = decision_recorder
+        # MET-529: an injected async ``record(...)`` that persists authored CAD
+        # geometry (STEP bytes) as a CAD_MODEL work product — MinIO blob + twin
+        # node + project link — so it renders in the viewer. Same injection seam
+        # as decision_recorder; None keeps tool_registry free of api_gateway.
+        self._geometry_recorder = geometry_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
+        if geometry_recorder is not None:
+            self._register_commit_geometry()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -538,4 +546,78 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
             supersedes=supersedes if isinstance(supersedes, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.commit_geometry (MET-529)
+    # ------------------------------------------------------------------
+
+    def _register_commit_geometry(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_geometry",
+                adapter_id="twin",
+                name="Commit Authored Geometry",
+                description=(
+                    "Persist CAD geometry authored over MCP (the base64 STEP from "
+                    "freecad.export_model) as a CAD_MODEL work product: stores the "
+                    "blob in MinIO, creates a twin node, and links it to a project "
+                    "so it renders in the 3D viewer. Call after authoring a part to "
+                    "make it durable and visible."
+                ),
+                capability="twin_geometry",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "step_base64": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Base64 STEP bytes from freecad.export_model.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Display name for the work product.",
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                        "domain": {"type": "string", "description": "Discipline (def mech)."},
+                        "format": {"type": "string", "description": "Format (def step)."},
+                    },
+                    "required": ["step_base64", "name"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "model_url": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=30),
+            ),
+            handler=self.commit_geometry,
+        )
+
+    async def commit_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        step_base64 = arguments.get("step_base64")
+        name = arguments.get("name")
+        if not step_base64 or not isinstance(step_base64, str):
+            raise ValueError("twin.commit_geometry: 'step_base64' is required (non-empty string)")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_geometry: 'name' is required (non-empty string)")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        domain = arguments.get("domain")
+        fmt = arguments.get("format")
+        return await self._geometry_recorder(
+            step_base64=step_base64,
+            name=name,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
+            domain=domain if isinstance(domain, str) and domain else "mechanical",
+            fmt=fmt if isinstance(fmt, str) and fmt else "step",
         )

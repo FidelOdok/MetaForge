@@ -133,18 +133,29 @@ class TestFreecadServer:
         assert server.adapter_id == "freecad"
 
     def test_server_version(self, server: FreecadServer) -> None:
-        assert server.version == "0.1.0"
+        assert server.version == "0.2.0"
 
-    def test_registers_five_tools(self, server: FreecadServer) -> None:
-        assert len(server.tool_ids) == 5
+    def test_registers_all_tools(self, server: FreecadServer) -> None:
+        # 5 stateless file-based + 8 stateful authoring (MET-528).
+        assert len(server.tool_ids) == 13
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
+            # stateless file-based
             "freecad.export_geometry",
             "freecad.generate_mesh",
             "freecad.boolean_operation",
             "freecad.get_properties",
             "freecad.create_parametric",
+            # stateful authoring (MET-528)
+            "freecad.open_session",
+            "freecad.close_session",
+            "freecad.describe_session",
+            "freecad.create_primitive",
+            "freecad.create_body",
+            "freecad.create_sketch",
+            "freecad.pad_sketch",
+            "freecad.export_model",
         }
         assert set(server.tool_ids) == expected
 
@@ -333,31 +344,161 @@ class TestGetProperties:
 # ---------------------------------------------------------------------------
 
 
-class TestUnmockedMethodsRaise:
-    """Verify that calling internal methods without mocks raises NotImplementedError."""
+class TestUnmockedMethodsDegrade:
+    """Without FreeCAD bindings, the internal methods delegate to FreecadOperations
+    which raises FreecadNotAvailableError (graceful degradation). On a host that
+    *does* have FreeCAD these would execute, so the class is skipped there."""
 
-    async def test_export_not_implemented(self, server: FreecadServer) -> None:
-        with pytest.raises(NotImplementedError, match="freecadcmd binary"):
-            await server._execute_export("/models/test.step", "stl", "/tmp/out.stl")
+    pytestmark = pytest.mark.skipif(
+        __import__("tool_registry.tools.freecad.operations", fromlist=["HAS_FREECAD"]).HAS_FREECAD,
+        reason="FreeCAD installed; degradation path not exercised",
+    )
 
-    async def test_mesh_not_implemented(self, server: FreecadServer) -> None:
-        with pytest.raises(NotImplementedError, match="freecadcmd binary"):
+    async def test_export_degrades(self, server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+        with pytest.raises(FreecadNotAvailableError):
+            await server._execute_export("/models/test.step", "step", "/tmp/out.step")
+
+    async def test_mesh_degrades(self, server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+        with pytest.raises(FreecadNotAvailableError):
             await server._execute_meshing("/models/test.step", 1.0, "netgen", "inp")
 
-    async def test_boolean_not_implemented(self, server: FreecadServer) -> None:
-        with pytest.raises(NotImplementedError, match="freecadcmd binary"):
+    async def test_boolean_degrades(self, server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+        with pytest.raises(FreecadNotAvailableError):
             await server._execute_boolean(
                 "/models/a.step", "/models/b.step", "union", "/tmp/out.step"
             )
 
-    async def test_analysis_not_implemented(self, server: FreecadServer) -> None:
-        with pytest.raises(NotImplementedError, match="freecadcmd binary"):
+    async def test_analysis_degrades(self, server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+        with pytest.raises(FreecadNotAvailableError):
             await server._execute_analysis("/models/test.step", ["volume"])
 
 
 # ---------------------------------------------------------------------------
 # TestJsonRpcIntegration
 # ---------------------------------------------------------------------------
+
+
+class _FakeObj:
+    """Stand-in for a live FreeCAD object."""
+
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
+
+
+class TestStatefulAuthoring:
+    """Session + PartDesign orchestration with FreeCAD geometry mocked out, so
+    the wiring (session store ↔ operations ↔ obj_id registry) is verified without
+    FreeCAD bindings."""
+
+    @pytest.fixture()
+    def authoring_server(self) -> FreecadServer:
+        from unittest.mock import MagicMock
+
+        from tool_registry.tools.freecad.session import FreecadSessionStore
+
+        s = FreecadServer()
+        # Fake, FreeCAD-free document lifecycle.
+        s._sessions = FreecadSessionStore(
+            doc_factory=lambda name: MagicMock(name=f"doc:{name}"),
+            doc_closer=lambda doc: None,
+        )
+        # Mock the geometry layer; each builder returns a tagged fake object.
+        ops = MagicMock()
+        ops.create_primitive.return_value = _FakeObj("box")
+        ops.create_body.return_value = _FakeObj("body")
+        ops.create_sketch.return_value = _FakeObj("sketch")
+        ops.pad_sketch.return_value = _FakeObj("pad")
+        ops.shape_props.return_value = {
+            "volume_mm3": 1000.0,
+            "surface_area_mm2": 600.0,
+            "bounding_box": {"min_x": 0, "max_x": 10},
+        }
+        ops.export_object_step_bytes.return_value = b"ISO-10303-21;\nfake-step\n"
+        s._ops = ops  # type: ignore[assignment]
+        return s
+
+    async def test_full_authoring_flow(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({"name": "widget"}))["session_id"]
+        assert sid
+
+        body = await s.create_body({"session_id": sid, "name": "Main"})
+        assert body["obj_id"] == "body_1"
+
+        sketch = await s.create_sketch(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "plane": "XY",
+                "elements": [{"type": "rectangle", "x": 0, "y": 0, "width": 20, "height": 10}],
+            }
+        )
+        assert sketch["obj_id"] == "sketch_2"
+        assert sketch["body_id"] == "body_1"
+
+        pad = await s.pad_sketch(
+            {
+                "session_id": sid,
+                "body_id": body["obj_id"],
+                "sketch_id": sketch["obj_id"],
+                "length": 5,
+            }
+        )
+        assert pad["obj_id"] == "feature_3"
+        assert pad["volume_mm3"] == 1000.0
+
+        # describe_session lists the three objects in creation order.
+        desc = await s.describe_session({"session_id": sid})
+        assert [o["obj_id"] for o in desc["objects"]] == ["body_1", "sketch_2", "feature_3"]
+
+    async def test_export_model_returns_base64_step(self, authoring_server: FreecadServer) -> None:
+        import base64
+
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        prim = await s.create_primitive({"session_id": sid, "kind": "box", "parameters": {}})
+        result = await s.export_model({"session_id": sid, "obj_id": prim["obj_id"]})
+        assert result["format"] == "step"
+        assert result["size_bytes"] == len(b"ISO-10303-21;\nfake-step\n")
+        assert base64.b64decode(result["step_base64"]) == b"ISO-10303-21;\nfake-step\n"
+        assert result["volume_mm3"] == 1000.0
+
+    async def test_create_primitive_passes_document_and_kind(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        await s.create_primitive(
+            {"session_id": sid, "kind": "cylinder", "parameters": {"radius": 4}}
+        )
+        # The live session document and kind/params reach the geometry layer.
+        call = s._ops.create_primitive.call_args  # type: ignore[attr-defined]
+        assert call[0][1] == "cylinder"
+        assert call[0][2] == {"radius": 4}
+
+    async def test_unknown_session_raises(self, authoring_server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.session import SessionNotFoundError
+
+        with pytest.raises(SessionNotFoundError):
+            await authoring_server.describe_session({"session_id": "ghost"})
+
+    async def test_missing_required_arg_raises(self, authoring_server: FreecadServer) -> None:
+        with pytest.raises(ValueError, match="session_id is required"):
+            await authoring_server.describe_session({})
+
+    async def test_close_session(self, authoring_server: FreecadServer) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        assert (await s.close_session({"session_id": sid}))["closed"] is True
+        assert (await s.close_session({"session_id": sid}))["closed"] is False
 
 
 def _make_jsonrpc(
@@ -376,12 +517,12 @@ def _make_jsonrpc(
 
 
 class TestJsonRpcIntegration:
-    async def test_tool_list_returns_four_tools(self, server: FreecadServer) -> None:
+    async def test_tool_list_returns_all_tools(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list")
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 5
+        assert len(response["result"]["tools"]) == 13
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -427,13 +568,16 @@ class TestJsonRpcIntegration:
         response = json.loads(raw_response)
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
-        assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 5
+        assert response["result"]["version"] == "0.2.0"
+        assert response["result"]["tools_available"] == 13
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         tools = response["result"]["tools"]
-        assert len(tools) == 1
-        assert tools[0]["tool_id"] == "freecad.export_geometry"
+        # cad_export now covers the stateless export_geometry + stateful export_model.
+        assert {t["tool_id"] for t in tools} == {
+            "freecad.export_geometry",
+            "freecad.export_model",
+        }

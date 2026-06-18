@@ -56,6 +56,7 @@ _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
     "cylinder": {"radius": 5.0, "height": 20.0},
     "sphere": {"radius": 10.0},
     "cone": {"radius1": 10.0, "radius2": 5.0, "height": 20.0},
+    "torus": {"radius1": 10.0, "radius2": 2.0},
     "bracket": {"length": 50.0, "width": 30.0, "thickness": 5.0, "hole_radius": 3.0},
     "plate": {"length": 100.0, "width": 50.0, "thickness": 2.0},
     "enclosure": {
@@ -392,3 +393,231 @@ class FreecadOperations:
                     "algorithm": algorithm,
                 },
             }
+
+    # ------------------------------------------------------------------
+    # File-based ops (retire the adapter's NotImplementedError stubs)
+    # ------------------------------------------------------------------
+
+    def boolean_operation(
+        self,
+        input_file_a: str,
+        input_file_b: str,
+        operation: str,
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Fuse / cut / common two CAD files and export the result to STEP."""
+        self._require_freecad()
+        with tracer.start_as_current_span("freecad.boolean") as span:
+            span.set_attribute("boolean.operation", operation)
+            if not output_path:
+                stem = Path(input_file_a).stem
+                output_path = os.path.join(self.work_dir, f"{stem}_{operation}.step")
+            self._ensure_output_dir(output_path)
+
+            shape_a = Part.Shape()
+            shape_a.read(input_file_a)
+            shape_b = Part.Shape()
+            shape_b.read(input_file_b)
+
+            if operation == "union":
+                result = shape_a.fuse(shape_b)
+            elif operation == "subtract":
+                result = shape_a.cut(shape_b)
+            elif operation == "intersect":
+                result = shape_a.common(shape_b)
+            else:
+                raise ValueError(f"Unsupported boolean operation: {operation}")
+
+            result.exportStep(output_path)
+            return {
+                "output_file": output_path,
+                "operation": operation,
+                "result_volume": round(result.Volume, 2),
+                "result_area": round(result.Area, 2),
+            }
+
+    def get_properties(
+        self, input_file: str, properties: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Extract geometric properties (volume/area/center_of_mass/bounding_box)."""
+        self._require_freecad()
+        wanted = properties or ["volume", "area", "center_of_mass", "bounding_box"]
+        with tracer.start_as_current_span("freecad.properties"):
+            shape = Part.Shape()
+            shape.read(input_file)
+            props: dict[str, Any] = {}
+            if "volume" in wanted:
+                props["volume"] = round(shape.Volume, 2)
+            if "area" in wanted:
+                props["area"] = round(shape.Area, 2)
+            if "center_of_mass" in wanted:
+                com = shape.CenterOfMass
+                props["center_of_mass"] = [round(com.x, 3), round(com.y, 3), round(com.z, 3)]
+            if "bounding_box" in wanted:
+                props["bounding_box"] = self._bbox_dict(shape.BoundBox)
+            return {"file": input_file, "properties": props}
+
+    # ------------------------------------------------------------------
+    # Stateful authoring ops (MET-528) — operate on a live session document.
+    # Each builds and returns a live FreeCAD object; the adapter registers it
+    # in the session store and hands back a stable obj_id.
+    # ------------------------------------------------------------------
+
+    def create_primitive(self, document: Any, kind: str, params: dict[str, Any]) -> Any:
+        """Add a parametric Part primitive (box/cylinder/sphere/cone/torus)."""
+        self._require_freecad()
+        defaults = _SHAPE_DEFAULTS.get(kind, {})
+        merged = {**defaults, **params}
+        if kind == "box":
+            obj = document.addObject("Part::Box", "Box")
+            obj.Length, obj.Width, obj.Height = (
+                merged["length"],
+                merged["width"],
+                merged["height"],
+            )
+        elif kind == "cylinder":
+            obj = document.addObject("Part::Cylinder", "Cylinder")
+            obj.Radius, obj.Height = merged["radius"], merged["height"]
+        elif kind == "sphere":
+            obj = document.addObject("Part::Sphere", "Sphere")
+            obj.Radius = merged["radius"]
+        elif kind == "cone":
+            obj = document.addObject("Part::Cone", "Cone")
+            obj.Radius1, obj.Radius2, obj.Height = (
+                merged["radius1"],
+                merged["radius2"],
+                merged["height"],
+            )
+        elif kind == "torus":
+            obj = document.addObject("Part::Torus", "Torus")
+            obj.Radius1 = params.get("radius1", 10.0)
+            obj.Radius2 = params.get("radius2", 2.0)
+        else:
+            raise ValueError(f"Unsupported primitive: {kind}")
+        document.recompute()
+        return obj
+
+    def create_body(self, document: Any, name: str = "Body") -> Any:
+        """Create a PartDesign Body for parametric (sketch-based) modelling."""
+        self._require_freecad()
+        body = document.addObject("PartDesign::Body", name or "Body")
+        document.recompute()
+        return body
+
+    def create_sketch(
+        self,
+        document: Any,
+        body: Any,
+        plane: str = "XY",
+        elements: list[dict[str, Any]] | None = None,
+    ) -> Any:
+        """Create a Sketch on a body's origin plane and add 2D geometry.
+
+        Supported element ``type`` values: ``rectangle`` (x,y,width,height),
+        ``circle`` (cx,cy,r), ``line`` (x1,y1,x2,y2).
+        """
+        self._require_freecad()
+        sketch = body.newObject("Sketcher::SketchObject", "Sketch")
+        plane_map = {"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}
+        plane_name = plane_map.get(plane.upper(), "XY_Plane")
+        origin_plane = next(
+            (f for f in body.Origin.OriginFeatures if f.Name.startswith(plane_name[:2])), None
+        )
+        if origin_plane is not None:
+            sketch.AttachmentSupport = [(origin_plane, "")]
+            sketch.MapMode = "FlatFace"
+        for el in elements or []:
+            self._add_sketch_element(sketch, el)
+        document.recompute()
+        return sketch
+
+    def _add_sketch_element(self, sketch: Any, el: dict[str, Any]) -> None:
+        import FreeCAD as FC  # type: ignore[import-untyped]
+
+        kind = el.get("type")
+        if kind == "rectangle":
+            x, y = float(el.get("x", 0.0)), float(el.get("y", 0.0))
+            w, h = float(el["width"]), float(el["height"])
+            pts = [
+                (x, y),
+                (x + w, y),
+                (x + w, y + h),
+                (x, y + h),
+            ]
+            for i in range(4):
+                a = FC.Vector(*pts[i], 0)
+                b = FC.Vector(*pts[(i + 1) % 4], 0)
+                sketch.addGeometry(Part.LineSegment(a, b), False)
+        elif kind == "circle":
+            cx, cy, r = float(el["cx"]), float(el["cy"]), float(el["r"])
+            sketch.addGeometry(
+                Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r), False
+            )
+        elif kind == "line":
+            a = FC.Vector(float(el["x1"]), float(el["y1"]), 0)
+            b = FC.Vector(float(el["x2"]), float(el["y2"]), 0)
+            sketch.addGeometry(Part.LineSegment(a, b), False)
+        else:
+            raise ValueError(f"Unsupported sketch element: {kind!r}")
+
+    def pad_sketch(
+        self,
+        document: Any,
+        body: Any,
+        sketch: Any,
+        length: float,
+        *,
+        reversed: bool = False,
+        midplane: bool = False,
+    ) -> Any:
+        """Extrude (pad) a sketch into a solid on its PartDesign body."""
+        self._require_freecad()
+        pad = body.newObject("PartDesign::Pad", "Pad")
+        pad.Profile = sketch
+        pad.Length = float(length)
+        pad.Reversed = bool(reversed)
+        pad.Midplane = bool(midplane)
+        sketch.Visibility = False
+        document.recompute()
+        return pad
+
+    def shape_props(self, obj: Any) -> dict[str, Any]:
+        """Volume / surface area / bounding box for a live object's shape."""
+        self._require_freecad()
+        shape = obj.Shape
+        return {
+            "volume_mm3": round(shape.Volume, 2),
+            "surface_area_mm2": round(shape.Area, 2),
+            "bounding_box": self._bbox_dict(shape.BoundBox),
+        }
+
+    def export_object_step_bytes(self, obj: Any) -> bytes:
+        """Export a live object's shape to STEP and return the bytes.
+
+        Bytes (not a container-local path) so the gateway/twin layer can persist
+        them to MinIO regardless of where the adapter runs (MET-529).
+        """
+        self._require_freecad()
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            obj.Shape.exportStep(tmp_path)
+            return Path(tmp_path).read_bytes()
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _bbox_dict(bb: Any) -> dict[str, float]:
+        return {
+            "min_x": round(bb.XMin, 2),
+            "min_y": round(bb.YMin, 2),
+            "min_z": round(bb.ZMin, 2),
+            "max_x": round(bb.XMax, 2),
+            "max_y": round(bb.YMax, 2),
+            "max_z": round(bb.ZMax, 2),
+        }
