@@ -549,13 +549,11 @@ class FreecadOperations:
         self._require_partdesign()
         sketch = body.newObject("Sketcher::SketchObject", "Sketch")
         plane_map = {"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}
-        plane_name = plane_map.get(plane.upper(), "XY_Plane")
-        origin_plane = next(
-            (f for f in body.Origin.OriginFeatures if f.Name.startswith(plane_name[:2])), None
-        )
-        if origin_plane is not None:
-            sketch.AttachmentSupport = [(origin_plane, "")]
-            sketch.MapMode = "FlatFace"
+        # Match by Role (not Name) so it works for the 2nd+ body in a document,
+        # where FreeCAD suffixes the origin Names (XY_Plane001).
+        origin_plane = self._origin_feature(body, plane_map.get(plane.upper(), "XY_Plane"))
+        sketch.AttachmentSupport = [(origin_plane, "")]
+        sketch.MapMode = "FlatFace"
         for el in elements or []:
             self._add_sketch_element(sketch, el)
         document.recompute()
@@ -727,11 +725,15 @@ class FreecadOperations:
     # versions). Validated headless against FreeCAD 1.0.0.
     # ------------------------------------------------------------------
 
-    def _origin_feature(self, body: Any, name: str) -> Any:
-        """Return a body origin feature (e.g. X_Axis / Z_Axis / YZ_Plane)."""
-        feat = next((f for f in body.Origin.OriginFeatures if f.Name == name), None)
+    def _origin_feature(self, body: Any, role: str) -> Any:
+        """Return a body origin feature by its stable ``Role`` (X_Axis / Z_Axis /
+        YZ_Plane / ...). Matching on Role (not Name) is essential: in a multi-body
+        document FreeCAD suffixes the Names (``X_Axis001``) while Role is stable."""
+        feat = next(
+            (f for f in body.Origin.OriginFeatures if getattr(f, "Role", None) == role), None
+        )
         if feat is None:
-            raise ValueError(f"origin feature {name!r} not found on body")
+            raise ValueError(f"origin feature with role {role!r} not found on body")
         return feat
 
     def linear_pattern(
