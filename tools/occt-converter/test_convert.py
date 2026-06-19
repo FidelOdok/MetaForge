@@ -183,6 +183,50 @@ class TestNamedPartReading:
         assert _read_step_named("/fake/missing.step") == []
 
 
+class TestPartShading:
+    """Verify per-part colour assignment (distinct palette + STEP-colour read)."""
+
+    def test_palette_is_deterministic_per_name(self):
+        from convert import _palette_color
+
+        assert _palette_color("fuselage") == _palette_color("fuselage")
+
+    def test_palette_distinguishes_parts(self):
+        from convert import _palette_color
+
+        assert _palette_color("fuselage") != _palette_color("battery_pack")
+
+    def test_palette_in_unit_range(self):
+        from convert import _palette_color
+
+        for name in ("fuselage", "front_left_motor", "lens_tele"):
+            r, g, b = _palette_color(name)
+            assert all(0.0 <= v <= 1.0 for v in (r, g, b))
+
+    def test_color_rgb_none_and_default_gray_fall_through(self):
+        """None or the ~0.8 default gray -> None, so the palette is used."""
+        from convert import _color_rgb
+
+        class _C:
+            def __init__(self, r, g, b):
+                self._r, self._g, self._b = r, g, b
+
+            def Red(self):
+                return self._r
+
+            def Green(self):
+                return self._g
+
+            def Blue(self):
+                return self._b
+
+        assert _color_rgb(None) is None
+        assert _color_rgb(_C(0.8, 0.8, 0.8)) is None  # default gray
+        assert _color_rgb(_C(0.5, 0.5, 0.5)) is None  # FreeCAD default gray
+        assert _color_rgb(_C(0.0, 0.0, 0.0)) is None  # black is achromatic too
+        assert _color_rgb(_C(0.1, 0.2, 0.9)) == pytest.approx((0.1, 0.2, 0.9))
+
+
 class TestCLIArgs:
     """Test command-line argument parsing."""
 

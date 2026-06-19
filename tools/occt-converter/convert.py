@@ -10,6 +10,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import colorsys
+import hashlib
 import json
 import logging
 import sys
@@ -26,6 +28,37 @@ QUALITY_TIERS = {
     "standard": 0.1,
     "fine": 0.01,
 }
+
+# An achromatic colour (r≈g≈b) carries no per-part distinction and is almost
+# always an exporter default (FreeCAD writes a uniform 0.5 gray on every object)
+# rather than an intentional colour — so treat it as "no colour" and fall
+# through to the generated palette. Only chromatic source colours are honoured.
+_CHROMA_EPS = 0.04
+
+
+def _color_rgb(c) -> tuple[float, float, float] | None:
+    """Extract a chromatic (r,g,b) 0-1 tuple from an OCC colour, else None."""
+    if c is None:
+        return None
+    try:
+        r, g, b = c.Red(), c.Green(), c.Blue()
+    except Exception:  # noqa: BLE001 — not a colour object
+        return None
+    if max(abs(r - g), abs(g - b), abs(r - b)) < _CHROMA_EPS:
+        return None  # gray/white/black → use the palette instead
+    return (float(r), float(g), float(b))
+
+
+def _palette_color(name: str) -> tuple[float, float, float]:
+    """Deterministic, visually distinct colour for a part name.
+
+    Hashes the name to a hue and converts at fixed saturation/value, so the same
+    part always gets the same pleasant mid-tone colour and sibling parts spread
+    across the wheel — distinct enough to tell parts apart in the viewer.
+    """
+    h = int(hashlib.sha1(name.encode("utf-8")).hexdigest(), 16)
+    hue = (h % 360) / 360.0
+    return colorsys.hsv_to_rgb(hue, 0.55, 0.85)
 
 
 def _read_step(path: str):
@@ -96,11 +129,15 @@ def _read_step_named(path: str) -> list[tuple]:
     for shape, label in shape_dict.items():
         if shape is None or shape.IsNull():
             continue
-        name = label[0] if isinstance(label, (tuple, list)) else label
+        if isinstance(label, (tuple, list)):
+            name = label[0]
+            color = _color_rgb(label[1]) if len(label) > 1 else None
+        else:
+            name, color = label, None
         name = str(name).strip() if name else ""
         if not name:
             continue
-        named.append((shape, name))
+        named.append((shape, name, color))
     return named
 
 
@@ -207,15 +244,18 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
     else:
         root_shape = _read_cad_file(input_path)
         sub_shapes = _get_sub_shapes(root_shape) or [root_shape]
-        enumerated = [(shape, f"Part_{i + 1}") for i, shape in enumerate(sub_shapes)]
+        enumerated = [(shape, f"Part_{i + 1}", None) for i, shape in enumerate(sub_shapes)]
         logger.info("Using %d anonymous solid(s)", len(enumerated))
+
+    from trimesh.visual.material import PBRMaterial
 
     scene = trimesh.Scene()
     parts: list[dict] = []
+    materials: list[dict] = []
     total_triangles = 0
     used_names: dict[str, int] = {}
 
-    for idx, (shape, part_name) in enumerate(enumerated):
+    for idx, (shape, part_name, src_color) in enumerate(enumerated):
         vertices, faces = _tessellate(shape, deflection)
         if vertices is None or faces is None:
             logger.warning("Skipping empty shape: %s", part_name)
@@ -229,8 +269,22 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
         else:
             used_names[part_name] = 0
 
+        # Per-part shading: honour an embedded STEP colour, else a deterministic
+        # distinct palette colour by name so parts are visually separable. The
+        # R3F viewer renders the GLB's own materials, so this surfaces directly.
+        r, g, b = src_color if src_color is not None else _palette_color(part_name)
+        rgba = [int(round(r * 255)), int(round(g * 255)), int(round(b * 255)), 255]
+
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
         mesh.fix_normals()
+        mesh.visual = trimesh.visual.TextureVisuals(
+            material=PBRMaterial(
+                name=node_name,
+                baseColorFactor=rgba,
+                metallicFactor=0.0,
+                roughnessFactor=0.75,
+            )
+        )
         scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
 
         total_triangles += len(faces)
@@ -240,8 +294,11 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
                 "meshName": node_name,
                 "children": [],
                 "boundingBox": _bounding_box(vertices),
+                "color": rgba,
+                "colorSource": "step" if src_color is not None else "palette",
             }
         )
+        materials.append({"part": node_name, "baseColorFactor": rgba})
 
     # Export GLB
     glb_path = out / "model.glb"
@@ -254,7 +311,7 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
         "sourceFormat": _source_format(input_path),
         "convertedAt": datetime.now(UTC).isoformat(),
         "parts": parts,
-        "materials": [],
+        "materials": materials,
         "stats": {
             "triangleCount": total_triangles,
             "fileSize": file_size,
