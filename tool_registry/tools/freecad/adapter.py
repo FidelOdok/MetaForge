@@ -522,6 +522,11 @@ class FreecadServer(McpToolServer):
                             "enum": ["box", "cylinder", "sphere", "cone", "torus"],
                         },
                         "parameters": {"type": "object"},
+                        "name": {
+                            "type": "string",
+                            "description": "Meaningful part name (e.g. 'fuselage'). "
+                            "Used as the STEP product name shown in the viewer.",
+                        },
                     },
                     ["session_id", "kind"],
                 ),
@@ -985,7 +990,9 @@ class FreecadServer(McpToolServer):
         kind = self._require(arguments, "kind")
         session = self._sessions.get(session_id)
         obj = self._ops.create_primitive(session.document, kind, arguments.get("parameters", {}))
-        obj_id = self._sessions.register_object(session_id, obj, "primitive", kind)
+        obj_id = self._sessions.register_object(
+            session_id, obj, "primitive", arguments.get("name", "") or kind
+        )
         return {"obj_id": obj_id, "kind": kind, **self._ops.shape_props(obj)}
 
     async def create_body(self, arguments: dict[str, Any]) -> dict[str, Any]:

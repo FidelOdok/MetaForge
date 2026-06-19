@@ -118,6 +118,53 @@ class TestObjectRegistry:
         assert [o["order"] for o in objs] == [1, 2]
 
 
+class _Labelled:
+    """Stand-in FreeCAD object that carries a settable Label."""
+
+    def __init__(self) -> None:
+        self.Label = ""
+
+
+class TestPartNamingEnforcement:
+    """The 'parts must be named' rule is enforced server-side at registration
+    (MET-535) so it holds for every MCP client, not just disciplined callers."""
+
+    def test_caller_name_is_stamped_as_label(self) -> None:
+        store, _ = _store()
+        sid = store.open_session()
+        obj = _Labelled()
+        store.register_object(sid, obj, "primitive", "fuselage")
+        assert obj.Label == "fuselage"
+        assert store.describe(sid)["objects"][0]["name"] == "fuselage"
+
+    def test_unnamed_part_falls_back_to_unique_objid(self) -> None:
+        store, _ = _store()
+        sid = store.open_session()
+        obj = _Labelled()
+        store.register_object(sid, obj, "primitive", "")
+        # Never anonymous/empty — defaults to the unique obj_id.
+        assert obj.Label == "primitive_1"
+
+    def test_duplicate_names_are_made_unique(self) -> None:
+        store, _ = _store()
+        sid = store.open_session()
+        a, b = _Labelled(), _Labelled()
+        store.register_object(sid, a, "primitive", "box")
+        store.register_object(sid, b, "primitive", "box")
+        assert a.Label == "box"
+        assert b.Label != "box"  # uniquified, so STEP products never collide
+        names = {o["name"] for o in store.describe(sid)["objects"]}
+        assert len(names) == 2
+
+    def test_objects_without_label_attr_do_not_break(self) -> None:
+        store, _ = _store()
+        sid = store.open_session()
+        # A plain object() has no Label; registration must still succeed.
+        oid = store.register_object(sid, object(), "primitive", "thing")
+        assert oid == "primitive_1"
+        assert store.describe(sid)["objects"][0]["name"] == "thing"
+
+
 class TestEviction:
     def test_idle_ttl_evicts_and_closes(self) -> None:
         clock = _Clock()
