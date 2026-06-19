@@ -184,47 +184,38 @@ class TestNamedPartReading:
 
 
 class TestPartShading:
-    """Verify per-part colour assignment (distinct palette + STEP-colour read)."""
+    """STEP colours are the source of truth — honoured verbatim, none fabricated."""
 
-    def test_palette_is_deterministic_per_name(self):
-        from convert import _palette_color
+    class _C:
+        def __init__(self, r, g, b):
+            self._r, self._g, self._b = r, g, b
 
-        assert _palette_color("fuselage") == _palette_color("fuselage")
+        def Red(self):
+            return self._r
 
-    def test_palette_distinguishes_parts(self):
-        from convert import _palette_color
+        def Green(self):
+            return self._g
 
-        assert _palette_color("fuselage") != _palette_color("battery_pack")
+        def Blue(self):
+            return self._b
 
-    def test_palette_in_unit_range(self):
-        from convert import _palette_color
-
-        for name in ("fuselage", "front_left_motor", "lens_tele"):
-            r, g, b = _palette_color(name)
-            assert all(0.0 <= v <= 1.0 for v in (r, g, b))
-
-    def test_color_rgb_none_and_default_gray_fall_through(self):
-        """None or the ~0.8 default gray -> None, so the palette is used."""
+    def test_color_rgb_none_when_no_color_object(self):
         from convert import _color_rgb
 
-        class _C:
-            def __init__(self, r, g, b):
-                self._r, self._g, self._b = r, g, b
-
-            def Red(self):
-                return self._r
-
-            def Green(self):
-                return self._g
-
-            def Blue(self):
-                return self._b
-
         assert _color_rgb(None) is None
-        assert _color_rgb(_C(0.8, 0.8, 0.8)) is None  # default gray
-        assert _color_rgb(_C(0.5, 0.5, 0.5)) is None  # FreeCAD default gray
-        assert _color_rgb(_C(0.0, 0.0, 0.0)) is None  # black is achromatic too
-        assert _color_rgb(_C(0.1, 0.2, 0.9)) == pytest.approx((0.1, 0.2, 0.9))
+
+    def test_color_rgb_honours_step_color_verbatim(self):
+        """Any defined colour — including grays — is returned as-is, not dropped."""
+        from convert import _color_rgb
+
+        assert _color_rgb(self._C(0.1, 0.2, 0.9)) == pytest.approx((0.1, 0.2, 0.9))
+        assert _color_rgb(self._C(0.5, 0.5, 0.5)) == pytest.approx((0.5, 0.5, 0.5))
+        assert _color_rgb(self._C(0.0, 0.0, 0.0)) == pytest.approx((0.0, 0.0, 0.0))
+
+    def test_color_rgb_none_on_non_color_object(self):
+        from convert import _color_rgb
+
+        assert _color_rgb(object()) is None
 
 
 class TestCLIArgs:
