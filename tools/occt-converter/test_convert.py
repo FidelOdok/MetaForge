@@ -218,6 +218,37 @@ class TestPartShading:
         assert _color_rgb(object()) is None
 
 
+class TestColorizeMaterialMap:
+    """The material/role colour heuristic used when baking colours into STEP."""
+
+    def test_known_materials_map_to_distinct_colors(self):
+        from colorize import material_color
+
+        battery = material_color("battery_pack")
+        motor = material_color("front_left_motor")
+        prop = material_color("rear_right_prop")
+        lens = material_color("lens_main")
+        assert None not in (battery, motor, prop, lens)
+        assert len({battery, motor, prop, lens}) == 4  # all distinct
+
+    def test_match_is_case_insensitive_and_substring(self):
+        from colorize import material_color
+
+        assert material_color("FrontLeft_MOTOR_01") == material_color("motor")
+
+    def test_unknown_part_left_uncoloured(self):
+        from colorize import material_color
+
+        assert material_color("mystery_widget") is None
+
+    def test_colors_in_unit_range(self):
+        from colorize import material_color
+
+        for name in ("battery", "prop", "lens", "fuselage", "main_pcb"):
+            r, g, b = material_color(name)
+            assert all(0.0 <= v <= 1.0 for v in (r, g, b))
+
+
 class TestCLIArgs:
     """Test command-line argument parsing."""
 
