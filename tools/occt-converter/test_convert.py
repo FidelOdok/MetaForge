@@ -172,6 +172,17 @@ class TestMetadataVersioningFields:
         assert parsed.tzinfo is not None
 
 
+class TestNamedPartReading:
+    """Verify XDE named-part recovery degrades gracefully."""
+
+    def test_named_read_falls_back_on_bad_input(self):
+        """Without OCCT (CI) or on an unreadable path, the helper must return
+        [] rather than raise, so convert() falls back to anonymous solids."""
+        from convert import _read_step_named
+
+        assert _read_step_named("/fake/missing.step") == []
+
+
 class TestCLIArgs:
     """Test command-line argument parsing."""
 

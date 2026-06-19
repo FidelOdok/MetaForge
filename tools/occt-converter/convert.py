@@ -65,6 +65,45 @@ def _read_cad_file(path: str):
         raise ValueError(f"Unsupported file format: {ext}")
 
 
+def _read_step_named(path: str) -> list[tuple]:
+    """Read a STEP file via the XDE layer, returning [(shape, product_name), ...].
+
+    STEP assemblies carry a product name per component (e.g. "fuselage",
+    "front_left_motor"). The plain STEPControl_Reader discards these, so parts
+    end up anonymous (Part_1..N). This uses pythonocc's XDE helper to recover
+    them. Returns [] when no names are available (older STEP, IGES) so the
+    caller can fall back to anonymous solid enumeration.
+    """
+    import contextlib
+    import io
+
+    try:
+        from OCC.Extend.DataExchange import read_step_file_with_names_colors
+    except Exception as exc:  # noqa: BLE001 — helper unavailable in this build
+        logger.warning("XDE named-read unavailable (%s); using anonymous parts", exc)
+        return []
+
+    try:
+        # The helper prints progress to stdout; suppress so it can't corrupt
+        # the JSON written to stdout by the CLI path.
+        with contextlib.redirect_stdout(io.StringIO()):
+            shape_dict = read_step_file_with_names_colors(path)
+    except Exception as exc:  # noqa: BLE001 — fall back to anonymous solids
+        logger.warning("XDE named read failed (%s); using anonymous parts", exc)
+        return []
+
+    named: list[tuple] = []
+    for shape, label in shape_dict.items():
+        if shape is None or shape.IsNull():
+            continue
+        name = label[0] if isinstance(label, (tuple, list)) else label
+        name = str(name).strip() if name else ""
+        if not name:
+            continue
+        named.append((shape, name))
+    return named
+
+
 def _get_sub_shapes(shape):
     """Extract child solids/shells from a compound shape."""
     from OCC.Core.TopAbs import TopAbs_SOLID
@@ -157,34 +196,48 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
     out.mkdir(parents=True, exist_ok=True)
 
     logger.info("Reading CAD file: %s (quality=%s, deflection=%s)", input_path, quality, deflection)
-    root_shape = _read_cad_file(input_path)
 
-    sub_shapes = _get_sub_shapes(root_shape)
-    if not sub_shapes:
-        sub_shapes = [root_shape]
+    # Prefer named parts from the STEP product structure; fall back to
+    # anonymous solid enumeration (IGES, unnamed STEP, or XDE failure).
+    is_step = Path(input_path).suffix.lower() in (".step", ".stp")
+    named = _read_step_named(input_path) if is_step else []
+    if named:
+        enumerated = named
+        logger.info("Recovered %d named parts from STEP product structure", len(named))
+    else:
+        root_shape = _read_cad_file(input_path)
+        sub_shapes = _get_sub_shapes(root_shape) or [root_shape]
+        enumerated = [(shape, f"Part_{i + 1}") for i, shape in enumerate(sub_shapes)]
+        logger.info("Using %d anonymous solid(s)", len(enumerated))
 
     scene = trimesh.Scene()
     parts: list[dict] = []
     total_triangles = 0
+    used_names: dict[str, int] = {}
 
-    for idx, shape in enumerate(sub_shapes):
-        part_name = f"Part_{idx + 1}"
-        mesh_name = f"mesh_{idx}"
-
+    for idx, (shape, part_name) in enumerate(enumerated):
         vertices, faces = _tessellate(shape, deflection)
         if vertices is None or faces is None:
             logger.warning("Skipping empty shape: %s", part_name)
             continue
 
+        # Keep node names unique for trimesh/glTF even if products repeat.
+        node_name = part_name
+        if part_name in used_names:
+            used_names[part_name] += 1
+            node_name = f"{part_name}_{used_names[part_name]}"
+        else:
+            used_names[part_name] = 0
+
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
         mesh.fix_normals()
-        scene.add_geometry(mesh, node_name=mesh_name, geom_name=mesh_name)
+        scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
 
         total_triangles += len(faces)
         parts.append(
             {
                 "name": part_name,
-                "meshName": mesh_name,
+                "meshName": node_name,
                 "children": [],
                 "boundingBox": _bounding_box(vertices),
             }
