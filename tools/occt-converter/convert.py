@@ -10,8 +10,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import colorsys
-import hashlib
 import json
 import logging
 import sys
@@ -29,36 +27,20 @@ QUALITY_TIERS = {
     "fine": 0.01,
 }
 
-# An achromatic colour (r≈g≈b) carries no per-part distinction and is almost
-# always an exporter default (FreeCAD writes a uniform 0.5 gray on every object)
-# rather than an intentional colour — so treat it as "no colour" and fall
-# through to the generated palette. Only chromatic source colours are honoured.
-_CHROMA_EPS = 0.04
-
 
 def _color_rgb(c) -> tuple[float, float, float] | None:
-    """Extract a chromatic (r,g,b) 0-1 tuple from an OCC colour, else None."""
+    """Extract an (r,g,b) 0-1 tuple from an OCC colour, or None if absent.
+
+    STEP colours are the single source of truth — whatever the model defines
+    (including grays) is honoured verbatim; no colour is fabricated. Returns
+    None only when the part carries no colour object at all.
+    """
     if c is None:
         return None
     try:
-        r, g, b = c.Red(), c.Green(), c.Blue()
+        return (float(c.Red()), float(c.Green()), float(c.Blue()))
     except Exception:  # noqa: BLE001 — not a colour object
         return None
-    if max(abs(r - g), abs(g - b), abs(r - b)) < _CHROMA_EPS:
-        return None  # gray/white/black → use the palette instead
-    return (float(r), float(g), float(b))
-
-
-def _palette_color(name: str) -> tuple[float, float, float]:
-    """Deterministic, visually distinct colour for a part name.
-
-    Hashes the name to a hue and converts at fixed saturation/value, so the same
-    part always gets the same pleasant mid-tone colour and sibling parts spread
-    across the wheel — distinct enough to tell parts apart in the viewer.
-    """
-    h = int(hashlib.sha1(name.encode("utf-8")).hexdigest(), 16)
-    hue = (h % 360) / 360.0
-    return colorsys.hsv_to_rgb(hue, 0.55, 0.85)
 
 
 def _read_step(path: str):
@@ -269,22 +251,26 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
         else:
             used_names[part_name] = 0
 
-        # Per-part shading: honour an embedded STEP colour, else a deterministic
-        # distinct palette colour by name so parts are visually separable. The
-        # R3F viewer renders the GLB's own materials, so this surfaces directly.
-        r, g, b = src_color if src_color is not None else _palette_color(part_name)
-        rgba = [int(round(r * 255)), int(round(g * 255)), int(round(b * 255)), 255]
-
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
         mesh.fix_normals()
-        mesh.visual = trimesh.visual.TextureVisuals(
-            material=PBRMaterial(
-                name=node_name,
-                baseColorFactor=rgba,
-                metallicFactor=0.0,
-                roughnessFactor=0.75,
+
+        # Per-part shading: STEP colours are the source of truth. Apply the
+        # model's own colour when present; otherwise leave the mesh's default
+        # (no colour is fabricated). The R3F viewer renders the GLB's own
+        # materials, so authored colours surface directly.
+        rgba: list[int] | None = None
+        if src_color is not None:
+            r, g, b = src_color
+            rgba = [int(round(r * 255)), int(round(g * 255)), int(round(b * 255)), 255]
+            mesh.visual = trimesh.visual.TextureVisuals(
+                material=PBRMaterial(
+                    name=node_name,
+                    baseColorFactor=rgba,
+                    metallicFactor=0.0,
+                    roughnessFactor=0.75,
+                )
             )
-        )
+            materials.append({"part": node_name, "baseColorFactor": rgba})
         scene.add_geometry(mesh, node_name=node_name, geom_name=node_name)
 
         total_triangles += len(faces)
@@ -295,10 +281,9 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
                 "children": [],
                 "boundingBox": _bounding_box(vertices),
                 "color": rgba,
-                "colorSource": "step" if src_color is not None else "palette",
+                "colorSource": "step" if src_color is not None else "none",
             }
         )
-        materials.append({"part": node_name, "baseColorFactor": rgba})
 
     # Export GLB
     glb_path = out / "model.glb"
