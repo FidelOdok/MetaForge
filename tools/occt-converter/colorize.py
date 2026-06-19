@@ -24,18 +24,18 @@ from collections.abc import Callable
 # Ordered (substring, rgb-0..1). First match on the lower-cased part name wins,
 # so put more-specific keys first (e.g. battery_pack before pack).
 _MATERIAL_COLORS: list[tuple[str, tuple[float, float, float]]] = [
-    ("battery", (0.20, 0.72, 0.38)),   # Li-ion green
+    ("battery", (0.20, 0.72, 0.38)),  # Li-ion green
     ("main_pcb", (0.09, 0.45, 0.22)),  # FR4 board green
     ("pcb", (0.09, 0.45, 0.22)),
     ("electronic", (0.16, 0.40, 0.45)),  # ESC / electronics teal
-    ("motor", (0.78, 0.79, 0.82)),     # metallic silver
+    ("motor", (0.78, 0.79, 0.82)),  # metallic silver
     ("hub", (0.42, 0.43, 0.47)),
-    ("prop", (0.10, 0.10, 0.12)),      # propeller black
-    ("foot", (0.14, 0.14, 0.15)),      # rubber foot
-    ("lens", (0.32, 0.56, 0.86)),      # glass blue
-    ("camera", (0.17, 0.17, 0.20)),    # camera body near-black
+    ("prop", (0.10, 0.10, 0.12)),  # propeller black
+    ("foot", (0.14, 0.14, 0.15)),  # rubber foot
+    ("lens", (0.32, 0.56, 0.86)),  # glass blue
+    ("camera", (0.17, 0.17, 0.20)),  # camera body near-black
     ("gimbal", (0.40, 0.41, 0.45)),
-    ("arm", (0.56, 0.58, 0.62)),       # structural body gray
+    ("arm", (0.56, 0.58, 0.62)),  # structural body gray
     ("fuselage", (0.86, 0.87, 0.89)),  # light body shell
     ("body", (0.82, 0.83, 0.85)),
 ]
