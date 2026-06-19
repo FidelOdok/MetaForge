@@ -237,15 +237,36 @@ class FreecadSessionStore:
         with self._lock:
             session._counter += 1
             obj_id = f"{kind}_{session._counter}"
+            # Enforce a meaningful, unique part name (the "parts must be named"
+            # rule, behind the MCP so it holds for every client). The caller's
+            # explicit name wins; otherwise fall back to the unique obj_id so a
+            # part is never anonymous or colliding (e.g. two bare "Box"es). The
+            # label is stamped onto the live object so it propagates into STEP
+            # PRODUCT entries on export, and from there to the viewer manifest.
+            label = name.strip() if name and name.strip() else obj_id
+            existing = {e.name for e in session.objects.values()}
+            if label in existing:
+                label = f"{label}_{session._counter}"
+            try:
+                if hasattr(obj, "Label"):
+                    obj.Label = label
+            except Exception:  # noqa: BLE001 — never fail authoring over a label
+                logger.warning("freecad_label_set_failed", session_id=session_id, obj_id=obj_id)
             session.objects[obj_id] = ObjectEntry(
                 obj_id=obj_id,
                 kind=kind,
-                name=name or obj_id,
+                name=label,
                 obj=obj,
                 order=session._counter,
                 metadata=metadata or {},
             )
-        logger.info("freecad_object_registered", session_id=session_id, obj_id=obj_id, kind=kind)
+        logger.info(
+            "freecad_object_registered",
+            session_id=session_id,
+            obj_id=obj_id,
+            kind=kind,
+            label=label,
+        )
         return obj_id
 
     def get_object(self, session_id: str, obj_id: str) -> Any:
