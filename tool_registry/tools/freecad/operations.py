@@ -1154,6 +1154,167 @@ class FreecadOperations:
         document.recompute()
         return feat
 
+    # ------------------------------------------------------------------
+    # Datasheet-driven component generation (MET-540): build a parametric
+    # 3D model of an IC package from its datasheet dimensions. Body + leads
+    # are emitted as separately-named parts so the digital thread, viewer,
+    # and colouring all see one named product per feature.
+    # ------------------------------------------------------------------
+
+    # Number of lead-bearing sides per package family.
+    _IC_SIDES = {
+        "SOIC": 2,
+        "SOP": 2,
+        "SSOP": 2,
+        "TSSOP": 2,
+        "MSOP": 2,
+        "DIP": 2,
+        "SOT": 2,
+        "QFP": 4,
+        "LQFP": 4,
+        "TQFP": 4,
+        "QFN": 4,
+        "MQFP": 4,
+    }
+
+    @staticmethod
+    def ic_pin_layout(package_type: str, lead_count: int, pitch: float) -> list[dict[str, Any]]:
+        """Pure pin layout: pin number, side, and centred position-along-side.
+
+        FreeCAD-free so it is unit-testable. Sides are ``y-``/``y+`` (leads run
+        out along ±Y, positioned along X) for 2-sided families, plus ``x+``/``x-``
+        for 4-sided ones. Numbering is counter-clockwise from the ``y-`` side,
+        the usual IC convention. ``u`` is the centred coordinate along the side.
+        """
+        sides = FreecadOperations._IC_SIDES.get(package_type.upper())
+        if sides is None:
+            raise ValueError(f"Unsupported package family: {package_type}")
+        if lead_count <= 0 or lead_count % sides != 0:
+            raise ValueError(
+                f"lead_count must be a positive multiple of {sides} for {package_type}"
+            )
+        per = lead_count // sides
+        coords = [(i - (per - 1) / 2.0) * pitch for i in range(per)]
+        pins: list[dict[str, Any]] = []
+        if sides == 2:
+            for i, u in enumerate(coords):  # y- side, left→right
+                pins.append({"pin": i + 1, "side": "y-", "u": u})
+            for i, u in enumerate(reversed(coords)):  # y+ side, right→left
+                pins.append({"pin": per + i + 1, "side": "y+", "u": u})
+        else:  # 4-sided, CCW: y- (bottom), x+ (right), y+ (top), x- (left)
+            for i, u in enumerate(coords):
+                pins.append({"pin": i + 1, "side": "y-", "u": u})
+            for i, u in enumerate(coords):
+                pins.append({"pin": per + i + 1, "side": "x+", "u": u})
+            for i, u in enumerate(reversed(coords)):
+                pins.append({"pin": 2 * per + i + 1, "side": "y+", "u": u})
+            for i, u in enumerate(reversed(coords)):
+                pins.append({"pin": 3 * per + i + 1, "side": "x-", "u": u})
+        return pins
+
+    # Per-family default dimensions (mm) — used to fill any param the caller
+    # (or datasheet extractor) didn't supply. Sensible JEDEC-ish nominals.
+    _IC_DEFAULTS = {
+        "SOIC": dict(
+            body_length=4.9,
+            body_width=3.9,
+            body_height=1.4,
+            lead_count=8,
+            pitch=1.27,
+            lead_span=6.0,
+            lead_width=0.41,
+            lead_thickness=0.2,
+            standoff=0.1,
+        ),
+        "QFP": dict(
+            body_length=7.0,
+            body_width=7.0,
+            body_height=1.0,
+            lead_count=32,
+            pitch=0.8,
+            lead_span=9.0,
+            lead_width=0.35,
+            lead_thickness=0.15,
+            standoff=0.05,
+        ),
+    }
+
+    def generate_ic_package(
+        self,
+        document: Any,
+        package_type: str,
+        name: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[tuple[str, Any]]:
+        """Build a parametric IC package (body + gull-wing leads) from dimensions.
+
+        ``package_type`` selects the family (SOIC/SOP/…, QFP/LQFP/…). ``params``
+        carries the datasheet dimensions (body_length/width/height, lead_count,
+        pitch, lead_span, lead_width, lead_thickness, standoff); anything missing
+        falls back to family nominals. Returns ``[(part_name, object), …]`` — the
+        epoxy body, a pin-1 marker, and one solid per lead — for the adapter to
+        register as individually-named parts.
+        """
+        self._require_freecad()
+        fam = package_type.upper()
+        base_key = "QFP" if self._IC_SIDES.get(fam) == 4 else "SOIC"
+        cfg = {**self._IC_DEFAULTS[base_key], **(params or {})}
+        v = FreeCAD.Vector
+        name = name or f"{fam}-{int(cfg['lead_count'])}"
+
+        L = float(cfg["body_length"])
+        W = float(cfg["body_width"])
+        H = float(cfg["body_height"])
+        so = float(cfg["standoff"])
+        lt = float(cfg["lead_thickness"])
+        lw = float(cfg["lead_width"])
+        lead_len = max(0.1, (float(cfg["lead_span"]) - W) / 2.0)
+
+        out: list[tuple[str, Any]] = []
+
+        def feat(label: str, shape: Any) -> None:
+            o = document.addObject("Part::Feature", label)
+            o.Shape = shape
+            o.Label = label
+            out.append((label, o))
+
+        # Epoxy body
+        feat(f"{name}_epoxy_body", Part.makeBox(L, W, H, v(-L / 2, -W / 2, so)))
+        # Pin-1 orientation dimple on the top face, near pin 1's corner
+        feat(
+            f"{name}_pin1_mark",
+            Part.makeCylinder(
+                min(0.35, L / 8), 0.05, v(-L / 2 + 0.6, -W / 2 + 0.6, so + H), v(0, 0, 1)
+            ),
+        )
+
+        def gull_lead(u: float, side: str) -> Any:
+            """Foot on the seating plane + riser up to the body — fused."""
+            if side in ("y-", "y+"):
+                sgn = -1.0 if side == "y-" else 1.0
+                y0 = min(sgn * W / 2, sgn * (W / 2 + lead_len))
+                foot = Part.makeBox(lw, lead_len, lt, v(u - lw / 2, y0, 0.0))
+                riser = Part.makeBox(
+                    lw, lt, so + lt, v(u - lw / 2, sgn * (W / 2) - (lt if sgn > 0 else 0), 0.0)
+                )
+            else:
+                sgn = -1.0 if side == "x-" else 1.0
+                x0 = min(sgn * L / 2, sgn * (L / 2 + lead_len))
+                foot = Part.makeBox(lead_len, lw, lt, v(x0, u - lw / 2, 0.0))
+                riser = Part.makeBox(
+                    lt, lw, so + lt, v(sgn * (L / 2) - (lt if sgn > 0 else 0), u - lw / 2, 0.0)
+                )
+            try:
+                return foot.fuse(riser)
+            except Exception:  # noqa: BLE001 — fall back to the flat foot
+                return foot
+
+        for p in self.ic_pin_layout(fam, int(cfg["lead_count"]), float(cfg["pitch"])):
+            feat(f"{name}_pin_{p['pin']}", gull_lead(float(p["u"]), str(p["side"])))
+
+        document.recompute()
+        return out
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
