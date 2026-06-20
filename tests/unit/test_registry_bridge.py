@@ -31,12 +31,12 @@ class TestRegistryMcpBridge:
     async def test_list_tools_all(self):
         """List all tools returns expected count.
 
-        Post-MET-528: cadquery=7 + freecad=13 + calculix=4 + kicad=6 = 30
-        (freecad +8 stateful PartDesign authoring tools).
+        Grows as adapters gain tools; freecad reached 39 with the IC-package
+        generator (MET-540), bringing the cross-adapter total to 56.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 55
+        assert len(tools) == 56
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

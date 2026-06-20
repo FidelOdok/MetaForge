@@ -24,6 +24,11 @@ from collections.abc import Callable
 # Ordered (substring, rgb-0..1). First match on the lower-cased part name wins,
 # so put more-specific keys first (e.g. battery_pack before pack).
 _MATERIAL_COLORS: list[tuple[str, tuple[float, float, float]]] = [
+    # IC package parts (most specific first: pin1_mark before pin, epoxy before body)
+    ("mark", (0.95, 0.95, 0.95)),  # pin-1 orientation marker (white)
+    ("epoxy", (0.13, 0.13, 0.15)),  # moulded package body (black)
+    ("pin", (0.80, 0.80, 0.83)),  # tinned lead (silver)
+    ("lead", (0.80, 0.80, 0.83)),
     ("battery", (0.20, 0.72, 0.38)),  # Li-ion green
     ("main_pcb", (0.09, 0.45, 0.22)),  # FR4 board green
     ("pcb", (0.09, 0.45, 0.22)),

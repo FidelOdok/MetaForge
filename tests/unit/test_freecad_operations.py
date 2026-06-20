@@ -77,6 +77,46 @@ class TestFreecadGuard:
             with pytest.raises(FreecadNotAvailableError):
                 ops.generate_mesh("/input.step")
 
+    def test_generate_ic_package_raises_when_unavailable(self) -> None:
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.generate_ic_package(None, "SOIC", "LM358", {})
+
+
+class TestIcPinLayout:
+    """Pure pin-layout maths (no FreeCAD) for datasheet-driven IC generation."""
+
+    def test_soic_two_sided_numbering(self) -> None:
+        pins = FreecadOperations.ic_pin_layout("SOIC", 8, 1.27)
+        assert len(pins) == 8
+        # 4 per side; pin 1 on y-, pin 8 on y+
+        assert {p["side"] for p in pins} == {"y-", "y+"}
+        assert pins[0]["pin"] == 1 and pins[0]["side"] == "y-"
+        # centred positions: symmetric about 0
+        ys = sorted(p["u"] for p in pins if p["side"] == "y-")
+        assert ys[0] == pytest.approx(-1.5 * 1.27)
+        assert ys[-1] == pytest.approx(1.5 * 1.27)
+
+    def test_qfp_four_sided(self) -> None:
+        pins = FreecadOperations.ic_pin_layout("LQFP", 32, 0.8)
+        assert len(pins) == 32
+        assert {p["side"] for p in pins} == {"y-", "x+", "y+", "x-"}
+        # 8 pins per side
+        from collections import Counter
+
+        assert set(Counter(p["side"] for p in pins).values()) == {8}
+
+    def test_unsupported_family_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported package family"):
+            FreecadOperations.ic_pin_layout("BGA", 64, 0.8)
+
+    def test_lead_count_must_match_sides(self) -> None:
+        with pytest.raises(ValueError, match="multiple of"):
+            FreecadOperations.ic_pin_layout("SOIC", 7, 1.27)  # odd → invalid for 2 sides
+        with pytest.raises(ValueError, match="multiple of"):
+            FreecadOperations.ic_pin_layout("QFP", 30, 0.8)  # not divisible by 4
+
 
 # ---------------------------------------------------------------------------
 # 3. FreecadOperations init

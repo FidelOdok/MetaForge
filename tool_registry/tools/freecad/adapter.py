@@ -840,6 +840,33 @@ class FreecadServer(McpToolServer):
                 self.lattice_perforation,
             ),
             (
+                "generate_ic_package",
+                "Skill: parametric 3D IC package from datasheet dims (body + leads), "
+                "e.g. SOIC/SOP/QFP — each part individually named",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "package_type": {
+                            "type": "string",
+                            "description": "Family: SOIC/SOP/SSOP/TSSOP/DIP or QFP/LQFP/TQFP/QFN",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Part name prefix (e.g. 'LM358')",
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Datasheet dims: body_length/width/height, lead_count, "
+                            "pitch, lead_span, lead_width, lead_thickness, standoff (mm). "
+                            "Missing values fall back to family nominals.",
+                        },
+                    },
+                    ["session_id", "package_type"],
+                ),
+                self.generate_ic_package,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1283,6 +1310,25 @@ class FreecadServer(McpToolServer):
             "pitch_diameter_mm": round(module * teeth, 3),
             "addendum_diameter_mm": round(module * (teeth + 2), 3),
             **self._ops.shape_props(gear),
+        }
+
+    async def generate_ic_package(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        package_type = self._require(arguments, "package_type")
+        name = arguments.get("name", "") or package_type
+        params = arguments.get("params") or {}
+        session = self._sessions.get(session_id)
+        parts = self._ops.generate_ic_package(session.document, package_type, name, params)
+        obj_ids = [
+            self._sessions.register_object(session_id, obj, "feature", label)
+            for label, obj in parts
+        ]
+        return {
+            "obj_ids": obj_ids,
+            "part_count": len(obj_ids),
+            "package_type": package_type.upper(),
+            "name": name,
+            "skill": "ic_package",
         }
 
     async def lattice_perforation(self, arguments: dict[str, Any]) -> dict[str, Any]:
