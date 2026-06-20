@@ -867,6 +867,32 @@ class FreecadServer(McpToolServer):
                 self.generate_ic_package,
             ),
             (
+                "generate_profile_part",
+                "Skill: build a part from a datasheet 2D profile — revolve "
+                "(shaft/spacer/can) or extrude (constant-section)",
+                "cad_skill",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "name": {"type": "string"},
+                        "profile": {
+                            "type": "array",
+                            "description": "Closed 2D outline as [{x,y}, …]. For revolve, "
+                            "x=radius (≥0), y=height in the X-Z half-plane.",
+                            "items": {"type": "object"},
+                        },
+                        "operation": {"type": "string", "enum": ["revolve", "extrude"]},
+                        "angle": {
+                            "type": "number",
+                            "description": "Revolve sweep degrees (default 360)",
+                        },
+                        "depth": {"type": "number", "description": "Extrude depth mm"},
+                    },
+                    ["session_id", "profile"],
+                ),
+                self.generate_profile_part,
+            ),
+            (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
                 "(escape hatch; assign `result` to surface an object)",
@@ -1329,6 +1355,30 @@ class FreecadServer(McpToolServer):
             "package_type": package_type.upper(),
             "name": name,
             "skill": "ic_package",
+        }
+
+    async def generate_profile_part(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        profile = arguments.get("profile")
+        if not profile:
+            raise ValueError("profile is required")
+        operation = arguments.get("operation", "revolve")
+        name = arguments.get("name", "") or operation.capitalize()
+        session = self._sessions.get(session_id)
+        obj = self._ops.generate_profile_part(
+            session.document,
+            name,
+            profile,
+            operation,
+            float(arguments.get("angle", 360.0)),
+            float(arguments.get("depth", 10.0)),
+        )
+        obj_id = self._sessions.register_object(session_id, obj, "feature", name)
+        return {
+            "obj_id": obj_id,
+            "operation": operation,
+            "skill": "profile_part",
+            **self._ops.shape_props(obj),
         }
 
     async def lattice_perforation(self, arguments: dict[str, Any]) -> dict[str, Any]:

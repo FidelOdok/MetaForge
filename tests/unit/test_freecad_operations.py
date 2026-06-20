@@ -107,6 +107,13 @@ class TestIcPinLayout:
 
         assert set(Counter(p["side"] for p in pins).values()) == {8}
 
+    def test_generate_profile_part_raises_when_unavailable(self) -> None:
+        ops = FreecadOperations()
+        prof = [{"x": 0, "y": 0}, {"x": 5, "y": 0}, {"x": 5, "y": 10}]
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.generate_profile_part(None, "Shaft", prof, "revolve")
+
     def test_unsupported_family_rejected(self) -> None:
         with pytest.raises(ValueError, match="Unsupported package family"):
             FreecadOperations.ic_pin_layout("BGA", 64, 0.8)
@@ -116,6 +123,39 @@ class TestIcPinLayout:
             FreecadOperations.ic_pin_layout("SOIC", 7, 1.27)  # odd → invalid for 2 sides
         with pytest.raises(ValueError, match="multiple of"):
             FreecadOperations.ic_pin_layout("QFP", 30, 0.8)  # not divisible by 4
+
+
+class TestNormalizeProfile:
+    """Pure profile validation for revolve/extrude generation (no FreeCAD)."""
+
+    def test_closes_open_profile(self) -> None:
+        pts = FreecadOperations.normalize_profile(
+            [{"x": 0, "y": 0}, {"x": 5, "y": 0}, {"x": 5, "y": 10}], "revolve"
+        )
+        assert pts[0] == pts[-1]  # auto-closed
+        assert len(pts) == 4
+
+    def test_rejects_too_few_points(self) -> None:
+        with pytest.raises(ValueError, match="at least 3 points"):
+            FreecadOperations.normalize_profile([{"x": 0, "y": 0}, {"x": 1, "y": 1}], "extrude")
+
+    def test_revolve_rejects_negative_radius(self) -> None:
+        with pytest.raises(ValueError, match="radius"):
+            FreecadOperations.normalize_profile(
+                [{"x": -1, "y": 0}, {"x": 5, "y": 0}, {"x": 5, "y": 10}], "revolve"
+            )
+
+    def test_extrude_allows_negative_x(self) -> None:
+        pts = FreecadOperations.normalize_profile(
+            [{"x": -2, "y": 0}, {"x": 2, "y": 0}, {"x": 0, "y": 3}], "extrude"
+        )
+        assert len(pts) == 4
+
+    def test_unknown_operation_rejected(self) -> None:
+        with pytest.raises(ValueError, match="revolve.*extrude|operation"):
+            FreecadOperations.normalize_profile(
+                [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "loft"
+            )
 
 
 # ---------------------------------------------------------------------------

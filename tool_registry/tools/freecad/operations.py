@@ -1315,6 +1315,66 @@ class FreecadOperations:
         document.recompute()
         return out
 
+    # ------------------------------------------------------------------
+    # Profile-driven generation (MET-541): build a part from a datasheet's 2D
+    # dimensioned outline — revolve it about an axis (shafts, spacers, sensor
+    # cans, seals) or extrude it along a depth (constant-section parts). The
+    # outline is the bridge from a mechanical drawing to a solid.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def normalize_profile(
+        points: list[dict[str, Any]], operation: str
+    ) -> list[tuple[float, float]]:
+        """Validate + close a 2D profile. Pure (FreeCAD-free), so it's testable.
+
+        Points are ``{"x":…, "y":…}``. For ``revolve`` the profile lives in the
+        (radius=x, height=y) half-plane and is spun about the Y/Z axis, so every
+        x must be ≥ 0. The ring is auto-closed if the last point ≠ the first.
+        """
+        op = operation.lower()
+        if op not in ("revolve", "extrude"):
+            raise ValueError(f"operation must be 'revolve' or 'extrude', got {operation!r}")
+        pts = [(float(p["x"]), float(p["y"])) for p in points]
+        if len(pts) < 3:
+            raise ValueError("profile needs at least 3 points")
+        if pts[0] != pts[-1]:
+            pts.append(pts[0])
+        if op == "revolve" and any(x < -1e-9 for x, _ in pts):
+            raise ValueError("revolve profile radius (x) must be >= 0")
+        return pts
+
+    def generate_profile_part(
+        self,
+        document: Any,
+        name: str,
+        profile: list[dict[str, Any]],
+        operation: str = "revolve",
+        angle: float = 360.0,
+        depth: float = 10.0,
+    ) -> Any:
+        """Build a solid from a 2D profile by revolving or extruding it.
+
+        ``operation='revolve'``: profile is (radius, height) in the X-Z plane,
+        spun ``angle`` degrees about the Z axis (default 360 → full body of
+        revolution). ``operation='extrude'``: profile is (x, y), extruded
+        ``depth`` along +Z. Returns a single named ``Part::Feature``.
+        """
+        self._require_freecad()
+        pts = self.normalize_profile(profile, operation)
+        v = FreeCAD.Vector
+        if operation.lower() == "revolve":
+            wire = Part.makePolygon([v(x, 0.0, y) for x, y in pts])
+            solid = Part.Face(wire).revolve(v(0, 0, 0), v(0, 0, 1), float(angle))
+        else:
+            wire = Part.makePolygon([v(x, y, 0.0) for x, y in pts])
+            solid = Part.Face(wire).extrude(v(0, 0, float(depth)))
+        feat = document.addObject("Part::Feature", name or "ProfilePart")
+        feat.Shape = solid
+        feat.Label = name or "ProfilePart"
+        document.recompute()
+        return feat
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
