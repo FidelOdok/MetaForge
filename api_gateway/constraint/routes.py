@@ -18,6 +18,7 @@ import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from api_gateway.constraint.freecad_client import FreecadMcpClient, default_freecad_client
 from api_gateway.constraint.kinematics import Joint, solve_joint
 from observability.tracing import get_tracer
 
@@ -29,6 +30,10 @@ router = APIRouter(prefix="/v1/constraint", tags=["constraint"])
 # Beyond this single-axis displacement (mm) the stub treats the move as
 # clearly infeasible (likely a collision) and returns a conflict.
 _FEASIBLE_LIMIT_MM = 500.0
+
+# Gateway→freecad-adapter client for parametric binding (MET-531). Module-level
+# so tests can patch it (mirrors api_gateway.twin.routes._twin).
+_freecad_client: FreecadMcpClient = default_freecad_client
 
 
 class DeltaTransform(BaseModel):
@@ -42,6 +47,15 @@ class DeltaTransform(BaseModel):
 class SynthesizeRequest(BaseModel):
     group_name: str = Field(min_length=1)
     delta: DeltaTransform
+    # MET-531: when the dragged group maps to a live FreeCAD session object,
+    # supplying both binds the suggested parameter into the model (parametric
+    # Apply) instead of only returning a suggestion string. Omitted → unchanged
+    # suggestion-only behaviour (backward compatible).
+    session_id: str | None = None
+    obj_id: str | None = None
+    # Placement component to drive; defaults to the dominant axis's
+    # ``Placement.Base.<axis>`` when omitted.
+    property_path: str | None = None
 
 
 class ConstraintSuggestion(BaseModel):
@@ -55,6 +69,10 @@ class SynthesizeResponse(BaseModel):
     suggestion: str
     constraint: ConstraintSuggestion | None = None
     conflict_reason: str | None = None
+    # MET-531: set when the suggestion was bound into a live FreeCAD model.
+    bound: bool = False
+    expression: str | None = None
+    binding_error: str | None = None
 
 
 _AXES: tuple[tuple[str, str], ...] = (("dx", "x"), ("dy", "y"), ("dz", "z"))
@@ -96,13 +114,58 @@ def _suggest(group_name: str, dx: float, dy: float, dz: float) -> SynthesizeResp
     )
 
 
+def _axis_of(parameter: str) -> str:
+    """Recover the dominant axis (``x``/``y``/``z``) from a ``*_position_<axis>`` name."""
+    return parameter.rsplit("_", 1)[-1]
+
+
 @router.post("/synthesize", response_model=SynthesizeResponse)
 async def synthesize_constraint(body: SynthesizeRequest) -> SynthesizeResponse:
-    """Turn a drag delta into a suggested parametric constraint (stub)."""
+    """Turn a drag delta into a parametric constraint, and — when the dragged
+    group maps to a live FreeCAD session object (``session_id`` + ``obj_id``) —
+    **bind it into the model** so Apply re-parameterizes and re-solves (MET-531).
+
+    Without a session/object it stays a suggestion-only stub (MET-519). Binding
+    is best-effort: an adapter error leaves the suggestion intact with
+    ``bound=False`` and a ``binding_error``.
+    """
     with tracer.start_as_current_span("constraint.synthesize") as span:
         span.set_attribute("constraint.group", body.group_name)
         resp = _suggest(body.group_name, body.delta.dx, body.delta.dy, body.delta.dz)
-        logger.info("constraint_synthesized", group=body.group_name, status=resp.status)
+        span.set_attribute("constraint.status", resp.status)
+
+        # Parametric Apply: only when we have something to bind to and the
+        # suggestion is actionable.
+        if resp.status == "ok" and resp.constraint and body.session_id and body.obj_id:
+            axis = _axis_of(resp.constraint.parameter)
+            property_path = body.property_path or f"Placement.Base.{axis}"
+            try:
+                binding = await _freecad_client.apply_parametric_binding(
+                    session_id=body.session_id,
+                    obj_id=body.obj_id,
+                    parameter=resp.constraint.parameter,
+                    value=resp.constraint.value,
+                    property_path=property_path,
+                )
+                resp.bound = bool(binding.get("bound"))
+                resp.expression = binding.get("expression")
+                resp.suggestion = f"{resp.suggestion} — bound {property_path} = {resp.expression}"
+            except Exception as exc:  # noqa: BLE001 — Apply must never hard-fail
+                span.record_exception(exc)
+                resp.binding_error = str(exc)
+                logger.warning(
+                    "constraint_binding_failed",
+                    group=body.group_name,
+                    obj_id=body.obj_id,
+                    error=str(exc),
+                )
+
+        logger.info(
+            "constraint_synthesized",
+            group=body.group_name,
+            status=resp.status,
+            bound=resp.bound,
+        )
         return resp
 
 
