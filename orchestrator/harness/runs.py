@@ -80,9 +80,7 @@ class InvalidTransition(Exception):
         self.run_id = run_id
         self.current = current
         self.target = target
-        super().__init__(
-            f"run '{run_id}': cannot transition {current.value} -> {target.value}"
-        )
+        super().__init__(f"run '{run_id}': cannot transition {current.value} -> {target.value}")
 
 
 @dataclass
