@@ -8,6 +8,11 @@ unit-testable without touching the network.
 
 from __future__ import annotations
 
+from orchestrator.harness.providers.adapters import (
+    anthropic_invoke,
+    default_invoke,
+    openai_invoke,
+)
 from orchestrator.harness.providers.config import (
     ConfigError,
     HarnessProviderConfig,
@@ -31,6 +36,9 @@ __all__ = [
     "AllProvidersFailedError",
     "AuthProfile",
     "ConfigError",
+    "anthropic_invoke",
+    "default_invoke",
+    "openai_invoke",
     "HarnessProviderConfig",
     "ProfileExhaustedError",
     "ProfileRotor",
