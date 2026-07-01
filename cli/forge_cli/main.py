@@ -26,6 +26,7 @@ from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
+from cli.forge_cli.runs import handle_runs
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
 
@@ -95,6 +96,31 @@ def build_parser() -> argparse.ArgumentParser:
     reject_parser.add_argument("change_id", help="Change proposal UUID")
     reject_parser.add_argument("--reason", required=True, help="Rejection reason")
     reject_parser.add_argument("--reviewer", default="cli-user", help="Reviewer identity")
+
+    # -- runs (harness) ----------------------------------------------------
+    runs_parser = subparsers.add_parser("runs", help="Drive harness runs (/v1/runs)")
+    runs_sub = runs_parser.add_subparsers(dest="runs_command", help="Runs subcommands")
+
+    runs_create = runs_sub.add_parser("create", help="Create a run")
+    runs_create.add_argument("--goal", default=None, help="Run goal text")
+    runs_create.add_argument("--request-json", default=None, help="Full run request as JSON")
+    runs_create.add_argument("--no-start", action="store_true", help="Leave the run queued")
+
+    runs_list = runs_sub.add_parser("list", help="List runs")
+    runs_list.add_argument("--json", action="store_true", help="JSON output")
+
+    runs_get = runs_sub.add_parser("get", help="Fetch one run")
+    runs_get.add_argument("run_id", help="Run id")
+    runs_get.add_argument("--json", action="store_true", help="JSON output")
+
+    runs_approve = runs_sub.add_parser("approve", help="Approve a paused run")
+    runs_approve.add_argument("run_id", help="Run id")
+
+    runs_reject = runs_sub.add_parser("reject", help="Reject a paused run")
+    runs_reject.add_argument("run_id", help="Run id")
+
+    runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
+    runs_watch.add_argument("run_id", help="Run id")
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(
@@ -247,6 +273,7 @@ _HANDLERS = {
     "sources": handle_sources,
     "knowledge": handle_knowledge,
     "memory": handle_memory,
+    "runs": handle_runs,
 }
 
 
