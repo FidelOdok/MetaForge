@@ -8,6 +8,11 @@ unit-testable without touching the network.
 
 from __future__ import annotations
 
+from orchestrator.harness.providers.config import (
+    ConfigError,
+    HarnessProviderConfig,
+    load_provider_config,
+)
 from orchestrator.harness.providers.pipeline import (
     AllProvidersFailedError,
     ProviderError,
@@ -25,6 +30,8 @@ from orchestrator.harness.providers.rotation import (
 __all__ = [
     "AllProvidersFailedError",
     "AuthProfile",
+    "ConfigError",
+    "HarnessProviderConfig",
     "ProfileExhaustedError",
     "ProfileRotor",
     "ProviderError",
@@ -32,4 +39,5 @@ __all__ = [
     "ProviderSpec",
     "RetryPolicy",
     "RoleModelSlots",
+    "load_provider_config",
 ]
