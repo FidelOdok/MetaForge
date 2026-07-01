@@ -7,6 +7,8 @@ import { ProjectsPage } from './pages/ProjectsPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SessionDetailPage } from './pages/SessionDetailPage';
+import { RunsPage } from './pages/RunsPage';
+import { RunDetailPage } from './pages/RunDetailPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { BomPage } from './pages/BomPage';
 import { TwinViewerPage } from './pages/TwinViewerPage';
@@ -55,6 +57,22 @@ export function App() {
               element={
                 <ErrorBoundary>
                   <SessionDetailPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="runs"
+              element={
+                <ErrorBoundary>
+                  <RunsPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="runs/:id"
+              element={
+                <ErrorBoundary>
+                  <RunDetailPage />
                 </ErrorBoundary>
               }
             />
