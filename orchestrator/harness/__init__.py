@@ -20,6 +20,7 @@ the layer rules in ``CLAUDE.md``.
 """
 
 from orchestrator.harness.artifacts import ArtifactStore, InMemoryArtifactStore
+from orchestrator.harness.runtime import HarnessRuntime
 from orchestrator.harness.three_agent import (
     Evaluator,
     GateResult,
@@ -37,6 +38,7 @@ __all__ = [
     "Generator",
     "HarnessConfig",
     "HarnessOutcome",
+    "HarnessRuntime",
     "InMemoryArtifactStore",
     "Planner",
     "ThreeAgentHarness",
