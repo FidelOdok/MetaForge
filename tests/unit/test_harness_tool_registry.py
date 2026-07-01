@@ -7,6 +7,7 @@ import pytest
 from orchestrator.harness.tools import (
     NATIVE,
     DuplicateToolError,
+    GateBlockedError,
     ToolNotFoundError,
     ToolRegistry,
 )
@@ -70,6 +71,76 @@ def test_list_and_filter_by_origin() -> None:
     reg.register_mcp("kicad", "erc", description="d", input_schema=SCHEMA, handler=_echo)
 
     assert reg.names() == ["mcp_calculix_run_fea", "mcp_kicad_erc", "twin_search"]
-    assert [s.name for s in reg.list(origin=NATIVE)] == ["twin_search"]
-    assert [s.name for s in reg.list(origin="calculix")] == ["mcp_calculix_run_fea"]
-    assert len(reg.list()) == 3
+    assert [s.name for s in reg.all_tools(origin=NATIVE)] == ["twin_search"]
+    assert [s.name for s in reg.all_tools(origin="calculix")] == ["mcp_calculix_run_fea"]
+    assert len(reg.all_tools()) == 3
+
+
+@pytest.mark.asyncio
+async def test_ungated_tool_invokes_without_gate_check() -> None:
+    reg = ToolRegistry()
+    reg.register_native("t", description="d", input_schema=SCHEMA, handler=_echo)
+    assert await reg.invoke("t", {"a": 1}) == {"echo": {"a": 1}}
+
+
+@pytest.mark.asyncio
+async def test_gated_tool_invokes_when_gates_satisfied() -> None:
+    reg = ToolRegistry()
+    reg.register_native(
+        "cut",
+        description="destructive",
+        input_schema=SCHEMA,
+        handler=_echo,
+        required_gates=["approval"],
+    )
+    result = await reg.invoke("cut", {"x": 1}, gate_check=lambda g: True)
+    assert result == {"echo": {"x": 1}}
+
+
+@pytest.mark.asyncio
+async def test_gated_tool_blocked_when_gate_unsatisfied() -> None:
+    reg = ToolRegistry()
+    reg.register_native(
+        "cut",
+        description="destructive",
+        input_schema=SCHEMA,
+        handler=_echo,
+        required_gates=["approval"],
+    )
+    with pytest.raises(GateBlockedError) as exc:
+        await reg.invoke("cut", {}, gate_check=lambda g: False)
+    assert exc.value.gate == "approval"
+
+
+@pytest.mark.asyncio
+async def test_gated_tool_fails_safe_without_evaluator() -> None:
+    reg = ToolRegistry()
+    reg.register_native(
+        "cut",
+        description="destructive",
+        input_schema=SCHEMA,
+        handler=_echo,
+        required_gates=["approval"],
+    )
+    # No gate_check passed -> a gated tool must NOT run (external-client safe).
+    with pytest.raises(GateBlockedError):
+        await reg.invoke("cut", {})
+
+
+def test_visible_filters_by_gate() -> None:
+    reg = ToolRegistry()
+    reg.register_native("safe", description="d", input_schema=SCHEMA, handler=_echo)
+    reg.register_native(
+        "cut",
+        description="d",
+        input_schema=SCHEMA,
+        handler=_echo,
+        required_gates=["approval"],
+    )
+    satisfied = {"approval"}
+    visible = [s.name for s in reg.visible(lambda g: g in satisfied)]
+    assert visible == ["cut", "safe"]
+
+    satisfied.clear()
+    visible = [s.name for s in reg.visible(lambda g: g in satisfied)]
+    assert visible == ["safe"]  # gated tool hidden until its gate holds

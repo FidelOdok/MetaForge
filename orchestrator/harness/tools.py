@@ -18,7 +18,7 @@ protocol call, so the registry stays a pure orchestration-layer component.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +28,8 @@ logger = structlog.get_logger(__name__)
 
 # A tool invocation: arguments in, result out.
 Handler = Callable[[dict[str, Any]], Awaitable[Any]]
+# Gate precondition check: gate name -> is it currently satisfied?
+GateCheck = Callable[[str], bool]
 
 NATIVE = "native"
 _SANITIZE = re.compile(r"[^0-9a-zA-Z]+")
@@ -46,6 +48,19 @@ class DuplicateToolError(ValueError):
     """A tool with the given name is already registered."""
 
 
+class GateBlockedError(PermissionError):
+    """A tool was invoked while a required gate precondition was unmet.
+
+    Enforced server-side so a consequential tool can never run for an external
+    client that skipped the gate.
+    """
+
+    def __init__(self, tool: str, gate: str) -> None:
+        self.tool = tool
+        self.gate = gate
+        super().__init__(f"tool '{tool}' blocked: gate '{gate}' not satisfied")
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """One registered tool the harness can call."""
@@ -55,6 +70,8 @@ class ToolSpec:
     input_schema: dict[str, Any]
     origin: str  # NATIVE or the MCP server name
     handler: Handler
+    # Gate names that must be satisfied before this tool may be invoked.
+    required_gates: tuple[str, ...] = ()
 
 
 class ToolRegistry:
@@ -82,6 +99,7 @@ class ToolRegistry:
         description: str,
         input_schema: dict[str, Any],
         handler: Handler,
+        required_gates: Sequence[str] = (),
     ) -> ToolSpec:
         return self._add(
             ToolSpec(
@@ -90,6 +108,7 @@ class ToolRegistry:
                 input_schema=input_schema,
                 origin=NATIVE,
                 handler=handler,
+                required_gates=tuple(required_gates),
             )
         )
 
@@ -101,6 +120,7 @@ class ToolRegistry:
         description: str,
         input_schema: dict[str, Any],
         handler: Handler,
+        required_gates: Sequence[str] = (),
     ) -> ToolSpec:
         return self._add(
             ToolSpec(
@@ -109,6 +129,7 @@ class ToolRegistry:
                 input_schema=input_schema,
                 origin=server,
                 handler=handler,
+                required_gates=tuple(required_gates),
             )
         )
 
@@ -121,13 +142,35 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return sorted(self._tools)
 
-    def list(self, *, origin: str | None = None) -> list[ToolSpec]:
-        specs = self._tools.values()
+    def all_tools(self, *, origin: str | None = None) -> list[ToolSpec]:
+        specs = list(self._tools.values())
         if origin is not None:
-            specs = [s for s in specs if s.origin == origin]  # type: ignore[assignment]
+            specs = [s for s in specs if s.origin == origin]
         return sorted(specs, key=lambda s: s.name)
 
-    async def invoke(self, name: str, arguments: dict[str, Any]) -> Any:
+    def visible(self, gate_check: GateCheck) -> list[ToolSpec]:
+        """Tools whose every required gate is currently satisfied.
+
+        Used to filter the tool list exposed to a client so gated tools don't
+        even appear until their preconditions hold.
+        """
+        return [s for s in self.all_tools() if all(gate_check(g) for g in s.required_gates)]
+
+    async def invoke(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        gate_check: GateCheck | None = None,
+    ) -> Any:
         spec = self.get(name)
+        if spec.required_gates:
+            # Fail safe: a gated tool never runs without an evaluator.
+            if gate_check is None:
+                raise GateBlockedError(name, spec.required_gates[0])
+            for gate in spec.required_gates:
+                if not gate_check(gate):
+                    logger.warning("tool_gate_blocked", tool=name, gate=gate)
+                    raise GateBlockedError(name, gate)
         logger.info("tool_invoke", tool=name, origin=spec.origin)
         return await spec.handler(arguments)
