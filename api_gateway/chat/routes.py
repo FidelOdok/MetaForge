@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 
 from api_gateway.chat.agent_router import default_router
 from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
+from api_gateway.chat.harness_backend import chat_harness_enabled, run_chat_turn
 from api_gateway.chat.models import (
     ChatMessageRecord,
     ChatThreadRecord,
@@ -134,6 +135,36 @@ async def _invoke_agent(
             logger.debug("llm_not_available_skipping_agent")
             span.set_attribute("skipped", True)
             return None
+
+        # Harness-backed path (MET-548, flagged): route the turn through the
+        # ReAct harness instead of the direct pydantic-ai agent call.
+        if chat_harness_enabled():
+            span.set_attribute("chat_backend", "harness")
+            now = datetime.now(UTC)
+            try:
+                text = await run_chat_turn(user_content)
+                return ChatMessageRecord(
+                    id=str(uuid4()),
+                    thread_id=thread.id,
+                    actor_id="harness-agent",
+                    actor_kind="agent",
+                    content=text,
+                    created_at=now,
+                    updated_at=now,
+                )
+            except Exception as exc:
+                span.record_exception(exc)
+                logger.error("harness_chat_failed", error=str(exc))
+                return ChatMessageRecord(
+                    id=str(uuid4()),
+                    thread_id=thread.id,
+                    actor_id="system",
+                    actor_kind="system",
+                    content=f"Harness error: {exc}",
+                    status="error",
+                    created_at=now,
+                    updated_at=now,
+                )
 
         agent = default_router.get_agent(
             scope_kind=thread.scope_kind,
