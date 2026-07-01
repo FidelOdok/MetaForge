@@ -7,6 +7,7 @@ import { NavLink } from 'react-router-dom';
 const NAV_ITEMS = [
   { to: '/projects',  icon: 'grid_view',    title: 'Platform'             },
   { to: '/sessions',  icon: 'account_tree', title: 'Orchestrator'         },
+  { to: '/runs',      icon: 'play_circle',  title: 'Runs'                 },
   { to: '/approvals', icon: 'task_alt',     title: 'Approvals'            },
   { to: '/bom',       icon: 'inventory_2',  title: 'BOM'                  },
   { to: '/twin',      icon: 'hub',          title: 'Digital Twin'         },

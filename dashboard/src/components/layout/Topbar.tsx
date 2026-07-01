@@ -12,6 +12,7 @@ import { useSessions } from '../../hooks/use-sessions';
 const SEGMENT_LABELS: Record<string, string> = {
   projects:  'Platform',
   sessions:  'Orchestrator',
+  runs:      'Runs',
   approvals: 'Approvals',
   bom:       'BOM',
   twin:      'Digital Twin',
