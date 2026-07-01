@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import structlog
 
@@ -23,16 +24,20 @@ logger = structlog.get_logger(__name__)
 _CLOSE = object()
 
 
-def run_event_to_sse(run: Run) -> str:
-    """Format a run's current state as one SSE ``run.status`` event."""
-    payload = {
+def run_event_payload(run: Run) -> dict[str, Any]:
+    """The JSON body describing a run's current state (SSE + WS share this)."""
+    return {
         "id": run.id,
         "status": str(run.status),
         "updated_at": run.updated_at,
         "approval_reason": run.approval_reason,
         "error": run.error,
     }
-    return f"event: run.status\ndata: {json.dumps(payload)}\n\n"
+
+
+def run_event_to_sse(run: Run) -> str:
+    """Format a run's current state as one SSE ``run.status`` event."""
+    return f"event: run.status\ndata: {json.dumps(run_event_payload(run))}\n\n"
 
 
 class RunStreamManager:
@@ -89,3 +94,33 @@ async def run_event_stream(
     finally:
         manager.unsubscribe(run_id, queue)
         logger.info("run_stream_closed", run_id=run_id)
+
+
+async def run_ws_loop(
+    send_json: Callable[[dict[str, Any]], Awaitable[None]],
+    run_id: str,
+    snapshot: Run,
+    manager: RunStreamManager,
+) -> None:
+    """Push run events over an injected ``send_json`` until terminal or close.
+
+    Same subscribe/snapshot/drain shape as the SSE stream, but emits JSON
+    payloads. ``send_json`` is injected so the loop is unit-testable without a
+    real WebSocket.
+    """
+    queue = manager.subscribe(run_id)
+    try:
+        await send_json(run_event_payload(snapshot))
+        if snapshot.is_terminal:
+            return
+        while True:
+            item = await queue.get()
+            if item is _CLOSE:
+                return
+            assert isinstance(item, Run)
+            await send_json(run_event_payload(item))
+            if item.is_terminal:
+                return
+    finally:
+        manager.unsubscribe(run_id, queue)
+        logger.info("run_ws_closed", run_id=run_id)

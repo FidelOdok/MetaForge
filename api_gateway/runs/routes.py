@@ -15,7 +15,7 @@ persistence lands in Phase 4. Domain errors map to clean HTTP status:
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 from api_gateway.runs.schemas import (
@@ -24,7 +24,7 @@ from api_gateway.runs.schemas import (
     RunListResponse,
     RunResponse,
 )
-from api_gateway.runs.streaming import RunStreamManager, run_event_stream
+from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
 from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
@@ -91,6 +91,22 @@ def stream_run_events(run_id: str) -> StreamingResponse:
         run_event_stream(run_id, snapshot, _stream_manager),
         media_type="text/event-stream",
     )
+
+
+@router.websocket("/{run_id}/ws")
+async def stream_run_ws(websocket: WebSocket, run_id: str) -> None:
+    """WebSocket stream of a run's status transitions (10 Hz-friendly, per MET-524)."""
+    await websocket.accept()
+    try:
+        snapshot = _store.get(run_id)
+    except RunNotFoundError:
+        await websocket.close(code=4404)
+        return
+    try:
+        await run_ws_loop(websocket.send_json, run_id, snapshot, _stream_manager)
+        await websocket.close()
+    except WebSocketDisconnect:
+        logger.info("run_ws_disconnected", run_id=run_id)
 
 
 @router.post("/{run_id}/approval", response_model=RunResponse)
