@@ -8,7 +8,9 @@ twin, and proposal endpoints.  The base URL is read from the
 
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote
 
@@ -270,3 +272,55 @@ class ForgeClient:
                 raise ForgeClientNotFound(f"No knowledge source registered for {source_path!r}")
             resp.raise_for_status()
             return resp.json()
+
+    # ------------------------------------------------------------------
+    # Harness runs (MET-548) — served at /v1/runs (no /api prefix)
+    # ------------------------------------------------------------------
+
+    def create_run(
+        self, request: dict[str, Any] | None = None, *, start: bool = True
+    ) -> dict[str, Any]:
+        """Create a run via ``POST /v1/runs``."""
+        with self._client() as client:
+            resp = client.post("/v1/runs", json={"request": request or {}, "start": start})
+            resp.raise_for_status()
+            return resp.json()
+
+    def list_runs(self) -> dict[str, Any]:
+        """List runs via ``GET /v1/runs``."""
+        with self._client() as client:
+            resp = client.get("/v1/runs")
+            resp.raise_for_status()
+            return resp.json()
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        """Fetch one run via ``GET /v1/runs/{id}``."""
+        with self._client() as client:
+            resp = client.get(f"/v1/runs/{run_id}")
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No run with id {run_id!r}")
+            resp.raise_for_status()
+            return resp.json()
+
+    def submit_run_approval(self, run_id: str, decision: str) -> dict[str, Any]:
+        """Approve or reject a paused run via ``POST /v1/runs/{id}/approval``."""
+        with self._client() as client:
+            resp = client.post(f"/v1/runs/{run_id}/approval", json={"decision": decision})
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No run with id {run_id!r}")
+            resp.raise_for_status()
+            return resp.json()
+
+    def stream_run_events(self, run_id: str) -> Iterator[dict[str, Any]]:
+        """Yield run status events from the SSE stream until it closes.
+
+        Uses no read timeout since the stream is long-lived.
+        """
+        with httpx.Client(base_url=self.base_url, timeout=None) as client:
+            with client.stream("GET", f"/v1/runs/{run_id}/events") as resp:
+                if resp.status_code == 404:
+                    raise ForgeClientNotFound(f"No run with id {run_id!r}")
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if line.startswith("data:"):
+                        yield json.loads(line[len("data:") :].strip())
