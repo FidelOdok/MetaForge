@@ -16,9 +16,17 @@ from orchestrator.harness.providers.pipeline import (
     RetryPolicy,
     RoleModelSlots,
 )
+from orchestrator.harness.providers.rotation import (
+    AuthProfile,
+    ProfileExhaustedError,
+    ProfileRotor,
+)
 
 __all__ = [
     "AllProvidersFailedError",
+    "AuthProfile",
+    "ProfileExhaustedError",
+    "ProfileRotor",
     "ProviderError",
     "ProviderPipeline",
     "ProviderSpec",
