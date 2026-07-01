@@ -30,8 +30,10 @@ from orchestrator.harness.three_agent import (
     Planner,
     ThreeAgentHarness,
 )
+from orchestrator.harness.toolkit import AgentContext, NativeToolDef, build_agent_runtime
 
 __all__ = [
+    "AgentContext",
     "ArtifactStore",
     "Evaluator",
     "GateResult",
@@ -40,6 +42,8 @@ __all__ = [
     "HarnessOutcome",
     "HarnessRuntime",
     "InMemoryArtifactStore",
+    "NativeToolDef",
     "Planner",
     "ThreeAgentHarness",
+    "build_agent_runtime",
 ]
