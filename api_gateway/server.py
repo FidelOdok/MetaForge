@@ -25,6 +25,7 @@ from api_gateway.health import health_router
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
+from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.twin.routes import router as twin_router
 from domain_agents.electronics.agent import ElectronicsAgent
@@ -996,6 +997,7 @@ def create_app(
     app.include_router(convert_router)
     app.include_router(sessions_router)
     app.include_router(projects_router)
+    app.include_router(runs_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
     app.include_router(bom_router)
