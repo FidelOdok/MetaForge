@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from api_gateway.runs.schemas import (
     ApprovalRequest,
@@ -23,6 +24,7 @@ from api_gateway.runs.schemas import (
     RunListResponse,
     RunResponse,
 )
+from api_gateway.runs.streaming import RunStreamManager, run_event_stream
 from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
@@ -34,9 +36,10 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/runs", tags=["runs"])
 
-# Process-local store (mirrors the chat backend pattern). Swappable via
-# init_run_store() at app startup; reset_run_store() is for tests.
-_store = InMemoryRunStore()
+# Process-local store + SSE manager (mirrors the chat backend pattern).
+# reset_run_store() rewires both for tests.
+_stream_manager = RunStreamManager()
+_store = InMemoryRunStore(on_transition=_stream_manager.publish)
 
 
 def get_run_store() -> InMemoryRunStore:
@@ -45,12 +48,14 @@ def get_run_store() -> InMemoryRunStore:
 
 def init_run_store(store: InMemoryRunStore) -> None:
     global _store
+    store.set_on_transition(_stream_manager.publish)
     _store = store
 
 
 def reset_run_store() -> None:
-    global _store
-    _store = InMemoryRunStore()
+    global _store, _stream_manager
+    _stream_manager = RunStreamManager()
+    _store = InMemoryRunStore(on_transition=_stream_manager.publish)
 
 
 @router.post("", response_model=RunResponse, status_code=201)
@@ -73,6 +78,19 @@ def get_run(run_id: str) -> RunResponse:
         return RunResponse.from_run(_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+
+
+@router.get("/{run_id}/events")
+def stream_run_events(run_id: str) -> StreamingResponse:
+    """SSE stream of a run's status transitions until it reaches a terminal state."""
+    try:
+        snapshot = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    return StreamingResponse(
+        run_event_stream(run_id, snapshot, _stream_manager),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/{run_id}/approval", response_model=RunResponse)

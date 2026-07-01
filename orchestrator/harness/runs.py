@@ -109,9 +109,26 @@ class InMemoryRunStore:
     passes the default wall clock.
     """
 
-    def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = time.time,
+        on_transition: Callable[[Run], None] | None = None,
+    ) -> None:
         self._clock = clock
+        # Optional synchronous observer fired on every status change (create +
+        # transition). Kept sync so this stays async-framework-free; the
+        # gateway wires it to an SSE stream manager.
+        self._on_transition = on_transition
         self._runs: dict[str, Run] = {}
+
+    def set_on_transition(self, callback: Callable[[Run], None] | None) -> None:
+        """Set (or clear) the status-change observer after construction."""
+        self._on_transition = callback
+
+    def _notify(self, run: Run) -> None:
+        if self._on_transition is not None:
+            self._on_transition(run)
 
     def create(self, request: dict[str, Any], *, run_id: str | None = None) -> Run:
         rid = run_id or f"run_{uuid.uuid4().hex[:16]}"
@@ -128,6 +145,7 @@ class InMemoryRunStore:
         )
         self._runs[rid] = run
         logger.info("run_created", run_id=rid)
+        self._notify(run)
         return run
 
     def get(self, run_id: str) -> Run:
@@ -148,6 +166,7 @@ class InMemoryRunStore:
         run.updated_at = self._clock()
         run.history.append(target)
         logger.info("run_transition", run_id=run_id, status=target.value)
+        self._notify(run)
         return run
 
     def start(self, run_id: str) -> Run:
