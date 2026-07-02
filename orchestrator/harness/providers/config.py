@@ -38,6 +38,7 @@ from orchestrator.harness.providers.pipeline import (
     RetryPolicy,
     RoleModelSlots,
 )
+from orchestrator.harness.providers.registry import UnknownProviderError, resolve_provider
 from orchestrator.harness.providers.rotation import AuthProfile, ProfileRotor
 
 
@@ -89,14 +90,35 @@ def _parse_spec(entry: Any, role: str, index: int) -> ProviderSpec:
         raise ConfigError(f"{where} is missing a string 'model'")
     extra_raw = spec.get("extra", {})
     extra = {str(k): str(v) for k, v in _require_mapping(extra_raw, f"{where}.extra").items()}
-    return ProviderSpec(
-        name=provider,
-        model=model,
-        api_key_env=spec.get("api_key_env"),
-        base_url=spec.get("base_url"),
-        weight=int(spec.get("weight", 1)),
-        extra=extra,
-    )
+    weight = int(spec.get("weight", 1))
+
+    # Enrich known provider ids from the registry: fill base_url + api_key_env
+    # when not given explicitly. Unknown ids fall back to the raw values, so
+    # arbitrary/custom providers still work.
+    try:
+        resolved = resolve_provider(
+            provider,
+            model,
+            base_url=spec.get("base_url"),
+            api_key_env=spec.get("api_key_env"),
+        )
+        return ProviderSpec(
+            name=resolved.name,
+            model=model,
+            api_key_env=resolved.api_key_env,
+            base_url=resolved.base_url,
+            weight=weight,
+            extra=extra,
+        )
+    except UnknownProviderError:
+        return ProviderSpec(
+            name=provider,
+            model=model,
+            api_key_env=spec.get("api_key_env"),
+            base_url=spec.get("base_url"),
+            weight=weight,
+            extra=extra,
+        )
 
 
 def _parse_roles(data: Mapping[str, Any]) -> RoleModelSlots:

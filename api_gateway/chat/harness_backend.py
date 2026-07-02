@@ -23,7 +23,9 @@ from orchestrator.harness.providers import (
     ProviderSpec,
     RetryPolicy,
     RoleModelSlots,
+    UnknownProviderError,
     default_invoke,
+    resolve_provider,
 )
 from orchestrator.harness.providers.pipeline import Invoke
 from orchestrator.harness.react import run_react
@@ -43,9 +45,17 @@ def provider_config_from_env() -> HarnessProviderConfig:
     provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "anthropic").strip().lower()
     model = (os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
     base_url = (os.environ.get("METAFORGE_LLM_BASE_URL") or "").strip() or None
-    spec = ProviderSpec(
-        name=provider, model=model, api_key_env="METAFORGE_LLM_API_KEY", base_url=base_url
-    )
+    # Resolve known provider ids through the registry (fills base_url from the
+    # provider's documented endpoint); the single METAFORGE_LLM_API_KEY is the
+    # key env, and an explicit METAFORGE_LLM_BASE_URL still overrides.
+    try:
+        spec = resolve_provider(
+            provider, model, base_url=base_url, api_key_env="METAFORGE_LLM_API_KEY"
+        )
+    except UnknownProviderError:
+        spec = ProviderSpec(
+            name=provider, model=model, api_key_env="METAFORGE_LLM_API_KEY", base_url=base_url
+        )
     return HarnessProviderConfig(
         slots=RoleModelSlots(slots={"generator": [spec]}), retry=RetryPolicy(), rotor=None
     )
