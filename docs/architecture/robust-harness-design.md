@@ -125,8 +125,11 @@ families**, which is what the adapter layer keys on:
 - **Anthropic-native:** anthropic/claude.
 - **Gemini-native:** gemini (google-genai).
 - **AWS Bedrock (Converse):** bedrock.
+- **Codex subscription (Responses API):** openai-codex — drives a ChatGPT
+  Plus/Pro subscription with no API key by reusing `~/.codex/auth.json`
+  (MET-550). See [Using a ChatGPT subscription with the harness](../harness-codex-subscription.md).
 - **Deferred (later slices):** Google Vertex (OAuth2), GitHub Copilot, and the
-  OAuth portals (Nous Portal, qwen/minimax/xai OAuth, ollama-cloud).
+  remaining OAuth portals (Nous Portal, qwen/minimax/xai OAuth, ollama-cloud).
 
 Implemented as `orchestrator/harness/providers/registry.py` (`resolve_provider`)
 + four adapters in `adapters.py`; `default_invoke` dispatches by family.
