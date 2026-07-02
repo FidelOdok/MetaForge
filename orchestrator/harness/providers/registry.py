@@ -30,6 +30,7 @@ logger = structlog.get_logger(__name__)
 
 OPENAI = "openai"
 ANTHROPIC = "anthropic"
+GEMINI = "gemini"
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ _PROFILES: tuple[ProviderProfile, ...] = (
     # Native / SDK-default endpoints
     _p("anthropic", "ANTHROPIC_API_KEY", family=ANTHROPIC, aliases=("claude", "claude-code")),
     _p("openai", "OPENAI_API_KEY", aliases=("openai-api",)),
+    _p("gemini", "GOOGLE_API_KEY", family=GEMINI, aliases=("google",)),
     # OpenAI-compatible, stable documented base URLs
     _p("openrouter", "OPENROUTER_API_KEY", base_url="https://openrouter.ai/api/v1"),
     _p("deepseek", "DEEPSEEK_API_KEY", base_url="https://api.deepseek.com"),

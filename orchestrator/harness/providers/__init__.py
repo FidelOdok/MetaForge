@@ -11,6 +11,7 @@ from __future__ import annotations
 from orchestrator.harness.providers.adapters import (
     anthropic_invoke,
     default_invoke,
+    gemini_invoke,
     openai_invoke,
 )
 from orchestrator.harness.providers.config import (
@@ -45,6 +46,7 @@ __all__ = [
     "ConfigError",
     "anthropic_invoke",
     "default_invoke",
+    "gemini_invoke",
     "openai_invoke",
     "HarnessProviderConfig",
     "ProfileExhaustedError",
