@@ -163,6 +163,62 @@ async def gemini_invoke(
     return {"text": getattr(resp, "text", "") or "", "model": spec.model}
 
 
+async def _codex_refresh_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        resp = await http.post(url, json=body)
+        resp.raise_for_status()
+        result: dict[str, Any] = resp.json()
+        return result
+
+
+async def codex_invoke(
+    spec: ProviderSpec,
+    request: Any,
+    *,
+    client: Any | None = None,
+    credentials: Any | None = None,
+) -> dict[str, Any]:
+    """Call a model on a ChatGPT subscription via the Codex backend (MET-550).
+
+    Uses the Responses API at the codex backend with the subscription access
+    token as bearer + the ``chatgpt-account-id`` header. Credentials come from
+    the official Codex CLI login (``~/.codex/auth.json``). ``client`` and
+    ``credentials`` are injectable so this unit-tests without network.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if client is None:
+        from openai import AsyncOpenAI
+
+        from orchestrator.harness.providers import codex_auth
+
+        if credentials is None:
+            credentials = await codex_auth.get_valid_credentials(post=_codex_refresh_post)
+        client = AsyncOpenAI(
+            api_key=credentials.access_token,
+            base_url=codex_auth.CODEX_BACKEND_BASE,
+            default_headers={
+                "chatgpt-account-id": credentials.account_id or "",
+                "originator": "codex_cli_rs",
+            },
+        )
+    input_text = "\n\n".join(m.get("content", "") for m in messages)
+    try:
+        resp = await client.responses.create(
+            model=spec.model,
+            input=input_text,
+            instructions=system or None,
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        )
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+    return {"text": getattr(resp, "output_text", "") or "", "model": spec.model}
+
+
 def _classify_bedrock_error(exc: Exception) -> ProviderError:
     """Map a botocore error to a ProviderError, reading the AWS status/code."""
     response = getattr(exc, "response", None)
@@ -214,6 +270,7 @@ async def bedrock_invoke(
 _ANTHROPIC_NAMES = frozenset({"anthropic", "claude"})
 _GEMINI_NAMES = frozenset({"gemini", "google", "vertex"})
 _BEDROCK_NAMES = frozenset({"bedrock", "aws-bedrock"})
+_CODEX_NAMES = frozenset({"openai-codex", "codex"})
 
 
 async def default_invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
@@ -230,4 +287,6 @@ async def default_invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
         return await gemini_invoke(spec, request)
     if name in _BEDROCK_NAMES:
         return await bedrock_invoke(spec, request)
+    if name in _CODEX_NAMES:
+        return await codex_invoke(spec, request)
     return await openai_invoke(spec, request)
