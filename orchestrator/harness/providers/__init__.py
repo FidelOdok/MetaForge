@@ -26,6 +26,13 @@ from orchestrator.harness.providers.pipeline import (
     RetryPolicy,
     RoleModelSlots,
 )
+from orchestrator.harness.providers.registry import (
+    ProviderProfile,
+    UnknownProviderError,
+    available_providers,
+    get_profile,
+    resolve_provider,
+)
 from orchestrator.harness.providers.rotation import (
     AuthProfile,
     ProfileExhaustedError,
@@ -44,8 +51,13 @@ __all__ = [
     "ProfileRotor",
     "ProviderError",
     "ProviderPipeline",
+    "ProviderProfile",
     "ProviderSpec",
     "RetryPolicy",
     "RoleModelSlots",
+    "UnknownProviderError",
+    "available_providers",
+    "get_profile",
     "load_provider_config",
+    "resolve_provider",
 ]
