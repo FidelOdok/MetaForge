@@ -89,7 +89,7 @@ MCP tools to the agents' toolbelt, and makes the loop configurable by
 │ role slots    │      └──────────────────┘        └──────────────────┘
 └───────┬───────┘
         ▼
- Anthropic · OpenAI · OpenRouter · local (vLLM/Ollama)
+ Anthropic · OpenAI · Gemini · Bedrock · Codex (ChatGPT sub) · OpenRouter · local (vLLM/Ollama)
 ```
 
 ### Layering note (open design question)
@@ -125,13 +125,20 @@ families**, which is what the adapter layer keys on:
 - **Anthropic-native:** anthropic/claude.
 - **Gemini-native:** gemini (google-genai).
 - **AWS Bedrock (Converse):** bedrock.
+- **Codex (ChatGPT subscription, no API key):** `openai-codex`/`codex`. Reuses
+  the official Codex CLI login (`~/.codex/auth.json` — run `npx @openai/codex
+  login` once) rather than reimplementing OAuth; refreshes via
+  `auth.openai.com/oauth/token` and calls the Codex backend Responses API with
+  the access token as bearer + a `chatgpt-account-id` header. Undocumented
+  endpoint (can change without notice) and ToS-gray — accepted caveats, see
+  MET-550.
 - **Deferred (later slices):** Google Vertex (OAuth2), GitHub Copilot, and the
-  OAuth portals (Nous Portal, qwen/minimax/xai OAuth, ollama-cloud).
+  remaining OAuth portals (Nous Portal, qwen/minimax/xai OAuth, ollama-cloud).
 
 Implemented as `orchestrator/harness/providers/registry.py` (`resolve_provider`)
-+ four adapters in `adapters.py`; `default_invoke` dispatches by family.
++ five adapters in `adapters.py`; `default_invoke` dispatches by family.
 Providers with account/region-specific endpoints read `base_url` from
-`HARNESS_<ID>_BASE_URL` so no guessed URL ships. See MET-549.
+`HARNESS_<ID>_BASE_URL` so no guessed URL ships. See MET-549, MET-550.
 
 ## Phased plan
 
