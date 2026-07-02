@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from orchestrator.harness.providers.adapters import (
     anthropic_invoke,
+    bedrock_invoke,
     default_invoke,
     gemini_invoke,
     openai_invoke,
@@ -45,6 +46,7 @@ __all__ = [
     "AuthProfile",
     "ConfigError",
     "anthropic_invoke",
+    "bedrock_invoke",
     "default_invoke",
     "gemini_invoke",
     "openai_invoke",
