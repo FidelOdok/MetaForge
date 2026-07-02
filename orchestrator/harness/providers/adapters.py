@@ -21,6 +21,7 @@ The SDK client is injectable so the adapters unit-test without network.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -162,9 +163,57 @@ async def gemini_invoke(
     return {"text": getattr(resp, "text", "") or "", "model": spec.model}
 
 
+def _classify_bedrock_error(exc: Exception) -> ProviderError:
+    """Map a botocore error to a ProviderError, reading the AWS status/code."""
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        code = response.get("Error", {}).get("Code", "")
+        if code in {"ThrottlingException", "TooManyRequestsException"}:
+            status = 429
+        if isinstance(status, int):
+            exc.status_code = status  # type: ignore[attr-defined]
+    return _classify_error(exc)
+
+
+async def bedrock_invoke(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> dict[str, Any]:
+    """Call an AWS Bedrock model via the Converse API (boto3).
+
+    boto3 is synchronous, so the call runs in a worker thread. Credentials come
+    from the standard AWS chain (no api key env). ``client`` is injectable.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if client is None:
+        import boto3
+
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+        client = boto3.client("bedrock-runtime", region_name=region)
+    kwargs: dict[str, Any] = {
+        "modelId": spec.model,
+        "messages": [
+            {"role": m.get("role", "user"), "content": [{"text": m.get("content", "")}]}
+            for m in messages
+        ],
+        "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+    }
+    if system:
+        kwargs["system"] = [{"text": system}]
+    try:
+        resp = await asyncio.to_thread(client.converse, **kwargs)
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify boto errors into ProviderError
+        raise _classify_bedrock_error(exc) from exc
+    text = resp["output"]["message"]["content"][0]["text"]
+    return {"text": text, "model": spec.model}
+
+
 # Provider-family dispatch by ProviderSpec.name.
 _ANTHROPIC_NAMES = frozenset({"anthropic", "claude"})
 _GEMINI_NAMES = frozenset({"gemini", "google", "vertex"})
+_BEDROCK_NAMES = frozenset({"bedrock", "aws-bedrock"})
 
 
 async def default_invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
@@ -179,4 +228,6 @@ async def default_invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
         return await anthropic_invoke(spec, request)
     if name in _GEMINI_NAMES:
         return await gemini_invoke(spec, request)
+    if name in _BEDROCK_NAMES:
+        return await bedrock_invoke(spec, request)
     return await openai_invoke(spec, request)
