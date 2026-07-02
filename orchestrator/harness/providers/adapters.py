@@ -133,16 +133,50 @@ async def openai_invoke(
     return {"text": text, "model": getattr(resp, "model", spec.model)}
 
 
+async def gemini_invoke(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> dict[str, Any]:
+    """Call a Google Gemini model via the google-genai SDK.
+
+    Messages are flattened into a single ``contents`` string and the system
+    prompt is passed as ``system_instruction``. ``client`` is injectable so the
+    adapter unit-tests without network.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if client is None:
+        from google import genai
+
+        client = genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY"))
+    contents = "\n\n".join(m.get("content", "") for m in messages)
+    config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
+    if system:
+        config["system_instruction"] = system
+    try:
+        resp = await client.aio.models.generate_content(
+            model=spec.model, contents=contents, config=config
+        )
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+    return {"text": getattr(resp, "text", "") or "", "model": spec.model}
+
+
 # Provider-family dispatch by ProviderSpec.name.
 _ANTHROPIC_NAMES = frozenset({"anthropic", "claude"})
+_GEMINI_NAMES = frozenset({"gemini", "google", "vertex"})
 
 
 async def default_invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
     """Dispatch to the right adapter by provider family.
 
-    Anthropic-family names use the Anthropic SDK; everything else is treated as
-    OpenAI-compatible (OpenAI, OpenRouter, vLLM, Ollama) via ``base_url``.
+    Anthropic-family names use the Anthropic SDK, Gemini-family names use
+    google-genai, and everything else is treated as OpenAI-compatible
+    (OpenAI, OpenRouter, vLLM, Ollama, …) via ``base_url``.
     """
-    if spec.name.lower() in _ANTHROPIC_NAMES:
+    name = spec.name.lower()
+    if name in _ANTHROPIC_NAMES:
         return await anthropic_invoke(spec, request)
+    if name in _GEMINI_NAMES:
+        return await gemini_invoke(spec, request)
     return await openai_invoke(spec, request)
