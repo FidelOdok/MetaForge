@@ -32,6 +32,7 @@ OPENAI = "openai"
 ANTHROPIC = "anthropic"
 GEMINI = "gemini"
 BEDROCK = "bedrock"
+CODEX = "openai-codex"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,8 @@ _PROFILES: tuple[ProviderProfile, ...] = (
     _p("gemini", "GOOGLE_API_KEY", family=GEMINI, aliases=("google",)),
     # AWS credential chain (no api key env); base_url derived from region
     _p("bedrock", "AWS_ACCESS_KEY_ID", family=BEDROCK, aliases=("aws-bedrock",)),
+    # ChatGPT subscription via Codex OAuth — creds from ~/.codex/auth.json, no api key
+    _p("openai-codex", "CODEX_OAUTH", family=CODEX, aliases=("codex",)),
     # OpenAI-compatible, stable documented base URLs
     _p("openrouter", "OPENROUTER_API_KEY", base_url="https://openrouter.ai/api/v1"),
     _p("deepseek", "DEEPSEEK_API_KEY", base_url="https://api.deepseek.com"),
