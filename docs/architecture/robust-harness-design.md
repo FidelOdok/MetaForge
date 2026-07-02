@@ -106,10 +106,32 @@ for resolution before Phase 2 lands; Phase 1 is unaffected.
 
 | From Hermes | From OpenClaw |
 |---|---|
-| Provider resolver over 18+ providers, `api_max_retries` + ordered `fallback_providers` | Auth-profile rotation (keep cache warm) + profile pinning |
+| Provider resolver over the verified provider surface (see below), `api_max_retries` + ordered `fallback_providers` | Auth-profile rotation (keep cache warm) + profile pinning |
 | Role-based auxiliary model slots (planner/generator/evaluator/vision/compression) | `SKILL.md` markdown-playbook skills + registry |
 | OpenAI-compatible REST + SSE, Runs API + `/approval` | WebSocket real-time streaming; bidirectional MCP |
 | SQLite session ledger (FTS5) + context compression | Session write-lock + `before_tool_call` hooks; local-first Markdown artifacts |
+
+### Provider surface (verified against Hermes docs, MET-549)
+
+Hermes integrates **~35 provider ids** — but they collapse into a few **API
+families**, which is what the adapter layer keys on:
+
+- **OpenAI-compatible** (one adapter + `base_url`): openrouter, openai, deepseek,
+  xai, novita, kimi/moonshot (±cn), zai/GLM, alibaba/dashscope (±coding-plan),
+  minimax (±cn), huggingface, nvidia, arcee, gmi, xiaomi, tencent-tokenhub,
+  opencode-zen/go, kilocode, stepfun, azure-foundry, and local runtimes
+  (ollama, vllm, sglang, llama.cpp, lmstudio) + router proxies (litellm,
+  clawrouter, custom).
+- **Anthropic-native:** anthropic/claude.
+- **Gemini-native:** gemini (google-genai).
+- **AWS Bedrock (Converse):** bedrock.
+- **Deferred (later slices):** Google Vertex (OAuth2), GitHub Copilot, and the
+  OAuth portals (Nous Portal, qwen/minimax/xai OAuth, ollama-cloud).
+
+Implemented as `orchestrator/harness/providers/registry.py` (`resolve_provider`)
++ four adapters in `adapters.py`; `default_invoke` dispatches by family.
+Providers with account/region-specific endpoints read `base_url` from
+`HARNESS_<ID>_BASE_URL` so no guessed URL ships. See MET-549.
 
 ## Phased plan
 
