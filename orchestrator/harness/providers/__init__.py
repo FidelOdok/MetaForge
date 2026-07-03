@@ -40,6 +40,7 @@ from orchestrator.harness.providers.rotation import (
     AuthProfile,
     ProfileExhaustedError,
     ProfileRotor,
+    rotating_invoke,
 )
 
 __all__ = [
@@ -66,4 +67,5 @@ __all__ = [
     "get_profile",
     "load_provider_config",
     "resolve_provider",
+    "rotating_invoke",
 ]
