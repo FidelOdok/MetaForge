@@ -65,3 +65,24 @@ async def test_run_chat_turn_exhaustion_message(monkeypatch: pytest.MonkeyPatch)
 
     out = await run_chat_turn("loop forever", invoke=never_final, max_steps=2)
     assert "couldn't converge" in out
+
+
+@pytest.mark.asyncio
+async def test_run_chat_turn_rotates_stored_credentials(monkeypatch, tmp_path):
+    from orchestrator.harness.providers import Credential, CredentialStore
+    from orchestrator.harness.providers.pipeline import ProviderError
+
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_LLM_MODEL", "x")
+    store = CredentialStore(tmp_path / "c.json")
+    store.add(Credential(provider="openrouter", name="a", api_key_env="KEY_A"))
+    store.add(Credential(provider="openrouter", name="b", api_key_env="KEY_B"))
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        if spec.api_key_env == "KEY_A":
+            raise ProviderError("revoked", status_code=401)
+        return {"text": '{"final": "ok via B"}', "model": spec.model}
+
+    out = await run_chat_turn("hi", invoke=invoke, credentials=store)
+    assert out == "ok via B"
+    assert [c.name for c in store.healthy("openrouter")] == ["b"]  # A blacklisted
