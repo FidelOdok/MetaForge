@@ -21,6 +21,11 @@ from orchestrator.harness.providers.config import (
     HarnessProviderConfig,
     load_provider_config,
 )
+from orchestrator.harness.providers.credentials import (
+    Credential,
+    CredentialStore,
+    default_credentials_path,
+)
 from orchestrator.harness.providers.pipeline import (
     AllProvidersFailedError,
     ProviderError,
@@ -47,6 +52,9 @@ __all__ = [
     "AllProvidersFailedError",
     "AuthProfile",
     "ConfigError",
+    "Credential",
+    "CredentialStore",
+    "default_credentials_path",
     "anthropic_invoke",
     "bedrock_invoke",
     "codex_invoke",
