@@ -216,3 +216,14 @@ zero network. Integration tests (Level 5) wire the pipeline into the existing
 - MET-524 — MCP-Driven Live Product Generation Orchestrator (this is its runtime)
 - MET-543 — Server API MCP client for simulators (tools this harness consumes)
 - MET-474 / MET-475 — the existing three-agent harness this wraps
+
+## Auth model (MET-551) — multi-credential + rotation + dead-token handling
+
+Mirrors Hermes's auth surface:
+
+- `CredentialStore` (`~/.metaforge/credentials.json`, or `METAFORGE_CREDENTIALS_PATH`; written `0600`) holds **multiple credentials per provider** with **dead-token blacklisting** (`mark_dead` / `healthy`).
+- `ProfileRotor` pins one credential per session (cache warmth) and rotates on failure.
+- `rotating_invoke(base, rotor, session_id, on_dead=...)` applies the pinned credential to the ProviderSpec and, on an auth/rate failure (401/403/429), rotates to the next healthy profile **before** the pipeline falls through to the next provider.
+- `store_backed_invoke(base, store, provider, session_id)` is the glue: builds the rotor from the store's healthy credentials and, on a **terminal** 401/403, writes the credential back to the store as dead (a transient 429 rotates but is **not** blacklisted).
+
+**Remote/headless auth (fidel-dev):** the harness runs where the gateway runs. Do the one-time `codex login --device-auth` on that host (or SSH-forward `:1455`, or copy `~/.codex/auth.json`); token refresh thereafter is pure HTTPS (no browser). `chmod 600` the auth file on shared boxes.
