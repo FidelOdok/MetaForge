@@ -21,6 +21,11 @@ from orchestrator.harness.providers.config import (
     HarnessProviderConfig,
     load_provider_config,
 )
+from orchestrator.harness.providers.credential_rotation import (
+    NoHealthyCredentialsError,
+    rotor_from_store,
+    store_backed_invoke,
+)
 from orchestrator.harness.providers.credentials import (
     Credential,
     CredentialStore,
@@ -54,7 +59,10 @@ __all__ = [
     "ConfigError",
     "Credential",
     "CredentialStore",
+    "NoHealthyCredentialsError",
     "default_credentials_path",
+    "rotor_from_store",
+    "store_backed_invoke",
     "anthropic_invoke",
     "bedrock_invoke",
     "codex_invoke",
