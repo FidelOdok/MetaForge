@@ -18,7 +18,7 @@ from pathlib import Path
 
 import structlog
 
-from orchestrator.harness.providers import HarnessProviderConfig
+from orchestrator.harness.providers import CredentialStore, HarnessProviderConfig
 from orchestrator.harness.runtime import HarnessRuntime
 from orchestrator.harness.skills import SkillRegistry
 from orchestrator.harness.tools import GateCheck, Handler, ToolRegistry
@@ -51,6 +51,8 @@ def build_agent_runtime(
     native_tools: Sequence[NativeToolDef] = (),
     mcp_tools: Sequence[tuple[str, NativeToolDef]] = (),
     gate_check: GateCheck | None = None,
+    credentials: CredentialStore | None = None,
+    session_id: str = "default",
     skills_dir: Path | None = None,
 ) -> AgentContext:
     """Assemble the tools + skills layer into a ready `AgentContext`.
@@ -78,7 +80,13 @@ def build_agent_runtime(
             required_gates=t.required_gates,
         )
 
-    runtime = HarnessRuntime.build(provider_config, tools=tools, gate_check=gate_check)
+    runtime = HarnessRuntime.build(
+        provider_config,
+        tools=tools,
+        gate_check=gate_check,
+        credentials=credentials,
+        session_id=session_id,
+    )
 
     skills = SkillRegistry()
     if skills_dir is not None and skills_dir.exists():
