@@ -19,7 +19,7 @@ falls through to the next provider.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -128,13 +128,25 @@ class ProfileRotor:
 
 # Auth failures that should trigger a profile rotation (vs. a hard error).
 _ROTATE_STATUSES = frozenset({401, 403, 429})
+# Terminal credential failures (bad/revoked key) — the credential is *dead*,
+# distinct from a transient 429 rate limit which should be retried, not blacklisted.
+_DEAD_STATUSES = frozenset({401, 403})
+
+# Called when a profile fails terminally, so a store can blacklist its credential.
+OnDead = Callable[[AuthProfile, ProviderError], None]
 
 
 def _should_rotate(exc: ProviderError) -> bool:
     return exc.status_code in _ROTATE_STATUSES or exc.retryable
 
 
-def rotating_invoke(base_invoke: Invoke, rotor: ProfileRotor, session_id: str) -> Invoke:
+def rotating_invoke(
+    base_invoke: Invoke,
+    rotor: ProfileRotor,
+    session_id: str,
+    *,
+    on_dead: OnDead | None = None,
+) -> Invoke:
     """Wrap an ``Invoke`` so it uses (and rotates) a session's auth profile.
 
     The pinned profile's credentials (``api_key_env`` / ``base_url``) are applied
@@ -142,7 +154,9 @@ def rotating_invoke(base_invoke: Invoke, rotor: ProfileRotor, session_id: str) -
     a retryable error) the profile is marked failed and the call retries with the
     next healthy profile — so profile rotation happens *before* the pipeline falls
     through to the next provider (Hermes's 'rotate profile → fall to next model').
-    Raises the last :class:`ProviderError` once every profile is exhausted.
+    A *terminal* failure (401/403) additionally fires ``on_dead`` so a credential
+    store can blacklist it. Raises the last :class:`ProviderError` once every
+    profile is exhausted.
     """
 
     async def invoke(spec: ProviderSpec, request: Any) -> Any:
@@ -158,6 +172,8 @@ def rotating_invoke(base_invoke: Invoke, rotor: ProfileRotor, session_id: str) -
             except ProviderError as exc:
                 if not _should_rotate(exc):
                     raise
+                if on_dead is not None and exc.status_code in _DEAD_STATUSES:
+                    on_dead(profile, exc)
                 try:
                     rotor.mark_failed(session_id, profile)
                 except ProfileExhaustedError:
