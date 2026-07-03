@@ -142,7 +142,7 @@ async def _invoke_agent(
             span.set_attribute("chat_backend", "harness")
             now = datetime.now(UTC)
             try:
-                text = await run_chat_turn(user_content)
+                text = await run_chat_turn(user_content, session_id=thread.id)
                 return ChatMessageRecord(
                     id=str(uuid4()),
                     thread_id=thread.id,

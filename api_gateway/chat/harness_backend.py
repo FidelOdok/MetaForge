@@ -19,6 +19,7 @@ import structlog
 from orchestrator.harness import build_agent_runtime
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
+    CredentialStore,
     HarnessProviderConfig,
     ProviderSpec,
     RetryPolicy,
@@ -62,10 +63,21 @@ def provider_config_from_env() -> HarnessProviderConfig:
 
 
 async def run_chat_turn(
-    user_content: str, *, invoke: Invoke = default_invoke, max_steps: int = 6
+    user_content: str,
+    *,
+    invoke: Invoke = default_invoke,
+    max_steps: int = 6,
+    session_id: str = "chat",
+    credentials: CredentialStore | None = None,
 ) -> str:
-    """Answer a chat message via the harness ReAct loop. Returns the reply text."""
-    ctx = build_agent_runtime(provider_config_from_env())
+    """Answer a chat message via the harness ReAct loop. Returns the reply text.
+
+    A credential store is attached so that when a provider has multiple stored
+    credentials they rotate (and dead ones are blacklisted) per session; with an
+    empty/absent store this is a no-op, so the default path is unchanged.
+    """
+    store = credentials if credentials is not None else CredentialStore()
+    ctx = build_agent_runtime(provider_config_from_env(), credentials=store, session_id=session_id)
     policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
     result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
