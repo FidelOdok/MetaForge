@@ -167,10 +167,42 @@ async def _codex_refresh_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
     import httpx
 
     async with httpx.AsyncClient(timeout=30.0) as http:
-        resp = await http.post(url, json=body)
+        # OpenAI's token endpoint expects form-encoded, not JSON.
+        resp = await http.post(url, data=body)
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
         return result
+
+
+# Default system prompt — the Codex Responses API requires non-empty instructions.
+_CODEX_DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
+
+
+def _codex_client(credentials: Any) -> Any:
+    from openai import AsyncOpenAI
+
+    from orchestrator.harness.providers import codex_auth
+
+    return AsyncOpenAI(
+        api_key=credentials.access_token,
+        base_url=codex_auth.CODEX_BACKEND_BASE,
+        default_headers={
+            "chatgpt-account-id": credentials.account_id or "",
+            "originator": "codex_cli_rs",
+        },
+    )
+
+
+async def _codex_call(
+    client: Any, spec: ProviderSpec, system: str | None, input_text: str
+) -> dict[str, Any]:
+    resp = await client.responses.create(
+        model=spec.model,
+        input=input_text,
+        instructions=system or _CODEX_DEFAULT_INSTRUCTIONS,  # required, non-empty
+        store=False,  # mandatory on the codex backend
+    )
+    return {"text": getattr(resp, "output_text", "") or "", "model": spec.model}
 
 
 async def codex_invoke(
@@ -184,39 +216,35 @@ async def codex_invoke(
 
     Uses the Responses API at the codex backend with the subscription access
     token as bearer + the ``chatgpt-account-id`` header. Credentials come from
-    the official Codex CLI login (``~/.codex/auth.json``). ``client`` and
+    the official Codex CLI login (``~/.codex/auth.json``); on a 401 the token is
+    refreshed and the call retried once (the codex CLI does the same — a stored
+    token can be invalidated even before its ``exp``). ``client`` and
     ``credentials`` are injectable so this unit-tests without network.
     """
-    system, messages, max_tokens, temperature = _normalize_request(request)
-    if client is None:
-        from openai import AsyncOpenAI
-
-        from orchestrator.harness.providers import codex_auth
-
-        if credentials is None:
-            credentials = await codex_auth.get_valid_credentials(post=_codex_refresh_post)
-        client = AsyncOpenAI(
-            api_key=credentials.access_token,
-            base_url=codex_auth.CODEX_BACKEND_BASE,
-            default_headers={
-                "chatgpt-account-id": credentials.account_id or "",
-                "originator": "codex_cli_rs",
-            },
-        )
+    system, messages, _max_tokens, _temperature = _normalize_request(request)
     input_text = "\n\n".join(m.get("content", "") for m in messages)
+
+    # Injected client (tests) → single call, no auth handling.
+    if client is not None:
+        try:
+            return await _codex_call(client, spec, system, input_text)
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise _classify_error(exc) from exc
+
+    from orchestrator.harness.providers import codex_auth
+
+    creds = credentials or await codex_auth.get_valid_credentials(post=_codex_refresh_post)
     try:
-        resp = await client.responses.create(
-            model=spec.model,
-            input=input_text,
-            instructions=system or None,
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
-    except ProviderError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
-        raise _classify_error(exc) from exc
-    return {"text": getattr(resp, "output_text", "") or "", "model": spec.model}
+        return await _codex_call(_codex_client(creds), spec, system, input_text)
+    except Exception as exc:  # noqa: BLE001
+        err = exc if isinstance(exc, ProviderError) else _classify_error(exc)
+        # Refresh-and-retry once on auth failure (stored token invalidated).
+        if err.status_code == 401 and getattr(creds, "refresh_token", None):
+            fresh = await codex_auth.refresh_credentials(creds, post=_codex_refresh_post)
+            return await _codex_call(_codex_client(fresh), spec, system, input_text)
+        raise err from exc
 
 
 def _classify_bedrock_error(exc: Exception) -> ProviderError:

@@ -46,6 +46,15 @@ async def test_codex_invoke_uses_responses_api() -> None:
     assert call["model"] == "gpt-5-codex"
     assert call["input"] == "hi"
     assert call["instructions"] == "be terse"
+    assert call["store"] is False  # mandatory on the codex backend
+
+
+@pytest.mark.asyncio
+async def test_codex_invoke_defaults_instructions_when_no_system() -> None:
+    client = FakeCodexClient(resp=SimpleNamespace(output_text="ok"))
+    await codex_invoke(CODEX_SPEC, {"prompt": "hi"}, client=client)
+    # Responses API requires non-empty instructions.
+    assert client.responses.calls[0]["instructions"]
 
 
 @pytest.mark.asyncio
