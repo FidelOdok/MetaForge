@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import datetime
 import json
 import os
+import stat
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -159,14 +161,53 @@ async def refresh_credentials(
     )
 
 
+def save_credentials(path: Path, creds: CodexCredentials) -> bool:
+    """Write refreshed tokens back into auth.json, preserving its shape.
+
+    Codex refresh tokens rotate (single-use), so a long-lived service MUST
+    persist the new tokens or the next process reads a stale (invalidated)
+    refresh token. Best-effort: returns False (and logs) if the file can't be
+    written — e.g. a read-only mount — so a call still succeeds in-memory.
+    """
+    try:
+        data: dict[str, Any] = {}
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+        raw_tokens = data.get("tokens")
+        tokens: dict[str, Any] = raw_tokens if isinstance(raw_tokens, dict) else {}
+        tokens["access_token"] = creds.access_token
+        if creds.refresh_token:
+            tokens["refresh_token"] = creds.refresh_token
+        if creds.id_token:
+            tokens["id_token"] = creds.id_token
+        if creds.account_id:
+            tokens["account_id"] = creds.account_id
+        data["tokens"] = tokens
+        data["last_refresh"] = datetime.datetime.now(datetime.UTC).isoformat()
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        return True
+    except OSError as exc:
+        logger.warning("codex_credentials_persist_failed", path=str(path), error=str(exc))
+        return False
+
+
 async def get_valid_credentials(
     *,
     path: Path | None = None,
     post: RefreshPost | None = None,
     now: float | None = None,
+    persist: bool = True,
 ) -> CodexCredentials:
-    """Load creds and refresh them if expired (when a refresh transport is given)."""
-    creds = load_credentials(path)
+    """Load creds and refresh them if expired (when a refresh transport is given).
+
+    On a successful refresh the rotated tokens are written back (best-effort) so
+    they survive across processes.
+    """
+    resolved = path or auth_json_path()
+    creds = load_credentials(resolved)
     if creds.is_expired(now=now) and creds.refresh_token and post is not None:
         creds = await refresh_credentials(creds, post=post, now=now)
+        if persist and resolved is not None:
+            save_credentials(resolved, creds)
     return creds
