@@ -134,11 +134,11 @@ async def refresh_credentials(
     """Refresh via the OAuth token endpoint. Returns new credentials."""
     if not creds.refresh_token:
         raise CodexAuthError("cannot refresh: no refresh_token")
+    # Form-encoded by the transport; no scope on refresh (matches the codex CLI).
     body = {
         "client_id": CODEX_CLIENT_ID,
         "grant_type": "refresh_token",
         "refresh_token": creds.refresh_token,
-        "scope": "openid profile email",
     }
     resp = await post(CODEX_TOKEN_URL, body)
     access_token = resp.get("access_token")
