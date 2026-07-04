@@ -235,14 +235,20 @@ async def codex_invoke(
 
     from orchestrator.harness.providers import codex_auth
 
-    creds = credentials or await codex_auth.get_valid_credentials(post=_codex_refresh_post)
+    path = codex_auth.auth_json_path()
+    creds = credentials or await codex_auth.get_valid_credentials(
+        path=path, post=_codex_refresh_post
+    )
     try:
         return await _codex_call(_codex_client(creds), spec, system, input_text)
     except Exception as exc:  # noqa: BLE001
         err = exc if isinstance(exc, ProviderError) else _classify_error(exc)
         # Refresh-and-retry once on auth failure (stored token invalidated).
+        # Persist the rotated tokens so the next process doesn't reuse a dead one.
         if err.status_code == 401 and getattr(creds, "refresh_token", None):
             fresh = await codex_auth.refresh_credentials(creds, post=_codex_refresh_post)
+            if path is not None:
+                codex_auth.save_credentials(path, fresh)
             return await _codex_call(_codex_client(fresh), spec, system, input_text)
         raise err from exc
 
