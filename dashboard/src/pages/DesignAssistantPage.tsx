@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSubmitRequest, useRunStatus } from '../hooks/use-assistant';
 import { useProjects } from '../hooks/use-projects';
+import { useScopedChat } from '../hooks/use-scoped-chat';
+import { ChatPanel } from '../components/chat/ChatPanel';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
@@ -463,6 +465,29 @@ export function DesignAssistantPage() {
   const submitRequest = useSubmitRequest();
   const { data: runStatus } = useRunStatus(runId);
 
+  // Conversational, harness-backed chat (streaming) for this page. Reuses the
+  // global 'assistant' thread so the same conversation appears here and in the
+  // sidebar. useScopedChat wires the SSE stream + provisional streaming bubble.
+  const {
+    thread: chatThread,
+    messages: chatMessages,
+    isTyping: chatTyping,
+    sendMessage: chatSend,
+    createThread: chatCreate,
+    isLoading: chatLoading,
+    isCreating: chatCreating,
+  } = useScopedChat({ scopeKind: 'assistant', entityId: 'global', label: 'Design Assistant' });
+
+  // Ensure a thread exists on mount, so the EventSource connects before the
+  // first message (no connect-after-send race). Guarded to create at most once.
+  const createdRef = useRef(false);
+  useEffect(() => {
+    if (!chatThread && !chatLoading && !chatCreating && !createdRef.current) {
+      createdRef.current = true;
+      chatCreate();
+    }
+  }, [chatThread, chatLoading, chatCreating, chatCreate]);
+
   const isRunning =
     runStatus?.status === 'running' || runStatus?.status === 'pending';
 
@@ -513,12 +538,64 @@ export function DesignAssistantPage() {
           Design Assistant
         </h1>
         <span style={{ fontSize: '12px', color: KC.onSurfaceVariant, fontFamily: 'Inter, sans-serif' }}>
-          Submit a request to an agent, track progress in real-time, and download results.
+          Chat with the design assistant, or run a structured agent task and track it in real-time.
         </span>
       </div>
 
       {/* Main content — scrollable */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
+        {/* Conversational chat (streaming, harness-backed) — primary view */}
+        <GlassPanel
+          style={{
+            padding: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            height: '58vh',
+            minHeight: 360,
+            overflow: 'hidden',
+          }}
+        >
+          {chatThread ? (
+            <ChatPanel
+              thread={chatThread}
+              messages={chatMessages}
+              isTyping={chatTyping}
+              typingAgentName="Design Assistant"
+              onSendMessage={chatSend}
+            />
+          ) : (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 13,
+                color: KC.onSurfaceVariant,
+                fontFamily: 'Inter, sans-serif',
+              }}
+            >
+              {chatCreating || chatLoading
+                ? 'Starting Design Assistant…'
+                : 'Design Assistant is unavailable.'}
+            </div>
+          )}
+        </GlassPanel>
+
+        {/* Structured actions — run a specific agent task and track it */}
+        <div
+          style={{
+            fontSize: '11px',
+            fontWeight: 500,
+            color: KC.onSurfaceVariant,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            marginTop: '4px',
+          }}
+        >
+          Structured actions
+        </div>
 
         {/* Request form */}
         <GlassPanel style={{ padding: '16px' }}>
