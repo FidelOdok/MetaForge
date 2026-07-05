@@ -155,7 +155,10 @@ async def _invoke_agent(
 
                 await notify_agent_typing(thread.id, "harness-agent")
                 text = await run_chat_turn_streaming(
-                    user_content, on_delta=_on_delta, session_id=thread.id
+                    user_content,
+                    on_delta=_on_delta,
+                    session_id=thread.id,
+                    mcp_bridge=_mcp_bridge,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 return ChatMessageRecord(
