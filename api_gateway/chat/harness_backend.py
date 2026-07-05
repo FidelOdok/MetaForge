@@ -24,6 +24,7 @@ from orchestrator.harness.providers import (
     ProviderSpec,
     RetryPolicy,
     RoleModelSlots,
+    RotationStrategy,
     UnknownProviderError,
     default_invoke,
     resolve_provider,
@@ -39,6 +40,16 @@ _TRUTHY = {"1", "true", "on", "yes"}
 def chat_harness_enabled() -> bool:
     """True when chat should route through the harness (env flag)."""
     return os.environ.get("METAFORGE_CHAT_HARNESS", "").strip().lower() in _TRUTHY
+
+
+def rotation_strategy_from_env() -> RotationStrategy:
+    """Credential rotation strategy from METAFORGE_ROTATION_STRATEGY (default round_robin)."""
+    raw = (os.environ.get("METAFORGE_ROTATION_STRATEGY") or "").strip().lower()
+    try:
+        return RotationStrategy(raw) if raw else RotationStrategy.ROUND_ROBIN
+    except ValueError:
+        logger.warning("unknown_rotation_strategy", value=raw)
+        return RotationStrategy.ROUND_ROBIN
 
 
 def provider_config_from_env() -> HarnessProviderConfig:
@@ -77,7 +88,12 @@ async def run_chat_turn(
     empty/absent store this is a no-op, so the default path is unchanged.
     """
     store = credentials if credentials is not None else CredentialStore()
-    ctx = build_agent_runtime(provider_config_from_env(), credentials=store, session_id=session_id)
+    ctx = build_agent_runtime(
+        provider_config_from_env(),
+        credentials=store,
+        session_id=session_id,
+        rotation_strategy=rotation_strategy_from_env(),
+    )
     policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
     result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
