@@ -16,6 +16,7 @@ from orchestrator.harness.providers.adapters import (
     gemini_invoke,
     openai_invoke,
 )
+from orchestrator.harness.providers.codex_login import login as run_codex_login
 from orchestrator.harness.providers.config import (
     ConfigError,
     HarnessProviderConfig,
@@ -66,6 +67,7 @@ __all__ = [
     "anthropic_invoke",
     "bedrock_invoke",
     "codex_invoke",
+    "run_codex_login",
     "default_invoke",
     "gemini_invoke",
     "openai_invoke",

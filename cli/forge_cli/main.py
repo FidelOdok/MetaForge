@@ -21,6 +21,8 @@ import sys
 from typing import Any
 
 from cli.forge_cli.client import ForgeClient
+from cli.forge_cli.codex_login import handle_codex_login
+from cli.forge_cli.codex_login import register_subparser as register_codex_login_subparser
 from cli.forge_cli.formatters import format_output
 from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
@@ -180,6 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
     # -- memory (MET-453) -------------------------------------------------
     register_memory_subparser(subparsers)
 
+    # -- codex-login (MET-550) --------------------------------------------
+    register_codex_login_subparser(subparsers)
+
     return parser
 
 
@@ -274,6 +279,7 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "codex-login": handle_codex_login,
 }
 
 
