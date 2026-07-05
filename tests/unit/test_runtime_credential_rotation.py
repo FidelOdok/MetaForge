@@ -72,14 +72,10 @@ async def test_runtime_clock_skips_then_revives_cooled_credential(tmp_path: Path
         return f"ok:{spec.api_key_env}"
 
     # While cooling, the runtime's clock excludes 'a' → only 'b' is used.
-    rt = HarnessRuntime.build(
-        CONFIG, credentials=store, session_id="s1", clock=lambda: now["t"]
-    )
+    rt = HarnessRuntime.build(CONFIG, credentials=store, session_id="s1", clock=lambda: now["t"])
     assert await rt.complete("generator", {}, invoke) == "ok:KEY_B"
 
     # Past the cooldown, 'a' auto-revives and a fresh session picks it first.
     now["t"] = 2000.0
-    rt2 = HarnessRuntime.build(
-        CONFIG, credentials=store, session_id="s2", clock=lambda: now["t"]
-    )
+    rt2 = HarnessRuntime.build(CONFIG, credentials=store, session_id="s2", clock=lambda: now["t"])
     assert await rt2.complete("generator", {}, invoke) == "ok:KEY_A"

@@ -123,9 +123,7 @@ def test_old_json_without_new_fields_loads(tmp_path: Path) -> None:
     # A credentials.json written before the cooldown fields existed still loads.
     path = tmp_path / "credentials.json"
     path.write_text(
-        json.dumps(
-            {"providers": {"p": [{"provider": "p", "name": "a", "api_key_env": "K"}]}}
-        ),
+        json.dumps({"providers": {"p": [{"provider": "p", "name": "a", "api_key_env": "K"}]}}),
         encoding="utf-8",
     )
     store = CredentialStore(path)
