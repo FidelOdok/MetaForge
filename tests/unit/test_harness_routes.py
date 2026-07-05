@@ -39,6 +39,19 @@ def test_list_providers_reports_active_and_configured(
     assert body["providers"][0]["configured"] is True
 
 
+def test_active_provider_configured_via_metaforge_llm_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The active provider's key may live in METAFORGE_LLM_API_KEY (deployments
+    # whose provider key-env name differs from the registry default).
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_LLM_API_KEY", "sk-active")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    by_id = {p["id"]: p for p in client.get("/v1/harness/providers").json()["providers"]}
+    assert by_id["openrouter"]["configured"] is True  # via METAFORGE_LLM_API_KEY
+
+
 def test_models_unknown_provider_returns_empty(client: TestClient) -> None:
     body = client.get("/v1/harness/models", params={"provider": "nope-xyz"}).json()
     assert body == {"provider": "nope-xyz", "models": [], "source": "none"}
