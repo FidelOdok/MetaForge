@@ -196,13 +196,23 @@ def _codex_client(credentials: Any) -> Any:
 async def _codex_call(
     client: Any, spec: ProviderSpec, system: str | None, input_text: str
 ) -> dict[str, Any]:
-    resp = await client.responses.create(
+    # The codex backend's Responses API requires:
+    #  - ``input`` as a list of typed items (a bare string is rejected),
+    #  - ``store=False``, and
+    #  - ``stream=True`` (it is streaming-only) — so we aggregate the
+    #    ``response.output_text.delta`` events into the final text.
+    stream = await client.responses.create(
         model=spec.model,
-        input=input_text,
+        input=[{"role": "user", "content": [{"type": "input_text", "text": input_text}]}],
         instructions=system or _CODEX_DEFAULT_INSTRUCTIONS,  # required, non-empty
-        store=False,  # mandatory on the codex backend
+        store=False,
+        stream=True,
     )
-    return {"text": getattr(resp, "output_text", "") or "", "model": spec.model}
+    parts: list[str] = []
+    async for event in stream:
+        if getattr(event, "type", "") == "response.output_text.delta":
+            parts.append(getattr(event, "delta", "") or "")
+    return {"text": "".join(parts), "model": spec.model}
 
 
 async def codex_invoke(
