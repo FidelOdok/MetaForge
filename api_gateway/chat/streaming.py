@@ -38,6 +38,7 @@ class StreamEventType(StrEnum):
     """SSE event types emitted by the chat stream."""
 
     MESSAGE_CREATED = "message.created"
+    MESSAGE_DELTA = "message.delta"
     AGENT_TYPING = "agent.typing"
     AGENT_DONE = "agent.done"
     ERROR = "error"
@@ -214,6 +215,16 @@ async def notify_new_message(
     event = StreamEvent(
         event=StreamEventType.MESSAGE_CREATED,
         data=message_data,
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_message_delta(thread_id: str, text: str, agent_id: str = "agent") -> int:
+    """Push a ``message.delta`` event — one token/chunk of a streaming answer."""
+    event = StreamEvent(
+        event=StreamEventType.MESSAGE_DELTA,
+        data={"delta": text, "agent_id": agent_id},
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)

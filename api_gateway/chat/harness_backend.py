@@ -13,6 +13,7 @@ network; production defaults to the real provider adapters.
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 
 import structlog
 
@@ -27,9 +28,10 @@ from orchestrator.harness.providers import (
     RotationStrategy,
     UnknownProviderError,
     default_invoke,
+    default_stream,
     resolve_provider,
 )
-from orchestrator.harness.providers.pipeline import Invoke
+from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.react import run_react
 
 logger = structlog.get_logger(__name__)
@@ -100,3 +102,64 @@ async def run_chat_turn(
     if result.status == "completed":
         return str(result.output)
     return "I couldn't converge on an answer within the step budget."
+
+
+_FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
+_STREAM_SYSTEM = "You are MetaForge's assistant. Write the final answer to the user, clearly."
+
+
+async def run_chat_turn_streaming(
+    user_content: str,
+    *,
+    on_delta: Callable[[str], Awaitable[None]],
+    invoke: Invoke = default_invoke,
+    stream_invoke: StreamInvoke = default_stream,
+    max_steps: int = 6,
+    session_id: str = "chat",
+    credentials: CredentialStore | None = None,
+) -> str:
+    """Run the ReAct loop, then stream the final answer token-by-token (Option B).
+
+    ReAct runs to completion on the non-streaming (rotation-protected) path; the
+    resolved answer is then re-rendered by a single dedicated streaming call,
+    with each delta pushed via ``on_delta``. Falls back to emitting the computed
+    answer as one delta if streaming fails or yields nothing. Returns the full
+    assembled text (what the caller should persist).
+    """
+    store = credentials if credentials is not None else CredentialStore()
+    ctx = build_agent_runtime(
+        provider_config_from_env(),
+        credentials=store,
+        session_id=session_id,
+        rotation_strategy=rotation_strategy_from_env(),
+    )
+    policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
+    result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+    logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
+
+    if result.status != "completed":
+        await on_delta(_FALLBACK_ANSWER)
+        return _FALLBACK_ANSWER
+
+    answer = str(result.output)
+    request = {
+        "system": _STREAM_SYSTEM,
+        "messages": [
+            {"role": "user", "content": user_content},
+            {"role": "assistant", "content": answer},
+            {"role": "user", "content": "Write your final answer to the user now."},
+        ],
+    }
+    collected: list[str] = []
+    try:
+        async for delta in ctx.runtime.stream_complete("generator", request, stream_invoke):
+            collected.append(delta)
+            await on_delta(delta)
+    except Exception as exc:  # noqa: BLE001 - streaming is best-effort; fall back below
+        logger.warning("chat_stream_failed_falling_back", error=str(exc))
+
+    if collected:
+        return "".join(collected)
+    # Streaming failed or produced nothing → emit the already-computed answer.
+    await on_delta(answer)
+    return answer

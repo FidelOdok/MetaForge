@@ -10,11 +10,17 @@ from __future__ import annotations
 
 from orchestrator.harness.providers.adapters import (
     anthropic_invoke,
+    anthropic_stream,
     bedrock_invoke,
+    bedrock_stream,
     codex_invoke,
+    codex_stream,
     default_invoke,
+    default_stream,
     gemini_invoke,
+    gemini_stream,
     openai_invoke,
+    openai_stream,
 )
 from orchestrator.harness.providers.codex_login import login as run_codex_login
 from orchestrator.harness.providers.config import (
@@ -41,6 +47,7 @@ from orchestrator.harness.providers.pipeline import (
     ProviderSpec,
     RetryPolicy,
     RoleModelSlots,
+    StreamInvoke,
 )
 from orchestrator.harness.providers.registry import (
     ProviderProfile,
@@ -70,9 +77,16 @@ __all__ = [
     "next_cooldown",
     "rotor_from_store",
     "store_backed_invoke",
+    "StreamInvoke",
     "anthropic_invoke",
+    "anthropic_stream",
     "bedrock_invoke",
+    "bedrock_stream",
     "codex_invoke",
+    "codex_stream",
+    "default_stream",
+    "gemini_stream",
+    "openai_stream",
     "run_codex_login",
     "default_invoke",
     "gemini_invoke",

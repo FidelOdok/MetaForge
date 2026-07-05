@@ -12,7 +12,7 @@ evaluated.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,7 +25,7 @@ from orchestrator.harness.providers import (
     RotationStrategy,
     store_backed_invoke,
 )
-from orchestrator.harness.providers.pipeline import Invoke, ProviderSpec
+from orchestrator.harness.providers.pipeline import Invoke, ProviderSpec, StreamInvoke
 from orchestrator.harness.runs import InMemoryRunStore
 from orchestrator.harness.tools import GateCheck, ToolRegistry
 
@@ -107,6 +107,19 @@ class HarnessRuntime:
     async def complete(self, role: str, request: Any, invoke: Invoke) -> Any:
         """Run a model request for a role through the provider pipeline."""
         return await self.providers.complete(role, request, self._effective_invoke(invoke))
+
+    async def stream_complete(
+        self, role: str, request: Any, stream_invoke: StreamInvoke
+    ) -> AsyncIterator[str]:
+        """Stream a role's response through the pipeline (retry/fallback before
+        the first token, then committed).
+
+        Used for the final user-facing chat answer only — the rotation-protected
+        :meth:`complete` path drives the ReAct loop that does the real work, so
+        the stream uses the spec's own credentials (no per-token rotation).
+        """
+        async for delta in self.providers.stream_complete(role, request, stream_invoke):
+            yield delta
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Invoke a registered tool, enforcing this runtime's gate policy."""

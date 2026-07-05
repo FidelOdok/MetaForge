@@ -17,7 +17,7 @@ fake ``invoke`` -- no network, no real backoff sleeps.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +33,8 @@ Role = str
 
 # Injected transport: perform one model call for a resolved provider.
 Invoke = Callable[["ProviderSpec", Any], Awaitable[Any]]
+# Injected streaming transport: yield text deltas for a resolved provider.
+StreamInvoke = Callable[["ProviderSpec", Any], AsyncIterator[str]]
 # Injected sleep, so tests can assert backoff without real delays.
 Sleep = Callable[[float], Awaitable[None]]
 
@@ -196,4 +198,49 @@ class ProviderPipeline:
             span.set_attribute("provider.failed", True)
 
         logger.error("all_providers_failed", role=role, tried=len(attempts))
+        raise AllProvidersFailedError(role, attempts)
+
+    async def stream_complete(
+        self, role: Role, request: Any, stream_invoke: StreamInvoke
+    ) -> AsyncIterator[str]:
+        """Stream a role's response with retry + fallback *before the first token*.
+
+        Each candidate is tried like :meth:`complete`, but the transport yields
+        text deltas. Retries and provider fallback happen only until the first
+        delta arrives; once a token is yielded the provider is committed and a
+        mid-stream failure is surfaced (no mid-stream failover — you can't
+        un-send tokens). Raises :class:`AllProvidersFailedError` if no provider
+        produces a first token.
+        """
+        candidates = self.resolve(role)
+        attempts: list[tuple[ProviderSpec, Exception]] = []
+
+        for spec in candidates:
+            last_exc: Exception | None = None
+            for attempt in range(self._retry.api_max_retries + 1):
+                agen = stream_invoke(spec, request)
+                try:
+                    first = await agen.__anext__()
+                except StopAsyncIteration:
+                    return  # empty but successful stream
+                except ProviderError as exc:
+                    last_exc = exc
+                    if not self._retry.is_retryable(exc) or attempt >= self._retry.api_max_retries:
+                        break
+                    await self._sleep(self._retry.backoff_base_seconds * (2**attempt))
+                    continue
+                except Exception as exc:  # noqa: BLE001 - non-provider failure: try next spec
+                    last_exc = exc
+                    break
+                # First token obtained → commit to this provider, no more failover.
+                logger.info("provider_stream_ok", role=role, provider=spec.name, model=spec.model)
+                yield first
+                async for delta in agen:
+                    yield delta
+                return
+
+            assert last_exc is not None
+            attempts.append((spec, last_exc))
+
+        logger.error("all_providers_failed_stream", role=role, tried=len(attempts))
         raise AllProvidersFailedError(role, attempts)
