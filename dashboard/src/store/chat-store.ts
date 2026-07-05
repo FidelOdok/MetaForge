@@ -17,6 +17,12 @@ interface ChatUIState {
   streamingContent: Record<string, string>;
   /** Set of thread IDs where an agent is currently typing. */
   typingThreadIds: Set<string>;
+  /** Selected provider id for outgoing messages (null = server default). */
+  selectedProvider: string | null;
+  /** Selected model for outgoing messages (null = server default). */
+  selectedModel: string | null;
+  /** Enabled MCP tool ids (null = all available). */
+  enabledTools: string[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +40,10 @@ interface ChatUIActions {
   clearStreamContent: (messageId: string) => void;
   /** Toggle the typing indicator for a thread. */
   setAgentTyping: (threadId: string, isTyping: boolean) => void;
+  /** Set the selected provider + model for outgoing messages. */
+  setModel: (provider: string | null, model: string | null) => void;
+  /** Set the enabled MCP tool ids (null = all available). */
+  setEnabledTools: (toolIds: string[] | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +56,9 @@ export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
   activeSidebarThreadId: null,
   streamingContent: {},
   typingThreadIds: new Set<string>(),
+  selectedProvider: null,
+  selectedModel: null,
+  enabledTools: null,
 
   // -- actions --
   openSidebar: (threadId) =>
@@ -84,4 +97,8 @@ export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
       }
       return { typingThreadIds: next };
     }),
+
+  setModel: (provider, model) => set({ selectedProvider: provider, selectedModel: model }),
+
+  setEnabledTools: (toolIds) => set({ enabledTools: toolIds }),
 }));

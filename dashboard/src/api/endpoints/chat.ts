@@ -51,6 +51,10 @@ export interface SendChatMessagePayload {
     nodeType: string;
     label: string;
   };
+  /** Per-turn harness selection (MET-548) — from the model/tools selector. */
+  provider?: string | null;
+  model?: string | null;
+  tools?: string[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +179,7 @@ export async function sendChatMessage(
   threadId: string,
   payload: SendChatMessagePayload,
 ): Promise<ChatMessage> {
-  const body: Record<string, string | undefined> = {
+  const body: Record<string, unknown> = {
     content: payload.content,
     actor_id: 'current-user',
     actor_kind: 'user',
@@ -185,6 +189,9 @@ export async function sendChatMessage(
     body.graph_ref_type = payload.graphRef.nodeType;
     body.graph_ref_label = payload.graphRef.label;
   }
+  if (payload.provider) body.provider = payload.provider;
+  if (payload.model) body.model = payload.model;
+  if (payload.tools != null) body.tools = payload.tools;
   const response = await apiClient.post(
     `/chat/threads/${threadId}/messages`,
     body,

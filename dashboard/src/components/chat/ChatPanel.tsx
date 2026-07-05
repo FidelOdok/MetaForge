@@ -3,6 +3,7 @@ import { type ChatThread, type ChatMessage } from '@/types/chat';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { ChatComposer } from './ChatComposer';
+import { ModelToolsBar } from './ModelToolsBar';
 
 // ---------------------------------------------------------------------------
 // KC color tokens
@@ -145,6 +146,9 @@ export function ChatPanel({
           </div>
         )}
       </div>
+
+      {/* ---- Model + tools/connectors selector ---- */}
+      {onSendMessage && <ModelToolsBar />}
 
       {/* ---- Composer ---- */}
       {onSendMessage && (
