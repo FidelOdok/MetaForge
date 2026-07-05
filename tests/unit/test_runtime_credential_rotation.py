@@ -60,3 +60,22 @@ async def test_build_agent_runtime_plumbs_store(tmp_path: Path) -> None:
     ctx = build_agent_runtime(CONFIG, credentials=store, session_id="s2")
     assert ctx.runtime.credentials is store
     assert ctx.runtime.session_id == "s2"
+
+
+@pytest.mark.asyncio
+async def test_runtime_clock_skips_then_revives_cooled_credential(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.mark_cooldown("openrouter", "a", now=1000.0)  # 'a' cools down until 1030
+    now = {"t": 1010.0}
+
+    async def invoke(spec: ProviderSpec, request: object) -> str:
+        return f"ok:{spec.api_key_env}"
+
+    # While cooling, the runtime's clock excludes 'a' → only 'b' is used.
+    rt = HarnessRuntime.build(CONFIG, credentials=store, session_id="s1", clock=lambda: now["t"])
+    assert await rt.complete("generator", {}, invoke) == "ok:KEY_B"
+
+    # Past the cooldown, 'a' auto-revives and a fresh session picks it first.
+    now["t"] = 2000.0
+    rt2 = HarnessRuntime.build(CONFIG, credentials=store, session_id="s2", clock=lambda: now["t"])
+    assert await rt2.complete("generator", {}, invoke) == "ok:KEY_A"

@@ -12,13 +12,18 @@ light and unit-testable, and the same assembly works for native + MCP tools.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import structlog
 
-from orchestrator.harness.providers import CredentialStore, HarnessProviderConfig
+from orchestrator.harness.providers import (
+    CredentialStore,
+    HarnessProviderConfig,
+    RotationStrategy,
+)
 from orchestrator.harness.runtime import HarnessRuntime
 from orchestrator.harness.skills import SkillRegistry
 from orchestrator.harness.tools import GateCheck, Handler, ToolRegistry
@@ -53,6 +58,8 @@ def build_agent_runtime(
     gate_check: GateCheck | None = None,
     credentials: CredentialStore | None = None,
     session_id: str = "default",
+    clock: Callable[[], float] = time.time,
+    rotation_strategy: RotationStrategy = RotationStrategy.ROUND_ROBIN,
     skills_dir: Path | None = None,
 ) -> AgentContext:
     """Assemble the tools + skills layer into a ready `AgentContext`.
@@ -86,6 +93,8 @@ def build_agent_runtime(
         gate_check=gate_check,
         credentials=credentials,
         session_id=session_id,
+        clock=clock,
+        rotation_strategy=rotation_strategy,
     )
 
     skills = SkillRegistry()

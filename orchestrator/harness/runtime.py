@@ -22,6 +22,7 @@ from orchestrator.harness.providers import (
     ProviderPipeline,
     RetryPolicy,
     RoleModelSlots,
+    RotationStrategy,
     store_backed_invoke,
 )
 from orchestrator.harness.providers.pipeline import Invoke, ProviderSpec
@@ -41,6 +42,10 @@ class HarnessRuntime:
     # stored credentials per session and blacklist any that fail terminally.
     credentials: CredentialStore | None = None
     session_id: str = "default"
+    # Clock seam — threaded into credential cooldown checks so time is injectable.
+    clock: Callable[[], float] = time.time
+    # How stored credentials are rotated across a provider's profiles.
+    rotation_strategy: RotationStrategy = RotationStrategy.ROUND_ROBIN
 
     @classmethod
     def build(
@@ -52,6 +57,7 @@ class HarnessRuntime:
         credentials: CredentialStore | None = None,
         session_id: str = "default",
         clock: Callable[[], float] = time.time,
+        rotation_strategy: RotationStrategy = RotationStrategy.ROUND_ROBIN,
     ) -> HarnessRuntime:
         """Assemble a runtime from an optional provider config.
 
@@ -67,6 +73,8 @@ class HarnessRuntime:
             gate_check=gate_check,
             credentials=credentials,
             session_id=session_id,
+            clock=clock,
+            rotation_strategy=rotation_strategy,
         )
 
     def _effective_invoke(self, base_invoke: Invoke) -> Invoke:
@@ -82,8 +90,15 @@ class HarnessRuntime:
         session = self.session_id
 
         async def invoke(spec: ProviderSpec, request: Any) -> Any:
-            if store.healthy(spec.name):
-                rotated = store_backed_invoke(base_invoke, store, spec.name, session)
+            if store.healthy(spec.name, now=self.clock()):
+                rotated = store_backed_invoke(
+                    base_invoke,
+                    store,
+                    spec.name,
+                    session,
+                    now=self.clock,
+                    strategy=self.rotation_strategy,
+                )
                 return await rotated(spec, request)
             return await base_invoke(spec, request)
 

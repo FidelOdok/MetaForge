@@ -28,9 +28,11 @@ from orchestrator.harness.providers.credential_rotation import (
     store_backed_invoke,
 )
 from orchestrator.harness.providers.credentials import (
+    COOLDOWN_LADDER,
     Credential,
     CredentialStore,
     default_credentials_path,
+    next_cooldown,
 )
 from orchestrator.harness.providers.pipeline import (
     AllProvidersFailedError,
@@ -51,17 +53,21 @@ from orchestrator.harness.providers.rotation import (
     AuthProfile,
     ProfileExhaustedError,
     ProfileRotor,
+    RotationStrategy,
     rotating_invoke,
 )
 
 __all__ = [
     "AllProvidersFailedError",
     "AuthProfile",
+    "COOLDOWN_LADDER",
     "ConfigError",
     "Credential",
     "CredentialStore",
     "NoHealthyCredentialsError",
+    "RotationStrategy",
     "default_credentials_path",
+    "next_cooldown",
     "rotor_from_store",
     "store_backed_invoke",
     "anthropic_invoke",
