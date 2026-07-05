@@ -17,7 +17,7 @@ import { useCreateChatThread, useSendChatMessage } from '@/hooks/use-chat';
  */
 export function FloatingAssistantInput() {
   const [value, setValue] = useState('');
-  const { openSidebar } = useChatStore();
+  const { openSidebar, clearStreamContent, setAgentTyping } = useChatStore();
   const createThread = useCreateChatThread();
   const sendMessage = useSendChatMessage();
 
@@ -33,17 +33,25 @@ export function FloatingAssistantInput() {
         title: text.length > 60 ? `${text.slice(0, 57)}…` : text,
         scope: { kind: 'assistant', entityId: 'global', label: 'Design Assistant' },
       });
+      // Open the sidebar on the new thread BEFORE sending, so ChatSidebar mounts
+      // and its useChatStream EventSource is connected while the (synchronous)
+      // send POST broadcasts message.delta events. Otherwise the deltas fire
+      // before any subscriber and the reply can't stream in (MET-548).
+      openSidebar(thread.id);
+      setValue('');
       await sendMessage.mutateAsync({
         threadId: thread.id,
         payload: { content: text },
       });
-      openSidebar(thread.id);
-      setValue('');
+      // Turn complete → drop the provisional streaming bubble; the refetched,
+      // persisted message (invalidated by the send mutation) is the source of truth.
+      clearStreamContent(thread.id);
+      setAgentTyping(thread.id, false);
     } catch {
       // On error (e.g. backend offline) still open the sidebar
       openSidebar();
     }
-  }, [value, openSidebar, createThread, sendMessage]);
+  }, [value, openSidebar, createThread, sendMessage, clearStreamContent, setAgentTyping]);
 
   const isPending = createThread.isPending || sendMessage.isPending;
 
