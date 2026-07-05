@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 
 import structlog
 
-from orchestrator.harness import build_agent_runtime
+from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
     CredentialStore,
@@ -33,10 +33,53 @@ from orchestrator.harness.providers import (
 )
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.react import run_react
+from orchestrator.harness.tools import Handler
+from skill_registry.mcp_bridge import McpBridge
 
 logger = structlog.get_logger(__name__)
 
 _TRUTHY = {"1", "true", "on", "yes"}
+
+
+async def mcp_tools_from_bridge(bridge: McpBridge) -> list[tuple[str, NativeToolDef]]:
+    """Adapt a provider's MCP bridge tools into harness ``NativeToolDef``s.
+
+    Each bridge tool becomes an ``mcp_<server>_<tool>`` entry whose handler
+    invokes it through the bridge. The bridge's ``list_tools`` gives no input
+    schema, so a permissive object schema is used (the model supplies args, the
+    bridge validates). Registering these lets the chat harness *drive tools*,
+    not just converse — subject to a live bridge being wired into the gateway.
+    """
+    tools = await bridge.list_tools()
+    defs: list[tuple[str, NativeToolDef]] = []
+    for entry in tools:
+        tool_id = str(entry.get("tool_id") or entry.get("name") or "").strip()
+        if not tool_id:
+            continue
+        server, _, tool = tool_id.partition(".")
+        if not tool:
+            server, tool = "mcp", tool_id
+        capability = entry.get("capability")
+        description = f"{tool_id} ({capability})" if capability else tool_id
+
+        def _make_handler(tid: str) -> Handler:
+            async def handler(arguments: dict[str, object]) -> object:
+                return await bridge.invoke(tid, dict(arguments))
+
+            return handler
+
+        defs.append(
+            (
+                server,
+                NativeToolDef(
+                    name=tool,
+                    description=description,
+                    input_schema={"type": "object"},
+                    handler=_make_handler(tool_id),
+                ),
+            )
+        )
+    return defs
 
 
 def chat_harness_enabled() -> bool:
@@ -75,6 +118,23 @@ def provider_config_from_env() -> HarnessProviderConfig:
     )
 
 
+async def _build_context(
+    session_id: str,
+    store: CredentialStore,
+    mcp_bridge: McpBridge | None,
+) -> AgentContext:
+    """Assemble the harness runtime, registering the bridge's MCP tools (if any)
+    so the chat harness can drive tools, not just converse."""
+    mcp_tools = await mcp_tools_from_bridge(mcp_bridge) if mcp_bridge is not None else []
+    return build_agent_runtime(
+        provider_config_from_env(),
+        credentials=store,
+        session_id=session_id,
+        rotation_strategy=rotation_strategy_from_env(),
+        mcp_tools=mcp_tools,
+    )
+
+
 async def run_chat_turn(
     user_content: str,
     *,
@@ -82,20 +142,17 @@ async def run_chat_turn(
     max_steps: int = 6,
     session_id: str = "chat",
     credentials: CredentialStore | None = None,
+    mcp_bridge: McpBridge | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
     A credential store is attached so that when a provider has multiple stored
     credentials they rotate (and dead ones are blacklisted) per session; with an
-    empty/absent store this is a no-op, so the default path is unchanged.
+    empty/absent store this is a no-op, so the default path is unchanged. When an
+    ``mcp_bridge`` is given, its tools are registered so the loop can call them.
     """
     store = credentials if credentials is not None else CredentialStore()
-    ctx = build_agent_runtime(
-        provider_config_from_env(),
-        credentials=store,
-        session_id=session_id,
-        rotation_strategy=rotation_strategy_from_env(),
-    )
+    ctx = await _build_context(session_id, store, mcp_bridge)
     policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
     result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
@@ -117,6 +174,7 @@ async def run_chat_turn_streaming(
     max_steps: int = 6,
     session_id: str = "chat",
     credentials: CredentialStore | None = None,
+    mcp_bridge: McpBridge | None = None,
 ) -> str:
     """Run the ReAct loop, then stream the final answer token-by-token (Option B).
 
@@ -124,15 +182,11 @@ async def run_chat_turn_streaming(
     resolved answer is then re-rendered by a single dedicated streaming call,
     with each delta pushed via ``on_delta``. Falls back to emitting the computed
     answer as one delta if streaming fails or yields nothing. Returns the full
-    assembled text (what the caller should persist).
+    assembled text (what the caller should persist). When an ``mcp_bridge`` is
+    given, its tools are registered so the loop can call them.
     """
     store = credentials if credentials is not None else CredentialStore()
-    ctx = build_agent_runtime(
-        provider_config_from_env(),
-        credentials=store,
-        session_id=session_id,
-        rotation_strategy=rotation_strategy_from_env(),
-    )
+    ctx = await _build_context(session_id, store, mcp_bridge)
     policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
     result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
