@@ -7,6 +7,7 @@ import {
   useSendChatMessage,
 } from '@/hooks/use-chat';
 import { useChatStore } from '@/store/chat-store';
+import { useChatStream } from '@/hooks/use-chat-stream';
 
 // Re-export ChatScopeKind so consumers do not need a separate import.
 export type { ChatScopeKind } from '@/types/chat';
@@ -92,15 +93,43 @@ export function useScopedChat({
   const typingThreadIds = useChatStore((s) => s.typingThreadIds);
   const isTyping = existingThreadId ? typingThreadIds.has(existingThreadId) : false;
 
+  // Subscribe to the thread's SSE stream so the agent answer renders
+  // token-by-token (MET-548). Accumulated deltas live in the chat store.
+  useChatStream(existingThreadId);
+
+  const streamingText = useChatStore((s) =>
+    existingThreadId ? s.streamingContent[existingThreadId] : undefined,
+  );
+  const clearStreamContent = useChatStore((s) => s.clearStreamContent);
+  const setAgentTyping = useChatStore((s) => s.setAgentTyping);
+
   // ------------------------------------------------------------------
   // 3. Optimistic local message queue (before server confirms)
   // ------------------------------------------------------------------
 
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
 
+  // Provisional agent bubble rendered from the live stream, shown until the
+  // real message lands via refetch (cleared on send success).
+  const streamingMessage: ChatMessage | null =
+    existingThreadId && streamingText
+      ? {
+          id: `streaming-${existingThreadId}`,
+          threadId: existingThreadId,
+          actor: { id: 'harness-agent', kind: 'agent', displayName: 'Agent' },
+          content: streamingText,
+          status: 'sending',
+          createdAt: new Date().toISOString(),
+        }
+      : null;
+
   const allMessages = useMemo(
-    () => [...messages, ...optimisticMessages],
-    [messages, optimisticMessages],
+    () => [
+      ...messages,
+      ...optimisticMessages,
+      ...(streamingMessage ? [streamingMessage] : []),
+    ],
+    [messages, optimisticMessages, streamingMessage],
   );
 
   // ------------------------------------------------------------------
@@ -165,6 +194,11 @@ export function useScopedChat({
             setOptimisticMessages((prev) =>
               prev.filter((m) => m.id !== optimistic.id),
             );
+            // The turn is complete (POST resolves after the full harness turn);
+            // drop the provisional streaming bubble so the refetched, persisted
+            // message is the single source of truth.
+            clearStreamContent(existingThreadId);
+            setAgentTyping(existingThreadId, false);
           },
           onError: () => {
             // Mark the optimistic message as failed.
@@ -177,7 +211,7 @@ export function useScopedChat({
         },
       );
     },
-    [existingThreadId, sendMessageMutation],
+    [existingThreadId, sendMessageMutation, clearStreamContent, setAgentTyping],
   );
 
   // ------------------------------------------------------------------
