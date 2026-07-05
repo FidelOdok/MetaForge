@@ -1,6 +1,8 @@
 import { useCallback, useEffect } from 'react';
+import type { ChatMessage } from '@/types/chat';
 import { useChatStore } from '@/store/chat-store';
 import { useChatThreads, useChatThread, useSendChatMessage } from '@/hooks/use-chat';
+import { useChatStream } from '@/hooks/use-chat-stream';
 import { ChatPanel } from './ChatPanel';
 import { ChatThreadList } from './ChatThreadList';
 
@@ -27,9 +29,17 @@ export function ChatSidebar() {
     sidebarOpen,
     activeSidebarThreadId,
     typingThreadIds,
+    streamingContent,
+    clearStreamContent,
+    setAgentTyping,
     openSidebar,
     closeSidebar,
   } = useChatStore();
+
+  // Subscribe to the active thread's SSE stream so the global assistant path
+  // gets the same token-by-token streaming + typing indicator as the scoped
+  // panels (which drive it via useScopedChat). MET-548.
+  useChatStream(activeSidebarThreadId);
 
   const { data: threadsPage } = useChatThreads(undefined, {
     enabled: sidebarOpen,
@@ -53,9 +63,20 @@ export function ChatSidebar() {
   const handleSend = useCallback(
     (content: string) => {
       if (!activeSidebarThreadId) return;
-      sendMessage.mutate({ threadId: activeSidebarThreadId, payload: { content } });
+      const threadId = activeSidebarThreadId;
+      sendMessage.mutate(
+        { threadId, payload: { content } },
+        {
+          onSuccess: () => {
+            // Turn complete → drop the provisional streaming bubble; the
+            // refetched, persisted message is the source of truth.
+            clearStreamContent(threadId);
+            setAgentTyping(threadId, false);
+          },
+        },
+      );
     },
-    [activeSidebarThreadId, sendMessage],
+    [activeSidebarThreadId, sendMessage, clearStreamContent, setAgentTyping],
   );
 
   useEffect(() => {
@@ -69,6 +90,29 @@ export function ChatSidebar() {
 
   const isTypingInActiveThread =
     !!activeSidebarThreadId && typingThreadIds.has(activeSidebarThreadId);
+
+  // Live streaming bubble (updates as message.delta events arrive), shown until
+  // the persisted reply lands via refetch.
+  const streamingText = activeSidebarThreadId
+    ? streamingContent[activeSidebarThreadId]
+    : undefined;
+  const panelMessages: ChatMessage[] = activeThread
+    ? [
+        ...activeThread.messages,
+        ...(activeSidebarThreadId && streamingText
+          ? [
+              {
+                id: `streaming-${activeSidebarThreadId}`,
+                threadId: activeSidebarThreadId,
+                actor: { id: 'harness-agent', kind: 'agent' as const, displayName: 'Agent' },
+                content: streamingText,
+                status: 'sending' as const,
+                createdAt: new Date().toISOString(),
+              },
+            ]
+          : []),
+      ]
+    : [];
 
   return (
     <>
@@ -147,7 +191,7 @@ export function ChatSidebar() {
           {activeSidebarThreadId && activeThread ? (
             <ChatPanel
               thread={activeThread}
-              messages={activeThread.messages}
+              messages={panelMessages}
               compact
               isTyping={isTypingInActiveThread}
               typingAgentName="Agent"
