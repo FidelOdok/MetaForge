@@ -270,3 +270,36 @@ class TestAgentBridgeNonUserMessages:
         )
         assert resp.status_code == 201
         mock_run_agent.assert_not_called()
+
+
+# ===================================================================
+# Harness path must bypass the legacy is_llm_available() gate (MET-548)
+# ===================================================================
+
+
+class TestHarnessBypassesLegacyGate:
+    """When the chat harness is enabled it uses its own registry-based provider
+    config, so it must run even when the legacy is_llm_available() (openai/
+    anthropic only) reports False — e.g. an openrouter/openai-codex provider."""
+
+    @patch("api_gateway.chat.routes.chat_harness_enabled", return_value=True)
+    @patch("api_gateway.chat.routes.is_llm_available", return_value=False)
+    @patch(
+        "api_gateway.chat.routes.run_chat_turn_streaming",
+        new_callable=AsyncMock,
+        return_value="harness reply",
+    )
+    def test_harness_replies_when_legacy_gate_false(
+        self,
+        _mock_stream: AsyncMock,
+        _mock_llm: object,
+        _mock_harness: object,
+        client: TestClient,
+    ) -> None:
+        thread = _create_thread(client)
+        _send_user_message(client, thread["id"])
+
+        messages = client.get(f"/v1/chat/threads/{thread['id']}").json()["messages"]
+        assert len(messages) == 2  # user + harness agent reply
+        assert messages[1]["actor_kind"] == "agent"
+        assert messages[1]["content"] == "harness reply"
