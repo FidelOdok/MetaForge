@@ -100,6 +100,11 @@ def init_mcp_bridge(bridge: McpBridge) -> None:
     logger.info("mcp_bridge_initialized", bridge_type=type(bridge).__name__)
 
 
+def get_mcp_bridge() -> McpBridge:
+    """The currently-active MCP bridge (used by the harness capability routes)."""
+    return _mcp_bridge
+
+
 def init_twin(twin: object) -> None:
     """Replace the default InMemoryTwinAPI with the orchestrator's twin.
 

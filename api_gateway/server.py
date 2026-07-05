@@ -21,6 +21,7 @@ from api_gateway.chat.routes import router as chat_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
+from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.memory import router as memory_router
@@ -1014,6 +1015,7 @@ def create_app(
 
     app.include_router(knowledge_router)
     app.include_router(memory_router)
+    app.include_router(harness_router)
 
     logger.info(
         "gateway_configured",
