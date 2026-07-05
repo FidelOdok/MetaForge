@@ -31,6 +31,25 @@ router = APIRouter(prefix="/v1/harness", tags=["harness"])
 _KEYLESS_PROVIDERS = frozenset({"ollama", "vllm", "llamacpp", "lmstudio", "sglang", "custom"})
 
 
+def _active_provider() -> str:
+    return (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+
+
+def _credentials_for(profile: registry.ProviderProfile) -> tuple[str, str | None]:
+    """(api_key, base_url) for a provider. For the *active* provider, honor the
+    METAFORGE_LLM_* env — where the working key lives on deployments whose
+    provider key-env name differs from the registry default (e.g. the box uses
+    OPEN_ROUTER_API_KEY while the registry expects OPENROUTER_API_KEY)."""
+    if profile.id == _active_provider():
+        key = os.environ.get("METAFORGE_LLM_API_KEY", "").strip()
+        base_url = (os.environ.get("METAFORGE_LLM_BASE_URL") or "").strip() or profile.base_url
+        if key:
+            return key, base_url
+    key = os.environ.get(profile.api_key_env or "", "").strip()
+    base_url = profile.base_url or (os.environ.get(profile.base_url_env or "", "").strip() or None)
+    return key, base_url
+
+
 # ---------------------------------------------------------------------------
 # Providers
 # ---------------------------------------------------------------------------
@@ -54,8 +73,8 @@ def _is_configured(profile: registry.ProviderProfile) -> bool:
         return auth_json_path() is not None
     if profile.id in _KEYLESS_PROVIDERS:
         return True
-    env = profile.api_key_env
-    return bool(env and os.environ.get(env, "").strip())
+    key, _ = _credentials_for(profile)
+    return bool(key)
 
 
 @router.get("/providers", response_model=ProvidersResponse)
@@ -122,8 +141,7 @@ async def list_models(provider: str = Query(..., description="Provider id")) -> 
     except registry.UnknownProviderError:
         return ModelsResponse(provider=provider, models=[], source="none")
 
-    key = os.environ.get(profile.api_key_env or "", "").strip()
-    base_url = profile.base_url or os.environ.get(profile.base_url_env or "", "").strip()
+    key, base_url = _credentials_for(profile)
     if profile.api_family == "openai" and base_url and key:
         try:
             ids = await _fetch_openai_models(base_url, key)
