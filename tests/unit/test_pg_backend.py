@@ -72,10 +72,11 @@ async def test_seed_default_channels(repo: PgChatRepository, session: AsyncSessi
     await session.commit()
 
     channels = await repo.list_channels(session)
-    assert len(channels) == 5
+    assert len(channels) == 6
     scope_kinds = {ch.scope_kind for ch in channels}
     assert "session" in scope_kinds
     assert "approval" in scope_kinds
+    assert "assistant" in scope_kinds
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ async def test_seed_idempotent(repo: PgChatRepository, session: AsyncSession) ->
     await session.commit()
 
     channels = await repo.list_channels(session)
-    assert len(channels) == 5
+    assert len(channels) == 6
 
 
 # ---------------------------------------------------------------------------

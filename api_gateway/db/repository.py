@@ -36,6 +36,7 @@ _DEFAULT_CHANNELS: list[dict[str, str]] = [
     {"name": "BOM Discussion", "scope_kind": "bom-entry"},
     {"name": "Digital Twin", "scope_kind": "digital-twin-node"},
     {"name": "Project Chat", "scope_kind": "project"},
+    {"name": "Design Assistant", "scope_kind": "assistant"},
 ]
 
 
@@ -51,32 +52,40 @@ class PgChatRepository:
     # ------------------------------------------------------------------
 
     async def seed_default_channels(self, session: AsyncSession) -> None:
-        """Insert default channels if the table is empty."""
+        """Ensure every default channel exists (idempotent, per scope_kind).
+
+        Inserts any default channel whose ``scope_kind`` is missing, so new
+        defaults (e.g. the ``assistant`` channel) are backfilled on databases
+        that were seeded before they existed — not just on an empty table.
+        """
         from api_gateway.db.models import ChatChannelRow
 
         with tracer.start_as_current_span("db.seed_channels") as span:
-            from sqlalchemy import func, select
+            from sqlalchemy import select
 
-            count_stmt = select(func.count()).select_from(ChatChannelRow)
-            result = await session.execute(count_stmt)
-            count: int = result.scalar_one()
-            span.set_attribute("existing_channels", count)
+            existing_stmt = select(ChatChannelRow.scope_kind)
+            result = await session.execute(existing_stmt)
+            existing = {row for row in result.scalars().all()}
+            span.set_attribute("existing_channels", len(existing))
 
-            if count > 0:
-                logger.debug("channels_already_seeded", count=count)
-                return
-
+            added = 0
             for ch_def in _DEFAULT_CHANNELS:
-                row = ChatChannelRow(
-                    id=str(uuid4()),
-                    name=ch_def["name"],
-                    scope_kind=ch_def["scope_kind"],
-                    created_at=datetime.now(UTC),
+                if ch_def["scope_kind"] in existing:
+                    continue
+                session.add(
+                    ChatChannelRow(
+                        id=str(uuid4()),
+                        name=ch_def["name"],
+                        scope_kind=ch_def["scope_kind"],
+                        created_at=datetime.now(UTC),
+                    )
                 )
-                session.add(row)
+                added += 1
 
-            await session.flush()
-            logger.info("default_channels_seeded", count=len(_DEFAULT_CHANNELS))
+            if added:
+                await session.flush()
+            span.set_attribute("channels_added", added)
+            logger.info("default_channels_seeded", added=added, total=len(_DEFAULT_CHANNELS))
 
     async def list_channels(self, session: AsyncSession) -> list[ChatChannelRecord]:
         """Return all channels."""

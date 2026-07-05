@@ -101,6 +101,7 @@ _DEFAULT_CHANNELS: list[dict[str, str]] = [
     {"name": "BOM Discussion", "scope_kind": "bom-entry"},
     {"name": "Digital Twin", "scope_kind": "digital-twin-node"},
     {"name": "Project Chat", "scope_kind": "project"},
+    {"name": "Design Assistant", "scope_kind": "assistant"},
 ]
 
 
