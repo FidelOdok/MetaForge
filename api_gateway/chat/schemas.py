@@ -37,6 +37,12 @@ class SendMessageRequest(BaseModel):
     graph_ref_node: str | None = Field(default=None, description="Digital-twin node reference")
     graph_ref_type: str | None = Field(default=None, description="Digital-twin ref type")
     graph_ref_label: str | None = Field(default=None, description="Digital-twin ref label")
+    # Harness selector overrides (MET-548) — chosen in the chat UI, per turn.
+    provider: str | None = Field(default=None, description="Override provider id for this turn")
+    model: str | None = Field(default=None, description="Override model for this turn")
+    tools: list[str] | None = Field(
+        default=None, description="Enabled MCP tool ids for this turn (None = all available)"
+    )
 
 
 # ---------------------------------------------------------------------------
