@@ -99,7 +99,7 @@ class TestListChannels:
         assert resp.status_code == 200
         data = resp.json()
         assert "channels" in data
-        assert len(data["channels"]) == 5
+        assert len(data["channels"]) == 6
 
     def test_channel_fields(self, client: TestClient) -> None:
         resp = client.get("/v1/chat/channels")
@@ -112,7 +112,7 @@ class TestListChannels:
     def test_channel_scope_kinds(self, client: TestClient) -> None:
         resp = client.get("/v1/chat/channels")
         scope_kinds = {ch["scope_kind"] for ch in resp.json()["channels"]}
-        expected = {"session", "approval", "bom-entry", "digital-twin-node", "project"}
+        expected = {"session", "approval", "bom-entry", "digital-twin-node", "project", "assistant"}
         assert scope_kinds == expected
 
 
