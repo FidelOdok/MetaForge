@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
@@ -193,14 +194,16 @@ def _codex_client(credentials: Any) -> Any:
     )
 
 
-async def _codex_call(
+async def _codex_stream_deltas(
     client: Any, spec: ProviderSpec, system: str | None, input_text: str
-) -> dict[str, Any]:
-    # The codex backend's Responses API requires:
-    #  - ``input`` as a list of typed items (a bare string is rejected),
-    #  - ``store=False``, and
-    #  - ``stream=True`` (it is streaming-only) — so we aggregate the
-    #    ``response.output_text.delta`` events into the final text.
+) -> AsyncIterator[str]:
+    """Open the codex Responses stream and yield ``output_text.delta`` chunks.
+
+    The codex backend's Responses API requires ``input`` as a list of typed
+    items (a bare string is rejected), ``store=False``, and ``stream=True`` (it
+    is streaming-only). Shared by the aggregating :func:`_codex_call` and the
+    streaming :func:`codex_stream` so the request shape lives in one place.
+    """
     stream = await client.responses.create(
         model=spec.model,
         input=[{"role": "user", "content": [{"type": "input_text", "text": input_text}]}],
@@ -208,10 +211,15 @@ async def _codex_call(
         store=False,
         stream=True,
     )
-    parts: list[str] = []
     async for event in stream:
         if getattr(event, "type", "") == "response.output_text.delta":
-            parts.append(getattr(event, "delta", "") or "")
+            yield getattr(event, "delta", "") or ""
+
+
+async def _codex_call(
+    client: Any, spec: ProviderSpec, system: str | None, input_text: str
+) -> dict[str, Any]:
+    parts = [delta async for delta in _codex_stream_deltas(client, spec, system, input_text)]
     return {"text": "".join(parts), "model": spec.model}
 
 
@@ -261,6 +269,37 @@ async def codex_invoke(
                 codex_auth.save_credentials(path, fresh)
             return await _codex_call(_codex_client(fresh), spec, system, input_text)
         raise err from exc
+
+
+async def codex_stream(
+    spec: ProviderSpec,
+    request: Any,
+    *,
+    client: Any | None = None,
+    credentials: Any | None = None,
+) -> AsyncIterator[str]:
+    """Stream a ChatGPT-subscription response via the codex Responses backend.
+
+    Shares the request shape + auth resolution with :func:`codex_invoke`.
+    Credentials are refreshed proactively when expired; unlike ``codex_invoke``
+    there is no mid-stream 401 refresh-retry (a rare invalidated-token stream
+    surfaces as an error the caller can fall back on).
+    """
+    system, messages, _max_tokens, _temperature = _normalize_request(request)
+    input_text = "\n\n".join(m.get("content", "") for m in messages)
+
+    if client is not None:
+        async for delta in _codex_stream_deltas(client, spec, system, input_text):
+            yield delta
+        return
+
+    from orchestrator.harness.providers import codex_auth
+
+    creds = credentials or await codex_auth.get_valid_credentials(
+        path=codex_auth.auth_json_path(), post=_codex_refresh_post
+    )
+    async for delta in _codex_stream_deltas(_codex_client(creds), spec, system, input_text):
+        yield delta
 
 
 def _classify_bedrock_error(exc: Exception) -> ProviderError:
@@ -334,3 +373,123 @@ async def default_invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
     if name in _CODEX_NAMES:
         return await codex_invoke(spec, request)
     return await openai_invoke(spec, request)
+
+
+# ---------------------------------------------------------------------------
+# Streaming adapters (MET-548) — yield text deltas for the final chat answer.
+# ---------------------------------------------------------------------------
+
+
+async def anthropic_stream(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[str]:
+    """Stream an Anthropic model's text deltas."""
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if client is None:
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(
+            api_key=_require_key(spec, "ANTHROPIC_API_KEY"), base_url=spec.base_url or None
+        )
+    kwargs: dict[str, Any] = {
+        "model": spec.model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": messages,
+    }
+    if system:
+        kwargs["system"] = system
+    try:
+        async with client.messages.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                yield text
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+
+async def openai_stream(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[str]:
+    """Stream an OpenAI-compatible model's text deltas."""
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if system:
+        messages = [{"role": "system", "content": system}, *messages]
+    if client is None:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(
+            api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+        )
+    try:
+        stream = await client.chat.completions.create(
+            model=spec.model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+
+async def gemini_stream(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[str]:
+    """Stream a Google Gemini model's text deltas."""
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if client is None:
+        from google import genai
+
+        client = genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY"))
+    contents = "\n\n".join(m.get("content", "") for m in messages)
+    config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
+    if system:
+        config["system_instruction"] = system
+    try:
+        stream = await client.aio.models.generate_content_stream(
+            model=spec.model, contents=contents, config=config
+        )
+        async for chunk in stream:
+            text = getattr(chunk, "text", "") or ""
+            if text:
+                yield text
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+
+async def bedrock_stream(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[str]:
+    """Bedrock streaming is *buffered*: the Converse result is yielded as a
+    single delta. ``converse_stream``'s sync EventStream doesn't bridge cleanly
+    to an async generator, and Bedrock is rarely the interactive chat provider.
+    """
+    result = await bedrock_invoke(spec, request, client=client)
+    text = result.get("text", "")
+    if text:
+        yield text
+
+
+def default_stream(spec: ProviderSpec, request: Any) -> AsyncIterator[str]:
+    """Dispatch to the right streaming adapter by provider family (see
+    :func:`default_invoke`)."""
+    name = spec.name.lower()
+    if name in _ANTHROPIC_NAMES:
+        return anthropic_stream(spec, request)
+    if name in _GEMINI_NAMES:
+        return gemini_stream(spec, request)
+    if name in _BEDROCK_NAMES:
+        return bedrock_stream(spec, request)
+    if name in _CODEX_NAMES:
+        return codex_stream(spec, request)
+    return openai_stream(spec, request)

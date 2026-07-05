@@ -22,7 +22,10 @@ from fastapi.responses import StreamingResponse
 
 from api_gateway.chat.agent_router import default_router
 from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
-from api_gateway.chat.harness_backend import chat_harness_enabled, run_chat_turn
+from api_gateway.chat.harness_backend import (
+    chat_harness_enabled,
+    run_chat_turn_streaming,
+)
 from api_gateway.chat.models import (
     ChatMessageRecord,
     ChatThreadRecord,
@@ -37,7 +40,7 @@ from api_gateway.chat.schemas import (
     ThreadResponse,
     ThreadSummaryResponse,
 )
-from api_gateway.chat.streaming import stream_manager, stream_thread
+from api_gateway.chat.streaming import notify_message_delta, stream_manager, stream_thread
 from api_gateway.projects.routes import _backend as _project_backend
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
@@ -142,7 +145,13 @@ async def _invoke_agent(
             span.set_attribute("chat_backend", "harness")
             now = datetime.now(UTC)
             try:
-                text = await run_chat_turn(user_content, session_id=thread.id)
+
+                async def _on_delta(delta: str) -> None:
+                    await notify_message_delta(thread.id, delta)
+
+                text = await run_chat_turn_streaming(
+                    user_content, on_delta=_on_delta, session_id=thread.id
+                )
                 return ChatMessageRecord(
                     id=str(uuid4()),
                     thread_id=thread.id,
