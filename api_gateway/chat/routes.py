@@ -134,13 +134,11 @@ async def _invoke_agent(
     with tracer.start_as_current_span("chat.invoke_agent") as span:
         span.set_attribute("scope_kind", thread.scope_kind)
 
-        if not is_llm_available():
-            logger.debug("llm_not_available_skipping_agent")
-            span.set_attribute("skipped", True)
-            return None
-
-        # Harness-backed path (MET-548, flagged): route the turn through the
-        # ReAct harness instead of the direct pydantic-ai agent call.
+        # Harness-backed path (MET-548, flagged) FIRST: the harness has its own
+        # registry-based provider config (any of ~32 providers), so it must NOT
+        # be gated by the legacy pydantic-ai ``is_llm_available()`` check, which
+        # only recognizes 'openai'/'anthropic'. Gating it there silently skipped
+        # the agent for openrouter / openai-codex / etc.
         if chat_harness_enabled():
             span.set_attribute("chat_backend", "harness")
             now = datetime.now(UTC)
@@ -174,6 +172,13 @@ async def _invoke_agent(
                     created_at=now,
                     updated_at=now,
                 )
+
+        # Legacy pydantic-ai path (harness disabled): this one only supports
+        # 'openai'/'anthropic', so keep its availability gate here.
+        if not is_llm_available():
+            logger.debug("llm_not_available_skipping_agent")
+            span.set_attribute("skipped", True)
+            return None
 
         agent = default_router.get_agent(
             scope_kind=thread.scope_kind,
