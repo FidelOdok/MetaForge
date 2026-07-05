@@ -135,6 +135,10 @@ def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
 async def _invoke_agent(
     thread: ChatThreadRecord,
     user_content: str,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    tools: list[str] | None = None,
 ) -> ChatMessageRecord | None:
     """Attempt to route *user_content* to a domain agent and return its response.
 
@@ -164,6 +168,9 @@ async def _invoke_agent(
                     on_delta=_on_delta,
                     session_id=thread.id,
                     mcp_bridge=_mcp_bridge,
+                    provider=provider,
+                    model=model,
+                    enabled_tools=tools,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 return ChatMessageRecord(
@@ -458,7 +465,9 @@ async def send_message(thread_id: str, body: SendMessageRequest) -> MessageRespo
 
     # --- Agent invocation (async) ----------------------------------------
     if body.actor_kind == "user":
-        agent_msg = await _invoke_agent(thread, body.content)
+        agent_msg = await _invoke_agent(
+            thread, body.content, provider=body.provider, model=body.model, tools=body.tools
+        )
         if agent_msg is not None:
             await _backend.add_message(
                 thread_id=thread_id,
