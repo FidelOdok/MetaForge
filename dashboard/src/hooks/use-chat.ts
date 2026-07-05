@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 import type { PaginatedResponse } from '@/types/common';
 import type { ChatThread, ChatMessage, ChatChannel } from '@/types/chat';
+import { useChatStore } from '@/store/chat-store';
 import {
   getChatThreads,
   getChatThread,
@@ -146,7 +147,17 @@ export function useSendChatMessage(
   const queryClient = useQueryClient();
 
   return useMutation<ChatMessage, Error, SendChatMessageVars>({
-    mutationFn: ({ threadId, payload }) => sendChatMessage(threadId, payload),
+    mutationFn: ({ threadId, payload }) => {
+      // Merge the current model/tools selection (MET-548) so every send site
+      // — scoped panels, sidebar, floating input — carries it automatically.
+      const sel = useChatStore.getState();
+      return sendChatMessage(threadId, {
+        ...payload,
+        provider: payload.provider ?? sel.selectedProvider,
+        model: payload.model ?? sel.selectedModel,
+        tools: payload.tools ?? sel.enabledTools,
+      });
+    },
     onSuccess: (...args) => {
       void queryClient.invalidateQueries({
         queryKey: chatKeys.thread(args[1].threadId),
