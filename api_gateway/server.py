@@ -670,11 +670,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Bootstrap tool adapters into the registry and create real MCP bridge.
     # The knowledge MCP adapter is included only when a KnowledgeService is
     # available on app.state.
+    from api_gateway.assistant.apply import make_apply_executor
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
 
+    decision_recorder = make_decision_recorder(twin, project_backend)
     tool_registry = await bootstrap_tool_registry(
         knowledge_service=getattr(app.state, "knowledge_service", None),
         twin=twin,
@@ -683,10 +685,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         memory_client=getattr(app.state, "memory_client", None),
         memory_insight_store=getattr(app.state, "consolidation_insight_store", None),
         agent_session_store=getattr(app.state, "agent_session_store", None),
-        decision_recorder=make_decision_recorder(twin, project_backend),
+        decision_recorder=decision_recorder,
         geometry_recorder=make_geometry_recorder(twin, project_backend),
         proposal_recorder=make_proposal_recorder(approval_workflow),
     )
+    # Apply-on-approve executor (MET-548): runs an approved proposal's diff.
+    app.state.proposal_apply = make_apply_executor(decision_recorder)
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
     logger.info(

@@ -199,6 +199,33 @@ class ApprovalWorkflow:
 
         return proposal
 
+    async def mark_applied(
+        self, change_id: UUID, result: dict[str, Any] | None = None
+    ) -> DesignChangeProposal | None:
+        """Mark an approved proposal as applied and emit CHANGE_APPLIED.
+
+        Called after the apply executor has run the proposal's diff against the
+        twin. Only approved proposals can be applied.
+        """
+        proposal = self._proposals.get(change_id)
+        if proposal is None:
+            return None
+        if proposal.status != ChangeStatus.APPROVED:
+            logger.warning(
+                "apply_on_non_approved", change_id=str(change_id), current_status=proposal.status
+            )
+            return proposal
+        proposal.status = ChangeStatus.APPLIED
+        await self._emit(
+            WebSocketEvent(
+                event_type=EventType.CHANGE_APPLIED,
+                payload={"change_id": str(change_id), "result": result or {}},
+                session_id=proposal.session_id,
+            )
+        )
+        logger.info("proposal_applied", change_id=str(change_id))
+        return proposal
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

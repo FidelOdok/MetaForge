@@ -28,6 +28,7 @@ class EventType(StrEnum):
     CHANGE_PROPOSED = "change_proposed"
     CHANGE_APPROVED = "change_approved"
     CHANGE_REJECTED = "change_rejected"
+    CHANGE_APPLIED = "change_applied"
     SKILL_STARTED = "skill_started"
     SKILL_COMPLETED = "skill_completed"
     TWIN_UPDATED = "twin_updated"
