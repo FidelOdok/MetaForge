@@ -239,6 +239,7 @@ class TestWebSocketEventSchema:
             "change_proposed",
             "change_approved",
             "change_rejected",
+            "change_applied",
             "skill_started",
             "skill_completed",
             "twin_updated",

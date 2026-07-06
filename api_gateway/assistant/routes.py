@@ -19,8 +19,10 @@ from fastapi.responses import StreamingResponse
 from api_gateway.assistant.approval import ApprovalWorkflow
 from api_gateway.assistant.schemas import (
     ApprovalDecision,
+    ApprovalDecisionType,
     AssistantRequest,
     AssistantResponse,
+    ChangeStatus,
     DesignChangeProposal,
     ProposalListResponse,
     RunStatusResponse,
@@ -190,8 +192,14 @@ async def get_proposal(change_id: UUID) -> DesignChangeProposal:
 
 
 @router.post("/proposals/{change_id}/decide", response_model=DesignChangeProposal)
-async def decide_proposal(change_id: UUID, body: ApprovalDecision) -> DesignChangeProposal:
-    """Approve or reject a pending design-change proposal."""
+async def decide_proposal(
+    change_id: UUID, body: ApprovalDecision, request: Request
+) -> DesignChangeProposal:
+    """Approve or reject a pending design-change proposal.
+
+    On approval, run the proposal's diff via the apply executor (if wired) so the
+    change is actually applied to the twin (HITL: propose → approve → apply).
+    """
     proposal = await workflow.decide(
         change_id=change_id,
         decision=body.decision,
@@ -200,6 +208,16 @@ async def decide_proposal(change_id: UUID, body: ApprovalDecision) -> DesignChan
     )
     if proposal is None:
         raise HTTPException(status_code=404, detail="Proposal not found")
+
+    if body.decision == ApprovalDecisionType.APPROVE and proposal.status == ChangeStatus.APPROVED:
+        executor = getattr(request.app.state, "proposal_apply", None)
+        if executor is not None:
+            try:
+                result = await executor(proposal)
+                if result.get("applied"):
+                    await workflow.mark_applied(change_id, result)
+            except Exception as exc:  # noqa: BLE001 - apply is best-effort; approval stands
+                logger.error("proposal_apply_failed", change_id=str(change_id), error=str(exc))
     return proposal
 
 
