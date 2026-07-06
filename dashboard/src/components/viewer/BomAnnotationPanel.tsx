@@ -6,6 +6,7 @@ import { useTwinNode } from '../../hooks/use-twin';
 import { useScopedChat } from '../../hooks/use-scoped-chat';
 import { StatusBadge } from '../shared/StatusBadge';
 import { NodeChatPanel } from '../chat/integrations/NodeChatPanel';
+import { NodeProposals } from './NodeProposals';
 
 export function BomAnnotationPanel() {
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
@@ -154,6 +155,9 @@ export function BomAnnotationPanel() {
           <p className="text-xs text-zinc-400">No BOM entry linked to this part</p>
         </div>
       )}
+
+      {/* Pending design-change proposals affecting this node (gated apply) */}
+      <NodeProposals nodeId={nodeId} />
 
       {/* Chat panel scoped to node — comments carry the selected-part context */}
       <div className="flex flex-1 flex-col p-4">
