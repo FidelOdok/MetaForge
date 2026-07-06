@@ -11,6 +11,7 @@ import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
 import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
+import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
@@ -323,6 +324,11 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             </table>
           </div>
         )}
+
+        {/* Pending design-change proposals for this node (gated apply, MET-548) */}
+        <div className="px-3 py-2 flex-shrink-0">
+          <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
+        </div>
 
         {/* Chat */}
         <div className="px-3 py-2 flex-1 min-h-0">
