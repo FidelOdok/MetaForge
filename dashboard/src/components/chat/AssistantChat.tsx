@@ -9,6 +9,7 @@ import {
 import { useChatStream } from '@/hooks/use-chat-stream';
 import { useChatStore } from '@/store/chat-store';
 import { formatRelativeTime } from '@/utils/format-time';
+import { generateId } from '@/utils/id';
 import { ChatPanel } from './ChatPanel';
 
 // ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ export function AssistantChat() {
       {
         channelId: 'assistant',
         title: 'New chat',
-        scope: { kind: 'assistant', entityId: crypto.randomUUID(), label: 'Design Assistant' },
+        scope: { kind: 'assistant', entityId: generateId(), label: 'Design Assistant' },
       },
       { onSuccess: (thread) => setActiveId(thread.id) },
     );
