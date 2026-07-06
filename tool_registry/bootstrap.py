@@ -189,6 +189,7 @@ async def bootstrap_tool_registry(
     agent_session_store: Any = None,
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
+    proposal_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -361,6 +362,7 @@ async def bootstrap_tool_registry(
                     allow_mutations=twin_allow_mutations,
                     decision_recorder=decision_recorder,
                     geometry_recorder=geometry_recorder,
+                    proposal_recorder=proposal_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
