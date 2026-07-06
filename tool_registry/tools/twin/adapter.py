@@ -42,6 +42,7 @@ class TwinServer(McpToolServer):
         allow_mutations: bool = False,
         decision_recorder: Any = None,
         geometry_recorder: Any = None,
+        proposal_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -59,11 +60,18 @@ class TwinServer(McpToolServer):
         # node + project link — so it renders in the viewer. Same injection seam
         # as decision_recorder; None keeps tool_registry free of api_gateway.
         self._geometry_recorder = geometry_recorder
+        # MET-548: an injected async ``propose(...)`` that files a reviewable
+        # design-change proposal (HITL) instead of mutating the twin directly.
+        # Built in api_gateway over the ApprovalWorkflow; None keeps
+        # tool_registry free of api_gateway imports.
+        self._proposal_recorder = proposal_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
         if geometry_recorder is not None:
             self._register_commit_geometry()
+        if proposal_recorder is not None:
+            self._register_propose_change()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -546,6 +554,85 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
             supersedes=supersedes if isinstance(supersedes, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.propose_change (MET-548) — gated HITL modification
+    # ------------------------------------------------------------------
+
+    def _register_propose_change(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.propose_change",
+                adapter_id="twin",
+                name="Propose Design Change",
+                description=(
+                    "Propose a REVIEWABLE change to a work product. Does NOT modify "
+                    "the twin directly — it files a pending proposal a human "
+                    "approves or rejects (human-in-the-loop). Use this for any "
+                    "consequential change (geometry, parameters, decisions) the "
+                    "user asked for, instead of committing directly."
+                ),
+                capability="twin_propose",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Human-readable summary of the proposed change.",
+                        },
+                        "diff": {
+                            "type": "object",
+                            "description": (
+                                "Structured change. Include an 'action' "
+                                "(e.g. 'record_decision' | 'regenerate_geometry' | "
+                                "'update_properties') plus its parameters."
+                            ),
+                        },
+                        "work_products_affected": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Twin node ids this change touches.",
+                        },
+                        "agent_code": {"type": "string", "description": "Proposing agent code."},
+                        "project_id": {"type": "string"},
+                        "session_id": {"type": "string"},
+                    },
+                    "required": ["description", "diff"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "change_id": {"type": "string"},
+                        "status": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.propose_change,
+        )
+
+    async def propose_change(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        description = arguments.get("description")
+        diff = arguments.get("diff")
+        if not description or not isinstance(description, str):
+            raise ValueError("twin.propose_change: 'description' is required (non-empty string)")
+        if not isinstance(diff, dict):
+            raise ValueError("twin.propose_change: 'diff' is required (object)")
+        wps = arguments.get("work_products_affected")
+        work_products = [str(w) for w in wps] if isinstance(wps, list) else []
+        agent_code = arguments.get("agent_code")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._proposal_recorder(
+            agent_code=agent_code if isinstance(agent_code, str) else "assistant",
+            description=description,
+            diff=diff,
+            work_products=work_products,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
         )
 
     # ------------------------------------------------------------------
