@@ -9,6 +9,7 @@ import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
+import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { useViewerStore } from '../store/viewer-store';
@@ -459,7 +460,19 @@ export function TwinViewerPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
   const [quality, setQuality] = useState('standard');
+  const [showTree, setShowTree] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Capture the live WebGL canvas as a PNG download (Screenshot button).
+  function handleScreenshot() {
+    const canvas = document.querySelector<HTMLCanvasElement>('.twin-canvas canvas');
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `twin-${Date.now()}.png`;
+    a.click();
+  }
   // Track which node's model is loaded so the auto-loader (MET-505) doesn't refetch.
   const [loadedModelNodeId, setLoadedModelNodeId] = useState<string | null>(null);
   // Deep-link: /twin?node=<id> preselects a node (e.g. from a project's work
@@ -484,7 +497,7 @@ export function TwinViewerPage() {
   // ── data ──
   const { data: nodes, isLoading } = useTwinNodes(projectId || undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  useTwinRelationships();  // prefetch
+  const { data: relationships = [] } = useTwinRelationships();
   const items = nodes ?? [];
 
   // ── viewer store ──
@@ -599,7 +612,7 @@ export function TwinViewerPage() {
       ════════════════════════════════════════════ */}
       <div style={{ position: 'absolute', inset: 0 }}>
         {isGraphMode ? (
-          /* Graph mode: empty canvas with floating node panels */
+          /* Graph mode: interactive node-link graph of the twin */
           isLoading ? (
             <div className="flex items-center justify-center h-full font-mono text-xs" style={{ color: KC.onSurfaceVariant }}>
               Loading twin graph…
@@ -612,12 +625,31 @@ export function TwinViewerPage() {
                 Work products will appear here when agents run.
               </span>
             </div>
-          ) : null
+          ) : (
+            <TwinGraphCanvas
+              nodes={items}
+              relationships={relationships}
+              selectedId={selectedId}
+              onSelectNode={setSelectedId}
+            />
+          )
         ) : (
           /* 3D model mode */
           <>
             <R3FViewer onPartClick={handlePartClick} />
-            {glbUrl && <ExplodedViewControls />}
+            {glbUrl && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 56,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 45,
+                }}
+              >
+                <ExplodedViewControls />
+              </div>
+            )}
           </>
         )}
       </div>
@@ -719,7 +751,7 @@ export function TwinViewerPage() {
       {/* ═══════════════════════════════════════════
           3D MODE: component tree (left panel)
       ════════════════════════════════════════════ */}
-      {!isGraphMode && manifest && (
+      {!isGraphMode && manifest && showTree && (
         <GlassPanel
           style={{
             position: 'absolute',
@@ -900,41 +932,26 @@ export function TwinViewerPage() {
           </button>
         </div>
 
-        {/* Layers */}
-        <button
-          type="button"
-          className="flex items-center justify-center rounded"
-          style={{
-            width: 32,
-            height: 32,
-            background: 'rgba(30,31,38,0.8)',
-            backdropFilter: 'blur(16px)',
-            border: `1px solid ${KC.border}`,
-            color: KC.onSurfaceVariant,
-            cursor: 'pointer',
-          }}
-          title="Layers"
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>layers</span>
-        </button>
-
-        {/* Screenshot */}
-        <button
-          type="button"
-          className="flex items-center justify-center rounded"
-          style={{
-            width: 32,
-            height: 32,
-            background: 'rgba(30,31,38,0.8)',
-            backdropFilter: 'blur(16px)',
-            border: `1px solid ${KC.border}`,
-            color: KC.onSurfaceVariant,
-            cursor: 'pointer',
-          }}
-          title="Screenshot"
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>photo_camera</span>
-        </button>
+        {/* Screenshot — captures the 3D canvas (only meaningful in model mode) */}
+        {!isGraphMode && glbUrl && (
+          <button
+            type="button"
+            onClick={handleScreenshot}
+            className="flex items-center justify-center rounded"
+            style={{
+              width: 32,
+              height: 32,
+              background: 'rgba(30,31,38,0.8)',
+              backdropFilter: 'blur(16px)',
+              border: `1px solid ${KC.border}`,
+              color: KC.onSurfaceVariant,
+              cursor: 'pointer',
+            }}
+            title="Screenshot"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>photo_camera</span>
+          </button>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════
@@ -952,11 +969,12 @@ export function TwinViewerPage() {
         }}
       >
         <ToolBtn icon="hub" active={isGraphMode} title="Graph View" onClick={() => setViewMode('graph')} />
-        <ToolBtn icon="account_tree" title="Tree View" />
-        <ToolBtn icon="filter_alt" title="Filter" />
-        <div style={{ height: 1, margin: '3px 8px', background: 'rgba(65,72,90,0.3)' }} />
-        <ToolBtn icon="timeline" title="Timeline" />
-        <ToolBtn icon="straighten" title="Measure" />
+        <ToolBtn
+          icon="account_tree"
+          active={!isGraphMode && showTree}
+          title="Tree View"
+          onClick={() => setShowTree((v) => !v)}
+        />
       </GlassPanel>
 
       {/* ═══════════════════════════════════════════

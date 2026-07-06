@@ -88,7 +88,7 @@ function GizmoControls() {
   };
 
   return (
-    <div className="absolute left-3 top-3 z-10 flex flex-col gap-2 rounded-md bg-black/60 px-3 py-2 text-xs text-white/90 select-none">
+    <div className="absolute left-1/2 top-3 z-50 -translate-x-1/2 flex flex-col gap-2 rounded-md bg-black/60 px-3 py-2 text-xs text-white/90 select-none">
       <div className="font-mono">
         {selectedGroup}
         {isDirty && <span className="ml-1 text-amber-400">• modified</span>}
@@ -138,9 +138,10 @@ export function R3FViewer({ onPartClick }: R3FViewerProps) {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div className="twin-canvas relative h-full w-full">
       <Canvas
         camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 10000 }}
+        gl={{ preserveDrawingBuffer: true }}
         style={{ background: bgColor }}
       >
         <Suspense fallback={<LoadingFallback />}>
@@ -179,16 +180,16 @@ export function R3FViewer({ onPartClick }: R3FViewerProps) {
       {/* Rigid-group Apply/Revert overlay (MET-519) */}
       <GizmoControls />
 
-      {/* Controls hint overlay */}
-      <div className="absolute bottom-3 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
+      {/* Controls hint overlay — bottom-14 clears the 32px twin status bar */}
+      <div className="absolute bottom-14 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
         Left drag: rotate · Scroll: zoom · Right drag: pan · Click a part to move it
       </div>
 
-      {/* Camera reset button */}
+      {/* Camera reset button — top-14 sits below the page's top-right controls row */}
       <button
         type="button"
         onClick={resetCamera}
-        className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+        className="absolute right-3 top-14 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
         title="Reset camera to default view"
         aria-label="Reset camera"
       >

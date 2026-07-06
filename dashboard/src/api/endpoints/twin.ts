@@ -57,7 +57,16 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
 }
 
 export async function getTwinRelationships(): Promise<TwinRelationship[]> {
-  return MOCK_RELATIONSHIPS;
+  // Live edges from the twin graph (backend already returns camelCase fields
+  // matching TwinRelationship). Falls back to mocks if the endpoint is absent.
+  try {
+    const response = await apiClient.get<{ relationships: TwinRelationship[] }>(
+      '/twin/relationships',
+    );
+    return response.data.relationships ?? [];
+  } catch {
+    return MOCK_RELATIONSHIPS;
+  }
 }
 
 export interface NodeModelResult {
