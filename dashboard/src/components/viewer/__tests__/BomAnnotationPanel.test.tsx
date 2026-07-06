@@ -54,7 +54,14 @@ describe('BomAnnotationPanel', () => {
 
   it('shows part info when mesh is selected', () => {
     mockViewerState = { selectedMeshName: 'mesh_0', manifest: MOCK_MANIFEST };
+    const { getAllByText } = render(<BomAnnotationPanel />);
+    // Appears in the header and in the "Commenting on <part>" context chip.
+    expect(getAllByText('Base Plate').length).toBeGreaterThan(0);
+  });
+
+  it('shows the "commenting on" context affordance', () => {
+    mockViewerState = { selectedMeshName: 'mesh_0', manifest: MOCK_MANIFEST };
     const { getByText } = render(<BomAnnotationPanel />);
-    expect(getByText('Base Plate')).toBeInTheDocument();
+    expect(getByText(/Commenting on/i)).toBeInTheDocument();
   });
 });
