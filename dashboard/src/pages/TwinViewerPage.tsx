@@ -9,6 +9,7 @@ import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
+import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { useViewerStore } from '../store/viewer-store';
@@ -496,7 +497,7 @@ export function TwinViewerPage() {
   // ── data ──
   const { data: nodes, isLoading } = useTwinNodes(projectId || undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  useTwinRelationships();  // prefetch
+  const { data: relationships = [] } = useTwinRelationships();
   const items = nodes ?? [];
 
   // ── viewer store ──
@@ -611,7 +612,7 @@ export function TwinViewerPage() {
       ════════════════════════════════════════════ */}
       <div style={{ position: 'absolute', inset: 0 }}>
         {isGraphMode ? (
-          /* Graph mode: empty canvas with floating node panels */
+          /* Graph mode: interactive node-link graph of the twin */
           isLoading ? (
             <div className="flex items-center justify-center h-full font-mono text-xs" style={{ color: KC.onSurfaceVariant }}>
               Loading twin graph…
@@ -624,7 +625,14 @@ export function TwinViewerPage() {
                 Work products will appear here when agents run.
               </span>
             </div>
-          ) : null
+          ) : (
+            <TwinGraphCanvas
+              nodes={items}
+              relationships={relationships}
+              selectedId={selectedId}
+              onSelectNode={setSelectedId}
+            />
+          )
         ) : (
           /* 3D model mode */
           <>
