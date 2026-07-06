@@ -457,6 +457,91 @@ function SceneDropdown({
   );
 }
 
+// ── TwinChatDock (persistent bottom chat strip) ───────────────────────────────
+/**
+ * Always-on, project/twin-scoped chat that lives at the bottom of the twin —
+ * a persistent agent you can talk to about the whole design, independent of
+ * any node/part selection. Collapses to a single bar; expands upward. Distinct
+ * from the node/part-scoped chats in NodeDetail / BomAnnotationPanel (MET-548).
+ */
+function TwinChatDock({ projectId, projectLabel }: { projectId: string; projectLabel: string }) {
+  const [open, setOpen] = useState(false);
+  const entityId = projectId || 'twin-global';
+  const subject = projectId ? projectLabel : 'the whole twin';
+  const chat = useScopedChat({
+    scopeKind: 'project',
+    entityId,
+    label: `Twin Assistant — ${projectLabel}`,
+  });
+  const msgCount = chat.messages.length;
+
+  return (
+    <div style={{ position: 'absolute', bottom: 32, left: 16, right: 16, zIndex: 46 }}>
+      <GlassPanel
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          height: open ? 360 : 36,
+          transition: 'height 0.16s ease',
+        }}
+      >
+        {/* Collapsed bar / header — click anywhere to toggle */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 px-3 flex-shrink-0"
+          style={{
+            height: 36,
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: open ? `1px solid ${KC.border}` : 'none',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 15, color: KC.orange }}>
+            forum
+          </span>
+          <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurface }}>
+            Twin Assistant
+          </span>
+          {!open && (
+            <span className="font-mono truncate" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
+              — ask about {subject}…
+            </span>
+          )}
+          <span style={{ flex: 1 }} />
+          {msgCount > 0 && (
+            <span className="font-mono rounded px-1.5" style={{ fontSize: 10, background: KC.surfaceHigh, color: KC.onSurfaceVariant }}>
+              {msgCount}
+            </span>
+          )}
+          <span className="material-symbols-outlined" style={{ fontSize: 16, color: KC.onSurfaceVariant }}>
+            {open ? 'expand_more' : 'expand_less'}
+          </span>
+        </button>
+
+        {/* Chat body (only mounted when open) */}
+        {open && (
+          <div className="flex-1 min-h-0 p-2">
+            <NodeChatPanel
+              nodeId={entityId}
+              nodeName={subject}
+              thread={chat.thread}
+              messages={chat.messages}
+              isTyping={chat.isTyping}
+              onSendMessage={chat.sendMessage}
+              onCreateThread={chat.createThread}
+            />
+          </div>
+        )}
+      </GlassPanel>
+    </div>
+  );
+}
+
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
 
@@ -647,7 +732,7 @@ export function TwinViewerPage() {
               <div
                 style={{
                   position: 'absolute',
-                  bottom: 56,
+                  bottom: 88,
                   left: '50%',
                   transform: 'translateX(-50%)',
                   zIndex: 45,
@@ -669,7 +754,7 @@ export function TwinViewerPage() {
             position: 'absolute',
             top: 56,
             left: 16,
-            bottom: 48,
+            bottom: 80,
             width: 260,
             zIndex: 40,
             display: 'flex',
@@ -742,7 +827,7 @@ export function TwinViewerPage() {
             position: 'absolute',
             top: 56,
             right: 72, // leave room for right toolbar (48px) + gap
-            bottom: 48,
+            bottom: 80,
             width: 320,
             zIndex: 40,
             display: 'flex',
@@ -763,7 +848,7 @@ export function TwinViewerPage() {
             position: 'absolute',
             top: 56,
             left: 16,
-            bottom: 48,
+            bottom: 80,
             width: 240,
             zIndex: 40,
             overflow: 'hidden',
@@ -782,7 +867,7 @@ export function TwinViewerPage() {
             position: 'absolute',
             top: 56,
             right: 72,
-            bottom: 48,
+            bottom: 80,
             width: 300,
             zIndex: 40,
             overflow: 'hidden',
@@ -1116,6 +1201,18 @@ export function TwinViewerPage() {
           </button>
         </Link>
       </div>
+
+      {/* ═══════════════════════════════════════════
+          PERSISTENT TWIN CHAT — bottom dock (always on)
+      ════════════════════════════════════════════ */}
+      <TwinChatDock
+        projectId={projectId}
+        projectLabel={
+          projectId
+            ? (projectOptions.find((p) => p.id === projectId)?.name ?? 'Project')
+            : 'All projects'
+        }
+      />
 
       {/* ═══════════════════════════════════════════
           STATUS BAR — 32px pinned to bottom
