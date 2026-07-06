@@ -1,15 +1,13 @@
-import { useLocation } from 'react-router-dom';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
-import { ChatSidebar } from '../chat/ChatSidebar';
-import { FloatingAssistantInput } from './FloatingAssistantInput';
 
+/**
+ * App shell. General chat lives on the /assistant page (the main chat);
+ * contextual chat lives in the per-entity panels on their own pages. The old
+ * floating pill + right chat sidebar were retired as redundant entry points.
+ */
 export function AppLayout() {
-  const location = useLocation();
-  // Design Assistant already has a full embedded chat — don't render the pill there
-  const showPill = location.pathname !== '/assistant';
-
   return (
     <div className="flex h-screen overflow-hidden bg-surface text-on-surface">
       {/* 48px icon-only nav rail */}
@@ -22,11 +20,6 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
-
-      <ChatSidebar />
-
-      {/* Floating assistant input pill — present on all pages except Design Assistant */}
-      {showPill && <FloatingAssistantInput />}
     </div>
   );
 }

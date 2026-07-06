@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useSubmitRequest, useRunStatus } from '../hooks/use-assistant';
 import { useProjects } from '../hooks/use-projects';
-import { useScopedChat } from '../hooks/use-scoped-chat';
-import { ChatPanel } from '../components/chat/ChatPanel';
+import { AssistantChat } from '../components/chat/AssistantChat';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
@@ -455,6 +454,7 @@ function ResultSection({ data }: { data: RunStatusResponse }) {
 // ---------------------------------------------------------------------------
 
 export function DesignAssistantPage() {
+  const [view, setView] = useState<'chat' | 'actions'>('chat');
   const [prompt, setPrompt] = useState('');
   const [action, setAction] = useState<string>(ACTIONS[0].value);
   const [projectId, setProjectId] = useState<string>('');
@@ -464,29 +464,6 @@ export function DesignAssistantPage() {
   const { data: projects } = useProjects();
   const submitRequest = useSubmitRequest();
   const { data: runStatus } = useRunStatus(runId);
-
-  // Conversational, harness-backed chat (streaming) for this page. Reuses the
-  // global 'assistant' thread so the same conversation appears here and in the
-  // sidebar. useScopedChat wires the SSE stream + provisional streaming bubble.
-  const {
-    thread: chatThread,
-    messages: chatMessages,
-    isTyping: chatTyping,
-    sendMessage: chatSend,
-    createThread: chatCreate,
-    isLoading: chatLoading,
-    isCreating: chatCreating,
-  } = useScopedChat({ scopeKind: 'assistant', entityId: 'global', label: 'Design Assistant' });
-
-  // Ensure a thread exists on mount, so the EventSource connects before the
-  // first message (no connect-after-send race). Guarded to create at most once.
-  const createdRef = useRef(false);
-  useEffect(() => {
-    if (!chatThread && !chatLoading && !chatCreating && !createdRef.current) {
-      createdRef.current = true;
-      chatCreate();
-    }
-  }, [chatThread, chatLoading, chatCreating, chatCreate]);
 
   const isRunning =
     runStatus?.status === 'running' || runStatus?.status === 'pending';
@@ -532,70 +509,62 @@ export function DesignAssistantPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0' }}>
 
-      {/* Page header */}
-      <div style={{ marginBottom: '16px' }}>
-        <h1 style={{ margin: '0 0 3px 0', fontSize: '18px', fontWeight: 500, color: KC.onSurface, fontFamily: 'Inter, sans-serif' }}>
-          Design Assistant
-        </h1>
-        <span style={{ fontSize: '12px', color: KC.onSurfaceVariant, fontFamily: 'Inter, sans-serif' }}>
-          Chat with the design assistant, or run a structured agent task and track it in real-time.
-        </span>
-      </div>
-
-      {/* Main content — scrollable */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-        {/* Conversational chat (streaming, harness-backed) — primary view */}
-        <GlassPanel
+      {/* Page header + Chat | Actions toggle */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '12px',
+          marginBottom: '16px',
+        }}
+      >
+        <div>
+          <h1 style={{ margin: '0 0 3px 0', fontSize: '18px', fontWeight: 500, color: KC.onSurface, fontFamily: 'Inter, sans-serif' }}>
+            Design Assistant
+          </h1>
+          <span style={{ fontSize: '12px', color: KC.onSurfaceVariant, fontFamily: 'Inter, sans-serif' }}>
+            Chat with the design assistant, or run a structured agent task and track it in real-time.
+          </span>
+        </div>
+        <div
           style={{
-            padding: 0,
             display: 'flex',
-            flexDirection: 'column',
-            height: '58vh',
-            minHeight: 360,
+            flexShrink: 0,
+            border: `1px solid ${KC.border}`,
+            borderRadius: '6px',
             overflow: 'hidden',
           }}
         >
-          {chatThread ? (
-            <ChatPanel
-              thread={chatThread}
-              messages={chatMessages}
-              isTyping={chatTyping}
-              typingAgentName="Design Assistant"
-              onSendMessage={chatSend}
-            />
-          ) : (
-            <div
+          {(['chat', 'actions'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
               style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 13,
-                color: KC.onSurfaceVariant,
+                padding: '6px 14px',
+                fontSize: '12px',
                 fontFamily: 'Inter, sans-serif',
+                textTransform: 'capitalize',
+                border: 'none',
+                cursor: 'pointer',
+                background: view === v ? KC.primaryContainer : KC.surfaceHigh,
+                color: view === v ? KC.surface : KC.onSurfaceVariant,
               }}
             >
-              {chatCreating || chatLoading
-                ? 'Starting Design Assistant…'
-                : 'Design Assistant is unavailable.'}
-            </div>
-          )}
-        </GlassPanel>
-
-        {/* Structured actions — run a specific agent task and track it */}
-        <div
-          style={{
-            fontSize: '11px',
-            fontWeight: 500,
-            color: KC.onSurfaceVariant,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-            marginTop: '4px',
-          }}
-        >
-          Structured actions
+              {v}
+            </button>
+          ))}
         </div>
+      </div>
+
+      {view === 'chat' ? (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <AssistantChat />
+        </div>
+      ) : (
+      /* Structured actions — scrollable */
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
         {/* Request form */}
         <GlassPanel style={{ padding: '16px' }}>
@@ -835,6 +804,7 @@ export function DesignAssistantPage() {
         )}
 
       </div>
+      )}
     </div>
   );
 }
