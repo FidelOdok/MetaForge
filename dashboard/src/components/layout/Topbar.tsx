@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { TopbarChatToggle } from './TopbarChatToggle';
 import { RunAgentDialog } from '../shared/RunAgentDialog';
 import { useProjects } from '../../hooks/use-projects';
 import { useSessions } from '../../hooks/use-sessions';
@@ -145,7 +144,6 @@ export function Topbar() {
           >
             Run Agent
           </button>
-          <TopbarChatToggle />
         </div>
       </header>
 

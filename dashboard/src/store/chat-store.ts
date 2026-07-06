@@ -5,14 +5,10 @@ import { create } from 'zustand';
 // ---------------------------------------------------------------------------
 
 interface ChatUIState {
-  /** Whether the chat sidebar is open. */
-  sidebarOpen: boolean;
-  /** ID of the thread currently highlighted in the sidebar, if any. */
-  activeSidebarThreadId: string | null;
   /**
-   * Accumulated streaming content keyed by message ID.
-   * Chunks are appended as they arrive via WebSocket; the entry is cleared
-   * once the stream completes.
+   * Accumulated streaming content keyed by thread/message id.
+   * Chunks are appended as they arrive over SSE; the entry is cleared once the
+   * stream completes.
    */
   streamingContent: Record<string, string>;
   /** Set of thread IDs where an agent is currently typing. */
@@ -30,11 +26,7 @@ interface ChatUIState {
 // ---------------------------------------------------------------------------
 
 interface ChatUIActions {
-  /** Open the sidebar, optionally jumping to a specific thread. */
-  openSidebar: (threadId?: string) => void;
-  /** Close the sidebar and clear the active thread selection. */
-  closeSidebar: () => void;
-  /** Append a streaming chunk for the given message. */
+  /** Append a streaming chunk for the given thread/message. */
   appendStreamChunk: (messageId: string, chunk: string) => void;
   /** Remove accumulated streaming content once the stream is done. */
   clearStreamContent: (messageId: string) => void;
@@ -52,8 +44,6 @@ interface ChatUIActions {
 
 export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
   // -- initial state --
-  sidebarOpen: false,
-  activeSidebarThreadId: null,
   streamingContent: {},
   typingThreadIds: new Set<string>(),
   selectedProvider: null,
@@ -61,18 +51,6 @@ export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
   enabledTools: null,
 
   // -- actions --
-  openSidebar: (threadId) =>
-    set({
-      sidebarOpen: true,
-      activeSidebarThreadId: threadId ?? null,
-    }),
-
-  closeSidebar: () =>
-    set({
-      sidebarOpen: false,
-      activeSidebarThreadId: null,
-    }),
-
   appendStreamChunk: (messageId, chunk) =>
     set((state) => ({
       streamingContent: {
