@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronRight, ChevronDown, Eye, EyeOff, Search, ChevronsUpDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, Eye, EyeOff, Search, ChevronsUpDown, ChevronUp } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import type { PartTreeNode } from '../../types/viewer';
 
@@ -113,7 +113,14 @@ function countParts(parts: PartTreeNode[]): number {
   return parts.reduce((acc, p) => acc + 1 + countParts(p.children), 0);
 }
 
-export function ComponentTree() {
+interface ComponentTreeProps {
+  /** When true, collapse the panel down to just its header bar. */
+  collapsed?: boolean;
+  /** When provided, renders a collapse/expand toggle in the header. */
+  onToggleCollapse?: () => void;
+}
+
+export function ComponentTree({ collapsed = false, onToggleCollapse }: ComponentTreeProps = {}) {
   const manifest = useViewerStore((s) => s.manifest);
   const [searchTerm, setSearchTerm] = useState('');
   const [allExpanded, setAllExpanded] = useState(true);
@@ -125,7 +132,7 @@ export function ComponentTree() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="border-b border-zinc-200 p-3 dark:border-zinc-700">
+      <div className={`p-3 ${collapsed ? '' : 'border-b border-zinc-200 dark:border-zinc-700'}`}>
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
             Components
@@ -133,17 +140,33 @@ export function ComponentTree() {
               {totalParts}
             </span>
           </h3>
-          <button
-            type="button"
-            onClick={() => setAllExpanded(!allExpanded)}
-            className="p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-            title={allExpanded ? 'Collapse all' : 'Expand all'}
-          >
-            <ChevronsUpDown size={14} />
-          </button>
+          <div className="flex items-center gap-1">
+            {!collapsed && (
+              <button
+                type="button"
+                onClick={() => setAllExpanded(!allExpanded)}
+                className="p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                title={allExpanded ? 'Collapse all' : 'Expand all'}
+              >
+                <ChevronsUpDown size={14} />
+              </button>
+            )}
+            {onToggleCollapse && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                title={collapsed ? 'Expand' : 'Collapse'}
+                aria-label={collapsed ? 'Expand components panel' : 'Collapse components panel'}
+              >
+                {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search */}
+        {!collapsed && (
         <div className="relative mt-2">
           <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
@@ -154,28 +177,33 @@ export function ComponentTree() {
             className="w-full rounded border border-zinc-200 bg-white py-1 pl-6 pr-2 text-xs text-zinc-700 placeholder:text-zinc-400 focus:border-blue-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
           />
         </div>
-      </div>
-
-      {/* Tree */}
-      <div className="flex-1 overflow-y-auto py-1">
-        {manifest.parts.map((part) => (
-          <TreeNodeItem
-            key={part.meshName}
-            node={part}
-            depth={0}
-            searchTerm={searchTerm}
-          />
-        ))}
-        {searchTerm && (
-          <NoMatchFallback parts={manifest.parts} searchTerm={searchTerm} />
         )}
       </div>
 
-      {/* Stats footer */}
-      <div className="border-t border-zinc-200 px-3 py-2 text-[10px] text-zinc-400 dark:border-zinc-700">
-        {manifest.stats.triangleCount.toLocaleString()} triangles &middot;{' '}
-        {(manifest.stats.fileSize / 1024).toFixed(1)} KB
-      </div>
+      {!collapsed && (
+        <>
+          {/* Tree */}
+          <div className="flex-1 overflow-y-auto py-1">
+            {manifest.parts.map((part) => (
+              <TreeNodeItem
+                key={part.meshName}
+                node={part}
+                depth={0}
+                searchTerm={searchTerm}
+              />
+            ))}
+            {searchTerm && (
+              <NoMatchFallback parts={manifest.parts} searchTerm={searchTerm} />
+            )}
+          </div>
+
+          {/* Stats footer */}
+          <div className="border-t border-zinc-200 px-3 py-2 text-[10px] text-zinc-400 dark:border-zinc-700">
+            {manifest.stats.triangleCount.toLocaleString()} triangles &middot;{' '}
+            {(manifest.stats.fileSize / 1024).toFixed(1)} KB
+          </div>
+        </>
+      )}
     </div>
   );
 }

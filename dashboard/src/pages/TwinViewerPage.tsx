@@ -552,6 +552,9 @@ export function TwinViewerPage() {
   const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
   const [quality, setQuality] = useState('standard');
   const [showTree, setShowTree] = useState(true);
+  // Collapse toggle for the left pane (Nodes list in graph mode / Components
+  // tree in 3D mode) so it can be tucked away to free up canvas space.
+  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Capture the live WebGL canvas as a PNG download (Screenshot button).
@@ -754,7 +757,7 @@ export function TwinViewerPage() {
             position: 'absolute',
             top: 56,
             left: 16,
-            bottom: 80,
+            bottom: leftPaneCollapsed ? undefined : 80,
             width: 260,
             zIndex: 40,
             display: 'flex',
@@ -764,19 +767,32 @@ export function TwinViewerPage() {
         >
           <div
             className="flex items-center gap-2 px-3 flex-shrink-0"
-            style={{ height: 36, borderBottom: `1px solid ${KC.border}` }}
+            style={{ height: 36, borderBottom: leftPaneCollapsed ? 'none' : `1px solid ${KC.border}` }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 14, color: KC.onSurfaceVariant }}>hub</span>
             <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
               Nodes
             </span>
             <span
-              className="ml-auto font-mono rounded px-1.5"
+              className="font-mono rounded px-1.5"
               style={{ fontSize: 10, background: KC.surfaceHigh, color: KC.onSurfaceVariant }}
             >
               {items.length}
             </span>
+            <button
+              type="button"
+              onClick={() => setLeftPaneCollapsed((c) => !c)}
+              className="ml-auto flex items-center justify-center"
+              title={leftPaneCollapsed ? 'Expand' : 'Collapse'}
+              aria-label={leftPaneCollapsed ? 'Expand nodes panel' : 'Collapse nodes panel'}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: KC.onSurfaceVariant }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                {leftPaneCollapsed ? 'expand_more' : 'expand_less'}
+              </span>
+            </button>
           </div>
+          {!leftPaneCollapsed && (
           <ul className="flex-1 overflow-y-auto" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
             {items.map((node) => {
               const active = node.id === selectedId;
@@ -815,6 +831,7 @@ export function TwinViewerPage() {
               );
             })}
           </ul>
+          )}
         </GlassPanel>
       )}
 
@@ -848,13 +865,16 @@ export function TwinViewerPage() {
             position: 'absolute',
             top: 56,
             left: 16,
-            bottom: 80,
+            bottom: leftPaneCollapsed ? undefined : 80,
             width: 240,
             zIndex: 40,
             overflow: 'hidden',
           }}
         >
-          <ComponentTree />
+          <ComponentTree
+            collapsed={leftPaneCollapsed}
+            onToggleCollapse={() => setLeftPaneCollapsed((c) => !c)}
+          />
         </GlassPanel>
       )}
 
