@@ -89,23 +89,6 @@ class AssistantRequest(BaseModel):
     )
 
 
-class ProposalCreateRequest(BaseModel):
-    """Body for ``POST /v1/assistant/proposals`` — file a design-change proposal.
-
-    Lets an out-of-process caller (e.g. the MCP sidecar, on behalf of an
-    external agent calling ``twin.propose_change``) file a proposal into the
-    gateway's ApprovalWorkflow so it is visible in the dashboard / in-twin card.
-    """
-
-    agent_code: str = Field(default="assistant", min_length=1)
-    description: str = Field(min_length=1)
-    diff: dict[str, Any] = Field(default_factory=dict)
-    work_products_affected: list[UUID] = Field(default_factory=list)
-    session_id: UUID | None = Field(default=None)
-    project_id: str | None = Field(default=None)
-    requires_approval: bool = Field(default=True)
-
-
 class ApprovalDecision(BaseModel):
     """Body for ``POST /api/v1/assistant/proposals/{change_id}/decide``."""
 
