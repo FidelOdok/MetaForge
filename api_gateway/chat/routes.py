@@ -42,6 +42,7 @@ from api_gateway.chat.schemas import (
 )
 from api_gateway.chat.streaming import (
     notify_agent_done,
+    notify_agent_step,
     notify_agent_typing,
     notify_message_delta,
     stream_manager,
@@ -162,10 +163,14 @@ async def _invoke_agent(
                 async def _on_delta(delta: str) -> None:
                     await notify_message_delta(thread.id, delta)
 
+                async def _on_step(step: dict[str, object]) -> None:
+                    await notify_agent_step(thread.id, step, "harness-agent")
+
                 await notify_agent_typing(thread.id, "harness-agent")
                 text = await run_chat_turn_streaming(
                     user_content,
                     on_delta=_on_delta,
+                    on_step=_on_step,
                     session_id=thread.id,
                     mcp_bridge=_mcp_bridge,
                     provider=provider,

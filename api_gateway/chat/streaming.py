@@ -40,6 +40,7 @@ class StreamEventType(StrEnum):
     MESSAGE_CREATED = "message.created"
     MESSAGE_DELTA = "message.delta"
     AGENT_TYPING = "agent.typing"
+    AGENT_STEP = "agent.step"
     AGENT_DONE = "agent.done"
     ERROR = "error"
 
@@ -235,6 +236,21 @@ async def notify_agent_typing(thread_id: str, agent_id: str = "agent") -> int:
     event = StreamEvent(
         event=StreamEventType.AGENT_TYPING,
         data={"agent_id": agent_id},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_agent_step(thread_id: str, step: dict[str, Any], agent_id: str = "agent") -> int:
+    """Push an ``agent.step`` event — one ReAct step (tool call / result / thought).
+
+    Makes the agent legible: the dashboard renders these as a tool-call timeline
+    instead of only the final text (MET-552). ``step`` is a JSON-safe dict:
+    ``{index, thought, tool, arguments, observation, error, final}``.
+    """
+    event = StreamEvent(
+        event=StreamEventType.AGENT_STEP,
+        data={"step": step, "agent_id": agent_id},
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)

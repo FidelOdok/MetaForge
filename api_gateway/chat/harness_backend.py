@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import structlog
 
@@ -202,10 +203,49 @@ _FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
 _STREAM_SYSTEM = "You are MetaForge's assistant. Write the final answer to the user, clearly."
 
 
+def _json_safe(value: Any, *, _depth: int = 0) -> Any:
+    """Coerce an arbitrary tool observation into a JSON-serializable shape.
+
+    Tool results are usually dicts/strings, but a handler can return anything;
+    fall back to ``str()`` so the step event never fails to serialize. Bounded
+    recursion keeps a pathological nested object from blowing the stack.
+    """
+    if _depth > 6:
+        return str(value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v, _depth=_depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v, _depth=_depth + 1) for v in value]
+    return str(value)
+
+
+def _step_to_dict(step: Any, index: int) -> dict[str, Any]:
+    """Serialize a ReActStep into a JSON-safe event payload.
+
+    The final step (``tool_call is None``) carries the answer as its
+    observation — omitted here since the answer is streamed separately; only its
+    thought is surfaced as closing reasoning.
+    """
+    tool_call = step.tool_call
+    is_final = tool_call is None
+    return {
+        "index": index,
+        "thought": step.thought or "",
+        "tool": tool_call.name if tool_call is not None else None,
+        "arguments": _json_safe(tool_call.arguments) if tool_call is not None else None,
+        "observation": None if is_final else _json_safe(step.observation),
+        "error": step.error,
+        "final": is_final,
+    }
+
+
 async def run_chat_turn_streaming(
     user_content: str,
     *,
     on_delta: Callable[[str], Awaitable[None]],
+    on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
     max_steps: int = 6,
@@ -232,6 +272,16 @@ async def run_chat_turn_streaming(
     policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
     result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
+
+    # Surface the agent's trace (tool calls, observations, reasoning) so the UI
+    # can render a legible timeline instead of only the final text. Best-effort:
+    # a bad step callback must never break the turn.
+    if on_step is not None:
+        for i, step in enumerate(result.steps):
+            try:
+                await on_step(_step_to_dict(step, i))
+            except Exception as exc:  # noqa: BLE001 — legibility is non-critical
+                logger.warning("chat_step_emit_failed", index=i, error=str(exc))
 
     if result.status != "completed":
         await on_delta(_FALLBACK_ANSWER)
