@@ -928,6 +928,18 @@ async def _bootstrap(
         decision_recorder = make_decision_recorder(twin, project_backend)
     except Exception as exc:  # noqa: BLE001 — degrade; record_decision just absent
         logger.warning("mcp_decision_recorder_init_failed", error=str(exc))
+    # MET-552: expose twin.propose_change over the sidecar by forwarding to the
+    # gateway's /v1/assistant/proposals endpoint (the sidecar can't reach the
+    # gateway's in-memory ApprovalWorkflow directly). This makes proposals filed
+    # by an external agent (e.g. LibreChat over MCP) show up in /approvals.
+    proposal_recorder = None
+    try:
+        from api_gateway.assistant.proposal_recorder import make_http_proposal_recorder
+
+        gateway_url = os.environ.get("METAFORGE_GATEWAY_URL", "http://gateway:8000")
+        proposal_recorder = make_http_proposal_recorder(gateway_url)
+    except Exception as exc:  # noqa: BLE001 — degrade; propose_change just absent
+        logger.warning("mcp_proposal_recorder_init_failed", error=str(exc))
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -940,6 +952,7 @@ async def _bootstrap(
         agent_session_store=agent_session_store,
         capture_sessions=getattr(args, "capture_sessions", False),
         decision_recorder=decision_recorder,
+        proposal_recorder=proposal_recorder,
     )
     return server, twin, knowledge_service, memory_store, insight_store
 

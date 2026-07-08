@@ -24,6 +24,7 @@ from api_gateway.assistant.schemas import (
     AssistantResponse,
     ChangeStatus,
     DesignChangeProposal,
+    ProposalCreateRequest,
     ProposalListResponse,
     RunStatusResponse,
 )
@@ -180,6 +181,27 @@ async def list_proposals(
     """List pending design-change proposals, optionally filtered by session/project."""
     proposals = workflow.get_pending_proposals(session_id=session_id, project_id=project_id)
     return ProposalListResponse(proposals=proposals, total=len(proposals))
+
+
+@router.post("/proposals", response_model=DesignChangeProposal, status_code=201)
+async def create_proposal(body: ProposalCreateRequest) -> DesignChangeProposal:
+    """File a design-change proposal into the shared ApprovalWorkflow.
+
+    This is the cross-process entry point (MET-552): the MCP sidecar's
+    ``twin.propose_change`` recorder POSTs here so proposals filed by an
+    external agent (e.g. via LibreChat) land in the same in-memory workflow the
+    dashboard ``/approvals`` and in-twin proposal card read from.
+    """
+    proposal = await workflow.propose_change(
+        agent_code=body.agent_code,
+        description=body.description,
+        diff=body.diff,
+        work_products=body.work_products_affected,
+        session_id=body.session_id,
+        project_id=body.project_id,
+        requires_approval=body.requires_approval,
+    )
+    return proposal
 
 
 @router.get("/proposals/{change_id}", response_model=DesignChangeProposal)

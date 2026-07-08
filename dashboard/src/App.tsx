@@ -14,6 +14,7 @@ import { BomPage } from './pages/BomPage';
 import { TwinViewerPage } from './pages/TwinViewerPage';
 import { FilesPage } from './pages/FilesPage';
 import { DesignAssistantPage } from './pages/DesignAssistantPage';
+import { LibreChatPage } from './pages/LibreChatPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { SourceDetailPage } from './pages/SourceDetailPage';
 
@@ -113,6 +114,14 @@ export function App() {
               element={
                 <ErrorBoundary>
                   <DesignAssistantPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="librechat"
+              element={
+                <ErrorBoundary>
+                  <LibreChatPage />
                 </ErrorBoundary>
               }
             />
