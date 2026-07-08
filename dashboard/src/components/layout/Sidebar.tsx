@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/files',     icon: 'folder',       title: 'Files'                },
   { to: '/knowledge', icon: 'psychology',   title: 'Knowledge'            },
   { to: '/assistant', icon: 'auto_awesome', title: 'Design Assistant'     },
+  { to: '/librechat', icon: 'forum',        title: 'Assistant (LibreChat)' },
 ] as const;
 
 // ---------------------------------------------------------------------------
