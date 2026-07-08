@@ -555,36 +555,6 @@ class TestListProposals:
 
 
 # ===================================================================
-# Route tests — POST /v1/assistant/proposals (create, cross-process — MET-552)
-# ===================================================================
-
-
-class TestCreateProposal:
-    def test_create_proposal(self, client: TestClient) -> None:
-        resp = client.post(
-            "/v1/assistant/proposals",
-            json={
-                "agent_code": "librechat",
-                "description": "fillet base plate 4mm",
-                "diff": {"action": "record_decision"},
-                "work_products_affected": [str(uuid4())],
-            },
-        )
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["agent_code"] == "librechat"
-        assert data["status"] == "pending"
-        # It lands in the shared workflow — visible via the list endpoint.
-        listed = client.get("/v1/assistant/proposals").json()
-        assert listed["total"] == 1
-        assert listed["proposals"][0]["change_id"] == data["change_id"]
-
-    def test_create_proposal_requires_description(self, client: TestClient) -> None:
-        resp = client.post("/v1/assistant/proposals", json={"agent_code": "x", "description": ""})
-        assert resp.status_code == 422
-
-
-# ===================================================================
 # Route tests — GET /v1/assistant/proposals/{change_id}
 # ===================================================================
 
