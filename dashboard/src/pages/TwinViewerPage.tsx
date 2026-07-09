@@ -464,8 +464,16 @@ function SceneDropdown({
  * any node/part selection. Collapses to a single bar; expands upward. Distinct
  * from the node/part-scoped chats in NodeDetail / BomAnnotationPanel (MET-548).
  */
-function TwinChatDock({ projectId, projectLabel }: { projectId: string; projectLabel: string }) {
-  const [open, setOpen] = useState(false);
+function TwinChatDock({
+  projectId,
+  projectLabel,
+  defaultOpen = false,
+}: {
+  projectId: string;
+  projectLabel: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const entityId = projectId || 'twin-global';
   const subject = projectId ? projectLabel : 'the whole twin';
   const chat = useScopedChat({
@@ -482,7 +490,7 @@ function TwinChatDock({ projectId, projectLabel }: { projectId: string; projectL
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          height: open ? 360 : 36,
+          height: open ? 440 : 36,
           transition: 'height 0.16s ease',
         }}
       >
@@ -505,7 +513,7 @@ function TwinChatDock({ projectId, projectLabel }: { projectId: string; projectL
             forum
           </span>
           <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurface }}>
-            Twin Assistant
+            Assistant
           </span>
           {!open && (
             <span className="font-mono truncate" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
@@ -1232,6 +1240,7 @@ export function TwinViewerPage() {
             ? (projectOptions.find((p) => p.id === projectId)?.name ?? 'Project')
             : 'All projects'
         }
+        defaultOpen={searchParams.get('assistant') === '1'}
       />
 
       {/* ═══════════════════════════════════════════
