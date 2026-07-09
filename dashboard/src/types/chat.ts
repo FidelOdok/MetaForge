@@ -32,6 +32,22 @@ export interface ChatMessage {
   graphRef?: ChatGraphRef;
 }
 
+/**
+ * One step of the agent's ReAct trace, surfaced over the `agent.step` SSE
+ * event so the UI can render a legible tool-call timeline (MET-552).
+ */
+export interface AgentStep {
+  index: number;
+  thought: string;
+  /** Tool id invoked this step, or null for the final reasoning step. */
+  tool: string | null;
+  arguments: unknown;
+  /** Tool result (omitted for the final step — the answer streams separately). */
+  observation: unknown;
+  error: string | null;
+  final: boolean;
+}
+
 /** Scope kinds for chat threads */
 export type ChatScopeKind = 'session' | 'approval' | 'bom-entry' | 'digital-twin-node' | 'project' | 'assistant';
 

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useChatStore } from '@/store/chat-store';
+import type { AgentStep } from '@/types/chat';
 
 /**
  * Subscribe to a chat thread's Server-Sent Events stream and feed the harness's
@@ -15,6 +16,8 @@ export function useChatStream(threadId: string | null): void {
   const appendStreamChunk = useChatStore((s) => s.appendStreamChunk);
   const setAgentTyping = useChatStore((s) => s.setAgentTyping);
   const clearStreamContent = useChatStore((s) => s.clearStreamContent);
+  const appendAgentStep = useChatStore((s) => s.appendAgentStep);
+  const clearAgentSteps = useChatStore((s) => s.clearAgentSteps);
 
   useEffect(() => {
     if (!threadId) return;
@@ -35,20 +38,32 @@ export function useChatStream(threadId: string | null): void {
         // Ignore malformed SSE payloads — keep the stream alive.
       }
     };
+    const onStep = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data) as { data?: { step?: AgentStep } };
+        const step = payload.data?.step;
+        if (step) appendAgentStep(threadId, step);
+      } catch {
+        // Ignore malformed step payloads — keep the stream alive.
+      }
+    };
     const onTyping = () => setAgentTyping(threadId, true);
     const onDone = () => setAgentTyping(threadId, false);
 
     source.addEventListener('message.delta', onDelta as EventListener);
+    source.addEventListener('agent.step', onStep as EventListener);
     source.addEventListener('agent.typing', onTyping as EventListener);
     source.addEventListener('agent.done', onDone as EventListener);
 
     return () => {
       source.removeEventListener('message.delta', onDelta as EventListener);
+      source.removeEventListener('agent.step', onStep as EventListener);
       source.removeEventListener('agent.typing', onTyping as EventListener);
       source.removeEventListener('agent.done', onDone as EventListener);
       source.close();
       setAgentTyping(threadId, false);
       clearStreamContent(threadId);
+      clearAgentSteps(threadId);
     };
-  }, [threadId, appendStreamChunk, setAgentTyping, clearStreamContent]);
+  }, [threadId, appendStreamChunk, setAgentTyping, clearStreamContent, appendAgentStep, clearAgentSteps]);
 }

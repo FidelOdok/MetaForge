@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { AgentStep } from '@/types/chat';
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -11,6 +12,8 @@ interface ChatUIState {
    * stream completes.
    */
   streamingContent: Record<string, string>;
+  /** Agent ReAct steps (tool calls / reasoning) for the in-flight turn, per thread. */
+  agentSteps: Record<string, AgentStep[]>;
   /** Set of thread IDs where an agent is currently typing. */
   typingThreadIds: Set<string>;
   /** Selected provider id for outgoing messages (null = server default). */
@@ -30,6 +33,10 @@ interface ChatUIActions {
   appendStreamChunk: (messageId: string, chunk: string) => void;
   /** Remove accumulated streaming content once the stream is done. */
   clearStreamContent: (messageId: string) => void;
+  /** Append an agent step (tool call / reasoning) for a thread's current turn. */
+  appendAgentStep: (threadId: string, step: AgentStep) => void;
+  /** Clear the accumulated agent steps for a thread (new turn / teardown). */
+  clearAgentSteps: (threadId: string) => void;
   /** Toggle the typing indicator for a thread. */
   setAgentTyping: (threadId: string, isTyping: boolean) => void;
   /** Set the selected provider + model for outgoing messages. */
@@ -45,6 +52,7 @@ interface ChatUIActions {
 export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
   // -- initial state --
   streamingContent: {},
+  agentSteps: {},
   typingThreadIds: new Set<string>(),
   selectedProvider: null,
   selectedModel: null,
@@ -63,6 +71,20 @@ export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
     set((state) => {
       const { [messageId]: _removed, ...rest } = state.streamingContent;
       return { streamingContent: rest };
+    }),
+
+  appendAgentStep: (threadId, step) =>
+    set((state) => ({
+      agentSteps: {
+        ...state.agentSteps,
+        [threadId]: [...(state.agentSteps[threadId] ?? []), step],
+      },
+    })),
+
+  clearAgentSteps: (threadId) =>
+    set((state) => {
+      const { [threadId]: _removed, ...rest } = state.agentSteps;
+      return { agentSteps: rest };
     }),
 
   setAgentTyping: (threadId, isTyping) =>
