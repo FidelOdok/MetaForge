@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { type ChatThread, type ChatMessage } from '@/types/chat';
 import { ChatMessageBubble } from './ChatMessageBubble';
+import { AgentSteps } from './AgentSteps';
 import { TypingIndicator } from './TypingIndicator';
 import { ChatComposer } from './ChatComposer';
 import { ModelToolsBar } from './ModelToolsBar';
@@ -139,6 +140,9 @@ export function ChatPanel({
             onGraphRefClick={onGraphRefClick}
           />
         ))}
+
+        {/* Agent tool-call / reasoning timeline for the in-flight turn */}
+        <AgentSteps threadId={thread.id} />
 
         {isTyping && (
           <div style={{ padding: '0 16px' }}>

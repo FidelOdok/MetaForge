@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from 'react';
 import type { ChatThread, ChatMessage } from '@/types/chat';
+import { AgentSteps } from '../AgentSteps';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -130,6 +131,9 @@ export function NodeChatPanel({
             )}
           </div>
         ))}
+
+        {/* Agent tool-call / reasoning timeline for the in-flight turn */}
+        {thread && <AgentSteps threadId={thread.id} />}
 
         {isTyping && (
           <div className="mb-1.5 flex items-start">

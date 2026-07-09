@@ -101,6 +101,7 @@ export function useScopedChat({
     existingThreadId ? s.streamingContent[existingThreadId] : undefined,
   );
   const clearStreamContent = useChatStore((s) => s.clearStreamContent);
+  const clearAgentSteps = useChatStore((s) => s.clearAgentSteps);
   const setAgentTyping = useChatStore((s) => s.setAgentTyping);
 
   // ------------------------------------------------------------------
@@ -170,6 +171,9 @@ export function useScopedChat({
     (content: string) => {
       if (!existingThreadId || content.trim().length === 0) return;
 
+      // New turn — drop the previous turn's tool-call timeline.
+      clearAgentSteps(existingThreadId);
+
       // Optimistic message so the UI feels instant.
       const optimistic: ChatMessage = {
         id: `optimistic-${Date.now()}`,
@@ -211,7 +215,7 @@ export function useScopedChat({
         },
       );
     },
-    [existingThreadId, sendMessageMutation, clearStreamContent, setAgentTyping],
+    [existingThreadId, sendMessageMutation, clearStreamContent, clearAgentSteps, setAgentTyping],
   );
 
   // ------------------------------------------------------------------
