@@ -29,6 +29,7 @@ from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
+from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_runs
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
@@ -160,6 +161,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a lifecycle-hooks config (default .forge/hooks.json)",
     )
     chat_parser.add_argument("--no-hooks", action="store_true", help="Disable lifecycle hooks")
+
+    # -- routine (scheduled background runs) -------------------------------
+    routine_parser = subparsers.add_parser("routine", help="Scheduled background chat runs")
+    routine_parser.add_argument(
+        "--file", default=".forge/routines.json", help="Routines store path"
+    )
+    routine_sub = routine_parser.add_subparsers(dest="routine_command", help="Routine subcommands")
+
+    routine_add = routine_sub.add_parser("add", help="Add a scheduled routine")
+    routine_add.add_argument("prompt", help="Prompt to run on schedule")
+    routine_add.add_argument("--every", required=True, help="Interval, e.g. 30s, 10m, 2h, 1d")
+    routine_add.add_argument("--provider", default=None, help="Provider override")
+    routine_add.add_argument("--model", default=None, help="Model override")
+    routine_add.add_argument(
+        "--mode", choices=["ask", "auto", "plan"], default="ask", help="Proposal handling mode"
+    )
+
+    routine_sub.add_parser("list", help="List routines")
+
+    routine_remove = routine_sub.add_parser("remove", help="Remove a routine")
+    routine_remove.add_argument("routine_id", help="Routine id")
+
+    routine_sub.add_parser("run-due", help="Run all routines whose interval has elapsed")
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(
@@ -317,6 +341,7 @@ _HANDLERS = {
     "memory": handle_memory,
     "runs": handle_runs,
     "chat": handle_chat,
+    "routine": handle_routine,
     "codex-login": handle_codex_login,
 }
 
