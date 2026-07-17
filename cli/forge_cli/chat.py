@@ -31,6 +31,7 @@ _BOLD = "\033[1m"
 _CYAN = "\033[36m"
 _GREEN = "\033[32m"
 _RED = "\033[31m"
+_YELLOW = "\033[33m"
 _RESET = "\033[0m"
 
 
@@ -210,6 +211,83 @@ def _turn(
         print(f"\n{label}  {m.get('content', '')}\n")
 
 
+def _pending_proposals(client: ForgeClient) -> list[dict[str, Any]]:
+    """Pending design-change proposals (best-effort; [] on any API error)."""
+    try:
+        payload = client.list_proposals()
+    except ForgeClientError:
+        return []
+    return [p for p in payload.get("proposals", []) if p.get("status") == "pending"]
+
+
+def _render_proposal(p: dict[str, Any], *, color: bool) -> None:
+    """Render a change proposal for inline review."""
+    cid = str(p.get("change_id", ""))
+    print(_c(f"\n⚑ Change proposal {cid}", _YELLOW, enabled=color))
+    print(f"  {p.get('description', '')}")
+    wps = p.get("work_products_affected") or []
+    meta = f"  agent={p.get('agent_code', '?')}  affects {len(wps)} work-product(s)"
+    print(_c(meta, _DIM, enabled=color))
+    diff = p.get("diff") or {}
+    if diff:
+        keys = ", ".join(list(diff)[:6])
+        print(_c(f"  diff: {keys}", _DIM, enabled=color))
+
+
+def _prompt_decision(p: dict[str, Any], client: ForgeClient, *, color: bool) -> None:
+    """Prompt to approve/reject/skip one proposal and act on the answer."""
+    _render_proposal(p, color=color)
+    cid = str(p.get("change_id", ""))
+    prompt = _c("  Approve? [a]pprove / [r]eject / [s]kip › ", _YELLOW, enabled=color)
+    while True:
+        try:
+            ans = input(prompt).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if ans in ("a", "approve"):
+            try:
+                client.approve_proposal(cid, reason="approved via forge chat")
+                print(_c("  ✓ approved", _GREEN, enabled=color))
+            except ForgeClientError as exc:
+                print(f"  Error: approve failed: {exc}", file=sys.stderr)
+            return
+        if ans in ("r", "reject"):
+            try:
+                client.reject_proposal(cid, reason="rejected via forge chat")
+                print(_c("  ✗ rejected", _RED, enabled=color))
+            except ForgeClientError as exc:
+                print(f"  Error: reject failed: {exc}", file=sys.stderr)
+            return
+        if ans in ("s", "skip", ""):
+            print(_c("  skipped (still pending)", _DIM, enabled=color))
+            return
+        print("  Please answer a / r / s.")
+
+
+def _review_new_proposals(
+    client: ForgeClient,
+    before_ids: set[str],
+    *,
+    color: bool,
+    interactive: bool,
+) -> None:
+    """Surface proposals created during the turn (change_ids not in ``before_ids``).
+
+    Interactive REPL prompts a decision per proposal; one-shot mode just prints a
+    non-blocking notice so scripts don't hang on input.
+    """
+    new = [p for p in _pending_proposals(client) if str(p.get("change_id", "")) not in before_ids]
+    if not new:
+        return
+    if not interactive:
+        msg = f"  ⚑ {len(new)} change proposal(s) pending — run 'forge proposals' to review."
+        print(_c(msg, _YELLOW, enabled=color))
+        return
+    for p in new:
+        _prompt_decision(p, client, color=color)
+
+
 def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None:
     """Reuse ``--thread`` if given, else create a fresh assistant-scope thread."""
     if args.thread:
@@ -244,7 +322,9 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
 
     # One-shot mode: send a single message and exit (scriptable).
     if args.message:
+        before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
         turn(args, client, thread_id, args.message, color=color)
+        _review_new_proposals(client, before, color=color, interactive=False)
         return None
 
     banner = _c("MetaForge assistant", _BOLD, enabled=color)
@@ -267,6 +347,8 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
             continue
         if line in ("/exit", "/quit"):
             break
+        before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
         turn(args, client, thread_id, line, color=color)
+        _review_new_proposals(client, before, color=color, interactive=True)
 
     return None

@@ -6,18 +6,32 @@ Exercise the REPL foundation with a stubbed client — no gateway, no network.
 from __future__ import annotations
 
 import argparse
+import builtins
 from typing import Any
 
-from cli.forge_cli.chat import _agent_replies_after, _render_stream, handle_chat
+from cli.forge_cli.chat import (
+    _agent_replies_after,
+    _render_stream,
+    _review_new_proposals,
+    handle_chat,
+)
 
 
 class StubClient:
     """Minimal duck-typed ForgeClient for the chat handler."""
 
-    def __init__(self, *, thread_messages: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        thread_messages: list[dict[str, Any]] | None = None,
+        proposals: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.thread_messages = thread_messages or []
+        self.proposals = proposals or []
         self.sent: list[str] = []
         self.created = False
+        self.approved: list[str] = []
+        self.rejected: list[str] = []
 
     def create_thread(self, scope_kind: str, scope_entity_id: str, **_: Any) -> dict[str, Any]:
         self.created = True
@@ -30,6 +44,21 @@ class StubClient:
     def send_message(self, thread_id: str, content: str, **_: Any) -> dict[str, Any]:
         self.sent.append(content)
         return {"id": "u-1", "thread_id": thread_id, "actor_kind": "user", "content": content}
+
+    def list_proposals(self) -> dict[str, Any]:
+        return {"proposals": self.proposals, "total": len(self.proposals)}
+
+    def approve_proposal(
+        self, change_id: str, reason: str, reviewer: str = "cli-user"
+    ) -> dict[str, Any]:
+        self.approved.append(change_id)
+        return {"change_id": change_id, "status": "approved"}
+
+    def reject_proposal(
+        self, change_id: str, reason: str, reviewer: str = "cli-user"
+    ) -> dict[str, Any]:
+        self.rejected.append(change_id)
+        return {"change_id": change_id, "status": "rejected"}
 
 
 def _args(**over: Any) -> argparse.Namespace:
@@ -179,3 +208,44 @@ def test_render_stream_skips_final_step() -> None:
     ]
     # final step carries no tool line; nothing to assert beyond no crash
     assert _render_stream(events, color=False) == ""
+
+
+# --- inline approval (MET-558) ---------------------------------------------
+
+
+def test_review_new_proposals_notifies_in_oneshot(capsys: Any) -> None:
+    client = StubClient(proposals=[{"change_id": "c-1", "status": "pending", "description": "d"}])
+    _review_new_proposals(client, before_ids=set(), color=False, interactive=False)  # type: ignore[arg-type]
+    out = capsys.readouterr().out
+    assert "1 change proposal" in out
+    assert client.approved == [] and client.rejected == []  # notify only, no decision
+
+
+def test_review_new_proposals_ignores_preexisting() -> None:
+    client = StubClient(proposals=[{"change_id": "c-1", "status": "pending"}])
+    # c-1 already existed before the turn → not surfaced
+    _review_new_proposals(client, before_ids={"c-1"}, color=False, interactive=True)  # type: ignore[arg-type]
+    assert client.approved == [] and client.rejected == []
+
+
+def test_review_new_proposals_approves_on_a(monkeypatch: Any) -> None:
+    client = StubClient(proposals=[{"change_id": "c-2", "status": "pending", "description": "x"}])
+    monkeypatch.setattr(builtins, "input", lambda *_: "a")
+    _review_new_proposals(client, before_ids=set(), color=False, interactive=True)  # type: ignore[arg-type]
+    assert client.approved == ["c-2"]
+    assert client.rejected == []
+
+
+def test_review_new_proposals_rejects_on_r(monkeypatch: Any) -> None:
+    client = StubClient(proposals=[{"change_id": "c-3", "status": "pending", "description": "x"}])
+    monkeypatch.setattr(builtins, "input", lambda *_: "r")
+    _review_new_proposals(client, before_ids=set(), color=False, interactive=True)  # type: ignore[arg-type]
+    assert client.rejected == ["c-3"]
+    assert client.approved == []
+
+
+def test_review_new_proposals_skip_leaves_pending(monkeypatch: Any) -> None:
+    client = StubClient(proposals=[{"change_id": "c-4", "status": "pending", "description": "x"}])
+    monkeypatch.setattr(builtins, "input", lambda *_: "s")
+    _review_new_proposals(client, before_ids=set(), color=False, interactive=True)  # type: ignore[arg-type]
+    assert client.approved == [] and client.rejected == []
