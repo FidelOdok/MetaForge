@@ -26,6 +26,12 @@ The **`docs/`** directory in *this* repo documents the architecture **as impleme
 
 When documenting or reasoning about **current behavior**, use `docs/` — and keep it accurate, since the docs CI builds `--strict` (broken links / warnings fail the build).
 
+**Update documentation before merge.** Any change that alters user-facing behavior, gateway routes, schemas, CLI commands, or architecture must land its `docs/` update **in the same PR** — never as a follow-up. Specifically:
+
+- **Gateway API**: the reference at `docs/reference/gateway-api.md` renders `docs/reference/openapi.json`, which is generated from the live app. When you change a route or response schema, run `python scripts/gen_openapi.py` and commit the regenerated spec so the published reference can't drift.
+- **CLI / behavior / architecture**: update the relevant `docs/` page (e.g. `cli-reference.md`, `architecture.md`, `capability-matrix.md`) alongside the code.
+- Verify locally with `mkdocs build --strict` before opening the PR — this is exactly what CI runs, and it fails on broken links or warnings.
+
 ### Future plans — the MetaForge-Planner repo
 
 The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) is the source of truth for **forward-looking** plans, specifications, and vision — what we intend to build, not what exists yet:
@@ -119,9 +125,10 @@ for the full command catalog.
 1. **Branch** — Create a feature branch from `main` (e.g., `feat/met-15-twin-api`)
 2. **Implement** — Commit changes to the feature branch
 3. **Test branch** — Run `pytest`, `ruff check .`, `mypy .` on the branch
-4. **Pull request** — Open a PR to `main` with a summary of changes
-5. **Merge** — Merge the PR into `main` (squash or merge commit)
-6. **Test main** — Verify `main` passes all checks after merge
+4. **Update docs** — Land any required `docs/` updates **in the same PR** (see [Update documentation before merge](#documentation-two-sources-of-truth)); verify with `mkdocs build --strict`
+5. **Pull request** — Open a PR to `main` with a summary of changes
+6. **Merge** — Merge the PR into `main` (squash or merge commit)
+7. **Test main** — Verify `main` passes all checks after merge
 
 ## Commit Convention
 

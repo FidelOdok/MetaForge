@@ -58,6 +58,7 @@ extra_css:
 plugins:
   - search
   - include-markdown
+  - swagger-ui-tag
 
 markdown_extensions:
   - admonition
@@ -89,6 +90,8 @@ nav:
       - Codex: integrations/codex.md
       - MCP Config Examples: integrations/mcp-config-examples.md
       - LightRAG UI: integrations/lightrag-ui.md
+  - API Reference:
+      - Gateway API: reference/gateway-api.md
   - Architecture (Contributors):
       - Overview: architecture.md
       - Roadmap: roadmap.md

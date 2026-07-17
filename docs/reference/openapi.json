@@ -1,0 +1,6862 @@
+{
+  "components": {
+    "schemas": {
+      "ApprovalDecision": {
+        "description": "Body for ``POST /api/v1/assistant/proposals/{change_id}/decide``.",
+        "properties": {
+          "change_id": {
+            "description": "UUID of the proposal to decide on",
+            "format": "uuid",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecisionType",
+            "description": "Approve or reject"
+          },
+          "reason": {
+            "description": "Human-written justification for the decision",
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "reviewer": {
+            "description": "Identifier of the human reviewer",
+            "minLength": 1,
+            "title": "Reviewer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "change_id",
+          "decision",
+          "reason",
+          "reviewer"
+        ],
+        "title": "ApprovalDecision",
+        "type": "object"
+      },
+      "ApprovalDecisionType": {
+        "description": "The two possible human verdicts on a change proposal.",
+        "enum": [
+          "approve",
+          "reject"
+        ],
+        "title": "ApprovalDecisionType",
+        "type": "string"
+      },
+      "ApprovalRequest": {
+        "description": "Body for ``POST /v1/runs/{id}/approval``.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalRequest",
+        "type": "object"
+      },
+      "AssistantRequest": {
+        "description": "Body for ``POST /api/v1/assistant/request``.\n\nEvery request must belong to a project. An IDE assistant submits a\nrequest to invoke an agent on a specific design work_product.",
+        "properties": {
+          "action": {
+            "description": "Agent action to perform (e.g. 'validate_stress', 'run_drc')",
+            "minLength": 1,
+            "title": "Action",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "description": "Action-specific parameters",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "project_id": {
+            "description": "Project this request belongs to",
+            "minLength": 1,
+            "title": "Project Id",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "description": "Free-text prompt or description for generative actions (e.g. generate_cad)",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Session ID for grouping related requests",
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID of the target work_product (optional for generative actions)",
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "AssistantRequest",
+        "type": "object"
+      },
+      "AssistantResponse": {
+        "description": "Response returned by ``POST /api/v1/assistant/request``.",
+        "properties": {
+          "errors": {
+            "description": "Error messages, if any",
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "Unique request identifier",
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "description": "Action result payload",
+            "title": "Result",
+            "type": "object"
+          },
+          "status": {
+            "description": "Request status (accepted, completed, failed)",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "AssistantResponse",
+        "type": "object"
+      },
+      "Body_import_work_product_v1_twin_import_post": {
+        "properties": {
+          "description": {
+            "default": "",
+            "description": "Work product description",
+            "title": "Description",
+            "type": "string"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Domain (mechanical, electronics)",
+            "title": "Domain"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Design file to import",
+            "title": "File",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to link to",
+            "title": "Project Id"
+          },
+          "wp_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Work product type",
+            "title": "Wp Type"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_work_product_v1_twin_import_post",
+        "type": "object"
+      },
+      "Body_upload_and_convert_v1_convert_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "STEP or IGES CAD file",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_and_convert_v1_convert_post",
+        "type": "object"
+      },
+      "BomComponentResponse": {
+        "description": "One BOM line item, in the dashboard's camelCase shape.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "designator": {
+            "title": "Designator",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "manufacturer": {
+            "title": "Manufacturer",
+            "type": "string"
+          },
+          "partNumber": {
+            "title": "Partnumber",
+            "type": "string"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "low_stock",
+              "out_of_stock",
+              "alternate_needed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unitPrice": {
+            "title": "Unitprice",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "designator",
+          "partNumber",
+          "description",
+          "manufacturer",
+          "quantity",
+          "unitPrice",
+          "status",
+          "category",
+          "projectId"
+        ],
+        "title": "BomComponentResponse",
+        "type": "object"
+      },
+      "BomListResponse": {
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/BomComponentResponse"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "components",
+          "total"
+        ],
+        "title": "BomListResponse",
+        "type": "object"
+      },
+      "ChangeStatus": {
+        "description": "Lifecycle states for a design-change proposal.",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "applied",
+          "expired"
+        ],
+        "title": "ChangeStatus",
+        "type": "string"
+      },
+      "ChannelListResponse": {
+        "description": "List of all channels.",
+        "properties": {
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelResponse"
+            },
+            "title": "Channels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "title": "ChannelListResponse",
+        "type": "object"
+      },
+      "ChannelResponse": {
+        "description": "Single channel.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scope_kind": {
+            "title": "Scope Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scope_kind",
+          "created_at"
+        ],
+        "title": "ChannelResponse",
+        "type": "object"
+      },
+      "ChecklistResponse": {
+        "description": "Response for checklist generation.",
+        "properties": {
+          "coverage_percent": {
+            "title": "Coverage Percent",
+            "type": "number"
+          },
+          "evidenced_items": {
+            "title": "Evidenced Items",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "target_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Markets",
+            "type": "array"
+          },
+          "total_items": {
+            "title": "Total Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id",
+          "target_markets",
+          "total_items",
+          "evidenced_items",
+          "coverage_percent",
+          "items"
+        ],
+        "title": "ChecklistResponse",
+        "type": "object"
+      },
+      "ComponentHealth": {
+        "description": "Health snapshot for one downstream dependency.",
+        "properties": {
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DependencyStatus"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "ComponentHealth",
+        "type": "object"
+      },
+      "ConfidenceTier": {
+        "description": "Provenance tier for a memory record.\n\nAligned with MET-462 property-extraction tiers so the same vocabulary\nflows from L1 extraction through to L3 reasoning:\n\n* ``VERBATIM`` \u2014 copied directly from a structured event field (1.0)\n* ``LLM_INFERRED`` \u2014 produced by an LLM synthesis step (0.6-0.8)\n* ``DERIVED`` \u2014 computed from other records (0.4-0.6)",
+        "enum": [
+          "verbatim",
+          "llm_inferred",
+          "derived"
+        ],
+        "title": "ConfidenceTier",
+        "type": "string"
+      },
+      "ConsolidationMode": {
+        "description": "How the orchestrator behaves on a given pass.",
+        "enum": [
+          "background",
+          "on_demand",
+          "proactive",
+          "janitor"
+        ],
+        "title": "ConsolidationMode",
+        "type": "string"
+      },
+      "ConsolidationTheme": {
+        "description": "Semantic buckets for experience consolidation.",
+        "enum": [
+          "mechanical_validation",
+          "power_analysis",
+          "circuit_design_rule",
+          "component_selection",
+          "firmware_build",
+          "simulation",
+          "compliance_check",
+          "misc"
+        ],
+        "title": "ConsolidationTheme",
+        "type": "string"
+      },
+      "ConsolidationTriggerRequest": {
+        "description": "Request body for ``POST /v1/memory/consolidate``.",
+        "properties": {
+          "fetchLimit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetchlimit"
+          },
+          "minImportance": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimportance"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ConsolidationMode",
+            "default": "on_demand",
+            "description": "Consolidation mode. Defaults to on_demand since the REST endpoint is a manual trigger; the Temporal worker handles background."
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsolidationTheme"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "title": "ConsolidationTriggerRequest",
+        "type": "object"
+      },
+      "ConsolidationTriggerResponse": {
+        "description": "Wire shape of a single consolidation pass result.",
+        "properties": {
+          "acceptedCount": {
+            "title": "Acceptedcount",
+            "type": "integer"
+          },
+          "fetchedCount": {
+            "title": "Fetchedcount",
+            "type": "integer"
+          },
+          "groupCount": {
+            "title": "Groupcount",
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ConsolidationMode"
+          },
+          "newlyFailedCount": {
+            "title": "Newlyfailedcount",
+            "type": "integer"
+          },
+          "rejectedCount": {
+            "title": "Rejectedcount",
+            "type": "integer"
+          },
+          "rejectedReasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rejectedreasons",
+            "type": "array"
+          },
+          "revalidatedCount": {
+            "title": "Revalidatedcount",
+            "type": "integer"
+          },
+          "synthesizedCount": {
+            "title": "Synthesizedcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "fetchedCount",
+          "groupCount",
+          "synthesizedCount",
+          "acceptedCount",
+          "rejectedCount",
+          "revalidatedCount",
+          "newlyFailedCount"
+        ],
+        "title": "ConsolidationTriggerResponse",
+        "type": "object"
+      },
+      "ConstraintSuggestion": {
+        "properties": {
+          "parameter": {
+            "title": "Parameter",
+            "type": "string"
+          },
+          "unit": {
+            "default": "mm",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "parameter",
+          "value"
+        ],
+        "title": "ConstraintSuggestion",
+        "type": "object"
+      },
+      "ConversionResult": {
+        "description": "Response payload for a completed conversion.",
+        "properties": {
+          "cached": {
+            "description": "True if result was served from cache.",
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "glb_url": {
+            "description": "URL to download the GLB file.",
+            "title": "Glb Url",
+            "type": "string"
+          },
+          "hash": {
+            "description": "SHA-256 content hash of the source file.",
+            "title": "Hash",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Part tree, stats, materials.",
+            "title": "Metadata",
+            "type": "object"
+          }
+        },
+        "required": [
+          "hash",
+          "glb_url",
+          "metadata",
+          "cached"
+        ],
+        "title": "ConversionResult",
+        "type": "object"
+      },
+      "CoverageResponse": {
+        "description": "Response for coverage queries.",
+        "properties": {
+          "coverage_percent": {
+            "title": "Coverage Percent",
+            "type": "number"
+          },
+          "evidenced_items": {
+            "title": "Evidenced Items",
+            "type": "integer"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "total_items": {
+            "title": "Total Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id",
+          "total_items",
+          "evidenced_items",
+          "coverage_percent"
+        ],
+        "title": "CoverageResponse",
+        "type": "object"
+      },
+      "CreateProjectRequest": {
+        "description": "Body for ``POST /v1/projects``.",
+        "properties": {
+          "description": {
+            "default": "",
+            "description": "Project description",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Project name",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "default": "draft",
+            "description": "Initial project status",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateProjectRequest",
+        "type": "object"
+      },
+      "CreateRunRequest": {
+        "description": "Body for ``POST /v1/runs``.",
+        "properties": {
+          "request": {
+            "additionalProperties": true,
+            "description": "Opaque run input (goal, spec, config) handed to the harness.",
+            "title": "Request",
+            "type": "object"
+          },
+          "start": {
+            "default": true,
+            "description": "Transition queued -> running immediately after creation.",
+            "title": "Start",
+            "type": "boolean"
+          }
+        },
+        "title": "CreateRunRequest",
+        "type": "object"
+      },
+      "CreateThreadRequest": {
+        "description": "Body for ``POST /api/v1/chat/threads``.",
+        "properties": {
+          "initial_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "If provided, a first message is created automatically",
+            "title": "Initial Message"
+          },
+          "scope_entity_id": {
+            "description": "ID of the scoped entity",
+            "title": "Scope Entity Id",
+            "type": "string"
+          },
+          "scope_kind": {
+            "description": "Scope type (session, approval, bom-entry, ...)",
+            "title": "Scope Kind",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional thread title",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "scope_kind",
+          "scope_entity_id"
+        ],
+        "title": "CreateThreadRequest",
+        "type": "object"
+      },
+      "DeltaTransform": {
+        "description": "Translation delta of a dragged group, in world units (mm).",
+        "properties": {
+          "dx": {
+            "default": 0.0,
+            "title": "Dx",
+            "type": "number"
+          },
+          "dy": {
+            "default": 0.0,
+            "title": "Dy",
+            "type": "number"
+          },
+          "dz": {
+            "default": 0.0,
+            "title": "Dz",
+            "type": "number"
+          }
+        },
+        "title": "DeltaTransform",
+        "type": "object"
+      },
+      "DependencyStatus": {
+        "description": "Health status for a single component or the overall system.",
+        "enum": [
+          "healthy",
+          "degraded",
+          "unhealthy"
+        ],
+        "title": "DependencyStatus",
+        "type": "string"
+      },
+      "DesignChangeProposal": {
+        "description": "A proposed design change awaiting human review.\n\nCreated by agents when they want to modify the Digital Twin.\nMust be approved before the change is applied.",
+        "properties": {
+          "agent_code": {
+            "description": "Code of the agent proposing the change",
+            "minLength": 1,
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "change_id": {
+            "description": "Unique proposal identifier",
+            "format": "uuid",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the proposal was created",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the proposal was approved or rejected",
+            "title": "Decided At"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reviewer's reason for the decision",
+            "title": "Decision Reason"
+          },
+          "description": {
+            "description": "Human-readable description of what the change does",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "diff": {
+            "additionalProperties": true,
+            "description": "Structured diff of the proposed changes",
+            "title": "Diff",
+            "type": "object"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project this proposal belongs to (for dashboard scoping, MET-518)",
+            "title": "Project Id"
+          },
+          "requires_approval": {
+            "default": true,
+            "description": "Whether this change requires explicit human approval",
+            "title": "Requires Approval",
+            "type": "boolean"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who approved or rejected the proposal",
+            "title": "Reviewer"
+          },
+          "session_id": {
+            "description": "Session under which this proposal was created",
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ChangeStatus",
+            "default": "pending",
+            "description": "Current lifecycle status of the proposal"
+          },
+          "work_products_affected": {
+            "description": "UUIDs of Digital Twin work_products affected by this change",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Work Products Affected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_code",
+          "description"
+        ],
+        "title": "DesignChangeProposal",
+        "type": "object"
+      },
+      "EvidenceResponse": {
+        "description": "Response for evidence operations.",
+        "properties": {
+          "checklist_item_id": {
+            "title": "Checklist Item Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_type": {
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "checklist_item_id",
+          "evidence_type",
+          "status",
+          "title",
+          "description",
+          "uploaded_at"
+        ],
+        "title": "EvidenceResponse",
+        "type": "object"
+      },
+      "EvidenceType": {
+        "description": "Types of compliance evidence work_products.",
+        "enum": [
+          "TEST_REPORT",
+          "DECLARATION",
+          "CERTIFICATE",
+          "TECHNICAL_FILE",
+          "RISK_ASSESSMENT"
+        ],
+        "title": "EvidenceType",
+        "type": "string"
+      },
+      "FieldDelta": {
+        "description": "Change for a single metadata field.",
+        "properties": {
+          "from_value": {
+            "title": "From Value"
+          },
+          "to_value": {
+            "title": "To Value"
+          }
+        },
+        "required": [
+          "from_value",
+          "to_value"
+        ],
+        "title": "FieldDelta",
+        "type": "object"
+      },
+      "FileLinkCreateRequest": {
+        "description": "Request body for creating a file link.",
+        "properties": {
+          "source_path": {
+            "description": "Absolute path to the source file",
+            "title": "Source Path",
+            "type": "string"
+          },
+          "tool": {
+            "default": "",
+            "description": "Tool identifier (kicad, freecad, cadquery)",
+            "title": "Tool",
+            "type": "string"
+          },
+          "watch": {
+            "default": true,
+            "description": "Enable file watching",
+            "title": "Watch",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_path"
+        ],
+        "title": "FileLinkCreateRequest",
+        "type": "object"
+      },
+      "FileLinkResponse": {
+        "description": "API response for a file link.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "last_synced_at": {
+            "title": "Last Synced At",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "source_path": {
+            "title": "Source Path",
+            "type": "string"
+          },
+          "sync_status": {
+            "title": "Sync Status",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          },
+          "watch": {
+            "title": "Watch",
+            "type": "boolean"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id",
+          "source_path",
+          "tool",
+          "watch",
+          "sync_status",
+          "source_hash",
+          "last_synced_at",
+          "created_at"
+        ],
+        "title": "FileLinkResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "Top-level response from ``GET /health``.",
+        "properties": {
+          "components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ComponentHealth"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DependencyStatus"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "title": "Uptime Seconds",
+            "type": "number"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "uptime_seconds",
+          "timestamp"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "ImportWorkProductResponse": {
+        "description": "Response from a successful work product import.",
+        "properties": {
+          "content_hash": {
+            "description": "SHA-256 of file content",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "ISO-8601 creation timestamp",
+            "title": "Created At",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Domain (mechanical, electronics, etc.)",
+            "title": "Domain",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "Stored file path",
+            "title": "File Path",
+            "type": "string"
+          },
+          "format": {
+            "description": "File format (step, kicad_sch, etc.)",
+            "title": "Format",
+            "type": "string"
+          },
+          "id": {
+            "description": "WorkProduct UUID",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Extracted metadata",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "WorkProduct name",
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Linked project ID",
+            "title": "Project Id"
+          },
+          "wp_type": {
+            "description": "WorkProduct type",
+            "title": "Wp Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "domain",
+          "wp_type",
+          "file_path",
+          "content_hash",
+          "format",
+          "created_at"
+        ],
+        "title": "ImportWorkProductResponse",
+        "type": "object"
+      },
+      "IngestDocumentRequest": {
+        "description": "Request body for L1 document ingestion via ``KnowledgeService`` (MET-336).",
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "knowledgeType": {
+            "$ref": "#/components/schemas/KnowledgeType"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "sourcePath": {
+            "minLength": 1,
+            "title": "Sourcepath",
+            "type": "string"
+          },
+          "sourceWorkProductId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceworkproductid"
+          }
+        },
+        "required": [
+          "content",
+          "sourcePath",
+          "knowledgeType"
+        ],
+        "title": "IngestDocumentRequest",
+        "type": "object"
+      },
+      "IngestDocumentResponse": {
+        "description": "L1 ingest result \u2014 mirrors ``IngestResult`` (MET-336).",
+        "properties": {
+          "chunksIndexed": {
+            "title": "Chunksindexed",
+            "type": "integer"
+          },
+          "entryIds": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Entryids",
+            "type": "array"
+          },
+          "sourcePath": {
+            "title": "Sourcepath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryIds",
+          "chunksIndexed",
+          "sourcePath"
+        ],
+        "title": "IngestDocumentResponse",
+        "type": "object"
+      },
+      "IngestRequest": {
+        "description": "Request body for manual knowledge ingestion.",
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "knowledgeType": {
+            "$ref": "#/components/schemas/KnowledgeType"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "sourcePath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcepath"
+          },
+          "sourceWorkProductId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceworkproductid"
+          }
+        },
+        "required": [
+          "content",
+          "knowledgeType"
+        ],
+        "title": "IngestRequest",
+        "type": "object"
+      },
+      "IngestResponse": {
+        "description": "Response from the knowledge ingest endpoint.",
+        "properties": {
+          "embedded": {
+            "title": "Embedded",
+            "type": "boolean"
+          },
+          "entryId": {
+            "format": "uuid",
+            "title": "Entryid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryId",
+          "embedded"
+        ],
+        "title": "IngestResponse",
+        "type": "object"
+      },
+      "InsightKind": {
+        "description": "What kind of statement the insight is.",
+        "enum": [
+          "pattern",
+          "principle",
+          "failure_mode",
+          "observation"
+        ],
+        "title": "InsightKind",
+        "type": "string"
+      },
+      "InsightListResponse": {
+        "description": "Response body for ``GET /v1/memory/insights``.",
+        "properties": {
+          "includeStale": {
+            "title": "Includestale",
+            "type": "boolean"
+          },
+          "insights": {
+            "items": {
+              "$ref": "#/components/schemas/InsightResponse"
+            },
+            "title": "Insights",
+            "type": "array"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsolidationTheme"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "insights",
+          "total",
+          "includeStale"
+        ],
+        "title": "InsightListResponse",
+        "type": "object"
+      },
+      "InsightResponse": {
+        "description": "Wire shape of a single consolidated insight.",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "confidenceTier": {
+            "$ref": "#/components/schemas/ConfidenceTier"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InsightKind"
+          },
+          "narrative": {
+            "title": "Narrative",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InsightStatus"
+          },
+          "supportingExperienceIds": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Supportingexperienceids",
+            "type": "array"
+          },
+          "synthesizedAt": {
+            "format": "date-time",
+            "title": "Synthesizedat",
+            "type": "string"
+          },
+          "theme": {
+            "$ref": "#/components/schemas/ConsolidationTheme"
+          }
+        },
+        "required": [
+          "id",
+          "theme",
+          "kind",
+          "narrative",
+          "confidence",
+          "confidenceTier",
+          "status",
+          "supportingExperienceIds",
+          "synthesizedAt"
+        ],
+        "title": "InsightResponse",
+        "type": "object"
+      },
+      "InsightStatus": {
+        "description": "Lifecycle state of a stored insight (MET-455).\n\n* ``ACTIVE`` \u2014 trusted; surfaced to agents normally.\n* ``STALE_WARN`` \u2014 confidence has decayed (or re-validation failed);\n  flagged for review. Still readable, but consumers should treat it\n  with caution / prefer fresher insights.",
+        "enum": [
+          "active",
+          "stale_warn"
+        ],
+        "title": "InsightStatus",
+        "type": "string"
+      },
+      "IterateRequest": {
+        "description": "Request body for POST /v1/twin/nodes/{id}/iterate.",
+        "properties": {
+          "change_description": {
+            "title": "Change Description",
+            "type": "string"
+          },
+          "metadata_updates": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Metadata Updates",
+            "type": "object"
+          }
+        },
+        "required": [
+          "change_description"
+        ],
+        "title": "IterateRequest",
+        "type": "object"
+      },
+      "KnowledgeEntryResponse": {
+        "description": "API response model for a single knowledge entry.",
+        "properties": {
+          "chunkIndex": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunkindex"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "knowledgeType": {
+            "$ref": "#/components/schemas/KnowledgeType"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "sourcePath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcepath"
+          },
+          "sourceWorkProductId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceworkproductid"
+          },
+          "totalChunks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalchunks"
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "knowledgeType",
+          "metadata",
+          "createdAt"
+        ],
+        "title": "KnowledgeEntryResponse",
+        "type": "object"
+      },
+      "KnowledgeHitResponse": {
+        "description": "Wire shape of a single knowledge-base hit.\n\nUsed by ``POST /v1/memory/search`` (design rationale) and\n``GET /v1/memory/components/{name}`` (component context). Fields\nmirror ``digital_twin.knowledge.service.SearchHit``.",
+        "properties": {
+          "chunkIndex": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunkindex"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "knowledgeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledgetype"
+          },
+          "similarityScore": {
+            "title": "Similarityscore",
+            "type": "number"
+          },
+          "sourcePath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcepath"
+          },
+          "sourceWorkProductId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceworkproductid"
+          },
+          "totalChunks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalchunks"
+          }
+        },
+        "required": [
+          "content",
+          "similarityScore"
+        ],
+        "title": "KnowledgeHitResponse",
+        "type": "object"
+      },
+      "KnowledgeType": {
+        "description": "Categories of knowledge stored in the knowledge layer.",
+        "enum": [
+          "design_decision",
+          "component",
+          "failure",
+          "constraint",
+          "session"
+        ],
+        "title": "KnowledgeType",
+        "type": "string"
+      },
+      "LinkEvidenceRequest": {
+        "description": "Request body for linking evidence to a checklist item.",
+        "properties": {
+          "checklist_item_id": {
+            "description": "Checklist item ID to link to",
+            "title": "Checklist Item Id",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "description": "Evidence description",
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_type": {
+            "$ref": "#/components/schemas/EvidenceType",
+            "description": "Type of evidence"
+          },
+          "title": {
+            "description": "Evidence title",
+            "title": "Title",
+            "type": "string"
+          },
+          "work_product_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "WorkProduct UUID",
+            "title": "Work Product Id"
+          }
+        },
+        "required": [
+          "checklist_item_id",
+          "evidence_type",
+          "title"
+        ],
+        "title": "LinkEvidenceRequest",
+        "type": "object"
+      },
+      "MemoryHitResponse": {
+        "description": "Wire shape of a single hit in the response payload.",
+        "properties": {
+          "agentCode": {
+            "title": "Agentcode",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceTier"
+          },
+          "durationSeconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationseconds"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "experienceId": {
+            "format": "uuid",
+            "title": "Experienceid",
+            "type": "string"
+          },
+          "importance": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "resultSummary": {
+            "title": "Resultsummary",
+            "type": "string"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "similarity": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Similarity",
+            "type": "number"
+          },
+          "stepId": {
+            "title": "Stepid",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "taskType": {
+            "title": "Tasktype",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experienceId",
+          "similarity",
+          "rank",
+          "agentCode",
+          "taskType",
+          "runId",
+          "stepId",
+          "success",
+          "resultSummary",
+          "importance",
+          "confidence",
+          "timestamp"
+        ],
+        "title": "MemoryHitResponse",
+        "type": "object"
+      },
+      "MemoryRetrieveRequest": {
+        "description": "Request body for ``POST /v1/memory/retrieve``.",
+        "properties": {
+          "agentCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional filter to a specific agent.",
+            "title": "Agentcode"
+          },
+          "goal": {
+            "description": "Natural-language description of the task.",
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "limit": {
+            "default": 5,
+            "description": "Maximum number of experiences to return.",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "minSimilarity": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": -1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional retrieval-confidence floor: drop hits whose cosine similarity is below this value. None = no floor.",
+            "title": "Minsimilarity"
+          },
+          "onlySuccess": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True = success-only, False = failures-only, None = no filter.",
+            "title": "Onlysuccess"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional project scope.",
+            "title": "Projectid"
+          }
+        },
+        "required": [
+          "goal"
+        ],
+        "title": "MemoryRetrieveRequest",
+        "type": "object"
+      },
+      "MemoryRetrieveResponse": {
+        "description": "Response body for ``POST /v1/memory/retrieve``.",
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryHitResponse"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "totalFound": {
+            "title": "Totalfound",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hits",
+          "query",
+          "totalFound"
+        ],
+        "title": "MemoryRetrieveResponse",
+        "type": "object"
+      },
+      "MemorySearchRequest": {
+        "description": "Request body for ``POST /v1/memory/search`` (design-rationale search).",
+        "properties": {
+          "limit": {
+            "default": 5,
+            "description": "Maximum number of hits to return.",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional project scope.",
+            "title": "Projectid"
+          },
+          "query": {
+            "description": "Natural-language query against design-decision knowledge.",
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "MemorySearchRequest",
+        "type": "object"
+      },
+      "MemorySearchResponse": {
+        "description": "Response body for ``POST /v1/memory/search`` and the components GET.",
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeHitResponse"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "totalFound": {
+            "title": "Totalfound",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hits",
+          "query",
+          "totalFound"
+        ],
+        "title": "MemorySearchResponse",
+        "type": "object"
+      },
+      "MessageResponse": {
+        "description": "Single message inside a thread response.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "graph_ref_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Ref Label"
+          },
+          "graph_ref_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Ref Node"
+          },
+          "graph_ref_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Ref Type"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "actor_id",
+          "actor_kind",
+          "content",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "MessageResponse",
+        "type": "object"
+      },
+      "ModelInfo": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelInfo",
+        "type": "object"
+      },
+      "ModelsResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "source"
+        ],
+        "title": "ModelsResponse",
+        "type": "object"
+      },
+      "ProjectListResponse": {
+        "description": "List of projects.",
+        "properties": {
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectResponse"
+            },
+            "title": "Projects",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projects",
+          "total"
+        ],
+        "title": "ProjectListResponse",
+        "type": "object"
+      },
+      "ProjectResponse": {
+        "description": "Dashboard-friendly representation of a hardware project.",
+        "properties": {
+          "agent_count": {
+            "default": 0,
+            "title": "Agent Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_updated": {
+            "title": "Last Updated",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "work_products": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectWorkProductResponse"
+            },
+            "title": "Work Products",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "status",
+          "last_updated",
+          "created_at"
+        ],
+        "title": "ProjectResponse",
+        "type": "object"
+      },
+      "ProjectWorkProductResponse": {
+        "description": "A single work product within a project.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "status",
+          "updated_at"
+        ],
+        "title": "ProjectWorkProductResponse",
+        "type": "object"
+      },
+      "ProposalListResponse": {
+        "description": "Paginated list of design-change proposals.",
+        "properties": {
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/DesignChangeProposal"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "proposals",
+          "total"
+        ],
+        "title": "ProposalListResponse",
+        "type": "object"
+      },
+      "ProviderInfo": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "family": {
+            "title": "Family",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "family",
+          "configured"
+        ],
+        "title": "ProviderInfo",
+        "type": "object"
+      },
+      "ProvidersResponse": {
+        "properties": {
+          "active_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Model"
+          },
+          "active_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Provider"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfo"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "RevisionDiff": {
+        "description": "Metadata diff between two revisions.",
+        "properties": {
+          "added": {
+            "additionalProperties": true,
+            "title": "Added",
+            "type": "object"
+          },
+          "changed": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldDelta"
+            },
+            "title": "Changed",
+            "type": "object"
+          },
+          "removed": {
+            "additionalProperties": true,
+            "title": "Removed",
+            "type": "object"
+          },
+          "revision_a": {
+            "title": "Revision A",
+            "type": "integer"
+          },
+          "revision_b": {
+            "title": "Revision B",
+            "type": "integer"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id",
+          "revision_a",
+          "revision_b",
+          "changed",
+          "added",
+          "removed"
+        ],
+        "title": "RevisionDiff",
+        "type": "object"
+      },
+      "RunListResponse": {
+        "description": "Body for ``GET /v1/runs``.",
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunResponse"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "RunListResponse",
+        "type": "object"
+      },
+      "RunResponse": {
+        "description": "Serialized run state.",
+        "properties": {
+          "approval_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Reason"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "history": {
+            "items": {
+              "type": "string"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "request": {
+            "additionalProperties": true,
+            "title": "Request",
+            "type": "object"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "request",
+          "created_at",
+          "updated_at",
+          "history"
+        ],
+        "title": "RunResponse",
+        "type": "object"
+      },
+      "RunStatusResponse": {
+        "description": "Response from ``GET /api/v1/assistant/request/{run_id}``.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO timestamp when the run completed",
+            "title": "Completed At"
+          },
+          "run_id": {
+            "description": "Workflow run identifier",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Run status: pending, running, completed, failed",
+            "title": "Status",
+            "type": "string"
+          },
+          "steps": {
+            "additionalProperties": true,
+            "description": "Per-step status and results",
+            "title": "Steps",
+            "type": "object"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunStatusResponse",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "description": "Response from the knowledge search endpoint.",
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeEntryResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "totalFound": {
+            "title": "Totalfound",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "query",
+          "totalFound"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SendMessageRequest": {
+        "description": "Body for ``POST /api/v1/chat/threads/{thread_id}/messages``.",
+        "properties": {
+          "actor_id": {
+            "description": "ID of the actor sending the message",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "actor_kind": {
+            "description": "Actor type: user | agent | system",
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "content": {
+            "description": "Message content",
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "graph_ref_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Digital-twin ref label",
+            "title": "Graph Ref Label"
+          },
+          "graph_ref_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Digital-twin node reference",
+            "title": "Graph Ref Node"
+          },
+          "graph_ref_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Digital-twin ref type",
+            "title": "Graph Ref Type"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override model for this turn",
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override provider id for this turn",
+            "title": "Provider"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Enabled MCP tool ids for this turn (None = all available)",
+            "title": "Tools"
+          }
+        },
+        "required": [
+          "content",
+          "actor_id",
+          "actor_kind"
+        ],
+        "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SessionCreateRequest": {
+        "description": "Open a new externally-recorded agent session.",
+        "properties": {
+          "agent_code": {
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "agent_code",
+          "task_type"
+        ],
+        "title": "SessionCreateRequest",
+        "type": "object"
+      },
+      "SessionEventCreateRequest": {
+        "description": "Append one event to a session timeline.\n\n``type`` is the normalized capture vocabulary shared by every client\nadapter (MET-497): thought / action / decision / observation / error /\nresult.",
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "SessionEventCreateRequest",
+        "type": "object"
+      },
+      "SessionEventCreatedResponse": {
+        "description": "Ack for an appended event \u2014 carries the server-assigned sequence.",
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_id",
+          "seq"
+        ],
+        "title": "SessionEventCreatedResponse",
+        "type": "object"
+      },
+      "SessionEventResponse": {
+        "description": "A single event within a session timeline.",
+        "properties": {
+          "agent_code": {
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "timestamp",
+          "type",
+          "agent_code",
+          "message"
+        ],
+        "title": "SessionEventResponse",
+        "type": "object"
+      },
+      "SessionListResponse": {
+        "description": "List of sessions.",
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionResponse"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions",
+          "total"
+        ],
+        "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionResponse": {
+        "description": "Dashboard-friendly representation of an agent session.",
+        "properties": {
+          "agent_code": {
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/SessionEventResponse"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agent_code",
+          "task_type",
+          "status",
+          "started_at"
+        ],
+        "title": "SessionResponse",
+        "type": "object"
+      },
+      "SessionUpdateRequest": {
+        "description": "Close out a session (status + optional summary).",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "SessionUpdateRequest",
+        "type": "object"
+      },
+      "SourceDeleteResponse": {
+        "description": "Envelope for ``DELETE /knowledge/sources/{path}``.",
+        "properties": {
+          "deletedChunks": {
+            "title": "Deletedchunks",
+            "type": "integer"
+          },
+          "sourcePath": {
+            "title": "Sourcepath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourcePath",
+          "deletedChunks"
+        ],
+        "title": "SourceDeleteResponse",
+        "type": "object"
+      },
+      "SourceDetailResponse": {
+        "description": "Per-source detail \u2014 adds an empty ``chunks`` list for parity with the MCP resource.",
+        "properties": {
+          "chunks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Chunks",
+            "type": "array"
+          },
+          "fragmentCount": {
+            "title": "Fragmentcount",
+            "type": "integer"
+          },
+          "indexedAt": {
+            "format": "date-time",
+            "title": "Indexedat",
+            "type": "string"
+          },
+          "knowledgeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledgetype"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "sourcePath": {
+            "title": "Sourcepath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourcePath",
+          "fragmentCount",
+          "indexedAt"
+        ],
+        "title": "SourceDetailResponse",
+        "type": "object"
+      },
+      "SourceListResponse": {
+        "description": "Envelope for ``GET /knowledge/sources``.",
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummaryResponse"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "total"
+        ],
+        "title": "SourceListResponse",
+        "type": "object"
+      },
+      "SourceSummaryResponse": {
+        "description": "One row from ``GET /knowledge/sources`` \u2014 mirrors ``SourceSummary`` (MET-411).",
+        "properties": {
+          "fragmentCount": {
+            "title": "Fragmentcount",
+            "type": "integer"
+          },
+          "indexedAt": {
+            "format": "date-time",
+            "title": "Indexedat",
+            "type": "string"
+          },
+          "knowledgeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledgetype"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "sourcePath": {
+            "title": "Sourcepath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourcePath",
+          "fragmentCount",
+          "indexedAt"
+        ],
+        "title": "SourceSummaryResponse",
+        "type": "object"
+      },
+      "SynthesizeRequest": {
+        "properties": {
+          "delta": {
+            "$ref": "#/components/schemas/DeltaTransform"
+          },
+          "group_name": {
+            "minLength": 1,
+            "title": "Group Name",
+            "type": "string"
+          },
+          "obj_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obj Id"
+          },
+          "property_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Path"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "group_name",
+          "delta"
+        ],
+        "title": "SynthesizeRequest",
+        "type": "object"
+      },
+      "SynthesizeResponse": {
+        "properties": {
+          "binding_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding Error"
+          },
+          "bound": {
+            "default": false,
+            "title": "Bound",
+            "type": "boolean"
+          },
+          "conflict_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Reason"
+          },
+          "constraint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintSuggestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expression": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expression"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "conflict",
+              "noop"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "suggestion"
+        ],
+        "title": "SynthesizeResponse",
+        "type": "object"
+      },
+      "ThreadListResponse": {
+        "description": "Paginated list of thread summaries.",
+        "properties": {
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadSummaryResponse"
+            },
+            "title": "Threads",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "threads",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "ThreadListResponse",
+        "type": "object"
+      },
+      "ThreadResponse": {
+        "description": "Full thread with its messages.",
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_message_at": {
+            "format": "date-time",
+            "title": "Last Message At",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "scope_entity_id": {
+            "title": "Scope Entity Id",
+            "type": "string"
+          },
+          "scope_kind": {
+            "title": "Scope Kind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "channel_id",
+          "scope_kind",
+          "scope_entity_id",
+          "title",
+          "archived",
+          "created_at",
+          "last_message_at"
+        ],
+        "title": "ThreadResponse",
+        "type": "object"
+      },
+      "ThreadSummaryResponse": {
+        "description": "Thread without messages -- used in list views.",
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_message_at": {
+            "format": "date-time",
+            "title": "Last Message At",
+            "type": "string"
+          },
+          "message_count": {
+            "default": 0,
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "scope_entity_id": {
+            "title": "Scope Entity Id",
+            "type": "string"
+          },
+          "scope_kind": {
+            "title": "Scope Kind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "channel_id",
+          "scope_kind",
+          "scope_entity_id",
+          "title",
+          "archived",
+          "created_at",
+          "last_message_at"
+        ],
+        "title": "ThreadSummaryResponse",
+        "type": "object"
+      },
+      "ToolInfo": {
+        "properties": {
+          "capability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capability"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "server"
+        ],
+        "title": "ToolInfo",
+        "type": "object"
+      },
+      "TwinNodeListResponse": {
+        "description": "Paginated list of twin nodes.",
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/TwinNodeResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nodes",
+          "total"
+        ],
+        "title": "TwinNodeListResponse",
+        "type": "object"
+      },
+      "TwinNodeResponse": {
+        "description": "Single node in the Digital Twin graph, shaped for the dashboard.",
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "domain",
+          "status",
+          "properties",
+          "updatedAt"
+        ],
+        "title": "TwinNodeResponse",
+        "type": "object"
+      },
+      "TwinRelationshipListResponse": {
+        "description": "List of edges for the Digital Twin graph.",
+        "properties": {
+          "relationships": {
+            "items": {
+              "$ref": "#/components/schemas/TwinRelationshipResponse"
+            },
+            "title": "Relationships",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "relationships",
+          "total"
+        ],
+        "title": "TwinRelationshipListResponse",
+        "type": "object"
+      },
+      "TwinRelationshipResponse": {
+        "description": "A single directed edge in the Digital Twin graph.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sourceId": {
+            "title": "Sourceid",
+            "type": "string"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sourceId",
+          "targetId",
+          "type",
+          "label"
+        ],
+        "title": "TwinRelationshipResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkProductRevision": {
+        "description": "A single snapshot in a work product's revision history.",
+        "properties": {
+          "change_description": {
+            "title": "Change Description",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "metadata_snapshot": {
+            "additionalProperties": true,
+            "title": "Metadata Snapshot",
+            "type": "object"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "created_at",
+          "content_hash",
+          "change_description",
+          "metadata_snapshot"
+        ],
+        "title": "WorkProductRevision",
+        "type": "object"
+      },
+      "WorkProductVersionHistory": {
+        "description": "Full version history for a work product.",
+        "properties": {
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/WorkProductRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id",
+          "revisions",
+          "total"
+        ],
+        "title": "WorkProductVersionHistory",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "HTTP/WebSocket front door for the MetaForge platform",
+    "title": "MetaForge Gateway",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/compliance/{project_id}/checklist": {
+      "get": {
+        "description": "Generate a compliance checklist for the given project and markets.\n\nMarkets are provided as a comma-separated query parameter, e.g.\n``?markets=UKCA,CE,FCC``.",
+        "operationId": "get_checklist_api_v1_compliance__project_id__checklist_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated regime codes",
+            "in": "query",
+            "name": "markets",
+            "required": false,
+            "schema": {
+              "default": "UKCA,CE",
+              "description": "Comma-separated regime codes",
+              "title": "Markets",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Checklist",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/api/v1/compliance/{project_id}/coverage": {
+      "get": {
+        "description": "Get evidence coverage statistics for a project.",
+        "operationId": "get_coverage_api_v1_compliance__project_id__coverage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Coverage",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/api/v1/compliance/{project_id}/evidence": {
+      "post": {
+        "description": "Link a piece of evidence to a compliance checklist item.",
+        "operationId": "link_evidence_api_v1_compliance__project_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Evidence",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/api/v1/compliance/{project_id}/evidence/{item_id}": {
+      "get": {
+        "description": "Retrieve all evidence records for a checklist item.",
+        "operationId": "get_evidence_api_v1_compliance__project_id__evidence__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceResponse"
+                  },
+                  "title": "Response Get Evidence Api V1 Compliance  Project Id  Evidence  Item Id  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evidence",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Return the aggregated health of the gateway and its dependencies.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/assistant/proposals": {
+      "get": {
+        "description": "List pending design-change proposals, optionally filtered by session/project.",
+        "operationId": "list_proposals_v1_assistant_proposals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Proposals",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/proposals/{change_id}": {
+      "get": {
+        "description": "Return a single design-change proposal.",
+        "operationId": "get_proposal_v1_assistant_proposals__change_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "change_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Change Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignChangeProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Proposal",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/proposals/{change_id}/decide": {
+      "post": {
+        "description": "Approve or reject a pending design-change proposal.\n\nOn approval, run the proposal's diff via the apply executor (if wired) so the\nchange is actually applied to the twin (HITL: propose \u2192 approve \u2192 apply).",
+        "operationId": "decide_proposal_v1_assistant_proposals__change_id__decide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "change_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Change Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignChangeProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Proposal",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/request": {
+      "post": {
+        "description": "Submit a request to an agent via the orchestrator.\n\nLooks up the workflow definition for ``body.action``, creates a\nWorkflowRun, and dispatches it through the Scheduler.",
+        "operationId": "submit_request_v1_assistant_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Request",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/request/{run_id}": {
+      "get": {
+        "description": "Poll the status of a workflow run.",
+        "operationId": "get_run_status_v1_assistant_request__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Status",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/sessions/{session_id}/events": {
+      "get": {
+        "description": "SSE endpoint \u2014 streams real-time events for *session_id*.",
+        "operationId": "session_events_v1_assistant_sessions__session_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Session Events",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/bom": {
+      "get": {
+        "description": "List BOM components, optionally scoped to a project.\n\nEmpty (``{components: [], total: 0}``) when the project has no BOM \u2014 not a\n404, so the dashboard renders a clean empty state.",
+        "operationId": "list_bom_v1_bom_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BomListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bom",
+        "tags": [
+          "bom"
+        ]
+      }
+    },
+    "/v1/chat/channels": {
+      "get": {
+        "description": "Return all available chat channels.",
+        "operationId": "list_channels_v1_chat_channels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Channels",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/v1/chat/threads": {
+      "get": {
+        "description": "List threads with optional filtering and pagination.",
+        "operationId": "list_threads_v1_chat_threads_get",
+        "parameters": [
+          {
+            "description": "Filter by channel ID",
+            "in": "query",
+            "name": "channel_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by channel ID",
+              "title": "Channel Id"
+            }
+          },
+          {
+            "description": "Filter by scope kind",
+            "in": "query",
+            "name": "scope_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by scope kind",
+              "title": "Scope Kind"
+            }
+          },
+          {
+            "description": "Filter by scope entity ID",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by scope entity ID",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "description": "Include archived threads",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include archived threads",
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page number (1-indexed)",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number (1-indexed)",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Results per page",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Results per page",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Threads",
+        "tags": [
+          "chat"
+        ]
+      },
+      "post": {
+        "description": "Create a new thread, optionally with an initial message.",
+        "operationId": "create_thread_v1_chat_threads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateThreadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Thread",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/v1/chat/threads/{thread_id}": {
+      "get": {
+        "description": "Return a single thread with all its messages.",
+        "operationId": "get_thread_v1_chat_threads__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Thread",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/v1/chat/threads/{thread_id}/messages": {
+      "post": {
+        "description": "Append a message to an existing thread.\n\nAfter persisting the user message, the handler routes it to the\nappropriate domain agent (when an LLM is configured).  The agent's\nresponse is inserted into the thread automatically.",
+        "operationId": "send_message_v1_chat_threads__thread_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Message",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/v1/chat/threads/{thread_id}/stream": {
+      "get": {
+        "description": "Stream real-time events for a chat thread via Server-Sent Events.\n\nThe client receives events as they occur:\n\n- ``message.created`` -- a new message was added\n- ``agent.typing``    -- an agent is processing\n- ``agent.done``      -- an agent finished\n- ``error``           -- an error occurred\n\nThe connection stays open until the client disconnects or the server\ncloses the stream.",
+        "operationId": "stream_thread_events_v1_chat_threads__thread_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Thread Events",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/v1/constraint/synthesize": {
+      "post": {
+        "description": "Turn a drag delta into a parametric constraint, and \u2014 when the dragged\ngroup maps to a live FreeCAD session object (``session_id`` + ``obj_id``) \u2014\n**bind it into the model** so Apply re-parameterizes and re-solves (MET-531).\n\nWithout a session/object it stays a suggestion-only stub (MET-519). Binding\nis best-effort: an adapter error leaves the suggestion intact with\n``bound=False`` and a ``binding_error``.",
+        "operationId": "synthesize_constraint_v1_constraint_synthesize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthesizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthesize Constraint",
+        "tags": [
+          "constraint"
+        ]
+      }
+    },
+    "/v1/convert": {
+      "post": {
+        "description": "Upload a STEP/IGES file and convert to GLB.\n\nReturns the conversion result with a URL to the GLB file and metadata.\nResults are cached by content hash \u2014 re-uploading the same file is instant.",
+        "operationId": "upload_and_convert_v1_convert_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "quality",
+            "required": false,
+            "schema": {
+              "default": "standard",
+              "pattern": "^(preview|standard|fine)$",
+              "title": "Quality",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_and_convert_v1_convert_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload And Convert",
+        "tags": [
+          "convert"
+        ]
+      }
+    },
+    "/v1/convert/{file_hash}": {
+      "get": {
+        "description": "Retrieve a cached conversion result by content hash.",
+        "operationId": "get_conversion_v1_convert__file_hash__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_hash",
+            "required": true,
+            "schema": {
+              "title": "File Hash",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "quality",
+            "required": false,
+            "schema": {
+              "default": "standard",
+              "pattern": "^(preview|standard|fine)$",
+              "title": "Quality",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversion",
+        "tags": [
+          "convert"
+        ]
+      }
+    },
+    "/v1/convert/{file_hash}/glb": {
+      "get": {
+        "description": "Download the converted GLB file.",
+        "operationId": "get_glb_v1_convert__file_hash__glb_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_hash",
+            "required": true,
+            "schema": {
+              "title": "File Hash",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "quality",
+            "required": false,
+            "schema": {
+              "default": "standard",
+              "pattern": "^(preview|standard|fine)$",
+              "title": "Quality",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Glb",
+        "tags": [
+          "convert"
+        ]
+      }
+    },
+    "/v1/convert/{file_hash}/metadata": {
+      "get": {
+        "description": "Retrieve conversion metadata (part tree, stats, materials).",
+        "operationId": "get_metadata_v1_convert__file_hash__metadata_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_hash",
+            "required": true,
+            "schema": {
+              "title": "File Hash",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "quality",
+            "required": false,
+            "schema": {
+              "default": "standard",
+              "pattern": "^(preview|standard|fine)$",
+              "title": "Quality",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Metadata V1 Convert  File Hash  Metadata Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Metadata",
+        "tags": [
+          "convert"
+        ]
+      }
+    },
+    "/v1/harness/models": {
+      "get": {
+        "description": "Models for a provider. OpenAI-compatible + configured \u2192 live-fetched; else empty.",
+        "operationId": "list_models_v1_harness_models_get",
+        "parameters": [
+          {
+            "description": "Provider id",
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "Provider id",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Models",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/v1/harness/providers": {
+      "get": {
+        "description": "List registered providers (configured ones first) + the active selection.",
+        "operationId": "list_providers_v1_harness_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Providers",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/v1/harness/tools": {
+      "get": {
+        "description": "MCP tools/connectors reachable via the gateway's bridge (empty if none wired).",
+        "operationId": "list_tools_v1_harness_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ToolInfo"
+                  },
+                  "title": "Response List Tools V1 Harness Tools Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/v1/knowledge/documents": {
+      "post": {
+        "description": "Ingest a document (markdown / plain text) via the L1 ``KnowledgeService``.\n\nBacks the ``forge ingest <path>`` CLI (MET-336). Heading-aware\nchunking, dedup, and citation metadata are handled by the\nunderlying provider \u2014 the route is a thin pass-through.",
+        "operationId": "ingest_document_v1_knowledge_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Document",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/knowledge/ingest": {
+      "post": {
+        "description": "Manually ingest a knowledge entry.\n\nRoutes through ``KnowledgeService`` when available so the chunk\npipeline, dedup, and citation-field round-trip apply consistently\nwith ``/documents`` and ``/search`` (MET-390).",
+        "operationId": "ingest_knowledge_v1_knowledge_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Knowledge",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/knowledge/search": {
+      "get": {
+        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents`` (MET-390).",
+        "operationId": "search_knowledge_v1_knowledge_search_get",
+        "parameters": [
+          {
+            "description": "Search query",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "Search query",
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by knowledge type",
+            "in": "query",
+            "name": "knowledgeType",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/KnowledgeType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by knowledge type",
+              "title": "Knowledgetype"
+            }
+          },
+          {
+            "description": "Max results",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "description": "Max results",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Knowledge",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/knowledge/sources": {
+      "get": {
+        "description": "List ingested knowledge sources via ``KnowledgeService.list_sources()``.\n\nBacks the ``forge sources list`` CLI (MET-411). Mirrors the schema\nsurfaced by the ``metaforge://knowledge/sources`` MCP resource.",
+        "operationId": "list_knowledge_sources_v1_knowledge_sources_get",
+        "parameters": [
+          {
+            "description": "Filter by knowledge type",
+            "in": "query",
+            "name": "knowledgeType",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/KnowledgeType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by knowledge type",
+              "title": "Knowledgetype"
+            }
+          },
+          {
+            "description": "Filter by project UUID",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by project UUID",
+              "title": "Projectid"
+            }
+          },
+          {
+            "description": "Max sources to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Max sources to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Pagination offset",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Pagination offset",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Knowledge Sources",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/knowledge/sources/{source_path}": {
+      "delete": {
+        "description": "Delete every chunk for a source via ``KnowledgeService.delete_by_source()``.\n\nBacks the ``forge sources delete`` CLI (MET-411). Returns the\nchunk count the backend removed; ``0`` when the source was already\nabsent \u2014 callers treat that as a no-op rather than an error.",
+        "operationId": "delete_knowledge_source_v1_knowledge_sources__source_path__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_path",
+            "required": true,
+            "schema": {
+              "title": "Source Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Knowledge Source",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "get": {
+        "description": "Per-source detail \u2014 looks up by exact ``source_path`` match.\n\nNo dedicated single-source accessor exists in the ``KnowledgeService``\ncontract, so we list and find \u2014 fine for CLI usage where the user\nhas already picked a known path. Returns 404 when the source isn't\nregistered.",
+        "operationId": "get_knowledge_source_v1_knowledge_sources__source_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_path",
+            "required": true,
+            "schema": {
+              "title": "Source Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by project UUID",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by project UUID",
+              "title": "Projectid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Knowledge Source",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/knowledge/{entry_id}": {
+      "get": {
+        "description": "Retrieve a single knowledge entry by ID.",
+        "operationId": "get_knowledge_entry_v1_knowledge__entry_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeEntryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Knowledge Entry",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/v1/memory/components/{name}": {
+      "get": {
+        "description": "Component usage / relationship knowledge for ``name`` (MET-471).\n\nWraps ``MemoryClient.get_component_context``: a typed convenience\nover the L1 knowledge base keyed off ``KnowledgeType.COMPONENT``.\nEmpty / whitespace ``name`` returns 422 \u2014 that's a client bug, not\na backend gap.",
+        "operationId": "get_component_context_v1_memory_components__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Projectid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Component Context",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/v1/memory/consolidate": {
+      "post": {
+        "description": "Trigger one consolidation pass synchronously.\n\nDefaults to ``on_demand`` mode (manual triage with the importance\nfloor relaxed). Pass ``mode=background`` to run the standard pass\nor ``mode=janitor`` to re-validate previously-stored insights\nwithout synthesizing new ones.",
+        "operationId": "trigger_consolidation_v1_memory_consolidate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsolidationTriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidationTriggerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Consolidation",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/v1/memory/insights": {
+      "get": {
+        "description": "List consolidated insights, newest first.\n\nExcludes ``STALE_WARN`` insights by default \u2014 agents should act on\nfresh lessons. Pass ``includeStale=true`` for an audit / review view\nthat includes faded insights. Optional ``theme`` narrows to one\nconsolidation theme.",
+        "operationId": "list_insights_v1_memory_insights_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConsolidationTheme"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeStale",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Includestale",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Insights",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/v1/memory/retrieve": {
+      "post": {
+        "description": "Return experiences most similar to the supplied goal.\n\nBody shape matches ``MemoryRetrieveRequest``. The response carries\n``hits`` sorted by descending similarity, plus the echoed ``query``\nand ``total_found`` so callers can paginate without re-derivation.",
+        "operationId": "retrieve_similar_experience_v1_memory_retrieve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryRetrieveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRetrieveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retrieve Similar Experience",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/v1/memory/search": {
+      "post": {
+        "description": "Semantic search over design-decision knowledge (MET-471).\n\nWraps ``MemoryClient.search_design_rationale``: a typed convenience\nover the L1 knowledge base that asks \"why was X decided?\" and\nreturns ranked hits keyed off ``KnowledgeType.DESIGN_DECISION``.\nRequires the gateway to have wired a knowledge_service on\n``app.state.knowledge_service``; the 503 from ``_get_client``\ncovers the case where the service hasn't initialised.",
+        "operationId": "search_design_rationale_v1_memory_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorySearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Design Rationale",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "description": "List all hardware projects.",
+        "operationId": "list_projects_v1_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Projects",
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "description": "Create a new hardware project and seed an initial WorkProduct.",
+        "operationId": "create_project_v1_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}": {
+      "delete": {
+        "description": "Delete a project by ID.",
+        "operationId": "delete_project_v1_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Project",
+        "tags": [
+          "projects"
+        ]
+      },
+      "get": {
+        "description": "Get a single project by ID.",
+        "operationId": "get_project_v1_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/work-products/{work_product_id}": {
+      "delete": {
+        "description": "Remove a work-product link from a project (MET-484).\n\nLets callers clean up duplicate/stale work-product references without\ndeleting the project. 404 if no matching link exists.",
+        "operationId": "unlink_work_product_v1_projects__project_id__work_products__work_product_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unlink Work Product",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/v1/runs": {
+      "get": {
+        "operationId": "list_runs_v1_runs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Runs",
+        "tags": [
+          "runs"
+        ]
+      },
+      "post": {
+        "operationId": "create_run_v1_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_v1_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/approval": {
+      "post": {
+        "operationId": "submit_approval_v1_runs__run_id__approval_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Approval",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/events": {
+      "get": {
+        "description": "SSE stream of a run's status transitions until it reaches a terminal state.",
+        "operationId": "stream_run_events_v1_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Run Events",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "description": "List all agent sessions.\n\nMerges internal Temporal ``WorkflowRun``s with externally-recorded\nagent sessions (MET-493) so MCP/CLI-driven work shows up alongside\nautonomous runs. Most-recent-first.\n\n``project_id`` scopes to one project (MET-516). Internal Temporal runs\ncarry no project, so they're excluded when a project filter is set.",
+        "operationId": "list_sessions_v1_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "post": {
+        "description": "Open a new externally-recorded agent session.",
+        "operationId": "create_session_v1_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}": {
+      "get": {
+        "description": "Get a single session by ID (store first, then workflow engine).",
+        "operationId": "get_session_v1_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "patch": {
+        "description": "Complete a session (set terminal status + optional summary).",
+        "operationId": "update_session_v1_sessions__session_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/events": {
+      "post": {
+        "description": "Append one event (thought / action / decision / \u2026) to a session.",
+        "operationId": "append_session_event_v1_sessions__session_id__events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionEventCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionEventCreatedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Append Session Event",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/twin/import": {
+      "post": {
+        "description": "Upload a design file and register it as a work product in the Twin.\n\nAccepts STEP, IGES, KiCad (.kicad_sch, .kicad_pcb), and FreeCAD\n(.FCStd) files. Metadata is extracted automatically based on file type.",
+        "operationId": "import_work_product_v1_twin_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_work_product_v1_twin_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportWorkProductResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Work Product",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/links": {
+      "get": {
+        "description": "List file links with live sync status, optionally scoped to a project.\n\nA link has no project of its own; scoping (MET-517) keeps only links whose\nlinked work product belongs to ``project_id``.",
+        "operationId": "list_file_links_v1_twin_links_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FileLinkResponse"
+                  },
+                  "title": "Response List File Links V1 Twin Links Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List File Links",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes": {
+      "get": {
+        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project (MET-491). Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.",
+        "operationId": "list_twin_nodes_v1_twin_nodes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinNodeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Twin Nodes",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}": {
+      "delete": {
+        "description": "Delete a work-product node, its project links, and its MinIO blob (MET-484).\n\nWithout ``cascade`` a delete that would orphan dependents returns 409.\nBest-effort on the blob (a storage failure doesn't block the delete).",
+        "operationId": "delete_node_v1_twin_nodes__node_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Also delete dependents that would orphan",
+            "in": "query",
+            "name": "cascade",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also delete dependents that would orphan",
+              "title": "Cascade",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Node",
+        "tags": [
+          "twin"
+        ]
+      },
+      "get": {
+        "description": "Get a single work-product node by ID.",
+        "operationId": "get_twin_node_v1_twin_nodes__node_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinNodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Twin Node",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/diff": {
+      "get": {
+        "description": "Return a metadata diff between two revisions (1-indexed).",
+        "operationId": "diff_versions_v1_twin_nodes__node_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "v1",
+            "required": true,
+            "schema": {
+              "title": "V1",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "v2",
+            "required": true,
+            "schema": {
+              "title": "V2",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Versions",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/file": {
+      "get": {
+        "description": "Stream a work product's stored file for download / open / preview.\n\n``download=false`` (default) returns the blob inline with a preview\ncontent-type so the dashboard can render PDFs, images, text, and BOMs\nin place; ``download=true`` forces a ``Content-Disposition: attachment``.",
+        "operationId": "download_node_file_v1_twin_nodes__node_id__file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Force attachment download vs inline preview",
+            "in": "query",
+            "name": "download",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Force attachment download vs inline preview",
+              "title": "Download",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Node File",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/iterate": {
+      "post": {
+        "description": "Record a new revision and apply metadata updates to a work product.",
+        "operationId": "iterate_work_product_v1_twin_nodes__node_id__iterate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IterateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkProductRevision"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Iterate Work Product",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/link": {
+      "delete": {
+        "description": "Remove the file link for a work product.",
+        "operationId": "delete_file_link_v1_twin_nodes__node_id__link_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete File Link",
+        "tags": [
+          "twin"
+        ]
+      },
+      "get": {
+        "description": "Get the file link for a work product, with live sync status.",
+        "operationId": "get_file_link_v1_twin_nodes__node_id__link_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get File Link",
+        "tags": [
+          "twin"
+        ]
+      },
+      "post": {
+        "description": "Link a work product to an external source file.\n\nThe source file must exist on the gateway's filesystem. Once linked,\nyou can call ``POST /sync`` to re-import changes, or enable ``watch``\nfor automatic detection.",
+        "operationId": "create_file_link_v1_twin_nodes__node_id__link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileLinkCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create File Link",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/model": {
+      "get": {
+        "description": "Convert a CAD work-product's STEP file to GLB and return the URL.\n\nReads the STEP file from the shared adapter workspace, converts it\nvia the OCCT converter, and returns the GLB URL + metadata.",
+        "operationId": "get_node_model_v1_twin_nodes__node_id__model_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "quality",
+            "required": false,
+            "schema": {
+              "default": "standard",
+              "pattern": "^(preview|standard|fine)$",
+              "title": "Quality",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Node Model V1 Twin Nodes  Node Id  Model Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Node Model",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/sync": {
+      "post": {
+        "description": "Manually trigger a sync for a linked work product.\n\nRe-reads the source file, extracts metadata, and updates the Twin\nnode if the file has changed.",
+        "operationId": "sync_file_link_v1_twin_nodes__node_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Sync File Link V1 Twin Nodes  Node Id  Sync Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync File Link",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/versions": {
+      "get": {
+        "description": "Return the full revision history for a work product.",
+        "operationId": "get_version_history_v1_twin_nodes__node_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkProductVersionHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Version History",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/relationships": {
+      "get": {
+        "description": "List all edges in the Digital Twin graph.",
+        "operationId": "list_twin_relationships_v1_twin_relationships_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinRelationshipListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Twin Relationships",
+        "tags": [
+          "twin"
+        ]
+      }
+    }
+  }
+}
