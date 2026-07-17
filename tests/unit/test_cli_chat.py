@@ -74,6 +74,7 @@ def _args(**over: Any) -> argparse.Namespace:
         timeout=120.0,
         no_color=True,
         no_stream=True,  # unit tests exercise the non-streaming path
+        mode="ask",
     )
     base.update(over)
     return argparse.Namespace(**base)
@@ -307,3 +308,49 @@ def test_dispatch_slash_unknown_is_handled_not_passed(capsys: Any) -> None:
     state = _ReplState(thread_id="t-1")
     assert _dispatch_slash("/bogus", client, _args(), state, color=False) == "handled"  # type: ignore[arg-type]
     assert "unknown command" in capsys.readouterr().out
+
+
+# --- permission modes + plan mode (MET-560) --------------------------------
+
+
+def test_review_auto_mode_approves_all() -> None:
+    client = StubClient(
+        proposals=[
+            {"change_id": "p-1", "status": "pending", "description": "a"},
+            {"change_id": "p-2", "status": "pending", "description": "b"},
+        ]
+    )
+    _review_new_proposals(client, set(), color=False, interactive=False, mode="auto")  # type: ignore[arg-type]
+    assert client.approved == ["p-1", "p-2"]
+    assert client.rejected == []
+
+
+def test_review_plan_mode_holds_without_applying(capsys: Any) -> None:
+    client = StubClient(proposals=[{"change_id": "p-9", "status": "pending", "description": "x"}])
+    _review_new_proposals(client, set(), color=False, interactive=True, mode="plan")  # type: ignore[arg-type]
+    out = capsys.readouterr().out
+    assert "plan mode" in out
+    assert client.approved == [] and client.rejected == []  # nothing applied
+
+
+def test_dispatch_slash_plan_shortcut_sets_plan_mode() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    assert _dispatch_slash("/plan", client, _args(), state, color=False) == "handled"  # type: ignore[arg-type]
+    assert state.mode == "plan"
+
+
+def test_dispatch_slash_mode_set_and_show(capsys: Any) -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    _dispatch_slash("/mode auto", client, _args(), state, color=False)  # type: ignore[arg-type]
+    assert state.mode == "auto"
+    _dispatch_slash("/mode", client, _args(), state, color=False)  # type: ignore[arg-type]
+    assert "mode=auto" in capsys.readouterr().out
+
+
+def test_dispatch_slash_mode_rejects_unknown() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    _dispatch_slash("/mode bogus", client, _args(), state, color=False)  # type: ignore[arg-type]
+    assert state.mode == "ask"  # unchanged

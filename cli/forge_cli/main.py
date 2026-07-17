@@ -148,6 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable SSE streaming; use request/refetch instead",
     )
+    chat_parser.add_argument(
+        "--mode",
+        choices=["ask", "auto", "plan"],
+        default="ask",
+        help="Proposal handling: ask (prompt), auto (approve), plan (hold). Default ask",
+    )
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(

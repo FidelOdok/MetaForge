@@ -272,15 +272,36 @@ def _review_new_proposals(
     *,
     color: bool,
     interactive: bool,
+    mode: str = "ask",
 ) -> None:
-    """Surface proposals created during the turn (change_ids not in ``before_ids``).
+    """Handle proposals created during the turn (change_ids not in ``before_ids``).
 
-    Interactive REPL prompts a decision per proposal; one-shot mode just prints a
-    non-blocking notice so scripts don't hang on input.
+    Behavior depends on the permission ``mode``:
+    - ``auto``  — approve every new proposal without asking.
+    - ``plan``  — hold: list them but never apply (nothing mutates the twin).
+    - ``ask``   — interactive REPL prompts a decision per proposal; one-shot mode
+                  prints a non-blocking notice so scripts don't hang on input.
     """
     new = [p for p in _pending_proposals(client) if str(p.get("change_id", "")) not in before_ids]
     if not new:
         return
+
+    if mode == "auto":
+        for p in new:
+            cid = str(p.get("change_id", ""))
+            try:
+                client.approve_proposal(cid, reason="auto-approved (auto mode)")
+                print(_c(f"  ✓ auto-approved {cid}", _GREEN, enabled=color))
+            except ForgeClientError as exc:
+                print(f"  Error: auto-approve failed: {exc}", file=sys.stderr)
+        return
+
+    if mode == "plan":
+        msg = f"  ⚑ {len(new)} proposal(s) held (plan mode) — not applied. /mode ask to review."
+        print(_c(msg, _YELLOW, enabled=color))
+        return
+
+    # mode == "ask"
     if not interactive:
         msg = f"  ⚑ {len(new)} change proposal(s) pending — run 'forge proposals' to review."
         print(_c(msg, _YELLOW, enabled=color))
@@ -311,20 +332,37 @@ def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None
     return str(thread["id"])
 
 
+_MODES = ("ask", "auto", "plan")
+
+
 @dataclass
 class _ReplState:
     """Mutable per-session REPL state that slash commands can change."""
 
     thread_id: str
+    mode: str = "ask"
     quit: bool = False
 
 
 _HELP = """Commands:
   /help                 show this help
   /model [provider] mdl show or set the provider/model for this session
+  /mode [ask|auto|plan] show or set how proposals are handled
+  /plan                 shortcut for /mode plan (hold changes, don't apply)
   /thread               show the current thread id
   /clear                start a fresh thread (clears context)
   /exit, /quit          leave the chat"""
+
+
+def _set_mode(state: _ReplState, mode: str, *, color: bool) -> None:
+    """Set the permission mode with a clear, mode-appropriate confirmation."""
+    state.mode = mode
+    if mode == "auto":
+        print(_c("  mode=auto — new change proposals are AUTO-APPROVED", _YELLOW, enabled=color))
+    elif mode == "plan":
+        print(_c("  mode=plan — changes are held, never applied", _GREEN, enabled=color))
+    else:
+        print(_c("  mode=ask — you'll be prompted for each change", _GREEN, enabled=color))
 
 
 def _dispatch_slash(
@@ -356,6 +394,19 @@ def _dispatch_slash(
 
     if cmd == "/thread":
         print(_c(f"  thread {state.thread_id}", _DIM, enabled=color))
+        return "handled"
+
+    if cmd == "/plan":
+        _set_mode(state, "plan", color=color)
+        return "handled"
+
+    if cmd == "/mode":
+        if not rest:
+            print(_c(f"  mode={state.mode}", _DIM, enabled=color))
+        elif rest[0].lower() in _MODES:
+            _set_mode(state, rest[0].lower(), color=color)
+        else:
+            print(_c(f"  unknown mode: {rest[0]} (ask|auto|plan)", _DIM, enabled=color))
         return "handled"
 
     if cmd == "/model":
@@ -396,14 +447,16 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
 
     turn = _turn if getattr(args, "no_stream", False) else _turn_streaming
 
+    mode = getattr(args, "mode", "ask")
+
     # One-shot mode: send a single message and exit (scriptable).
     if args.message:
         before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
         turn(args, client, thread_id, args.message, color=color)
-        _review_new_proposals(client, before, color=color, interactive=False)
+        _review_new_proposals(client, before, color=color, interactive=False, mode=mode)
         return None
 
-    state = _ReplState(thread_id=thread_id)
+    state = _ReplState(thread_id=thread_id, mode=mode)
     banner = _c("MetaForge assistant", _BOLD, enabled=color)
     banner += _c(f"  (thread {thread_id})", _DIM, enabled=color)
     print(banner)
@@ -433,6 +486,6 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
 
         before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
         turn(args, client, state.thread_id, line, color=color)
-        _review_new_proposals(client, before, color=color, interactive=True)
+        _review_new_proposals(client, before, color=color, interactive=True, mode=state.mode)
 
     return None
