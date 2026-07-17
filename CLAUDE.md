@@ -8,11 +8,29 @@ MetaForge is a **local-first control plane** that turns human intent into review
 
 **Prime Rule**: If it can't be versioned, reviewed, and built — MetaForge doesn't output it.
 
-## Planning & Reference Repository
+## Documentation: Two Sources of Truth
 
-The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) contains all architectural plans, specifications, and documentation. Use it as the source of truth for:
+Architecture documentation lives in **two places**, split by tense — what is built vs. what is planned. Consult the right one for the task:
 
-- **Architecture**: `docs/architecture/` — system vision, orchestrator design, technical specs
+### Live architecture — this repo's `docs/`
+
+The **`docs/`** directory in *this* repo documents the architecture **as implemented**. This is the source of truth for how the system actually works today. It is published as a MkDocs Material site on GitHub Pages at **https://fidelodok.github.io/MetaForge/** (auto-deployed by `.github/workflows/docs.yml` on every push to `main` that touches `docs/`). Key references:
+
+- **Overview**: `docs/architecture.md` — system architecture as built
+- **Harness**: `docs/architecture/robust-harness-design.md` — the agent harness (ReAct loop, providers, tools, gates)
+- **Context engineering**: `docs/architecture/context-engineering.md`
+- **MCP protocol**: `docs/mcp_spec.md` — wire protocol + tool communication
+- **Capability matrix**: `docs/capability-matrix.md` — tool catalog + Phase-1 limits
+- **Skill / Twin specs**: `docs/skill_spec.md`, `docs/twin_schema.md`
+- **Session capture**: `docs/session-capture.md`
+
+When documenting or reasoning about **current behavior**, use `docs/` — and keep it accurate, since the docs CI builds `--strict` (broken links / warnings fail the build).
+
+### Future plans — the MetaForge-Planner repo
+
+The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) is the source of truth for **forward-looking** plans, specifications, and vision — what we intend to build, not what exists yet:
+
+- **Architecture (planned)**: `docs/architecture/` — system vision, orchestrator design, technical specs
 - **Repository Structure**: `docs/architecture/repository-structure.md` — canonical monorepo layout
 - **Framework**: `docs/FRAMEWORK_MAPPING.md` — 25-discipline taxonomy with phase-by-phase implementation
 - **Roadmap**: `docs/roadmap.md` and `docs/architecture/mvp-roadmap.md` — phased delivery plan
@@ -20,7 +38,7 @@ The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) contains all arch
 - **Tool catalog**: `TOOLS_INTEGRATION_CATALOG.md` — all external tool integrations
 - **Vision**: `VISION.md` — project principles and non-goals
 
-When planning new features or making architectural decisions, fetch the relevant docs from `FidelOdok/MetaForge-Planner` using GitHub tools before implementing. Do not invent architecture — follow what's specified there.
+When **planning new features or making architectural decisions**, fetch the relevant docs from `FidelOdok/MetaForge-Planner` using GitHub tools before implementing. Do not invent architecture — follow what's specified there. Once a plan is built, reflect the implemented reality in this repo's `docs/`.
 
 ## Project & Task Management (Linear)
 

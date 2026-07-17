@@ -30,21 +30,30 @@ theme:
     - search.highlight
     - content.code.copy
     - content.action.edit
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: Inter
+    code: Roboto Mono
   palette:
-    - scheme: default
-      primary: deep purple
-      accent: deep purple
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
+    # Dark-first, matching the Kinetic Console dashboard (MET-553).
     - scheme: slate
-      primary: deep purple
-      accent: deep purple
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   icon:
     repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/brand.css
 
 plugins:
   - search
