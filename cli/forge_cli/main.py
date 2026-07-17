@@ -154,6 +154,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="ask",
         help="Proposal handling: ask (prompt), auto (approve), plan (hold). Default ask",
     )
+    chat_parser.add_argument(
+        "--hooks",
+        default=".forge/hooks.json",
+        help="Path to a lifecycle-hooks config (default .forge/hooks.json)",
+    )
+    chat_parser.add_argument("--no-hooks", action="store_true", help="Disable lifecycle hooks")
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(

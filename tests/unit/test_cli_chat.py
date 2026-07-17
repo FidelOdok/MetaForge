@@ -75,6 +75,8 @@ def _args(**over: Any) -> argparse.Namespace:
         no_color=True,
         no_stream=True,  # unit tests exercise the non-streaming path
         mode="ask",
+        hooks=".forge/hooks.json",
+        no_hooks=True,  # hooks disabled in handle_chat tests
     )
     base.update(over)
     return argparse.Namespace(**base)

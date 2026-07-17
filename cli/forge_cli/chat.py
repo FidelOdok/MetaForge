@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cli.forge_cli.client import ForgeClient, ForgeClientError, ForgeClientNotFound
+from cli.forge_cli.hooks import HookRunner
 
 # The main assistant chat lives on the "assistant" scope (Design Assistant channel).
 _SCOPE_KIND = "assistant"
@@ -448,12 +449,20 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
     turn = _turn if getattr(args, "no_stream", False) else _turn_streaming
 
     mode = getattr(args, "mode", "ask")
+    hooks = HookRunner.from_path(
+        getattr(args, "hooks", ".forge/hooks.json"),
+        enabled=not getattr(args, "no_hooks", False),
+    )
+    hooks.run("session_start", {"thread_id": thread_id, "mode": mode})
 
     # One-shot mode: send a single message and exit (scriptable).
     if args.message:
+        hooks.run("user_prompt", {"message": args.message, "thread_id": thread_id, "mode": mode})
         before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
         turn(args, client, thread_id, args.message, color=color)
         _review_new_proposals(client, before, color=color, interactive=False, mode=mode)
+        hooks.run("post_turn", {"thread_id": thread_id, "mode": mode})
+        hooks.run("session_end", {"thread_id": thread_id})
         return None
 
     state = _ReplState(thread_id=thread_id, mode=mode)
@@ -484,8 +493,13 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
         if action == "handled":
             continue
 
+        hooks.run(
+            "user_prompt", {"message": line, "thread_id": state.thread_id, "mode": state.mode}
+        )
         before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
         turn(args, client, state.thread_id, line, color=color)
         _review_new_proposals(client, before, color=color, interactive=True, mode=state.mode)
+        hooks.run("post_turn", {"thread_id": state.thread_id, "mode": state.mode})
 
+    hooks.run("session_end", {"thread_id": state.thread_id})
     return None
