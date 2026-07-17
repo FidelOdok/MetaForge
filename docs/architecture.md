@@ -345,7 +345,7 @@ sequenceDiagram
     participant K as Kafka
 
     H->>CLI: forge run validate-stress model.step
-    CLI->>GW: POST /api/v1/workflows
+    CLI->>GW: POST /v1/runs
     GW->>O: Start workflow
     O->>A: Schedule mechanical agent
     A->>TW: Read current work_product state
@@ -363,7 +363,7 @@ sequenceDiagram
     GW-->>CLI: Response (approval required)
     CLI-->>H: Show results + approval prompt
     H->>CLI: Approve
-    CLI->>GW: POST /api/v1/approvals
+    CLI->>GW: POST /v1/runs/{run_id}/approval
     GW->>TW: Merge branch to main
     TW->>K: Emit artifact_committed event
 ```

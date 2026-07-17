@@ -33,7 +33,7 @@ jobs:
           cache: pip
 
       - name: Install MkDocs
-        run: pip install mkdocs-material mkdocs-include-markdown-plugin
+        run: pip install mkdocs-material mkdocs-include-markdown-plugin mkdocs-swagger-ui-tag
 
       - name: Build site (strict — fails on warnings or broken links)
         run: mkdocs build --strict
