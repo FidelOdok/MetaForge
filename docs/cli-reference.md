@@ -125,6 +125,32 @@ or timeout logs a warning and never breaks the turn.
 > provider configured for the harness (`METAFORGE_CHAT_HARNESS` + credentials).
 > Without one, `forge chat` still runs but reports "no reply".
 
+### `routine` — scheduled background runs
+
+```
+routine [--file PATH] {add,list,remove,run-due}
+routine add "<prompt>" --every 30m [--provider P] [--model M] [--mode M]
+routine list
+routine remove <id>
+routine run-due
+```
+
+A daemonless way to run assistant prompts on a schedule (the "routines" idea).
+Routines are stored in `.forge/routines.json`; `run-due` fires every routine
+whose interval has elapsed (creating an assistant thread and sending the prompt)
+and records `last_run`. Wire `run-due` to OS cron or a loop for real scheduling:
+
+```bash
+# add a nightly design-review prompt
+python -m cli.forge_cli routine add "Review the latest DRC results" --every 1d
+
+# in crontab: fire due routines every 15 minutes
+*/15 * * * * python -m cli.forge_cli routine run-due
+```
+
+Intervals are `30s` / `10m` / `2h` / `1d` (not full cron). Each `run-due` is
+best-effort — one routine's failure doesn't stop the others.
+
 ### `run` — invoke a skill
 
 ```
