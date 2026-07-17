@@ -18,6 +18,7 @@ import sys
 import threading
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from cli.forge_cli.client import ForgeClient, ForgeClientError, ForgeClientNotFound
@@ -310,6 +311,81 @@ def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None
     return str(thread["id"])
 
 
+@dataclass
+class _ReplState:
+    """Mutable per-session REPL state that slash commands can change."""
+
+    thread_id: str
+    quit: bool = False
+
+
+_HELP = """Commands:
+  /help                 show this help
+  /model [provider] mdl show or set the provider/model for this session
+  /thread               show the current thread id
+  /clear                start a fresh thread (clears context)
+  /exit, /quit          leave the chat"""
+
+
+def _dispatch_slash(
+    line: str,
+    client: ForgeClient,
+    args: argparse.Namespace,
+    state: _ReplState,
+    *,
+    color: bool,
+) -> str:
+    """Handle a slash command. Returns 'pass' | 'handled' | 'quit'.
+
+    'pass' means the line is not a command and should go to the agent.
+    """
+    if not line.startswith("/"):
+        return "pass"
+
+    parts = line.split()
+    cmd = parts[0].lower()
+    rest = parts[1:]
+
+    if cmd in ("/exit", "/quit"):
+        state.quit = True
+        return "quit"
+
+    if cmd == "/help":
+        print(_HELP)
+        return "handled"
+
+    if cmd == "/thread":
+        print(_c(f"  thread {state.thread_id}", _DIM, enabled=color))
+        return "handled"
+
+    if cmd == "/model":
+        if not rest:
+            cur = f"provider={args.provider or '(default)'}  model={args.model or '(default)'}"
+            print(_c(f"  {cur}", _DIM, enabled=color))
+        elif len(rest) == 1:
+            args.model = rest[0]
+            print(_c(f"  model set to {rest[0]}", _GREEN, enabled=color))
+        else:
+            args.provider, args.model = rest[0], rest[1]
+            print(_c(f"  provider={rest[0]}  model={rest[1]}", _GREEN, enabled=color))
+        return "handled"
+
+    if cmd == "/clear":
+        try:
+            thread = client.create_thread(
+                _SCOPE_KIND, f"cli-{uuid.uuid4().hex[:8]}", title="CLI session"
+            )
+        except ForgeClientError as exc:
+            print(f"  Error: could not start a new thread: {exc}", file=sys.stderr)
+            return "handled"
+        state.thread_id = str(thread["id"])
+        print(_c(f"  new thread {state.thread_id}", _GREEN, enabled=color))
+        return "handled"
+
+    print(_c(f"  unknown command: {cmd} (try /help)", _DIM, enabled=color))
+    return "handled"
+
+
 def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Dispatch `forge chat` — one-shot (``--message``) or interactive REPL."""
     color = sys.stdout.isatty() and not getattr(args, "no_color", False)
@@ -327,10 +403,13 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
         _review_new_proposals(client, before, color=color, interactive=False)
         return None
 
+    state = _ReplState(thread_id=thread_id)
     banner = _c("MetaForge assistant", _BOLD, enabled=color)
     banner += _c(f"  (thread {thread_id})", _DIM, enabled=color)
     print(banner)
-    print(_c("Type your message. /exit or Ctrl-D to quit.", _DIM, enabled=color))
+    print(
+        _c("Type your message. /help for commands, /exit or Ctrl-D to quit.", _DIM, enabled=color)
+    )
     prompt = _c("› ", _CYAN, enabled=color)
 
     while True:
@@ -345,10 +424,15 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
         line = line.strip()
         if not line:
             continue
-        if line in ("/exit", "/quit"):
+
+        action = _dispatch_slash(line, client, args, state, color=color)
+        if action == "quit":
             break
+        if action == "handled":
+            continue
+
         before = {str(p.get("change_id", "")) for p in _pending_proposals(client)}
-        turn(args, client, thread_id, line, color=color)
+        turn(args, client, state.thread_id, line, color=color)
         _review_new_proposals(client, before, color=color, interactive=True)
 
     return None

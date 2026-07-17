@@ -11,7 +11,9 @@ from typing import Any
 
 from cli.forge_cli.chat import (
     _agent_replies_after,
+    _dispatch_slash,
     _render_stream,
+    _ReplState,
     _review_new_proposals,
     handle_chat,
 )
@@ -249,3 +251,59 @@ def test_review_new_proposals_skip_leaves_pending(monkeypatch: Any) -> None:
     monkeypatch.setattr(builtins, "input", lambda *_: "s")
     _review_new_proposals(client, before_ids=set(), color=False, interactive=True)  # type: ignore[arg-type]
     assert client.approved == [] and client.rejected == []
+
+
+# --- slash commands (MET-559) ----------------------------------------------
+
+
+def test_dispatch_slash_passes_non_commands() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    assert _dispatch_slash("hello there", client, _args(), state, color=False) == "pass"  # type: ignore[arg-type]
+
+
+def test_dispatch_slash_quit() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    assert _dispatch_slash("/exit", client, _args(), state, color=False) == "quit"  # type: ignore[arg-type]
+    assert state.quit is True
+
+
+def test_dispatch_slash_help(capsys: Any) -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    assert _dispatch_slash("/help", client, _args(), state, color=False) == "handled"  # type: ignore[arg-type]
+    assert "/model" in capsys.readouterr().out
+
+
+def test_dispatch_slash_model_sets_provider_and_model() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    args = _args()
+    assert _dispatch_slash("/model openrouter gpt-x", client, args, state, color=False) == "handled"  # type: ignore[arg-type]
+    assert args.provider == "openrouter"
+    assert args.model == "gpt-x"
+
+
+def test_dispatch_slash_model_single_arg_sets_model_only() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    args = _args(provider="anthropic", model="old")
+    assert _dispatch_slash("/model new-model", client, args, state, color=False) == "handled"  # type: ignore[arg-type]
+    assert args.provider == "anthropic"  # unchanged
+    assert args.model == "new-model"
+
+
+def test_dispatch_slash_clear_starts_new_thread() -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-old")
+    assert _dispatch_slash("/clear", client, _args(), state, color=False) == "handled"  # type: ignore[arg-type]
+    assert state.thread_id == "t-123"  # StubClient.create_thread returns t-123
+    assert client.created is True
+
+
+def test_dispatch_slash_unknown_is_handled_not_passed(capsys: Any) -> None:
+    client = StubClient()
+    state = _ReplState(thread_id="t-1")
+    assert _dispatch_slash("/bogus", client, _args(), state, color=False) == "handled"  # type: ignore[arg-type]
+    assert "unknown command" in capsys.readouterr().out
