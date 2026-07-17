@@ -17,15 +17,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
-# Silence gateway startup logging so stdout stays clean for the spec.
-import logging
-
+# Silence gateway startup logging so importing the app doesn't spam output.
 logging.disable(logging.CRITICAL)
 
-from api_gateway.server import create_app  # noqa: E402
+from api_gateway.server import create_app  # noqa: E402  (import after logging.disable)
 
 OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "reference" / "openapi.json"
 
