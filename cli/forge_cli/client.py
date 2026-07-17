@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import quote
 
@@ -373,6 +373,41 @@ class ForgeClient:
                 raise ForgeClientNotFound(f"No thread with id {thread_id!r}")
             resp.raise_for_status()
             return resp.json()
+
+    def stream_thread_events(
+        self,
+        thread_id: str,
+        *,
+        on_connect: Callable[[], None] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield chat SSE events from ``GET /v1/chat/threads/{id}/stream``.
+
+        Each yielded item is ``{"event": <type>, "data": <parsed dict>}`` —
+        the stream sends ``event:`` and ``data:`` line pairs (message.delta,
+        agent.step, agent.typing, agent.done, ...). ``on_connect`` fires once the
+        stream is established, so a caller can safely POST the message that
+        triggers the events without racing the subscription. No read timeout —
+        the stream is long-lived.
+        """
+        with httpx.Client(base_url=self.base_url, timeout=None) as client:
+            with client.stream("GET", f"/v1/chat/threads/{thread_id}/stream") as resp:
+                if resp.status_code == 404:
+                    raise ForgeClientNotFound(f"No thread with id {thread_id!r}")
+                resp.raise_for_status()
+                if on_connect is not None:
+                    on_connect()
+                event_type: str | None = None
+                for line in resp.iter_lines():
+                    if line.startswith("event:"):
+                        event_type = line[len("event:") :].strip()
+                    elif line.startswith("data:"):
+                        raw = line[len("data:") :].strip()
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            data = {"raw": raw}
+                        yield {"event": event_type, "data": data}
+                        event_type = None
 
     def send_message(
         self,

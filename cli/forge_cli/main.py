@@ -143,6 +143,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=120.0, help="Per-turn timeout in seconds (default 120)"
     )
     chat_parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+    chat_parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="Disable SSE streaming; use request/refetch instead",
+    )
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(

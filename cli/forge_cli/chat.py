@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 from cli.forge_cli.client import ForgeClient, ForgeClientError, ForgeClientNotFound
@@ -28,6 +30,7 @@ _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _CYAN = "\033[36m"
 _GREEN = "\033[32m"
+_RED = "\033[31m"
 _RESET = "\033[0m"
 
 
@@ -63,6 +66,111 @@ def _agent_replies_after(messages: list[dict[str, Any]], user_msg_id: str) -> li
     return out
 
 
+def _render_step(step: dict[str, Any], *, color: bool) -> None:
+    """Render one ReAct step as a tool-timeline line (Claude-Code style)."""
+    if step.get("final") or not step.get("tool"):
+        return  # the final step's answer arrives via message.delta
+    tool = step.get("tool")
+    arguments = step.get("arguments") or {}
+    error = step.get("error")
+    shown = ", ".join(f"{k}={v!r}" for k, v in list(arguments.items())[:3])
+    if len(arguments) > 3:
+        shown += ", …"
+    mark = _c("✗", _RED, enabled=color) if error else _c("✓", _GREEN, enabled=color)
+    print(_c(f"⏺ {tool}({shown})", _CYAN, enabled=color) + f"  {mark}")
+    if error:
+        print(_c(f"  {error}", _DIM, enabled=color))
+
+
+def _render_stream(events: Iterable[dict[str, Any]], *, color: bool) -> str:
+    """Consume chat SSE events, render timeline + streamed answer, return the text.
+
+    Pure over an event iterable so it unit-tests without threads or a network.
+    Stops on ``agent.done`` or ``error``.
+    """
+    parts: list[str] = []
+    answering = False
+    for evt in events:
+        etype = evt.get("event")
+        data = evt.get("data") or {}
+        if etype == "agent.step":
+            _render_step(data.get("step") or {}, color=color)
+        elif etype == "message.delta":
+            if not answering:
+                sys.stdout.write("\n" + _c("assistant  ", _GREEN, enabled=color))
+                answering = True
+            delta = str(data.get("delta", ""))
+            sys.stdout.write(delta)
+            sys.stdout.flush()
+            parts.append(delta)
+        elif etype == "agent.done":
+            break
+        elif etype == "error":
+            msg = data.get("message") or data.get("error") or data
+            print(_c(f"\nError: {msg}", _RED, enabled=color), file=sys.stderr)
+            break
+    if answering:
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+    return "".join(parts)
+
+
+def _turn_streaming(
+    args: argparse.Namespace,
+    client: ForgeClient,
+    thread_id: str,
+    content: str,
+    *,
+    color: bool,
+) -> None:
+    """Run one turn with live SSE rendering.
+
+    Subscribe to the thread stream in a background thread, wait until it's
+    connected, then POST the message (which drives the harness to broadcast
+    deltas/steps). The consumer renders live and stops on agent.done.
+    """
+    connected = threading.Event()
+    rendered = threading.Event()
+
+    def _consume() -> None:
+        try:
+            _render_stream(
+                client.stream_thread_events(thread_id, on_connect=connected.set),
+                color=color,
+            )
+        except ForgeClientError as exc:
+            print(_c(f"\nError: stream failed: {exc}", _RED, enabled=color), file=sys.stderr)
+        finally:
+            connected.set()  # never leave the main thread blocked
+            rendered.set()
+
+    consumer = threading.Thread(target=_consume, daemon=True)
+    consumer.start()
+
+    if not connected.wait(timeout=10.0):
+        print(_c("  (could not open stream; falling back)", _DIM, enabled=color))
+        _turn(args, client, thread_id, content, color=color)
+        return
+
+    try:
+        client.send_message(
+            thread_id,
+            content,
+            provider=args.provider,
+            model=args.model,
+            timeout=args.timeout,
+        )
+    except ForgeClientNotFound as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return
+    except ForgeClientError as exc:
+        print(f"Error: send failed: {exc}", file=sys.stderr)
+        return
+
+    # Give the stream a moment to flush the final events after the turn returns.
+    rendered.wait(timeout=5.0)
+
+
 def _turn(
     args: argparse.Namespace,
     client: ForgeClient,
@@ -71,7 +179,7 @@ def _turn(
     *,
     color: bool,
 ) -> None:
-    """Run one chat turn: send the message, print the agent reply."""
+    """Run one chat turn (non-streaming): send the message, print the agent reply."""
     try:
         user_msg = client.send_message(
             thread_id,
@@ -132,9 +240,11 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
     if thread_id is None:
         return None
 
+    turn = _turn if getattr(args, "no_stream", False) else _turn_streaming
+
     # One-shot mode: send a single message and exit (scriptable).
     if args.message:
-        _turn(args, client, thread_id, args.message, color=color)
+        turn(args, client, thread_id, args.message, color=color)
         return None
 
     banner = _c("MetaForge assistant", _BOLD, enabled=color)
@@ -157,6 +267,6 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
             continue
         if line in ("/exit", "/quit"):
             break
-        _turn(args, client, thread_id, line, color=color)
+        turn(args, client, thread_id, line, color=color)
 
     return None

@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from cli.forge_cli.chat import _agent_replies_after, handle_chat
+from cli.forge_cli.chat import _agent_replies_after, _render_stream, handle_chat
 
 
 class StubClient:
@@ -42,6 +42,7 @@ def _args(**over: Any) -> argparse.Namespace:
         model=None,
         timeout=120.0,
         no_color=True,
+        no_stream=True,  # unit tests exercise the non-streaming path
     )
     base.update(over)
     return argparse.Namespace(**base)
@@ -105,9 +106,76 @@ def test_handle_chat_oneshot_reuses_thread_when_given(capsys: Any) -> None:
 
 
 def test_handle_chat_reports_no_reply_gracefully(capsys: Any) -> None:
-    client = StubClient(
-        thread_messages=[{"id": "u-1", "actor_kind": "user", "content": "hello"}]
-    )
+    client = StubClient(thread_messages=[{"id": "u-1", "actor_kind": "user", "content": "hello"}])
     handle_chat(_args(), client)  # type: ignore[arg-type]
     out = capsys.readouterr().out
     assert "no reply" in out.lower()
+
+
+# --- streaming renderer (MET-557) ------------------------------------------
+
+
+def test_render_stream_assembles_deltas_and_stops_on_done(capsys: Any) -> None:
+    events = [
+        {"event": "agent.typing", "data": {"agent_id": "harness-agent"}},
+        {"event": "message.delta", "data": {"delta": "Hello"}},
+        {"event": "message.delta", "data": {"delta": ", world"}},
+        {"event": "agent.done", "data": {"agent_id": "harness-agent"}},
+        {"event": "message.delta", "data": {"delta": "IGNORED after done"}},
+    ]
+    text = _render_stream(events, color=False)
+    out = capsys.readouterr().out
+    assert text == "Hello, world"
+    assert "Hello, world" in out
+    assert "IGNORED" not in out  # stopped at agent.done
+
+
+def test_render_stream_renders_tool_timeline() -> None:
+    events = [
+        {
+            "event": "agent.step",
+            "data": {
+                "step": {
+                    "index": 0,
+                    "tool": "twin_get_node",
+                    "arguments": {"node_id": "abc"},
+                    "observation": {"ok": True},
+                    "error": None,
+                    "final": False,
+                }
+            },
+        },
+        {"event": "agent.done", "data": {}},
+    ]
+    text = _render_stream(events, color=False)
+    assert text == ""  # no answer deltas, just a tool step
+
+
+def test_render_stream_shows_tool_error(capsys: Any) -> None:
+    events = [
+        {
+            "event": "agent.step",
+            "data": {
+                "step": {
+                    "tool": "calculix_run_fea",
+                    "arguments": {},
+                    "error": "adapter down (-32001)",
+                    "final": False,
+                }
+            },
+        },
+        {"event": "agent.done", "data": {}},
+    ]
+    _render_stream(events, color=False)
+    out = capsys.readouterr().out
+    assert "calculix_run_fea" in out
+    assert "-32001" in out
+
+
+def test_render_stream_skips_final_step() -> None:
+    events = [
+        {"event": "agent.step", "data": {"step": {"tool": None, "final": True}}},
+        {"event": "agent.done", "data": {}},
+    ]
+    # final step carries no tool line; nothing to assert beyond no crash
+    assert _render_stream(events, color=False) == ""
