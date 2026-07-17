@@ -20,6 +20,7 @@ import json
 import sys
 from typing import Any
 
+from cli.forge_cli.chat import handle_chat
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.codex_login import handle_codex_login
 from cli.forge_cli.codex_login import register_subparser as register_codex_login_subparser
@@ -123,6 +124,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
     runs_watch.add_argument("run_id", help="Run id")
+
+    # -- chat --------------------------------------------------------------
+    chat_parser = subparsers.add_parser(
+        "chat", help="Interactive assistant REPL (thin client over /v1/chat)"
+    )
+    chat_parser.add_argument(
+        "--message", "-m", default=None, help="Send a single message and exit (one-shot mode)"
+    )
+    chat_parser.add_argument("--thread", default=None, help="Reuse an existing thread id")
+    chat_parser.add_argument(
+        "--session", default=None, help="Scope entity id for a new thread (default: random)"
+    )
+    chat_parser.add_argument("--title", default=None, help="Title for a new thread")
+    chat_parser.add_argument("--provider", default=None, help="Override provider for the turn")
+    chat_parser.add_argument("--model", default=None, help="Override model for the turn")
+    chat_parser.add_argument(
+        "--timeout", type=float, default=120.0, help="Per-turn timeout in seconds (default 120)"
+    )
+    chat_parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(
@@ -279,6 +299,7 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "chat": handle_chat,
     "codex-login": handle_codex_login,
 }
 
