@@ -38,6 +38,93 @@ python -m cli.forge_cli --format json --gateway-url http://gateway.local:8000 pr
 
 ## Commands
 
+### `chat` — interactive assistant REPL
+
+```
+chat [-m MESSAGE] [--thread ID] [--session ID] [--title T]
+     [--provider P] [--model M] [--timeout S]
+     [--mode {ask,auto,plan}] [--no-stream] [--no-color]
+     [--hooks PATH] [--no-hooks]
+```
+
+A Claude-Code-style terminal front-end for the MetaForge assistant. It's a
+**thin client** over the gateway's `/v1/chat` surface (harness-backed), so the
+agent loop, tools, and approval gates all run server-side. Streams the answer
+token-by-token, renders a live tool-call timeline, and prompts for approval on
+gated design changes.
+
+```bash
+# Interactive session (default: streaming, ask-mode)
+python -m cli.forge_cli chat
+
+# One-shot, scriptable
+python -m cli.forge_cli chat -m "What is the stress margin on the bracket?"
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `-m, --message <text>` | — | One-shot: send a single message and exit |
+| `--thread <id>` | new thread | Reuse an existing chat thread |
+| `--session <id>` | random | Scope-entity id for a new thread |
+| `--title <text>` | `CLI session` | Title for a new thread |
+| `--provider <id>` | gateway default | Per-turn provider override |
+| `--model <id>` | gateway default | Per-turn model override |
+| `--timeout <s>` | `120` | Per-turn timeout (an agent turn runs inside the request) |
+| `--mode {ask,auto,plan}` | `ask` | How gated change proposals are handled (see below) |
+| `--no-stream` | off | Use request/refetch instead of SSE streaming |
+| `--no-color` | off | Disable ANSI colors |
+| `--hooks <path>` | `.forge/hooks.json` | Lifecycle-hooks config |
+| `--no-hooks` | off | Disable lifecycle hooks |
+
+#### Permission modes
+
+The consequential action in chat is a **gated design-change proposal**
+(`twin.propose_change`). `--mode` (or `/mode` in-session) governs how new
+proposals are handled after each turn:
+
+| Mode | Behavior |
+|---|---|
+| `ask` (default) | Prompt `[a]pprove / [r]eject / [s]kip` per proposal (interactive); one-shot mode just prints a notice |
+| `auto` | Auto-approve new proposals (prints a warning on entry) |
+| `plan` | Hold — list proposals but never apply them (nothing mutates the twin) |
+
+#### Slash commands (interactive)
+
+| Command | Effect |
+|---|---|
+| `/help` | List commands |
+| `/model [provider] <model>` | Show or set the provider/model for the session |
+| `/mode [ask\|auto\|plan]` | Show or set the permission mode |
+| `/plan` | Shortcut for `/mode plan` |
+| `/thread` | Show the current thread id |
+| `/clear` | Start a fresh thread (clears context) |
+| `/exit`, `/quit` | Leave the chat |
+
+#### Hooks
+
+Run your own shell commands on lifecycle events by creating `.forge/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "session_start": [{"command": "echo session started"}],
+    "user_prompt":   [{"command": "echo \"you asked: $FORGE_HOOK_MESSAGE\""}],
+    "post_turn":     [{"command": "./scripts/on_turn.sh"}],
+    "session_end":   [{"command": "echo bye"}]
+  }
+}
+```
+
+Events: `session_start`, `user_prompt` (before send), `post_turn` (after the
+reply), `session_end`. Each command receives the payload as `FORGE_HOOK_*`
+environment variables (e.g. `FORGE_HOOK_EVENT`, `FORGE_HOOK_MESSAGE`,
+`FORGE_HOOK_THREAD_ID`) and as JSON on stdin. Hooks are best-effort — a failure
+or timeout logs a warning and never breaks the turn.
+
+> **Note:** the assistant only produces replies when the gateway has an LLM
+> provider configured for the harness (`METAFORGE_CHAT_HARNESS` + credentials).
+> Without one, `forge chat` still runs but reports "no reply".
+
 ### `run` — invoke a skill
 
 ```
