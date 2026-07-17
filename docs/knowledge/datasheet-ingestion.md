@@ -127,5 +127,5 @@ Still queued under MET-430:
 ## See also
 
 - [knowledge-ingestion-playbook.md](../architecture/knowledge-ingestion-playbook.md) — general knowledge ingestion patterns
-- [`scripts/datasheets/README.md`](../../scripts/datasheets/README.md) — fixture tooling
+- [`scripts/datasheets/README.md`](https://github.com/FidelOdok/MetaForge/blob/main/scripts/datasheets/README.md) — fixture tooling
 - `tests/integration/test_esp32_datasheet_ingest.py` — end-to-end test

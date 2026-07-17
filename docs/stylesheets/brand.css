@@ -1,0 +1,60 @@
+/* ── MetaForge docs branding — Kinetic Console alignment (MET-553) ───────────
+   Maps MkDocs Material's theme variables onto the dashboard's design tokens
+   (dashboard/src/index.css) so the docs site matches the product. Dark-first,
+   warm-amber accent. Keep these values in sync with the dashboard tokens.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Warm-amber accent — dashboard --color-primary / --color-primary-container */
+  --md-primary-fg-color:        #e67e22;
+  --md-primary-fg-color--light: #ffb783;
+  --md-primary-fg-color--dark:  #c25e0f;
+  --md-accent-fg-color:         #ffb783;
+
+  --md-primary-bg-color:        #ffffff;
+  --md-primary-bg-color--light: #ffffffb3;
+}
+
+/* ── Dark scheme (default) — Kinetic Console surfaces ───────────────────────── */
+[data-md-color-scheme="slate"] {
+  --md-hue: 232;
+
+  --md-default-bg-color:        #111319; /* surface */
+  --md-default-fg-color:        #e2e2eb; /* on-surface */
+  --md-default-fg-color--light: #9a9aaa; /* on-surface-variant */
+  --md-default-fg-color--lighter: #9a9aaa99;
+  --md-default-fg-color--lightest: #9a9aaa33;
+
+  --md-typeset-color:           #e2e2eb;
+  --md-typeset-a-color:         #ffb783; /* links = accent */
+
+  /* Header + footer sit on the darkest surface */
+  --md-footer-bg-color:         #0c0e14; /* surface-lowest */
+  --md-footer-bg-color--dark:   #0c0e14;
+
+  /* Code blocks on the container surface */
+  --md-code-bg-color:           #1e1f26; /* surface-container */
+  --md-code-fg-color:           #e2e2eb;
+
+  --md-accent-fg-color:         #ffb783;
+}
+
+/* Header uses the darkest surface rather than a flat accent fill, matching the
+   dashboard's dark chrome (accent is reserved for interactive elements). */
+[data-md-color-scheme="slate"] .md-header,
+[data-md-color-scheme="slate"] .md-tabs {
+  background-color: #0c0e14;
+  color: #e2e2eb;
+}
+
+/* ── Light scheme (toggle) — keep the amber accent ──────────────────────────── */
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color:         #c25e0f;
+  --md-accent-fg-color:         #e67e22;
+}
+
+/* ── Typography — Inter + Roboto Mono, as in the dashboard ──────────────────── */
+:root {
+  --md-text-font: "Inter";
+  --md-code-font: "Roboto Mono";
+}
