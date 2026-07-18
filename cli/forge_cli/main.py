@@ -20,6 +20,7 @@ import json
 import sys
 from typing import Any
 
+from cli.forge_cli.chat import handle_chat
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.codex_login import handle_codex_login
 from cli.forge_cli.codex_login import register_subparser as register_codex_login_subparser
@@ -28,6 +29,7 @@ from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
+from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_runs
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
@@ -123,6 +125,65 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
     runs_watch.add_argument("run_id", help="Run id")
+
+    # -- chat --------------------------------------------------------------
+    chat_parser = subparsers.add_parser(
+        "chat", help="Interactive assistant REPL (thin client over /v1/chat)"
+    )
+    chat_parser.add_argument(
+        "--message", "-m", default=None, help="Send a single message and exit (one-shot mode)"
+    )
+    chat_parser.add_argument("--thread", default=None, help="Reuse an existing thread id")
+    chat_parser.add_argument(
+        "--session", default=None, help="Scope entity id for a new thread (default: random)"
+    )
+    chat_parser.add_argument("--title", default=None, help="Title for a new thread")
+    chat_parser.add_argument("--provider", default=None, help="Override provider for the turn")
+    chat_parser.add_argument("--model", default=None, help="Override model for the turn")
+    chat_parser.add_argument(
+        "--timeout", type=float, default=120.0, help="Per-turn timeout in seconds (default 120)"
+    )
+    chat_parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+    chat_parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="Disable SSE streaming; use request/refetch instead",
+    )
+    chat_parser.add_argument(
+        "--mode",
+        choices=["ask", "auto", "plan"],
+        default="ask",
+        help="Proposal handling: ask (prompt), auto (approve), plan (hold). Default ask",
+    )
+    chat_parser.add_argument(
+        "--hooks",
+        default=".forge/hooks.json",
+        help="Path to a lifecycle-hooks config (default .forge/hooks.json)",
+    )
+    chat_parser.add_argument("--no-hooks", action="store_true", help="Disable lifecycle hooks")
+
+    # -- routine (scheduled background runs) -------------------------------
+    routine_parser = subparsers.add_parser("routine", help="Scheduled background chat runs")
+    routine_parser.add_argument(
+        "--file", default=".forge/routines.json", help="Routines store path"
+    )
+    routine_sub = routine_parser.add_subparsers(dest="routine_command", help="Routine subcommands")
+
+    routine_add = routine_sub.add_parser("add", help="Add a scheduled routine")
+    routine_add.add_argument("prompt", help="Prompt to run on schedule")
+    routine_add.add_argument("--every", required=True, help="Interval, e.g. 30s, 10m, 2h, 1d")
+    routine_add.add_argument("--provider", default=None, help="Provider override")
+    routine_add.add_argument("--model", default=None, help="Model override")
+    routine_add.add_argument(
+        "--mode", choices=["ask", "auto", "plan"], default="ask", help="Proposal handling mode"
+    )
+
+    routine_sub.add_parser("list", help="List routines")
+
+    routine_remove = routine_sub.add_parser("remove", help="Remove a routine")
+    routine_remove.add_argument("routine_id", help="Routine id")
+
+    routine_sub.add_parser("run-due", help="Run all routines whose interval has elapsed")
 
     # -- ingest ------------------------------------------------------------
     ingest_parser = subparsers.add_parser(
@@ -279,6 +340,8 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "chat": handle_chat,
+    "routine": handle_routine,
     "codex-login": handle_codex_login,
 }
 

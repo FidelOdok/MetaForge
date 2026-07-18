@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import quote
 
@@ -324,3 +324,125 @@ class ForgeClient:
                 for line in resp.iter_lines():
                     if line.startswith("data:"):
                         yield json.loads(line[len("data:") :].strip())
+
+    # ------------------------------------------------------------------
+    # Chat (MET-556) — served at /v1/chat (no /api prefix)
+    # ------------------------------------------------------------------
+
+    def list_channels(self) -> dict[str, Any]:
+        """List chat channels via ``GET /v1/chat/channels``."""
+        with self._client() as client:
+            resp = client.get("/v1/chat/channels")
+            resp.raise_for_status()
+            return resp.json()
+
+    def create_thread(
+        self,
+        scope_kind: str,
+        scope_entity_id: str,
+        *,
+        title: str | None = None,
+        initial_message: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a chat thread via ``POST /v1/chat/threads``.
+
+        Raises ``ForgeClientError`` on 400 (no channel for the scope_kind).
+        """
+        payload: dict[str, Any] = {
+            "scope_kind": scope_kind,
+            "scope_entity_id": scope_entity_id,
+        }
+        if title is not None:
+            payload["title"] = title
+        if initial_message is not None:
+            payload["initial_message"] = initial_message
+        with self._client() as client:
+            resp = client.post("/v1/chat/threads", json=payload)
+            if resp.status_code == 400:
+                raise ForgeClientError(
+                    f"No chat channel for scope_kind={scope_kind!r}", status_code=400
+                )
+            resp.raise_for_status()
+            return resp.json()
+
+    def get_thread(self, thread_id: str) -> dict[str, Any]:
+        """Fetch a thread (with its messages) via ``GET /v1/chat/threads/{id}``."""
+        with self._client() as client:
+            resp = client.get(f"/v1/chat/threads/{thread_id}")
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No thread with id {thread_id!r}")
+            resp.raise_for_status()
+            return resp.json()
+
+    def stream_thread_events(
+        self,
+        thread_id: str,
+        *,
+        on_connect: Callable[[], None] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield chat SSE events from ``GET /v1/chat/threads/{id}/stream``.
+
+        Each yielded item is ``{"event": <type>, "data": <parsed dict>}`` —
+        the stream sends ``event:`` and ``data:`` line pairs (message.delta,
+        agent.step, agent.typing, agent.done, ...). ``on_connect`` fires once the
+        stream is established, so a caller can safely POST the message that
+        triggers the events without racing the subscription. No read timeout —
+        the stream is long-lived.
+        """
+        with httpx.Client(base_url=self.base_url, timeout=None) as client:
+            with client.stream("GET", f"/v1/chat/threads/{thread_id}/stream") as resp:
+                if resp.status_code == 404:
+                    raise ForgeClientNotFound(f"No thread with id {thread_id!r}")
+                resp.raise_for_status()
+                if on_connect is not None:
+                    on_connect()
+                event_type: str | None = None
+                for line in resp.iter_lines():
+                    if line.startswith("event:"):
+                        event_type = line[len("event:") :].strip()
+                    elif line.startswith("data:"):
+                        raw = line[len("data:") :].strip()
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            data = {"raw": raw}
+                        yield {"event": event_type, "data": data}
+                        event_type = None
+
+    def send_message(
+        self,
+        thread_id: str,
+        content: str,
+        *,
+        actor_id: str = "cli-user",
+        actor_kind: str = "user",
+        provider: str | None = None,
+        model: str | None = None,
+        tools: list[str] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Post a message via ``POST /v1/chat/threads/{id}/messages``.
+
+        The gateway invokes the agent synchronously and appends its reply to the
+        thread; this returns the *user* message envelope, so callers refetch the
+        thread to read the agent's response. A longer timeout is allowed since
+        the agent turn runs inside the request.
+        """
+        payload: dict[str, Any] = {
+            "content": content,
+            "actor_id": actor_id,
+            "actor_kind": actor_kind,
+        }
+        if provider is not None:
+            payload["provider"] = provider
+        if model is not None:
+            payload["model"] = model
+        if tools is not None:
+            payload["tools"] = tools
+        eff_timeout = timeout if timeout is not None else self.timeout
+        with httpx.Client(base_url=self.base_url, timeout=eff_timeout) as client:
+            resp = client.post(f"/v1/chat/threads/{thread_id}/messages", json=payload)
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No thread with id {thread_id!r}")
+            resp.raise_for_status()
+            return resp.json()
