@@ -35,6 +35,7 @@ done
 pyinstaller \
   --onefile \
   --name forge \
+  --paths . \
   --collect-submodules cli.forge_cli \
   "${exclude_args[@]}" \
   --distpath dist \

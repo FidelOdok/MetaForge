@@ -1,0 +1,92 @@
+name: release
+
+# Build standalone `forge` CLI binaries for each platform on a version tag and
+# publish them to a GitHub Release (MET-555).
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Downloadable afterwards at:
+#   https://github.com/FidelOdok/MetaForge/releases/download/v0.1.0/forge-linux-x64
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: # manual run builds the matrix but skips publishing
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: forge-linux-x64
+          - os: macos-13
+            asset: forge-macos-x64
+          - os: macos-latest
+            asset: forge-macos-arm64
+          - os: windows-latest
+            asset: forge-windows-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The forge CLI is a thin HTTP client — install only what it imports, not
+      # the full package (which pulls unix-only deps like uvloop that break the
+      # Windows runner).
+      - name: Install build deps
+        run: python -m pip install --upgrade pip httpx structlog "pyinstaller>=6.0"
+
+      - name: Build binary
+        shell: bash
+        run: bash scripts/build_forge_binary.sh
+
+      - name: Stage asset
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ -f dist/forge.exe ]; then
+            cp dist/forge.exe "out/${{ matrix.asset }}"
+          else
+            cp dist/forge "out/${{ matrix.asset }}"
+          fi
+
+      - name: Smoke-test the binary
+        shell: bash
+        run: ./out/${{ matrix.asset }} chat --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -R artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
