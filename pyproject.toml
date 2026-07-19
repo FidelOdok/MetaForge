@@ -42,6 +42,7 @@ dependencies = [
 ]
 
 [project.scripts]
+forge = "cli.forge_cli.main:main"
 forge-server = "api_gateway.server:main"
 
 [project.optional-dependencies]
