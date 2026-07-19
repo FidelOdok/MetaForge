@@ -11,16 +11,22 @@ or `python -m api_gateway.server`).
 
 ## Invocation
 
-There is no `forge` console-script entry yet — invoke the module
-directly:
+After `pip install -e .`, use the `forge` console script:
+
+```bash
+forge <command> [args...]
+```
+
+Equivalently, run the module directly (no install step needed):
 
 ```bash
 python -m cli.forge_cli <command> [args...]
 ```
 
-(The only `[project.scripts]` entry today is `forge-server`, which
-launches the gateway, **not** the CLI. A `forge` binary is tracked
-as a follow-up.)
+Both entry points are identical. `forge` is a Python console-script (it
+requires the project's Python environment, like `forge-server`); it is not a
+standalone compiled binary. Examples in this reference use `python -m
+cli.forge_cli`, but `forge` works everywhere in its place.
 
 ## Global flags
 
