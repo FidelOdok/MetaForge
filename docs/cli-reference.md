@@ -24,9 +24,30 @@ python -m cli.forge_cli <command> [args...]
 ```
 
 Both entry points are identical. `forge` is a Python console-script (it
-requires the project's Python environment, like `forge-server`); it is not a
-standalone compiled binary. Examples in this reference use `python -m
-cli.forge_cli`, but `forge` works everywhere in its place.
+requires the project's Python environment, like `forge-server`). Examples in
+this reference use `python -m cli.forge_cli`, but `forge` works everywhere in
+its place.
+
+### Standalone binary (no Python required)
+
+For distribution to machines without a Python environment, build a
+self-contained executable with PyInstaller:
+
+```bash
+pip install -e ".[build]"          # installs pyinstaller
+scripts/build_forge_binary.sh      # produces dist/forge
+./dist/forge chat --help
+```
+
+The CLI is a thin HTTP client (only `httpx` + `structlog` beyond the standard
+library), so the bundle stays small (~40 MB); the gateway/server stack is
+excluded. The resulting `dist/forge` runs on its own — copy it onto a target
+machine and run it directly.
+
+> **Platform note:** PyInstaller bundles for the platform it runs on. Build on
+> each OS you want to ship (macOS / Linux / Windows) — typically a CI matrix —
+> rather than cross-compiling. This is a developer/packaging step; most users
+> should just `pip install -e .` and use the `forge` console script above.
 
 ## Global flags
 
