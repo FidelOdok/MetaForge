@@ -30,8 +30,25 @@ its place.
 
 ### Standalone binary (no Python required)
 
-For distribution to machines without a Python environment, build a
-self-contained executable with PyInstaller:
+**Install a prebuilt binary** (from GitHub Releases):
+
+```bash
+# latest release, auto-detects your OS/arch
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | sh
+
+# or a specific version
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | sh -s v0.1.0
+```
+
+This drops `forge` into `~/.local/bin` (override with `FORGE_BIN_DIR`). Windows
+users download `forge-windows-x64.exe` from the
+[Releases page](https://github.com/FidelOdok/MetaForge/releases) directly.
+
+Binaries are published per platform on every `v*` tag by the `release` workflow
+(`.github/workflows/release.yml`): `forge-linux-x64`, `forge-macos-x64`,
+`forge-macos-arm64`, `forge-windows-x64.exe`.
+
+**Build it yourself** with PyInstaller:
 
 ```bash
 pip install -e ".[build]"          # installs pyinstaller
