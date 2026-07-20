@@ -68,7 +68,10 @@ class ForgeClient:
         return httpx.Client(base_url=self.base_url, timeout=self.timeout)
 
     def _url(self, path: str) -> str:
-        return f"/api/v1{path}"
+        # The gateway serves its routes under /v1 (the /api/v1 prefix was retired;
+        # knowledge/runs/chat already call /v1 directly). Assistant + twin routes
+        # live at /v1/assistant and /v1/twin, so build /v1<path> here.
+        return f"/v1{path}"
 
     # ------------------------------------------------------------------
     # Skill invocation
