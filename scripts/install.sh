@@ -29,7 +29,13 @@ case "$os" in
   Darwin)
     case "$arch" in
       arm64 | aarch64) asset="forge-macos-arm64" ;;
-      x86_64) asset="forge-macos-x64" ;;
+      x86_64)
+        echo "No prebuilt Intel-Mac binary is published. Options:" >&2
+        echo "  - Apple Silicon Mac: this installer works there." >&2
+        echo "  - Intel Mac: build from source (scripts/build_forge_binary.sh)" >&2
+        echo "    or run 'pip install -e .' and use the 'forge' console script." >&2
+        exit 1
+        ;;
       *) echo "Unsupported macOS arch: $arch" >&2; exit 1 ;;
     esac
     ;;

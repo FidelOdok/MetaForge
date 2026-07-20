@@ -45,8 +45,9 @@ users download `forge-windows-x64.exe` from the
 [Releases page](https://github.com/FidelOdok/MetaForge/releases) directly.
 
 Binaries are published per platform on every `v*` tag by the `release` workflow
-(`.github/workflows/release.yml`): `forge-linux-x64`, `forge-macos-x64`,
-`forge-macos-arm64`, `forge-windows-x64.exe`.
+(`.github/workflows/release.yml`): `forge-linux-x64`, `forge-macos-arm64`, and
+`forge-windows-x64.exe`. Intel Macs aren't prebuilt (GitHub is retiring Intel
+runners) — build from source there.
 
 **Build it yourself** with PyInstaller:
 
