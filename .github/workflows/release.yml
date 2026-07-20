@@ -27,8 +27,6 @@ jobs:
         include:
           - os: ubuntu-latest
             asset: forge-linux-x64
-          - os: macos-13
-            asset: forge-macos-x64
           - os: macos-latest
             asset: forge-macos-arm64
           - os: windows-latest
