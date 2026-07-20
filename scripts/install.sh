@@ -64,8 +64,40 @@ else
 fi
 chmod +x "$BIN_DIR/forge"
 
-echo "Installed. Ensure $BIN_DIR is on your PATH, then run: forge --help"
+echo "Installed forge to $BIN_DIR/forge"
+
+# Make sure BIN_DIR is on PATH. If it already is, we're done. Otherwise append
+# the export to the shell profile (idempotent). Opt out with FORGE_NO_MODIFY_PATH=1.
+path_line="export PATH=\"$BIN_DIR:\$PATH\""
 case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) echo "  (add it:  export PATH=\"$BIN_DIR:\$PATH\")" ;;
+  *":$BIN_DIR:"*)
+    echo "Run: forge --help"
+    ;;
+  *)
+    if [ "${FORGE_NO_MODIFY_PATH:-0}" = "1" ]; then
+      echo "$BIN_DIR is not on your PATH. Add it manually:"
+      echo "  $path_line"
+    else
+      # Choose a profile based on the login shell.
+      case "$(basename "${SHELL:-sh}")" in
+        zsh) profile="$HOME/.zshrc" ;;
+        bash)
+          if [ "$(uname -s)" = "Darwin" ]; then
+            profile="$HOME/.bash_profile"
+          else
+            profile="$HOME/.bashrc"
+          fi
+          ;;
+        *) profile="$HOME/.profile" ;;
+      esac
+      touch "$profile" 2>/dev/null || true
+      if grep -qF "$path_line" "$profile" 2>/dev/null; then
+        echo "PATH already configured in $profile."
+      else
+        printf '\n# Added by the MetaForge forge installer\n%s\n' "$path_line" >> "$profile"
+        echo "Added $BIN_DIR to PATH in $profile."
+      fi
+      echo "Restart your shell (or run: $path_line) then: forge --help"
+    fi
+    ;;
 esac
