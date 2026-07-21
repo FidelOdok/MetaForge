@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 from urllib.parse import quote
 
@@ -38,6 +38,33 @@ class ForgeClientNotFound(ForgeClientError):
 
 
 _DEFAULT_GATEWAY_URL = "http://localhost:8000"
+
+
+def parse_sse_events(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
+    """Parse `event:`/`data:` SSE line pairs into ``{"event", "data"}`` dicts.
+
+    The gateway wraps each payload in a ``StreamEvent`` envelope::
+
+        event: message.delta
+        data: {"data": {"delta": "Hi", ...}, "thread_id": "...", "timestamp": "..."}
+
+    so the useful payload lives under the inner ``data`` key — this unwraps it,
+    yielding ``{"event": "message.delta", "data": {"delta": "Hi", ...}}``. Falls
+    back to the raw parsed object if there's no envelope.
+    """
+    event_type: str | None = None
+    for line in lines:
+        if line.startswith("event:"):
+            event_type = line[len("event:") :].strip()
+        elif line.startswith("data:"):
+            raw = line[len("data:") :].strip()
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = {"raw": raw}
+            payload = parsed.get("data", parsed) if isinstance(parsed, dict) else parsed
+            yield {"event": event_type, "data": payload}
+            event_type = None
 
 
 class ForgeClient:
@@ -425,18 +452,7 @@ class ForgeClient:
                 resp.raise_for_status()
                 if on_connect is not None:
                     on_connect()
-                event_type: str | None = None
-                for line in resp.iter_lines():
-                    if line.startswith("event:"):
-                        event_type = line[len("event:") :].strip()
-                    elif line.startswith("data:"):
-                        raw = line[len("data:") :].strip()
-                        try:
-                            data = json.loads(raw)
-                        except json.JSONDecodeError:
-                            data = {"raw": raw}
-                        yield {"event": event_type, "data": data}
-                        event_type = None
+                yield from parse_sse_events(resp.iter_lines())
 
     def send_message(
         self,
