@@ -24,6 +24,7 @@ from cli.forge_cli.chat import handle_chat
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.codex_login import handle_codex_login
 from cli.forge_cli.codex_login import register_subparser as register_codex_login_subparser
+from cli.forge_cli.config import ForgeConfig, handle_config
 from cli.forge_cli.formatters import format_output
 from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
@@ -152,8 +153,9 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument(
         "--mode",
         choices=["ask", "auto", "plan"],
-        default="ask",
-        help="Proposal handling: ask (prompt), auto (approve), plan (hold). Default ask",
+        default=None,
+        help="Proposal handling: ask (prompt), auto (approve), plan (hold). "
+        "Default: config's mode, else ask",
     )
     chat_parser.add_argument(
         "--hooks",
@@ -161,6 +163,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a lifecycle-hooks config (default .forge/hooks.json)",
     )
     chat_parser.add_argument("--no-hooks", action="store_true", help="Disable lifecycle hooks")
+
+    # -- config (client-side settings + wizard) ----------------------------
+    config_parser = subparsers.add_parser(
+        "config", help="Configure the CLI (gateway, provider, model) — wizard by default"
+    )
+    config_sub = config_parser.add_subparsers(dest="config_command", help="Config subcommands")
+    config_sub.add_parser("show", help="Print the current configuration")
+    config_sub.add_parser("path", help="Print the config file path")
+    config_set = config_sub.add_parser("set", help="Set one value")
+    config_set.add_argument("key", help="gateway_url | provider | model | mode")
+    config_set.add_argument("value", help="Value to set")
 
     # -- routine (scheduled background runs) -------------------------------
     routine_parser = subparsers.add_parser("routine", help="Scheduled background chat runs")
@@ -342,6 +355,7 @@ _HANDLERS = {
     "runs": handle_runs,
     "chat": handle_chat,
     "routine": handle_routine,
+    "config": handle_config,
     "codex-login": handle_codex_login,
 }
 
@@ -360,7 +374,13 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(1)
 
-    client = ForgeClient(base_url=args.gateway_url)
+    # Client-side config: explicit --gateway-url wins, else the saved config's
+    # gateway_url, else ForgeClient's own env/default fallback. The loaded config
+    # is attached to args so handlers (e.g. chat) can read default provider/model.
+    config = ForgeConfig.load()
+    args.forge_config = config
+    effective_gateway = args.gateway_url or config.gateway_url
+    client = ForgeClient(base_url=effective_gateway)
 
     try:
         result = handler(args, client)

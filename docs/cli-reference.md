@@ -86,6 +86,36 @@ python -m cli.forge_cli --format json --gateway-url http://gateway.local:8000 pr
 
 ## Commands
 
+### `config` — configure the CLI (wizard)
+
+```
+config                       # interactive wizard
+config show                  # print current config
+config path                  # print config file location
+config set <key> <value>     # set one value (gateway_url|provider|model|mode)
+```
+
+Runs an interactive wizard that picks your **gateway URL**, lists the gateway's
+**providers** and **models** (`/v1/harness/*`) for you to choose, and sets a
+default **mode**. Saved to `~/.forge/config.json` (override with `$FORGE_CONFIG`).
+`forge chat` then uses these defaults, so you don't repeat `--provider`/`--model`
+each run.
+
+```bash
+forge config                                 # guided setup
+forge config set model claude-sonnet-5       # or set values directly
+forge config show
+```
+
+Precedence: an explicit CLI flag wins over the config file, which wins over the
+`METAFORGE_GATEWAY_URL` env var, which wins over the built-in default.
+
+!!! note "What this does and doesn't configure"
+    This stores *your client's* choice of gateway and the per-turn
+    provider/model it sends (which the gateway honors via its selector). It does
+    **not** set the gateway's own API keys or the `METAFORGE_CHAT_HARNESS` flag —
+    those are server-side settings on the gateway host, not the CLI.
+
 ### `chat` — interactive assistant REPL
 
 ```
