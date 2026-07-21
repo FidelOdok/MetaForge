@@ -39,6 +39,11 @@ services:
       - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
       - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
       - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
+      # Route chat through the MET-547 harness (enables the ~32-provider
+      # registry incl. openrouter/codex). Without this, chat falls back to the
+      # legacy openai/anthropic-only path and ignores other providers.
+      - METAFORGE_CHAT_HARNESS=${METAFORGE_CHAT_HARNESS:-off}
+      - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
       # OpenRouter — read by digital_twin/knowledge/openrouter_lightrag.py
       # and openrouter_property_llm.py. Tunables fall back to in-code defaults.
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
