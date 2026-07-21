@@ -93,6 +93,7 @@ def _render_stream(events: Iterable[dict[str, Any]], *, color: bool) -> str:
     """
     parts: list[str] = []
     answering = False
+    errored = False
     for evt in events:
         etype = evt.get("event")
         data = evt.get("data") or {}
@@ -111,10 +112,13 @@ def _render_stream(events: Iterable[dict[str, Any]], *, color: bool) -> str:
         elif etype == "error":
             msg = data.get("message") or data.get("error") or data
             print(_c(f"\nError: {msg}", _RED, enabled=color), file=sys.stderr)
+            errored = True
             break
     if answering:
         sys.stdout.write("\n\n")
         sys.stdout.flush()
+    elif not errored:
+        print(_c("  (no reply — is an LLM configured on the gateway?)", _DIM, enabled=color))
     return "".join(parts)
 
 

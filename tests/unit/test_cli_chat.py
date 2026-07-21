@@ -356,3 +356,48 @@ def test_dispatch_slash_mode_rejects_unknown() -> None:
     state = _ReplState(thread_id="t-1")
     _dispatch_slash("/mode bogus", client, _args(), state, color=False)  # type: ignore[arg-type]
     assert state.mode == "ask"  # unchanged
+
+
+# --- SSE envelope parsing (MET-555) ----------------------------------------
+
+
+def test_parse_sse_events_unwraps_gateway_envelope() -> None:
+    from cli.forge_cli.client import parse_sse_events
+
+    # Exact wire format from the gateway (StreamEvent envelope).
+    lines = [
+        "event: message.delta",
+        'data: {"data": {"delta": "Hi", "agent_id": "agent"}, "thread_id": "t", "timestamp": "x"}',
+        "",
+        "event: agent.step",
+        'data: {"data": {"step": {"tool": "twin_get_node", "final": false}}, "thread_id": "t"}',
+        "",
+        "event: agent.done",
+        'data: {"data": {"agent_id": "harness-agent"}, "thread_id": "t"}',
+    ]
+    events = list(parse_sse_events(lines))
+    assert events[0] == {"event": "message.delta", "data": {"delta": "Hi", "agent_id": "agent"}}
+    assert events[1]["data"]["step"]["tool"] == "twin_get_node"
+    assert events[2]["event"] == "agent.done"
+
+
+def test_parse_sse_events_then_render_produces_text(capsys: Any) -> None:
+    from cli.forge_cli.client import parse_sse_events
+
+    lines = [
+        "event: message.delta",
+        'data: {"data": {"delta": "Hello"}, "thread_id": "t"}',
+        "event: message.delta",
+        'data: {"data": {"delta": " world"}, "thread_id": "t"}',
+        "event: agent.done",
+        'data: {"data": {}, "thread_id": "t"}',
+    ]
+    text = _render_stream(parse_sse_events(lines), color=False)
+    assert text == "Hello world"
+    assert "Hello world" in capsys.readouterr().out
+
+
+def test_render_stream_reports_no_reply_when_empty(capsys: Any) -> None:
+    text = _render_stream([{"event": "agent.done", "data": {}}], color=False)
+    assert text == ""
+    assert "no reply" in capsys.readouterr().out.lower()
