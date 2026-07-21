@@ -442,13 +442,22 @@ def handle_chat(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Dispatch `forge chat` — one-shot (``--message``) or interactive REPL."""
     color = sys.stdout.isatty() and not getattr(args, "no_color", False)
 
+    # Apply client-config defaults where per-run flags weren't given
+    # (precedence: flag > config > built-in default).
+    cfg = getattr(args, "forge_config", None)
+    if cfg is not None:
+        if args.provider is None:
+            args.provider = cfg.provider
+        if args.model is None:
+            args.model = cfg.model
+
     thread_id = _resolve_thread(args, client)
     if thread_id is None:
         return None
 
     turn = _turn if getattr(args, "no_stream", False) else _turn_streaming
 
-    mode = getattr(args, "mode", "ask")
+    mode = getattr(args, "mode", None) or (cfg.mode if cfg is not None else None) or "ask"
     hooks = HookRunner.from_path(
         getattr(args, "hooks", ".forge/hooks.json"),
         enabled=not getattr(args, "no_hooks", False),

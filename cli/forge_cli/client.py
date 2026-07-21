@@ -339,6 +339,32 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    # ------------------------------------------------------------------
+    # Harness capabilities (providers / models) — served at /v1/harness
+    # ------------------------------------------------------------------
+
+    def list_harness_providers(self) -> dict[str, Any]:
+        """List registered providers + the gateway's active selection.
+
+        ``GET /v1/harness/providers`` →
+        ``{active_provider, active_model, providers: [{id, family, configured, base_url}]}``.
+        """
+        with self._client() as client:
+            resp = client.get("/v1/harness/providers")
+            resp.raise_for_status()
+            return resp.json()
+
+    def list_harness_models(self, provider: str) -> dict[str, Any]:
+        """List models for a provider via ``GET /v1/harness/models?provider=<id>``.
+
+        Live-fetched for OpenAI-compatible providers; otherwise an empty list
+        (the caller falls back to free-text model entry).
+        """
+        with self._client() as client:
+            resp = client.get("/v1/harness/models", params={"provider": provider})
+            resp.raise_for_status()
+            return resp.json()
+
     def create_thread(
         self,
         scope_kind: str,
