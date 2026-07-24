@@ -48,10 +48,13 @@ async def mcp_tools_from_bridge(
     """Adapt a provider's MCP bridge tools into harness ``NativeToolDef``s.
 
     Each bridge tool becomes an ``mcp_<server>_<tool>`` entry whose handler
-    invokes it through the bridge. The bridge's ``list_tools`` gives no input
-    schema, so a permissive object schema is used (the model supplies args, the
-    bridge validates). Registering these lets the chat harness *drive tools*,
-    not just converse — subject to a live bridge being wired into the gateway.
+    invokes it through the bridge. The bridge's ``list_tools`` carries each
+    tool's ``input_schema`` (from its ``ToolManifest``); we surface it verbatim
+    so the model knows the tool's required/optional parameters. Tools that
+    declare no usable object schema fall back to a permissive one (the model
+    supplies args, the bridge validates). Registering these lets the chat
+    harness *drive tools*, not just converse — subject to a live bridge being
+    wired into the gateway.
 
     ``enabled`` (a set of tool ids) restricts which tools are registered — the
     chat UI's tools/connectors selector passes the user's choice; ``None`` means
@@ -71,6 +74,15 @@ async def mcp_tools_from_bridge(
         capability = entry.get("capability")
         description = f"{tool_id} ({capability})" if capability else tool_id
 
+        # Surface the tool's real parameter schema so the model can supply the
+        # required arguments. Fall back to a permissive object schema only when
+        # the manifest declares none (an empty dict or a non-object schema).
+        raw_schema = entry.get("input_schema")
+        if isinstance(raw_schema, dict) and raw_schema.get("type") == "object":
+            input_schema = raw_schema
+        else:
+            input_schema = {"type": "object"}
+
         def _make_handler(tid: str) -> Handler:
             async def handler(arguments: dict[str, object]) -> object:
                 return await bridge.invoke(tid, dict(arguments))
@@ -83,7 +95,7 @@ async def mcp_tools_from_bridge(
                 NativeToolDef(
                     name=tool,
                     description=description,
-                    input_schema={"type": "object"},
+                    input_schema=input_schema,
                     handler=_make_handler(tool_id),
                 ),
             )

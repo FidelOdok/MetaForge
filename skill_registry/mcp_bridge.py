@@ -81,10 +81,28 @@ class InMemoryMcpBridge(McpBridge):
         self._responses[tool_id] = response
         self._available.add(tool_id)
 
-    def register_tool(self, tool_id: str, capability: str, name: str = "") -> None:
-        """Register a tool as available."""
+    def register_tool(
+        self,
+        tool_id: str,
+        capability: str,
+        name: str = "",
+        input_schema: dict[str, Any] | None = None,
+    ) -> None:
+        """Register a tool as available.
+
+        ``input_schema`` mirrors the tool's ``ToolManifest`` schema so callers
+        that surface parameter definitions (e.g. the chat harness) can be
+        exercised; it defaults to an empty dict when omitted.
+        """
         self._available.add(tool_id)
-        self._tools.append({"tool_id": tool_id, "capability": capability, "name": name or tool_id})
+        self._tools.append(
+            {
+                "tool_id": tool_id,
+                "capability": capability,
+                "name": name or tool_id,
+                "input_schema": input_schema or {},
+            }
+        )
 
     async def invoke(
         self,
