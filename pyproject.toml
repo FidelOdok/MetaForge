@@ -62,7 +62,10 @@ build = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "ruff>=0.8",
+    # Pinned exactly: ruff's formatter output changes between minor releases,
+    # so an unpinned range let CI drift to a newer ruff than local dev and
+    # fail `ruff format --check .` on unchanged files. Bump deliberately.
+    "ruff==0.15.6",
     "mypy>=1.13",
     "httpx>=0.27",
     # Pulled in so unit tests like ``test_pg_backend.py`` (which use
