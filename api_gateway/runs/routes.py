@@ -14,6 +14,8 @@ persistence lands in Phase 4. Domain errors map to clean HTTP status:
 
 from __future__ import annotations
 
+import asyncio
+
 import structlog
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
@@ -25,10 +27,12 @@ from api_gateway.runs.schemas import (
     RunResponse,
 )
 from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
+from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
     InvalidTransition,
+    Run,
     RunNotFoundError,
 )
 
@@ -36,35 +40,80 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/runs", tags=["runs"])
 
-# Process-local store + SSE manager (mirrors the chat backend pattern).
-# reset_run_store() rewires both for tests.
+# Process-local store + SSE manager + gate coordinator (mirrors the chat backend
+# pattern). The store notifies BOTH the SSE stream and the gate coordinator so a
+# design-flow run paused at a gate resumes when POST /approval fires a
+# transition. reset_run_store() rewires all three for tests.
 _stream_manager = RunStreamManager()
-_store = InMemoryRunStore(on_transition=_stream_manager.publish)
+_gate_coordinator = GateCoordinator()
+
+
+def _on_transition(run: Run) -> None:
+    _stream_manager.publish(run)
+    _gate_coordinator.on_transition(run)
+
+
+_store = InMemoryRunStore(on_transition=_on_transition)
+
+# Background executor tasks, kept referenced so they aren't GC'd mid-run.
+_flow_tasks: set[asyncio.Task[None]] = set()
 
 
 def get_run_store() -> InMemoryRunStore:
     return _store
 
 
+def get_gate_coordinator() -> GateCoordinator:
+    return _gate_coordinator
+
+
 def init_run_store(store: InMemoryRunStore) -> None:
     global _store
-    store.set_on_transition(_stream_manager.publish)
+    store.set_on_transition(_on_transition)
     _store = store
 
 
 def reset_run_store() -> None:
-    global _store, _stream_manager
+    global _store, _stream_manager, _gate_coordinator
     _stream_manager = RunStreamManager()
-    _store = InMemoryRunStore(on_transition=_stream_manager.publish)
+    _gate_coordinator = GateCoordinator()
+    _store = InMemoryRunStore(on_transition=_on_transition)
+
+
+def _is_design_flow(request: dict) -> bool:
+    """A run is a design flow only when it opts in explicitly.
+
+    Triggered by a ``flow`` id or ``kind == "design_flow"`` — never by a bare
+    ``goal`` alone, so plain runs keep their existing create+start semantics.
+    """
+    return bool(request.get("flow")) or request.get("kind") == "design_flow"
+
+
+def _launch_flow(run_id: str) -> None:
+    """Spawn the design-flow executor for ``run_id`` as a tracked background task."""
+    from api_gateway.chat.routes import get_mcp_bridge
+    from api_gateway.runs.flow_brain import ReActPhaseBrain
+
+    brain = ReActPhaseBrain(mcp_bridge=get_mcp_bridge(), session_id=f"flow:{run_id}")
+    executor = DesignFlowExecutor(store=_store, brain=brain, coordinator=_gate_coordinator)
+    task = asyncio.create_task(executor.run(run_id))
+    _flow_tasks.add(task)
+    task.add_done_callback(_flow_tasks.discard)
 
 
 @router.post("", response_model=RunResponse, status_code=201)
-def create_run(body: CreateRunRequest) -> RunResponse:
+async def create_run(body: CreateRunRequest) -> RunResponse:
     run = _store.create(body.request)
-    if body.start:
+    if _is_design_flow(body.request) and body.start:
+        # The executor owns the lifecycle (start -> phases -> gates -> terminal).
+        _launch_flow(run.id)
+        logger.info("run_api_created", run_id=run.id, started=True, kind="design_flow")
+    elif body.start:
         run = _store.start(run.id)
-    logger.info("run_api_created", run_id=run.id, started=body.start)
-    return RunResponse.from_run(run)
+        logger.info("run_api_created", run_id=run.id, started=True, kind="plain")
+    else:
+        logger.info("run_api_created", run_id=run.id, started=False)
+    return RunResponse.from_run(_store.get(run.id))
 
 
 @router.get("", response_model=RunListResponse)
@@ -110,7 +159,10 @@ async def stream_run_ws(websocket: WebSocket, run_id: str) -> None:
 
 
 @router.post("/{run_id}/approval", response_model=RunResponse)
-def submit_approval(run_id: str, body: ApprovalRequest) -> RunResponse:
+async def submit_approval(run_id: str, body: ApprovalRequest) -> RunResponse:
+    # Async so the store transition — which resolves the design-flow gate's
+    # asyncio.Future via the coordinator — runs on the event-loop thread (future
+    # resolution is not thread-safe from FastAPI's sync worker pool).
     try:
         run = _store.submit_approval(run_id, ApprovalDecision(body.decision))
     except RunNotFoundError as exc:
