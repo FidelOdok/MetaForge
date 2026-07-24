@@ -90,19 +90,41 @@ def _is_design_flow(request: dict) -> bool:
 
 
 def _launch_flow(run_id: str) -> None:
-    """Spawn the design-flow executor for ``run_id`` as a tracked background task."""
+    """Spawn the design-flow executor for ``run_id`` as a tracked background task.
+
+    The brain is a HybridBrain: deterministic handlers drive the mechanical
+    phases (requirements / design / simulation) so their deliverables reliably
+    land in the twin, and the ReAct brain handles any other phase.
+    """
     from api_gateway.chat.routes import get_mcp_bridge
     from api_gateway.projects.routes import get_project_backend
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.gate_eval import ProjectGateEvaluator
+    from api_gateway.runs.mech_handlers import (
+        HybridBrain,
+        MechanicalDesignHandler,
+        RequirementsHandler,
+        SimulationHandler,
+    )
+    from api_gateway.twin.geometry_recorder import make_geometry_recorder
+    from api_gateway.twin.routes import get_twin
 
-    brain = ReActPhaseBrain(mcp_bridge=get_mcp_bridge(), session_id=f"flow:{run_id}")
-    evaluator = ProjectGateEvaluator(get_project_backend())
+    bridge = get_mcp_bridge()
+    project_backend = get_project_backend()
+    recorder = make_geometry_recorder(get_twin(), project_backend)
+    hybrid = HybridBrain(
+        handlers={
+            "requirements": RequirementsHandler(bridge),
+            "design": MechanicalDesignHandler(bridge, recorder),
+            "simulation": SimulationHandler(bridge),
+        },
+        fallback=ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}"),
+    )
     executor = DesignFlowExecutor(
         store=_store,
-        brain=brain,
+        brain=hybrid,
         coordinator=_gate_coordinator,
-        gate_evaluator=evaluator,
+        gate_evaluator=ProjectGateEvaluator(project_backend),
     )
     task = asyncio.create_task(executor.run(run_id))
     _flow_tasks.add(task)
