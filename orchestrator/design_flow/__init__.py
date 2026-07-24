@@ -19,8 +19,10 @@ from orchestrator.design_flow.executor import (
     FlowCanceled,
     FlowContext,
     GateCoordinator,
+    GateEvaluator,
     PhaseBrain,
     PhaseOutcome,
+    ReadinessReport,
 )
 from orchestrator.design_flow.spec import (
     DEFAULT_FLOW_ID,
@@ -40,8 +42,10 @@ __all__ = [
     "FlowDefinition",
     "Gate",
     "GateCoordinator",
+    "GateEvaluator",
     "Phase",
     "PhaseBrain",
     "PhaseOutcome",
+    "ReadinessReport",
     "get_flow",
 ]

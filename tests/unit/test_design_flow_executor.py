@@ -38,17 +38,44 @@ class ScriptedBrain:
         )
 
 
-def _register_flow(flow_id: str, *, gated: bool = True, auto: bool = False) -> str:
+class FakeEvaluator:
+    """A `GateEvaluator` double returning a fixed set of present types."""
+
+    def __init__(self, present: set[str]) -> None:
+        self._present = present
+
+    async def present_types(self, project_id: str | None, since_ts: float) -> set[str]:
+        return set(self._present)
+
+
+def _register_flow(
+    flow_id: str,
+    *,
+    gated: bool = True,
+    auto: bool = False,
+    required: tuple[str, ...] = (),
+    enforce: bool = True,
+) -> str:
     def gate(name: str) -> Gate | None:
         return Gate(name=name, auto_approve=auto) if gated else None
+
+    def phase(pid: str, title: str, obj: str, gname: str) -> Phase:
+        return Phase(
+            id=pid,
+            title=title,
+            objective=obj,
+            required_deliverables=required,
+            enforce_deliverables=enforce,
+            gate=gate(gname),
+        )
 
     FLOWS[flow_id] = FlowDefinition(
         id=flow_id,
         name=flow_id,
         phases=(
-            Phase(id="requirements", title="Requirements", objective="x", gate=gate("g1")),
-            Phase(id="design", title="Design", objective="y", gate=gate("g2")),
-            Phase(id="simulation", title="Simulation", objective="z", gate=gate("g3")),
+            phase("requirements", "Requirements", "x", "g1"),
+            phase("design", "Design", "y", "g2"),
+            phase("simulation", "Simulation", "z", "g3"),
         ),
     )
     return flow_id
@@ -148,3 +175,73 @@ async def test_ungated_flow_completes_without_pausing() -> None:
     await asyncio.wait_for(executor.run(run.id), timeout=2.0)
 
     assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_gate_proceeds_when_required_deliverable_present() -> None:
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    brain = ScriptedBrain()
+    flow_id = _register_flow("test_ready", required=("cad_model",))
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=brain,
+        coordinator=coord,
+        gate_evaluator=FakeEvaluator({"cad_model", "design_decision"}),
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    for _ in range(3):  # deliverable present -> each gate pauses for the human
+        await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+        store.submit_approval(run.id, ApprovalDecision.APPROVE)
+
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_gate_fails_when_required_deliverable_missing() -> None:
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    brain = ScriptedBrain()
+    flow_id = _register_flow("test_missing", required=("cad_model",))
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    # Evaluator reports the required cad_model is absent -> gate must not pass.
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=brain,
+        coordinator=coord,
+        gate_evaluator=FakeEvaluator({"design_decision"}),
+    )
+    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
+
+    run_ = store.get(run.id)
+    assert run_.status is RunStatus.FAILED
+    assert "cad_model" in (run_.error or "")
+    assert brain.seen == ["requirements"]  # failed at the first gate
+
+
+@pytest.mark.asyncio
+async def test_missing_deliverable_not_enforced_still_pauses() -> None:
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    brain = ScriptedBrain()
+    flow_id = _register_flow("test_soft", required=("cad_model",), enforce=False)
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=brain,
+        coordinator=coord,
+        gate_evaluator=FakeEvaluator(set()),  # nothing present
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    # Not enforced -> the gate still pauses for the human despite the gap.
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.REJECTED

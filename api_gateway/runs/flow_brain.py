@@ -34,7 +34,7 @@ class ReActPhaseBrain:
         *,
         mcp_bridge: McpBridge | None,
         session_id: str = "design-flow",
-        max_steps: int = 12,
+        max_steps: int = 24,
         provider: str | None = None,
         model: str | None = None,
     ) -> None:
@@ -56,6 +56,7 @@ class ReActPhaseBrain:
             else "No project id supplied; still record decisions to the twin."
         )
         expected = ", ".join(phase.expected_artifacts) or "the appropriate work products"
+        deliverables = self._deliverable_guidance(phase, context)
         return (
             f"You are MetaForge's autonomous design engineer executing the "
             f"**{phase.title}** phase of a gated design flow.\n\n"
@@ -63,11 +64,41 @@ class ReActPhaseBrain:
             f"{project_line}\n\n"
             f"Prior phases completed:\n{prior}\n\n"
             f"Your objective for THIS phase:\n{phase.objective}\n\n"
+            f"{deliverables}\n"
             f"Use the available MCP tools (project, twin, CAD/FEA/EDA, knowledge) to "
             f"actually perform the work and record {expected} into the digital twin — "
-            f"do not just describe it. When done, reply with a concise summary (3-5 "
-            f"sentences) of what you produced and the specific artifacts/decisions you "
-            f"recorded, so a human reviewer can decide whether to pass this gate."
+            f"do not just describe it. Work efficiently: prefer one decisive tool call "
+            f"per step and avoid repeating a failed call with the same arguments. When "
+            f"done, reply with a concise summary (3-5 sentences) of what you produced "
+            f"and the specific artifacts/decisions you recorded, so a human reviewer "
+            f"can decide whether to pass this gate."
+        )
+
+    @staticmethod
+    def _deliverable_guidance(phase: Phase, context: FlowContext) -> str:
+        """Tell the brain exactly which twin work products the gate requires."""
+        if not phase.required_deliverables:
+            return ""
+        pid = context.project_id or "<the project>"
+        hints = {
+            "design_decision": (
+                "record it with the record-decision tool (title, rationale, alternatives), "
+                f"project_id={pid}"
+            ),
+            "cad_model": (
+                "author the geometry with the FreeCAD authoring tools, then PERSIST it "
+                f"with the commit-geometry tool (project_id={pid}) so it becomes a "
+                "viewable cad_model in the twin — a described-but-uncommitted model does "
+                "NOT count"
+            ),
+        }
+        lines = "\n".join(
+            f"  - {d}: {hints.get(d, 'record it into the twin, scoped to the project')}"
+            for d in phase.required_deliverables
+        )
+        return (
+            "This gate will FAIL unless the following work products are actually "
+            f"recorded into the twin for this project during this phase:\n{lines}\n"
         )
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:

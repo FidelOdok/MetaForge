@@ -92,10 +92,18 @@ def _is_design_flow(request: dict) -> bool:
 def _launch_flow(run_id: str) -> None:
     """Spawn the design-flow executor for ``run_id`` as a tracked background task."""
     from api_gateway.chat.routes import get_mcp_bridge
+    from api_gateway.projects.routes import get_project_backend
     from api_gateway.runs.flow_brain import ReActPhaseBrain
+    from api_gateway.runs.gate_eval import ProjectGateEvaluator
 
     brain = ReActPhaseBrain(mcp_bridge=get_mcp_bridge(), session_id=f"flow:{run_id}")
-    executor = DesignFlowExecutor(store=_store, brain=brain, coordinator=_gate_coordinator)
+    evaluator = ProjectGateEvaluator(get_project_backend())
+    executor = DesignFlowExecutor(
+        store=_store,
+        brain=brain,
+        coordinator=_gate_coordinator,
+        gate_evaluator=evaluator,
+    )
     task = asyncio.create_task(executor.run(run_id))
     _flow_tasks.add(task)
     task.add_done_callback(_flow_tasks.discard)

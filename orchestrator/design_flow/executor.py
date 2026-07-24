@@ -16,6 +16,7 @@ already wraps.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -62,6 +63,16 @@ class FlowContext:
     completed: list[tuple[Phase, PhaseOutcome]] = field(default_factory=list)
 
 
+@dataclass
+class ReadinessReport:
+    """Whether a phase's required deliverables are present in the twin."""
+
+    ready: bool
+    present: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    checked: bool = True  # False when no evaluator was available to check
+
+
 @runtime_checkable
 class PhaseBrain(Protocol):
     """Produces the work for one phase.
@@ -72,6 +83,17 @@ class PhaseBrain(Protocol):
     """
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome: ...
+
+
+@runtime_checkable
+class GateEvaluator(Protocol):
+    """Reports which work-product *types* a project has recorded since ``since_ts``.
+
+    Backed in production by the project store the dashboard reads, so gate
+    readiness matches what a human can actually see in the twin viewer.
+    """
+
+    async def present_types(self, project_id: str | None, since_ts: float) -> set[str]: ...
 
 
 class GateCoordinator:
@@ -120,18 +142,28 @@ class GateCoordinator:
             fut.set_exception(FlowCanceled(run_id))
 
 
-def _gate_reason(phase: Phase, outcome: PhaseOutcome) -> str:
+def _gate_reason(phase: Phase, outcome: PhaseOutcome, readiness: ReadinessReport) -> str:
     """Human-facing reason shown while a run waits at a gate."""
     gate = phase.gate
     label = gate.name if gate else phase.title
     head = f"[{label}] {phase.title} complete. {outcome.summary}".strip()
     if gate and gate.criteria:
         head += " | Review criteria: " + "; ".join(gate.criteria)
+    if readiness.checked and (readiness.present or readiness.missing):
+        head += (
+            f" | Deliverables present: {readiness.present or '—'};"
+            f" missing: {readiness.missing or 'none'}"
+        )
     return head[:2000]
 
 
 class DesignFlowExecutor:
-    """Walks a :class:`FlowDefinition`, gating between phases."""
+    """Walks a :class:`FlowDefinition`, gating between phases.
+
+    ``gate_evaluator`` (optional) lets a gate check that a phase actually
+    recorded its ``required_deliverables`` into the twin; without one, gates
+    proceed on the brain summary alone (readiness "unchecked").
+    """
 
     def __init__(
         self,
@@ -139,10 +171,12 @@ class DesignFlowExecutor:
         store: InMemoryRunStore,
         brain: PhaseBrain,
         coordinator: GateCoordinator,
+        gate_evaluator: GateEvaluator | None = None,
     ) -> None:
         self._store = store
         self._brain = brain
         self._coordinator = coordinator
+        self._evaluator = gate_evaluator
 
     async def run(self, run_id: str) -> None:
         """Drive ``run_id`` through its flow to a terminal state.
@@ -182,6 +216,7 @@ class DesignFlowExecutor:
 
     async def _walk(self, run_id: str, flow: FlowDefinition, ctx: FlowContext) -> None:
         for phase in flow.phases:
+            phase_start = time.time()
             logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id)
             outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
             ctx.completed.append((phase, outcome))
@@ -197,10 +232,24 @@ class DesignFlowExecutor:
             if gate is None or gate.auto_approve:
                 continue
 
+            # Readiness: did the phase record its required deliverables?
+            readiness = await self._readiness(phase, ctx, since_ts=phase_start)
+            if phase.enforce_deliverables and readiness.checked and not readiness.ready:
+                msg = (
+                    f"Gate '{gate.name}' not ready — phase '{phase.id}' did not record "
+                    f"required deliverables {readiness.missing} into the twin "
+                    f"(present: {readiness.present or 'none'})."
+                )
+                logger.warning(
+                    "design_flow_gate_not_ready", run_id=run_id, missing=readiness.missing
+                )
+                self._store.fail(run_id, msg)
+                return
+
             # Register the waiter BEFORE moving to awaiting_approval so a fast
             # approval can't race ahead of the future.
             self._coordinator.register(run_id)
-            self._store.request_approval(run_id, reason=_gate_reason(phase, outcome))
+            self._store.request_approval(run_id, reason=_gate_reason(phase, outcome, readiness))
             logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name)
             decision = await self._coordinator.wait(run_id)
             if decision is ApprovalDecision.REJECT:
@@ -210,6 +259,28 @@ class DesignFlowExecutor:
             logger.info("design_flow_gate_approved", run_id=run_id, gate=gate.name)
 
         self._store.complete(run_id, result=self._summarize(flow, ctx))
+
+    async def _readiness(
+        self, phase: Phase, ctx: FlowContext, *, since_ts: float
+    ) -> ReadinessReport:
+        """Check the twin for the phase's required deliverables."""
+        required = set(phase.required_deliverables)
+        if not required:
+            return ReadinessReport(ready=True, checked=True)
+        if self._evaluator is None:
+            return ReadinessReport(ready=True, checked=False)
+        try:
+            present = await self._evaluator.present_types(ctx.project_id, since_ts)
+        except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+            logger.warning("design_flow_readiness_error", phase=phase.id, error=str(exc))
+            return ReadinessReport(ready=True, checked=False)
+        missing = sorted(required - present)
+        return ReadinessReport(
+            ready=not missing,
+            present=sorted(required & present),
+            missing=missing,
+            checked=True,
+        )
 
     @staticmethod
     def _summarize(flow: FlowDefinition, ctx: FlowContext) -> dict[str, object]:

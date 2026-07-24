@@ -39,14 +39,20 @@ class Phase:
     """One step of the design lifecycle.
 
     ``objective`` is handed to the :class:`PhaseBrain` as the phase goal.
-    ``expected_artifacts`` documents the work-product types the phase should
-    record into the twin — advisory context for the brain, not enforced here.
+    ``required_deliverables`` are the work-product *types* (``WorkProductType``
+    values, e.g. ``"cad_model"``) the phase must record into the twin before its
+    gate. When ``enforce_deliverables`` is set, a phase whose required
+    deliverables are absent fails its gate instead of silently passing — this is
+    the "no work product is missing" guarantee. ``expected_artifacts`` is the
+    softer, advisory list surfaced to the brain as guidance.
     """
 
     id: str
     title: str
     objective: str
     expected_artifacts: tuple[str, ...] = ()
+    required_deliverables: tuple[str, ...] = ()
+    enforce_deliverables: bool = True
     gate: Gate | None = None
 
 
@@ -78,6 +84,9 @@ DESIGN_V1 = FlowDefinition(
                 "(use the record-decision tool), scoped to the project."
             ),
             expected_artifacts=("prd", "constraint_set", "design_decision"),
+            # Producible via twin.record_decision today; prd/constraint_set gain
+            # dedicated creation tools in a later slice.
+            required_deliverables=("design_decision",),
             gate=Gate(
                 name="Requirements sign-off",
                 criteria=(
@@ -98,6 +107,10 @@ DESIGN_V1 = FlowDefinition(
                 "dimensions, safety factor target) into the twin."
             ),
             expected_artifacts=("cad_model", "schematic", "design_decision"),
+            # The load-bearing geometry MUST be committed to the twin (via
+            # twin.commit_geometry) — the gate cannot pass without a viewable
+            # cad_model, so the CAD can never be silently missing.
+            required_deliverables=("cad_model",),
             gate=Gate(
                 name="Design review",
                 criteria=(
@@ -118,6 +131,9 @@ DESIGN_V1 = FlowDefinition(
                 "into the twin."
             ),
             expected_artifacts=("simulation_result", "test_result", "design_decision"),
+            # The V&V verdict is recorded as a decision today; a typed
+            # simulation_result/test_result work product follows with its tool.
+            required_deliverables=("design_decision",),
             gate=Gate(
                 name="V&V sign-off",
                 criteria=(

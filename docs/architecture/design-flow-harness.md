@@ -69,12 +69,28 @@ python -m cli.forge_cli runs reject <run_id>
 A run is treated as a design flow only when it opts in with a `flow` id (or
 `kind: "design_flow"`); a bare `{goal}` keeps the plain run semantics.
 
+## Deliverable enforcement ("no work product silently missing")
+
+Each phase declares `required_deliverables` — the work-product *types* it must
+record into the twin (e.g. the Design phase requires a `cad_model`). At the
+gate, a `GateEvaluator` (backed by the same project store the dashboard reads)
+checks which of those types the phase actually recorded during its window:
+
+- **All present** → the gate pauses for human sign-off, showing present/missing.
+- **Missing** and the phase is `enforce_deliverables` → the run **fails at the
+  gate** with the missing list, rather than silently passing. The Design gate
+  cannot pass without a committed, viewable `cad_model`.
+
+This makes completeness machine-enforced and quality human-judged: the machine
+guarantees the deliverable exists in the twin; the human reviews whether it's
+right.
+
 ## What's built vs. planned
 
 **Built (Phase 1, thin vertical):** the `design_v1` 3-phase gated flow, the
-executor + gate coordinator wired into `/v1/runs`, the ReAct phase brain, and
-SSE/CLI drive. Each phase records its artifacts + decisions into the digital
-twin via MCP tools.
+executor + gate coordinator wired into `/v1/runs`, the ReAct phase brain,
+per-phase deliverable enforcement via `GateEvaluator`, and SSE/CLI drive. Each
+phase records its artifacts + decisions into the digital twin via MCP tools.
 
 **Planned (next slices):** the full lifecycle (Architecture → Digital-Twin
 consolidation → Release), per-discipline fan-out (a registry routing phases to
