@@ -10,7 +10,10 @@
     "dev": "tsx src/cli.tsx",
     "typecheck": "tsc --noEmit",
     "gen:types": "openapi-typescript ../docs/reference/openapi.json -o src/api/schema.ts",
-    "build": "tsc"
+    "stamp": "node scripts/stamp.mjs",
+    "build": "npm run stamp && tsc",
+    "start": "node dist/cli.js",
+    "bundle:bin": "npm run stamp && bun build src/cli.tsx --compile --outfile dist/forge-tui"
   },
   "dependencies": {
     "ink": "^5.1.0",

@@ -27,6 +27,26 @@ npm run dev           # launches the TUI (requires a TTY)
 Config is read from `~/.forge/config.json` (shared with the Python CLI):
 `gateway_url`, `provider`, `model`, `mode`.
 
+Keys: `^T` chat · `^R` runs · `^N` new run · `^B` twin · `Esc`/`^C` quit.
+
+## Build & distribute
+
+```bash
+npm run build              # stamp provenance + tsc -> dist/ ; run: node dist/cli.js
+forge-tui --version        # -> forge-tui 0.1.0 (<commit>, <date>)
+```
+
+`npm run stamp` writes the git commit + date into `src/build-info.ts`, so
+`--version` reports exactly which build you're running — making the "is my CLI
+stale?" question answerable (the trap that bit the Python binary).
+
+A true standalone single binary (no Node needed) is produced with
+[Bun](https://bun.sh):
+
+```bash
+npm run bundle:bin         # -> dist/forge-tui  (requires bun)
+```
+
 ## Layout
 
 ```
