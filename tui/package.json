@@ -1,0 +1,36 @@
+{
+  "name": "@metaforge/forge-tui",
+  "version": "0.1.0",
+  "description": "MetaForge terminal UI (Ink) — gated design-flow HITL over the gateway",
+  "type": "module",
+  "bin": {
+    "forge-tui": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts' 'src/**/*.test.tsx'",
+    "gen:types": "openapi-typescript ../docs/reference/openapi.json -o src/api/schema.ts",
+    "stamp": "node scripts/stamp.mjs",
+    "build": "npm run stamp && tsc",
+    "start": "node dist/cli.js",
+    "bundle:bin": "npm run stamp && bun build src/cli.tsx --compile --outfile dist/forge-tui"
+  },
+  "dependencies": {
+    "ink": "^5.1.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "ink-testing-library": "^4.0.0",
+    "openapi-typescript": "^7.4.3",
+    "react-devtools-core": "^4.19.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
