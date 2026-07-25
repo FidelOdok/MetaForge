@@ -25,9 +25,15 @@ export function Chat({
     setInput("");
   };
 
+  // Cap scrollback so a long session doesn't overflow the terminal.
+  const MAX_VISIBLE = 8;
+  const visible = messages.slice(-MAX_VISIBLE);
+  const hidden = messages.length - visible.length;
+
   return (
     <Box flexDirection="column" paddingX={1}>
-      {messages.map((m, i) => (
+      {hidden > 0 && <Text dimColor>… {hidden} earlier message{hidden > 1 ? "s" : ""}</Text>}
+      {visible.map((m, i) => (
         <Box key={i} flexDirection="column" marginBottom={1}>
           {m.role === "user" ? (
             <Text>
