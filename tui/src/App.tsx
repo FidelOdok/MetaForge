@@ -6,8 +6,11 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
 import { RunsView } from "./components/RunsView.js";
 import { NewRun } from "./components/NewRun.js";
+import { useRunAlerts } from "./hooks/useRunAlerts.js";
 
 type View = "chat" | "runs" | "new";
+
+const ALERT_COLOR = { gate: "yellow", done: "green", failed: "red" } as const;
 
 /**
  * Root TUI: header + status bar + a switchable view. Ctrl+T = chat (streaming
@@ -20,6 +23,7 @@ export function App() {
   const [health, setHealth] = useState("checking…");
   const [project, setProject] = useState<string | undefined>(undefined);
   const [view, setView] = useState<View>("chat");
+  const { awaiting, alert } = useRunAlerts(client);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -58,15 +62,32 @@ export function App() {
           </Text>
           <Text dimColor> · gated design-flow harness</Text>
         </Box>
-        <Text dimColor>
-          <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
-          {" · "}
-          <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
-          {" · "}
-          <Text color={view === "new" ? "cyan" : undefined}>new</Text>
-          {"  ^T/^R/^N"}
-        </Text>
+        <Box>
+          {awaiting > 0 && (
+            <Text color="yellow" bold>
+              ⏸ {awaiting} gate{awaiting > 1 ? "s" : ""}{"   "}
+            </Text>
+          )}
+          <Text dimColor>
+            <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
+            {" · "}
+            <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
+            {" · "}
+            <Text color={view === "new" ? "cyan" : undefined}>new</Text>
+            {"  ^T/^R/^N"}
+          </Text>
+        </Box>
       </Box>
+
+      {alert && (
+        <Box paddingX={1}>
+          <Text color={ALERT_COLOR[alert.kind]}>
+            {alert.kind === "gate" ? "🔔 " : alert.kind === "done" ? "✓ " : "✗ "}
+            {alert.text}
+            {alert.kind === "gate" ? <Text dimColor> — ^R to review</Text> : null}
+          </Text>
+        </Box>
+      )}
 
       <StatusBar
         gatewayUrl={cfg.gateway_url}
