@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx src/cli.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/lib/gate.test.ts src/lib/intent.test.ts src/api/chat.test.ts src/api/runs.test.ts src/config.test.ts",
+    "test": "node --import tsx --test 'src/**/*.test.ts' 'src/**/*.test.tsx'",
     "gen:types": "openapi-typescript ../docs/reference/openapi.json -o src/api/schema.ts",
     "stamp": "node scripts/stamp.mjs",
     "build": "npm run stamp && tsc",
@@ -24,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
+    "ink-testing-library": "^4.0.0",
     "openapi-typescript": "^7.4.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
