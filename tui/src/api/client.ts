@@ -81,4 +81,51 @@ export class GatewayClient {
     const data = await this.get<{ runs?: Run[] }>("/v1/runs");
     return data.runs ?? [];
   }
+
+  baseUrl(): string {
+    return this.base();
+  }
+
+  private async post<T>(path: string, body: unknown, timeoutMs = 15000): Promise<T> {
+    const res = await fetch(`${this.base()}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) throw new GatewayError(`POST ${path} -> ${res.status}`, res.status);
+    return (await res.json()) as T;
+  }
+
+  /** Create an assistant-scoped chat thread. */
+  async createThread(scopeEntityId: string, title?: string): Promise<{ id: string }> {
+    return this.post<{ id: string }>("/v1/chat/threads", {
+      scope_kind: "assistant",
+      scope_entity_id: scopeEntityId,
+      title,
+    });
+  }
+
+  /**
+   * Post a user message. The gateway runs the agent turn inside this request
+   * while the SSE stream delivers deltas/steps concurrently, so callers fire
+   * this without blocking the UI on the returned envelope.
+   */
+  async sendMessage(
+    threadId: string,
+    content: string,
+    opts: { provider?: string; model?: string } = {},
+  ): Promise<void> {
+    await this.post<unknown>(
+      `/v1/chat/threads/${threadId}/messages`,
+      {
+        content,
+        actor_id: "tui-user",
+        actor_kind: "user",
+        provider: opts.provider,
+        model: opts.model,
+      },
+      120000,
+    );
+  }
 }
