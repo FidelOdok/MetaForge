@@ -1,4 +1,7 @@
 import { Box, Text } from "ink";
+import { gateReady } from "../lib/gate.js";
+
+export { statusColor } from "../lib/gate.js";
 
 /**
  * Approval prompt shown when a run is paused at a gate. The `reason` is the
@@ -6,7 +9,7 @@ import { Box, Text } from "ink";
  * readiness); [a] approves, [x] rejects.
  */
 export function GateModal({ reason, busy }: { reason: string; busy?: boolean }) {
-  const ready = /missing:\s*none/i.test(reason);
+  const ready = gateReady(reason);
   return (
     <Box
       flexDirection="column"
@@ -43,16 +46,3 @@ export function GateModal({ reason, busy }: { reason: string; busy?: boolean }) 
   );
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  completed: "green",
-  running: "cyan",
-  awaiting_approval: "yellow",
-  failed: "red",
-  rejected: "red",
-  canceled: "gray",
-  queued: "gray",
-};
-
-export function statusColor(status: string | undefined): string {
-  return (status && STATUS_COLOR[status]) || "white";
-}

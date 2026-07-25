@@ -21,7 +21,7 @@ export type ChatEvent =
   | { type: "error"; error: string }
   | { type: "other"; event: string; data: unknown };
 
-function parseEvent(raw: string): ChatEvent | null {
+export function parseEvent(raw: string): ChatEvent | null {
   let event = "message";
   let dataStr = "";
   for (const line of raw.split("\n")) {
