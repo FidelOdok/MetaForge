@@ -26,6 +26,7 @@
     "@types/react": "^18.3.12",
     "ink-testing-library": "^4.0.0",
     "openapi-typescript": "^7.4.3",
+    "react-devtools-core": "^4.19.1",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   },
