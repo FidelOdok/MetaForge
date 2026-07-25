@@ -68,9 +68,54 @@ jobs:
           path: out/${{ matrix.asset }}
           if-no-files-found: error
 
+  build-tui:
+    name: build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: forge-tui-linux-x64
+          - os: macos-latest
+            asset: forge-tui-macos-arm64
+          - os: windows-latest
+            asset: forge-tui-windows-x64.exe
+    defaults:
+      run:
+        working-directory: tui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tui/package-lock.json
+      - run: npm ci
+      - name: Build TUI binary (stamps git provenance)
+        run: npm run bundle:bin
+      - name: Stage asset
+        shell: bash
+        run: |
+          mkdir -p ../out
+          if [ -f dist/forge-tui.exe ]; then
+            cp dist/forge-tui.exe "../out/${{ matrix.asset }}"
+          else
+            cp dist/forge-tui "../out/${{ matrix.asset }}"
+          fi
+      - name: Smoke-test the binary
+        shell: bash
+        run: ../out/${{ matrix.asset }} --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          if-no-files-found: error
+
   release:
     name: publish release
-    needs: build
+    needs: [build, build-tui]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:

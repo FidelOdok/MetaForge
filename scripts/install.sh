@@ -66,6 +66,37 @@ chmod +x "$BIN_DIR/forge"
 
 echo "Installed forge to $BIN_DIR/forge"
 
+# Also install the terminal UI (forge-tui) alongside the CLI. Best-effort:
+# older releases may not ship it, so a missing asset is a skip, not an error.
+# Opt out with FORGE_NO_TUI=1.
+if [ "${FORGE_NO_TUI:-0}" != "1" ]; then
+  case "$os" in
+    Linux) tui_asset="forge-tui-linux-x64" ;;
+    Darwin) tui_asset="forge-tui-macos-arm64" ;;
+    *) tui_asset="" ;;
+  esac
+  if [ -n "$tui_asset" ]; then
+    if [ "$VERSION" = "latest" ]; then
+      tui_url="https://github.com/$REPO/releases/latest/download/$tui_asset"
+    else
+      tui_url="https://github.com/$REPO/releases/download/$VERSION/$tui_asset"
+    fi
+    echo "Installing forge-tui ($tui_asset) -> $BIN_DIR/forge-tui"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$tui_url" -o "$BIN_DIR/forge-tui" 2>/dev/null || true
+    else
+      wget -qO "$BIN_DIR/forge-tui" "$tui_url" 2>/dev/null || true
+    fi
+    if [ -s "$BIN_DIR/forge-tui" ]; then
+      chmod +x "$BIN_DIR/forge-tui"
+      echo "Installed forge-tui to $BIN_DIR/forge-tui"
+    else
+      rm -f "$BIN_DIR/forge-tui"
+      echo "forge-tui not published for this release yet; skipping."
+    fi
+  fi
+fi
+
 # Make sure BIN_DIR is on PATH. If it already is, we're done. Otherwise append
 # the export to the shell profile (idempotent). Opt out with FORGE_NO_MODIFY_PATH=1.
 path_line="export PATH=\"$BIN_DIR:\$PATH\""
