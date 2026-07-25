@@ -5,7 +5,7 @@ import { GatewayClient } from "./api/client.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
 import { RunsView } from "./components/RunsView.js";
-import { NewRun } from "./components/NewRun.js";
+import { IntentForm } from "./components/IntentForm.js";
 import { TwinView } from "./components/TwinView.js";
 import { useRunAlerts } from "./hooks/useRunAlerts.js";
 
@@ -107,7 +107,7 @@ export function App() {
         )}
         {view === "runs" && <RunsView client={client} onExit={() => setView("chat")} />}
         {view === "new" && (
-          <NewRun
+          <IntentForm
             client={client}
             onCreated={() => setView("runs")}
             onCancel={() => setView("chat")}

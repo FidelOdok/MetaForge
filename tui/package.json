@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx src/cli.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/lib/gate.test.ts src/api/chat.test.ts src/api/runs.test.ts src/config.test.ts",
+    "test": "node --import tsx --test src/lib/gate.test.ts src/lib/intent.test.ts src/api/chat.test.ts src/api/runs.test.ts src/config.test.ts",
     "gen:types": "openapi-typescript ../docs/reference/openapi.json -o src/api/schema.ts",
     "stamp": "node scripts/stamp.mjs",
     "build": "npm run stamp && tsc",
