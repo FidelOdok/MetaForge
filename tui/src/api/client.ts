@@ -33,6 +33,17 @@ export interface Project {
   work_products?: WorkProductRef[];
 }
 
+export interface TwinNode {
+  id: string;
+  name: string;
+  type: string;
+  domain?: string;
+  status?: string;
+  content_hash?: string;
+  properties?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
 export interface Run {
   id: string;
   status: string;
@@ -104,6 +115,12 @@ export class GatewayClient {
 
   async getRun(id: string): Promise<Run> {
     return this.get<Run>(`/v1/runs/${id}`);
+  }
+
+  /** Fetch a twin node (work product) with its properties. */
+  async getNode(id: string): Promise<TwinNode> {
+    const data = await this.get<TwinNode & { node?: TwinNode }>(`/v1/twin/nodes/${id}`);
+    return data.node ?? data;
   }
 
   /** Approve or reject a run paused at a gate. */

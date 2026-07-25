@@ -6,9 +6,10 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
 import { RunsView } from "./components/RunsView.js";
 import { NewRun } from "./components/NewRun.js";
+import { TwinView } from "./components/TwinView.js";
 import { useRunAlerts } from "./hooks/useRunAlerts.js";
 
-type View = "chat" | "runs" | "new";
+type View = "chat" | "runs" | "new" | "twin";
 
 const ALERT_COLOR = { gate: "yellow", done: "green", failed: "red" } as const;
 
@@ -33,6 +34,7 @@ export function App() {
     if (key.ctrl && input === "r") setView("runs");
     else if (key.ctrl && input === "t") setView("chat");
     else if (key.ctrl && input === "n") setView("new");
+    else if (key.ctrl && input === "b") setView("twin");
     else if (key.escape && view === "chat") exit();
   });
 
@@ -74,7 +76,9 @@ export function App() {
             <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
             {" · "}
             <Text color={view === "new" ? "cyan" : undefined}>new</Text>
-            {"  ^T/^R/^N"}
+            {" · "}
+            <Text color={view === "twin" ? "cyan" : undefined}>twin</Text>
+            {"  ^T/^R/^N/^B"}
           </Text>
         </Box>
       </Box>
@@ -109,6 +113,7 @@ export function App() {
             onCancel={() => setView("chat")}
           />
         )}
+        {view === "twin" && <TwinView client={client} onExit={() => setView("chat")} />}
       </Box>
     </Box>
   );
