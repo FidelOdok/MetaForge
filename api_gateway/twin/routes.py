@@ -69,6 +69,11 @@ def init_twin(twin: object) -> None:
     logger.info("twin_viewer_twin_initialized", twin_type=type(twin).__name__)
 
 
+def get_twin() -> object:
+    """The active twin API (used by the design-flow mechanical handlers)."""
+    return _twin
+
+
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
 
 

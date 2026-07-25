@@ -59,6 +59,11 @@ def init_project_backend(backend: ProjectBackend) -> None:
     logger.info("project_backend_initialized", backend_type=type(backend).__name__)
 
 
+def get_project_backend() -> ProjectBackend:
+    """The active project backend (used by the design-flow gate evaluator)."""
+    return _backend
+
+
 async def link_work_product_to_project(
     project_id: str,
     wp_id: str,
