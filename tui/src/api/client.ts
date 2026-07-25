@@ -97,6 +97,20 @@ export class GatewayClient {
     return (await res.json()) as T;
   }
 
+  /** Create a run (design flow when the request carries a `flow`). */
+  async createRun(request: Record<string, unknown>, start = true): Promise<Run> {
+    return this.post<Run>("/v1/runs", { request, start });
+  }
+
+  async getRun(id: string): Promise<Run> {
+    return this.get<Run>(`/v1/runs/${id}`);
+  }
+
+  /** Approve or reject a run paused at a gate. */
+  async submitApproval(id: string, decision: "approve" | "reject"): Promise<Run> {
+    return this.post<Run>(`/v1/runs/${id}/approval`, { decision });
+  }
+
   /** Create an assistant-scoped chat thread. */
   async createThread(scopeEntityId: string, title?: string): Promise<{ id: string }> {
     return this.post<{ id: string }>("/v1/chat/threads", {

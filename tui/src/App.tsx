@@ -4,10 +4,13 @@ import { loadConfig } from "./config.js";
 import { GatewayClient } from "./api/client.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
+import { RunsView } from "./components/RunsView.js";
+
+type View = "chat" | "runs";
 
 /**
- * Root TUI: header + status bar + chat view. Iteration 2 adds streaming chat
- * over /v1/chat with the tool-call trace. Gated-run approval lands next.
+ * Root TUI: header + status bar + a switchable view. Ctrl+T = chat (streaming
+ * assistant), Ctrl+R = runs (gated design-flow timeline + approvals).
  */
 export function App() {
   const { exit } = useApp();
@@ -15,9 +18,16 @@ export function App() {
   const [client] = useState(() => new GatewayClient(cfg));
   const [health, setHealth] = useState("checking…");
   const [project, setProject] = useState<string | undefined>(undefined);
+  const [view, setView] = useState<View>("chat");
 
   useInput((input, key) => {
-    if (key.escape || (key.ctrl && input === "c")) exit();
+    if (key.ctrl && input === "c") {
+      exit();
+      return;
+    }
+    if (key.ctrl && input === "r") setView("runs");
+    else if (key.ctrl && input === "t") setView("chat");
+    else if (key.escape && view === "chat") exit();
   });
 
   useEffect(() => {
@@ -39,11 +49,19 @@ export function App() {
 
   return (
     <Box flexDirection="column">
-      <Box paddingX={1}>
-        <Text bold color="magenta">
-          MetaForge
+      <Box paddingX={1} justifyContent="space-between">
+        <Box>
+          <Text bold color="magenta">
+            MetaForge
+          </Text>
+          <Text dimColor> · gated design-flow harness</Text>
+        </Box>
+        <Text dimColor>
+          <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
+          {" · "}
+          <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
+          {"  ^T/^R"}
         </Text>
-        <Text dimColor> · gated design-flow harness</Text>
       </Box>
 
       <StatusBar
@@ -55,7 +73,11 @@ export function App() {
       />
 
       <Box marginTop={1}>
-        <Chat client={client} model={cfg.model} provider={cfg.provider} />
+        {view === "chat" ? (
+          <Chat client={client} model={cfg.model} provider={cfg.provider} />
+        ) : (
+          <RunsView client={client} onExit={() => setView("chat")} />
+        )}
       </Box>
     </Box>
   );
