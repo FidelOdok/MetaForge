@@ -5,8 +5,9 @@ import { GatewayClient } from "./api/client.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
 import { RunsView } from "./components/RunsView.js";
+import { NewRun } from "./components/NewRun.js";
 
-type View = "chat" | "runs";
+type View = "chat" | "runs" | "new";
 
 /**
  * Root TUI: header + status bar + a switchable view. Ctrl+T = chat (streaming
@@ -27,6 +28,7 @@ export function App() {
     }
     if (key.ctrl && input === "r") setView("runs");
     else if (key.ctrl && input === "t") setView("chat");
+    else if (key.ctrl && input === "n") setView("new");
     else if (key.escape && view === "chat") exit();
   });
 
@@ -60,7 +62,9 @@ export function App() {
           <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
           {" · "}
           <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
-          {"  ^T/^R"}
+          {" · "}
+          <Text color={view === "new" ? "cyan" : undefined}>new</Text>
+          {"  ^T/^R/^N"}
         </Text>
       </Box>
 
@@ -73,10 +77,16 @@ export function App() {
       />
 
       <Box marginTop={1}>
-        {view === "chat" ? (
+        {view === "chat" && (
           <Chat client={client} model={cfg.model} provider={cfg.provider} />
-        ) : (
-          <RunsView client={client} onExit={() => setView("chat")} />
+        )}
+        {view === "runs" && <RunsView client={client} onExit={() => setView("chat")} />}
+        {view === "new" && (
+          <NewRun
+            client={client}
+            onCreated={() => setView("runs")}
+            onCancel={() => setView("chat")}
+          />
         )}
       </Box>
     </Box>
