@@ -4,6 +4,8 @@
  * error. `streamThread` yields parsed events off the fetch body stream.
  */
 
+import { log } from "../log.js";
+
 export interface AgentStep {
   index?: number;
   thought?: string;
@@ -79,7 +81,11 @@ export async function* streamThread(
     while ((sep = buf.indexOf("\n\n")) !== -1) {
       const raw = buf.slice(0, sep);
       buf = buf.slice(sep + 2);
+      log.debug("sse.frame", { raw });
       const ev = parseEvent(raw);
+      // A delta event that parsed to no text is the fingerprint of an SSE
+      // payload/parse mismatch — surface it loudly rather than silently drop it.
+      if (ev?.type === "message.delta" && ev.delta === "") log.warn("sse.empty_delta", { raw });
       if (ev) yield ev;
     }
   }

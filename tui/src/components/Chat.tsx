@@ -90,7 +90,11 @@ export function Chat({
                 <Text color="magenta" bold>
                   assistant{"  "}
                 </Text>
-                {m.text ? m.text : <Text dimColor>(no reply — the agent didn't answer)</Text>}
+                {m.text ? (
+                  m.text
+                ) : (
+                  <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
+                )}
               </Text>
             </Box>
           )}

@@ -409,6 +409,34 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 |---|---|---|
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
+| `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
+| `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |
+
+## Logs & debugging the interactive TUI
+
+The interactive `forge` TUI owns the terminal, so it cannot print diagnostics to
+the screen without corrupting the UI. Instead it appends a JSONL session log to
+**`~/.forge/logs/session.log`** — always on, a few lines per session:
+
+- `chat.thread_created` / `chat.stream_open` — stream lifecycle
+- `chat.send` — a turn was submitted (`chars`, `model`, `provider`)
+- `chat.turn_done` — **one line per turn** with `events`, `deltas`, `chars`, and
+  a `reason` when the turn came back empty (e.g. `"N delta event(s) but 0
+  characters — likely an SSE payload/parse mismatch"`). This is the signal that
+  turns a "(no reply)" into a diagnosable cause.
+- `chat.stream_error_event` / `chat.stream_failed` — transport/agent errors
+
+Run with `--debug` (or `FORGE_LOG=1`) to also capture every raw SSE frame
+(`sse.frame`) and a `sse.empty_delta` warning whenever a delta event carries no
+text — the exact fingerprint of a payload/parse mismatch:
+
+```bash
+forge --debug            # interactive TUI, verbose logging on
+tail -f ~/.forge/logs/session.log | jq .
+```
+
+An empty assistant turn now shows *why* inline — `(no reply — <cause>)` — instead
+of a single opaque string.
 
 ## Troubleshooting
 
