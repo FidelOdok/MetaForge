@@ -9,7 +9,12 @@ import { runCommand } from "./commands.js";
  *   - a subcommand / --help   → run it non-interactively (print + exit)
  *   - bare + piped (no TTY)   → print a hint (can't render a UI without a TTY)
  */
-const argv = process.argv.slice(2);
+// `--debug` (verbose file logging) is a global flag, not a subcommand — pull it
+// out before mode detection so `forge --debug` still launches the TUI. log.ts
+// reads it straight off argv, so no wiring beyond keeping it out of the way.
+const rawArgv = process.argv.slice(2);
+if (rawArgv.includes("--debug")) process.env.FORGE_LOG ??= "1";
+const argv = rawArgv.filter((a) => a !== "--debug");
 const first = argv[0];
 
 const wantsTui = first === undefined || first === "ui";

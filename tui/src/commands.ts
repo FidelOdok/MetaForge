@@ -75,8 +75,9 @@ function printHelp(): void {
       "  forge config show|path|set <key> <value>",
       "  forge --version | --help",
       "",
-      "Flags: --json  --gateway <url>  (chat: --model --provider)",
+      "Flags: --json  --gateway <url>  --debug  (chat: --model --provider)",
       "Config: ~/.forge/config.json (gateway_url, provider, model, mode)",
+      "Logs:   ~/.forge/logs/session.log  (--debug or FORGE_LOG=1 adds raw SSE)",
     ].join("\n"),
   );
 }
