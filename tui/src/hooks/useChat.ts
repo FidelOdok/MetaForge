@@ -67,12 +67,12 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
               break;
             case "agent.done": {
               const buf = bufRef.current;
-              if (buf.text || buf.steps.length) {
-                setMessages((m) => [
-                  ...m,
-                  { role: "assistant", text: buf.text, steps: buf.steps },
-                ]);
-              }
+              // Always commit a turn's result so an exhausted/empty turn shows a
+              // "(no reply)" line rather than a confusing blank assistant.
+              setMessages((m) => [
+                ...m,
+                { role: "assistant", text: buf.text, steps: buf.steps },
+              ]);
               bufRef.current = { text: "", steps: [] };
               setPending(null);
               setStatus("idle");
