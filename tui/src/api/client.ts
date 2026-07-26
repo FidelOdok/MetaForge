@@ -44,6 +44,13 @@ export interface TwinNode {
   metadata?: Record<string, unknown>;
 }
 
+export interface ThreadMessage {
+  role?: string;
+  actor_kind?: string;
+  content?: string;
+  text?: string;
+}
+
 export interface Run {
   id: string;
   status: string;
@@ -91,6 +98,15 @@ export class GatewayClient {
   async listRuns(): Promise<Run[]> {
     const data = await this.get<{ runs?: Run[] }>("/v1/runs");
     return data.runs ?? [];
+  }
+
+  async listTwinNodes(): Promise<TwinNode[]> {
+    const data = await this.get<{ nodes?: TwinNode[] }>("/v1/twin/nodes");
+    return data.nodes ?? [];
+  }
+
+  async getThread(id: string): Promise<{ messages?: ThreadMessage[] }> {
+    return this.get<{ messages?: ThreadMessage[] }>(`/v1/chat/threads/${id}`);
   }
 
   baseUrl(): string {

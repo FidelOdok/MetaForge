@@ -1,33 +1,30 @@
 #!/usr/bin/env node
 import { render } from "ink";
 import { App } from "./App.js";
-import { BUILD } from "./build-info.js";
+import { runCommand } from "./commands.js";
 
-const args = process.argv.slice(2);
+/**
+ * Unified `forge` entrypoint. Mode is chosen by invocation:
+ *   - bare + a TTY            → launch the interactive Ink TUI
+ *   - a subcommand / --help   → run it non-interactively (print + exit)
+ *   - bare + piped (no TTY)   → print a hint (can't render a UI without a TTY)
+ */
+const argv = process.argv.slice(2);
+const first = argv[0];
 
-if (args.includes("--version") || args.includes("-v")) {
-  const stamp = BUILD.date ? `${BUILD.commit}, ${BUILD.date}` : BUILD.commit;
-  console.log(`forge-tui ${BUILD.version} (${stamp})`);
-  process.exit(0);
+const wantsTui = first === undefined || first === "ui";
+const wantsVersion = first === "--version" || first === "-v";
+
+if (wantsVersion) {
+  void runCommand(["version"]).then((code) => process.exit(code));
+} else if (wantsTui) {
+  if (process.stdout.isTTY && process.stdin.isTTY) {
+    render(<App />);
+  } else {
+    process.stderr.write("forge: no TTY — the interactive UI needs a terminal.\n");
+    process.stderr.write("Use a command instead, e.g. `forge runs list` or `forge --help`.\n");
+    process.exit(0);
+  }
+} else {
+  void runCommand(argv).then((code) => process.exit(code));
 }
-
-if (args.includes("--help") || args.includes("-h")) {
-  console.log(
-    [
-      "forge-tui — MetaForge terminal UI (Ink)",
-      "",
-      "Usage: forge-tui",
-      "",
-      "  ^T  chat        streaming assistant + tool-call trace",
-      "  ^R  runs        gated design-flow timeline + approve/reject",
-      "  ^N  new         launch a design-flow run",
-      "  ^B  twin        browse projects → work products",
-      "  Esc/^C  quit",
-      "",
-      "Config: ~/.forge/config.json (gateway_url, provider, model, mode)",
-    ].join("\n"),
-  );
-  process.exit(0);
-}
-
-render(<App />);
