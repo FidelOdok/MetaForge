@@ -22,6 +22,7 @@ The SDK client is injectable so the adapters unit-test without network.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from typing import Any
@@ -110,7 +111,12 @@ async def anthropic_invoke(
 async def openai_invoke(
     spec: ProviderSpec, request: Any, *, client: Any | None = None
 ) -> dict[str, Any]:
-    """Call an OpenAI-compatible model (OpenAI / OpenRouter / vLLM / Ollama)."""
+    """Call an OpenAI-compatible model (OpenAI / OpenRouter / vLLM / Ollama).
+
+    When the request carries ``tools`` (native function schemas), they are passed
+    through and any ``tool_calls`` in the reply are parsed and returned — this is
+    the native tool-calling path (matches how Claude Code drives tools).
+    """
     system, messages, max_tokens, temperature = _normalize_request(request)
     if system:
         messages = [{"role": "system", "content": system}, *messages]
@@ -120,19 +126,41 @@ async def openai_invoke(
         client = AsyncOpenAI(
             api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
         )
+    kwargs: dict[str, Any] = {
+        "model": spec.model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    tools = request.get("tools") if isinstance(request, dict) else None
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = request.get("tool_choice", "auto")
     try:
-        resp = await client.chat.completions.create(
-            model=spec.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        resp = await client.chat.completions.create(**kwargs)
     except ProviderError:
         raise
     except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
         raise _classify_error(exc) from exc
-    text = resp.choices[0].message.content or ""
-    return {"text": text, "model": getattr(resp, "model", spec.model)}
+    msg = resp.choices[0].message
+    tool_calls: list[dict[str, Any]] = []
+    for tc in getattr(msg, "tool_calls", None) or []:
+        try:
+            args = json.loads(tc.function.arguments or "{}")
+        except (ValueError, TypeError):
+            args = {}
+        tool_calls.append(
+            {
+                "id": tc.id,
+                "name": tc.function.name,
+                "arguments": args if isinstance(args, dict) else {},
+            }
+        )
+    return {
+        "text": msg.content or "",
+        "tool_calls": tool_calls,
+        "model": getattr(resp, "model", spec.model),
+    }
 
 
 async def gemini_invoke(

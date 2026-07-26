@@ -1,0 +1,96 @@
+"""Native tool-calling loop tests (MET-10). Network-free — scripted invoke."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from orchestrator.harness import HarnessRuntime
+from orchestrator.harness.native_tools import _tool_schemas, run_native_tools
+from orchestrator.harness.providers import ProviderSpec, load_provider_config
+from orchestrator.harness.tools import ToolRegistry
+
+CONFIG = load_provider_config({"roles": {"generator": [{"provider": "openai", "model": "gpt-4o"}]}})
+
+
+async def _double(args: dict[str, Any]) -> dict[str, Any]:
+    return {"result": args["x"] * 2}
+
+
+def _runtime_with_double() -> HarnessRuntime:
+    tools = ToolRegistry()
+    tools.register_native(
+        "double",
+        description="double a number",
+        input_schema={"type": "object", "properties": {"x": {"type": "number"}}},
+        handler=_double,
+    )
+    return HarnessRuntime.build(CONFIG, tools=tools)
+
+
+def _scripted(*responses: dict[str, Any]):
+    calls = {"n": 0}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict[str, Any]:
+        i = min(calls["n"], len(responses) - 1)
+        calls["n"] += 1
+        return {"model": spec.model, **responses[i]}
+
+    return invoke
+
+
+@pytest.mark.asyncio
+async def test_answers_directly_without_tools() -> None:
+    rt = HarnessRuntime.build(CONFIG)
+    inv = _scripted({"text": "Hello! How can I help?", "tool_calls": []})
+    res = await run_native_tools(rt, "hello", invoke=inv)
+    assert res.status == "completed"
+    assert res.output == "Hello! How can I help?"
+    assert res.steps == []  # no tool was called for a greeting
+
+
+@pytest.mark.asyncio
+async def test_calls_tool_then_answers() -> None:
+    rt = _runtime_with_double()
+    inv = _scripted(
+        {"text": "", "tool_calls": [{"id": "c1", "name": "double", "arguments": {"x": 21}}]},
+        {"text": "It's 42.", "tool_calls": []},
+    )
+    res = await run_native_tools(rt, "double 21", invoke=inv)
+    assert res.output == "It's 42."
+    assert len(res.steps) == 1
+    assert res.steps[0].tool_call is not None and res.steps[0].tool_call.name == "double"
+    assert res.steps[0].observation == {"result": 42}
+
+
+@pytest.mark.asyncio
+async def test_tool_error_is_fed_back_not_fatal() -> None:
+    rt = _runtime_with_double()
+    inv = _scripted(
+        {"text": "", "tool_calls": [{"id": "c1", "name": "missing_tool", "arguments": {}}]},
+        {"text": "That tool isn't available, but here's my answer.", "tool_calls": []},
+    )
+    res = await run_native_tools(rt, "do it", invoke=inv)
+    assert res.status == "completed"
+    assert "here's my answer" in str(res.output)
+    assert res.steps[0].error is not None  # the failure was recorded, loop continued
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_forces_a_final_answer() -> None:
+    rt = _runtime_with_double()
+    toolcall = {"text": "", "tool_calls": [{"id": "c", "name": "double", "arguments": {"x": 1}}]}
+    inv = _scripted(toolcall, toolcall, {"text": "Final answer after cap.", "tool_calls": []})
+    res = await run_native_tools(rt, "loop", invoke=inv, max_steps=2)
+    assert res.status == "completed"
+    assert res.output == "Final answer after cap."
+
+
+def test_tool_schemas_shape() -> None:
+    rt = _runtime_with_double()
+    schemas = _tool_schemas(rt)
+    assert schemas[0]["type"] == "function"
+    fn = schemas[0]["function"]
+    assert fn["name"] == "double"
+    assert fn["parameters"]["type"] == "object"
