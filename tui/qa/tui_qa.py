@@ -73,9 +73,7 @@ class Tmux:
 
     def alive(self) -> bool:
         return (
-            subprocess.run(
-                ["tmux", "has-session", "-t", SESSION], capture_output=True
-            ).returncode
+            subprocess.run(["tmux", "has-session", "-t", SESSION], capture_output=True).returncode
             == 0
         )
 
@@ -222,7 +220,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="QA-style E2E tester for the forge TUI (tmux)")
     here = os.path.dirname(os.path.abspath(__file__))
     ap.add_argument("--binary", default=os.path.join(here, "..", "dist", "forge"))
-    ap.add_argument("--gateway", default=os.environ.get("FORGE_QA_GATEWAY", "http://fidel-dev:8000"))
+    ap.add_argument(
+        "--gateway", default=os.environ.get("FORGE_QA_GATEWAY", "http://fidel-dev:8000")
+    )
     ap.add_argument("--stub", action="store_true", help="use the built-in hermetic stub gateway")
     ap.add_argument("--watch", action="store_true", help="print a screen snapshot after each step")
     ap.add_argument("--keep", action="store_true", help="leave the tmux session alive at the end")
@@ -255,8 +255,12 @@ def main() -> int:
     os.makedirs(os.path.join(home, ".forge", "logs"), exist_ok=True)
     with open(os.path.join(home, ".forge", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(
-            {"gateway_url": gateway, "provider": "openrouter",
-             "model": "openai/gpt-4o", "mode": "ask"},
+            {
+                "gateway_url": gateway,
+                "provider": "openrouter",
+                "model": "openai/gpt-4o",
+                "mode": "ask",
+            },
             fh,
         )
     log_path = os.path.join(home, ".forge", "logs", "session.log")
@@ -294,11 +298,16 @@ def main() -> int:
     passed = total - rep.failed
     print(f"\nQA summary: {passed}/{total} scenarios passed", file=sys.stderr)
     if args.json:
-        print(json.dumps(
-            {"passed": passed, "total": total,
-             "results": [{"name": n, "passed": ok, "detail": d} for n, ok, d in rep.results]},
-            indent=2,
-        ))
+        print(
+            json.dumps(
+                {
+                    "passed": passed,
+                    "total": total,
+                    "results": [{"name": n, "passed": ok, "detail": d} for n, ok, d in rep.results],
+                },
+                indent=2,
+            )
+        )
     return 1 if rep.failed else 0
 
 
