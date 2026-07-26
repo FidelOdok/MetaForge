@@ -1,6 +1,6 @@
 {
   "name": "@metaforge/forge",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "description": "MetaForge unified CLI + TUI (Ink) — scriptable commands + interactive gated HITL over the gateway",
   "type": "module",
   "bin": {
