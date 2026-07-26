@@ -1,9 +1,24 @@
-# forge-tui (Ink)
+# forge (Ink — unified CLI + TUI)
 
-A terminal UI for MetaForge, built with [Ink](https://github.com/vadimdemedes/ink)
-(React for the terminal). It is a thin client of the gateway — the same surface
-the Python `forge` CLI drives — focused on the **gated design-flow HITL loop**:
-streaming chat, live run/gate transitions, and approve/reject at each gate.
+A single MetaForge client, built with [Ink](https://github.com/vadimdemedes/ink)
+(React for the terminal). **One entrypoint, two modes chosen by invocation:**
+
+```bash
+forge                       # bare + a TTY → interactive TUI
+forge runs list             # a subcommand → run it, print, exit
+forge runs create --request-json '{"goal":"…","flow":"design_v1","project_id":"…"}'
+forge runs approve <id>     # approve a gated run
+forge runs watch <id>       # stream status transitions
+forge chat -m "hello"       # one-shot assistant turn
+forge projects              # list projects
+forge twin list             # list twin nodes
+forge config show|set model openai/gpt-4o
+forge <cmd> --json          # machine output for scripts
+```
+
+Both modes share the same typed gateway client, so there's one implementation.
+The TUI is the interactive HITL surface (streaming chat, live gate approvals);
+the commands are the scriptable surface (automation, CI, hooks).
 
 Why Ink: the reasoning brain and gateway are Python, but the *client* stack
 aligns with the React dashboard, so components and mental model are shared

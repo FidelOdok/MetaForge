@@ -2,9 +2,9 @@
  * Reads the same client config the Python `forge` CLI writes
  * (~/.forge/config.json), so the TUI shares gateway/provider/model/mode.
  */
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export interface ForgeConfig {
   gateway_url: string;
@@ -29,4 +29,18 @@ export function loadConfig(): ForgeConfig {
   } catch {
     return { ...DEFAULTS };
   }
+}
+
+export function saveConfig(cfg: ForgeConfig): void {
+  const p = configPath();
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, `${JSON.stringify(cfg, null, 2)}\n`);
+}
+
+/** Set one config key (gateway_url|provider|model|mode) and persist. */
+export function setConfigValue(key: string, value: string): ForgeConfig {
+  const cfg = loadConfig();
+  (cfg as unknown as Record<string, string>)[key] = value;
+  saveConfig(cfg);
+  return cfg;
 }
