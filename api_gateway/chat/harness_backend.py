@@ -299,7 +299,12 @@ async def run_chat_turn_streaming(
         await on_delta(_FALLBACK_ANSWER)
         return _FALLBACK_ANSWER
 
-    answer = str(result.output)
+    answer = str(result.output).strip()
+    # Never stream an empty answer — a completed turn with no final text (weak
+    # model, or an empty `final`) must still say something, not render blank.
+    if not answer:
+        await on_delta(_FALLBACK_ANSWER)
+        return _FALLBACK_ANSWER
     request = {
         "system": _STREAM_SYSTEM,
         "messages": [
