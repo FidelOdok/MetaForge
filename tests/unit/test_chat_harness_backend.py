@@ -44,6 +44,7 @@ def test_provider_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_run_chat_turn_returns_final(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # asserts ReAct JSON-final extraction
 
     async def fake_invoke(spec: ProviderSpec, request: object) -> dict:
         return {
@@ -58,6 +59,7 @@ async def test_run_chat_turn_returns_final(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.asyncio
 async def test_run_chat_turn_exhaustion_message(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # asserts ReAct "couldn't converge"
 
     async def never_final(spec: ProviderSpec, request: object) -> dict:
         # Always proposes a (nonexistent) tool, never finalizes -> exhaust.
@@ -74,6 +76,7 @@ async def test_run_chat_turn_rotates_stored_credentials(monkeypatch, tmp_path):
 
     monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("METAFORGE_LLM_MODEL", "x")
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # fake emits ReAct JSON-final
     store = CredentialStore(tmp_path / "c.json")
     store.add(Credential(provider="openrouter", name="a", api_key_env="KEY_A"))
     store.add(Credential(provider="openrouter", name="b", api_key_env="KEY_B"))

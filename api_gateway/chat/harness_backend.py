@@ -34,7 +34,7 @@ from orchestrator.harness.providers import (
     resolve_provider,
 )
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
-from orchestrator.harness.providers.registry import OPENAI, get_profile
+from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
 from orchestrator.harness.react import run_react
 from orchestrator.harness.tools import Handler
 from skill_registry.mcp_bridge import McpBridge
@@ -112,9 +112,9 @@ def native_tools_enabled(provider: str | None = None) -> bool:
     """Whether this turn uses native tool-calling instead of JSON-in-text ReAct.
 
     ``METAFORGE_NATIVE_TOOLS`` forces it on/off. Otherwise the default is ON for
-    OpenAI-compatible providers — whose adapter parses ``tool_calls`` — and OFF
-    for others (Anthropic/Gemini/...), which stay on the ReAct path until their
-    adapters gain native tool support.
+    providers whose adapter parses native ``tool_calls`` (OpenAI-compatible and
+    Anthropic) and OFF for the rest (Gemini/Bedrock/...), which stay on the ReAct
+    path until their adapters gain native tool support.
     """
     raw = os.environ.get("METAFORGE_NATIVE_TOOLS", "").strip().lower()
     if raw in _TRUTHY:
@@ -125,7 +125,7 @@ def native_tools_enabled(provider: str | None = None) -> bool:
     if not prov:
         return False
     try:
-        return get_profile(prov).api_family == OPENAI
+        return get_profile(prov).api_family in (OPENAI, ANTHROPIC)
     except Exception:  # noqa: BLE001 - unknown provider → conservative ReAct default
         return False
 

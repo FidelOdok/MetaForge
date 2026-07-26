@@ -39,6 +39,7 @@ async def test_run_chat_turn_honors_model_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # asserts ReAct JSON-final extraction
     seen: dict = {}
 
     async def invoke(spec: ProviderSpec, request: object) -> dict:
@@ -62,6 +63,7 @@ async def test_enabled_tools_filters_registered_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # asserts ReAct JSON tool-then-final loop
     bridge = InMemoryMcpBridge()
     bridge.register_tool("twin.query_node", capability="twin")
     bridge.register_tool("kicad.run_erc", capability="eda")

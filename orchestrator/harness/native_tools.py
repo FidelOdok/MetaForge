@@ -7,9 +7,10 @@ answer) or native ``tool_calls`` that we execute and feed back as ``tool`` role
 messages. The model decides when a tool is needed — so a greeting is answered
 directly, not flailed at with tools.
 
-Targets the OpenAI-compatible message shape (``openai_invoke`` returns
-``{text, tool_calls:[{id,name,arguments}]}``), which covers OpenAI / OpenRouter /
-vLLM / Ollama — the providers the gateway actually uses.
+The loop speaks one canonical (OpenAI-compatible) message shape — ``openai_invoke``
+returns ``{text, tool_calls:[{id,name,arguments}]}`` directly (OpenAI / OpenRouter /
+vLLM / Ollama), and ``anthropic_invoke`` translates that shape to/from Anthropic's
+``tool_use``/``tool_result`` blocks — so the same loop drives Claude models too.
 """
 
 from __future__ import annotations

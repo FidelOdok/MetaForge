@@ -75,11 +75,85 @@ def _require_key(spec: ProviderSpec, default_env: str) -> str:
     return key
 
 
+def _to_anthropic_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert OpenAI function schemas to Anthropic tool schemas.
+
+    OpenAI: ``{"type":"function","function":{"name","description","parameters"}}``
+    Anthropic: ``{"name","description","input_schema"}``.
+    """
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        fn = t.get("function", t)
+        out.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "input_schema": fn.get("parameters") or {"type": "object"},
+            }
+        )
+    return out
+
+
+def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate OpenAI-canonical messages to Anthropic content-block form.
+
+    The native loop speaks OpenAI shape (assistant ``tool_calls`` + ``tool`` role
+    results). Anthropic instead wants ``tool_use`` blocks on the assistant turn
+    and ``tool_result`` blocks grouped into a single following user turn — so we
+    coalesce consecutive ``tool`` messages into one user message.
+    """
+    out: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        if pending:
+            out.append({"role": "user", "content": list(pending)})
+            pending.clear()
+
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            pending.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": m.get("tool_call_id"),
+                    "content": str(m.get("content", "")),
+                }
+            )
+            continue
+        flush()
+        if role == "assistant" and m.get("tool_calls"):
+            blocks: list[dict[str, Any]] = []
+            if m.get("content"):
+                blocks.append({"type": "text", "text": m["content"]})
+            for tc in m["tool_calls"]:
+                fn = tc["function"]
+                try:
+                    inp = json.loads(fn.get("arguments") or "{}")
+                except (ValueError, TypeError):
+                    inp = {}
+                blocks.append(
+                    {"type": "tool_use", "id": tc["id"], "name": fn["name"], "input": inp}
+                )
+            out.append({"role": "assistant", "content": blocks})
+        else:
+            out.append({"role": role, "content": m.get("content", "")})
+    flush()
+    return out
+
+
 async def anthropic_invoke(
     spec: ProviderSpec, request: Any, *, client: Any | None = None
 ) -> dict[str, Any]:
-    """Call an Anthropic model. ``client`` is injectable for tests."""
+    """Call an Anthropic model. ``client`` is injectable for tests.
+
+    When the request carries ``tools`` (native tool-calling), the OpenAI-shaped
+    tools/messages are translated to Anthropic's block form and any ``tool_use``
+    blocks in the reply are returned as ``tool_calls`` — so the native loop drives
+    Claude models the same way it drives OpenAI-compatible ones.
+    """
     system, messages, max_tokens, temperature = _normalize_request(request)
+    tools = request.get("tools") if isinstance(request, dict) else None
     if client is None:
         from anthropic import AsyncAnthropic
 
@@ -90,10 +164,12 @@ async def anthropic_invoke(
         "model": spec.model,
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "messages": messages,
+        "messages": _to_anthropic_messages(messages) if tools else messages,
     }
     if system:
         kwargs["system"] = system
+    if tools:
+        kwargs["tools"] = _to_anthropic_tools(tools)
     try:
         resp = await client.messages.create(**kwargs)
     except ProviderError:
@@ -105,7 +181,19 @@ async def anthropic_invoke(
         for block in resp.content
         if getattr(block, "type", None) == "text"
     )
-    return {"text": text, "model": getattr(resp, "model", spec.model)}
+    tool_calls = [
+        {
+            "id": getattr(block, "id", ""),
+            "name": getattr(block, "name", ""),
+            "arguments": dict(getattr(block, "input", None) or {}),
+        }
+        for block in resp.content
+        if getattr(block, "type", None) == "tool_use"
+    ]
+    result: dict[str, Any] = {"text": text, "model": getattr(resp, "model", spec.model)}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    return result
 
 
 async def openai_invoke(
