@@ -133,6 +133,29 @@ def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
     )
 
 
+# actor_kind (as stored) -> LLM chat role. Only these two carry into context;
+# system/error messages are left out.
+_HISTORY_ROLE = {"user": "user", "agent": "assistant"}
+_HISTORY_LIMIT = 20  # most-recent turns fed back as context
+
+
+async def _thread_history(thread_id: str) -> list[dict[str, str]]:
+    """Prior conversation for *thread_id* as [{role, content}], oldest first.
+
+    The current user turn has already been persisted by the caller, so the last
+    stored message is dropped — it is passed to the harness separately as the
+    goal. Capped to the most recent ``_HISTORY_LIMIT`` turns.
+    """
+    msgs = await _backend.get_messages(thread_id)
+    prior = msgs[:-1] if msgs else []
+    out: list[dict[str, str]] = []
+    for m in prior:
+        role = _HISTORY_ROLE.get(m.actor_kind)
+        if role and m.content and (m.status or "ok") != "error":
+            out.append({"role": role, "content": m.content})
+    return out[-_HISTORY_LIMIT:]
+
+
 async def _invoke_agent(
     thread: ChatThreadRecord,
     user_content: str,
@@ -167,6 +190,7 @@ async def _invoke_agent(
                     await notify_agent_step(thread.id, step, "harness-agent")
 
                 await notify_agent_typing(thread.id, "harness-agent")
+                history = await _thread_history(thread.id)
                 text = await run_chat_turn_streaming(
                     user_content,
                     on_delta=_on_delta,
@@ -176,6 +200,7 @@ async def _invoke_agent(
                     provider=provider,
                     model=model,
                     enabled_tools=tools,
+                    history=history,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 return ChatMessageRecord(

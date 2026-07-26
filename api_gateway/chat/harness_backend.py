@@ -217,6 +217,7 @@ async def run_chat_turn(
     provider: str | None = None,
     model: str | None = None,
     enabled_tools: list[str] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -225,6 +226,7 @@ async def run_chat_turn(
     empty/absent store this is a no-op, so the default path is unchanged. When an
     ``mcp_bridge`` is given, its tools are registered so the loop can call them.
     ``provider``/``model``/``enabled_tools`` are the chat UI's per-turn selection.
+    ``history`` is the prior conversation so multi-turn chats keep context.
     """
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
@@ -232,7 +234,12 @@ async def run_chat_turn(
     )
     if native_tools_enabled(provider):
         result = await run_native_tools(
-            ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
+            ctx.runtime,
+            user_content,
+            role="generator",
+            invoke=invoke,
+            max_steps=max_steps,
+            history=history,
         )
     else:
         policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
@@ -299,6 +306,7 @@ async def run_chat_turn_streaming(
     provider: str | None = None,
     model: str | None = None,
     enabled_tools: list[str] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> str:
     """Run the ReAct loop, then stream the final answer token-by-token (Option B).
 
@@ -307,7 +315,8 @@ async def run_chat_turn_streaming(
     with each delta pushed via ``on_delta``. Falls back to emitting the computed
     answer as one delta if streaming fails or yields nothing. Returns the full
     assembled text (what the caller should persist). When an ``mcp_bridge`` is
-    given, its tools are registered so the loop can call them.
+    given, its tools are registered so the loop can call them. ``history`` is the
+    prior conversation so multi-turn chats keep context.
     """
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
@@ -315,7 +324,12 @@ async def run_chat_turn_streaming(
     )
     if native_tools_enabled(provider):
         result = await run_native_tools(
-            ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
+            ctx.runtime,
+            user_content,
+            role="generator",
+            invoke=invoke,
+            max_steps=max_steps,
+            history=history,
         )
     else:
         policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)

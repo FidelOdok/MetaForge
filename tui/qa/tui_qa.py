@@ -116,6 +116,19 @@ def wait_for_new_turn(tui: Tmux, log_path: str, prev: int, timeout: float) -> di
     return None
 
 
+def converse(
+    tui: Tmux, log_path: str, prompts: list[str], timeout: float = 60
+) -> list[dict | None]:
+    """Send each prompt as a turn and collect its logged chat.turn_done record."""
+    out: list[dict | None] = []
+    for prompt in prompts:
+        prev = len(read_turns(log_path))
+        tui.type(prompt)
+        tui.key("Enter")
+        out.append(wait_for_new_turn(tui, log_path, prev, timeout))
+    return out
+
+
 # --- report ----------------------------------------------------------------
 
 
@@ -173,6 +186,38 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
         bool(turn and turn.get("chars", 0) > 0 and not turn.get("reason")),
         f"turn={_fmt(turn)}",
     )
+
+    # 3b. A full multi-turn conversation stays healthy end to end.
+    convo = [
+        "Hi there.",
+        "I'm designing a small quadruped robot.",
+        "What class of actuators would suit the legs?",
+        "And what should I consider for the battery?",
+        "Thanks — briefly summarize what we discussed.",
+    ]
+    turns = converse(tui, log_path, convo)
+    answered = sum(1 for t in turns if t and t.get("chars", 0) > 0 and not t.get("reason"))
+    no_reply = tui.wait_for("(no reply", timeout=1)
+    tui.snap("after full conversation")
+    rep.add(
+        "full_conversation",
+        answered == len(convo) and not no_reply,
+        f"{answered}/{len(convo)} turns answered, no_reply_seen={no_reply}",
+    )
+
+    # 3c. Context carries across turns (live only — the stub can't remember, it
+    #     replies with fixed scripted text regardless of input).
+    if not stub:
+        converse(tui, log_path, ["Please remember: my name is Fidel and I'm building a quadruped."])
+        converse(tui, log_path, ["What is my name and what am I building?"])
+        scr = tui.capture().lower()
+        carried = "fidel" in scr and "quadruped" in scr
+        tui.snap("after context-carry")
+        rep.add(
+            "conversation_context_carry",
+            carried,
+            f"name_recalled={'fidel' in scr}, topic_recalled={'quadruped' in scr}",
+        )
 
     # 4. Empty-turn cause is surfaced (stub only — deterministically malformed SSE).
     if stub:
