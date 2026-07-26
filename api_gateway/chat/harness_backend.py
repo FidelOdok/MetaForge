@@ -19,6 +19,7 @@ from typing import Any
 import structlog
 
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
+from orchestrator.harness.native_tools import run_native_tools
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
     CredentialStore,
@@ -101,6 +102,13 @@ async def mcp_tools_from_bridge(
             )
         )
     return defs
+
+
+def native_tools_enabled() -> bool:
+    """True when the chat loop should use native tool-calling instead of the
+    JSON-in-text ReAct loop. Opt-in via METAFORGE_NATIVE_TOOLS. Only meaningful
+    for OpenAI-compatible providers (the adapter that parses tool_calls)."""
+    return os.environ.get("METAFORGE_NATIVE_TOOLS", "").strip().lower() in _TRUTHY
 
 
 def chat_harness_enabled() -> bool:
@@ -203,8 +211,13 @@ async def run_chat_turn(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
-    result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+    if native_tools_enabled():
+        result = await run_native_tools(
+            ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
+        )
+    else:
+        policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
+        result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
     if result.status == "completed":
         return str(result.output)
@@ -281,8 +294,13 @@ async def run_chat_turn_streaming(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
-    result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+    if native_tools_enabled():
+        result = await run_native_tools(
+            ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
+        )
+    else:
+        policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
+        result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
 
     # Surface the agent's trace (tool calls, observations, reasoning) so the UI
