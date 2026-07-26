@@ -29,12 +29,19 @@ export function parseEvent(raw: string): ChatEvent | null {
     else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
   }
   if (!dataStr) return null;
-  let data: Record<string, unknown>;
+  let envelope: Record<string, unknown>;
   try {
-    data = JSON.parse(dataStr) as Record<string, unknown>;
+    envelope = JSON.parse(dataStr) as Record<string, unknown>;
   } catch {
     return null;
   }
+  // The gateway wraps every event payload in a `data` envelope alongside
+  // `thread_id`/`timestamp` (api_gateway/chat/streaming.py), so the fields we
+  // want (delta/step/error) live under `envelope.data`, not at the top level.
+  // Unwrap it; fall back to the envelope itself for any un-enveloped event.
+  const data = (
+    envelope.data && typeof envelope.data === "object" ? envelope.data : envelope
+  ) as Record<string, unknown>;
   switch (event) {
     case "message.delta":
       return { type: "message.delta", delta: String(data.delta ?? "") };
