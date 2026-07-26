@@ -69,6 +69,9 @@ function printHelp(): void {
       "  forge chat -m \"message\"        one-shot assistant turn",
       "  forge projects                list projects",
       "  forge twin list               list twin nodes",
+      "  forge sources                 list ingested knowledge sources",
+      '  forge memory retrieve "goal"  find similar past experiences',
+      "  forge proposals list|approve <id>|reject <id>",
       "  forge config show|path|set <key> <value>",
       "  forge --version | --help",
       "",
@@ -174,6 +177,61 @@ async function twinCmd(client: GatewayClient, json: boolean): Promise<number> {
   return 0;
 }
 
+async function memoryCmd(
+  client: GatewayClient,
+  sub: string | undefined,
+  rest: string[],
+  flags: Record<string, string | boolean>,
+  json: boolean,
+): Promise<number> {
+  const goal = sub === "retrieve" ? rest[0] : sub;
+  if (!goal) return usage('forge memory retrieve "goal text"');
+  const limit = typeof flags.limit === "string" ? Number(flags.limit) : 5;
+  const hits = await client.memoryRetrieve(goal, limit);
+  if (json) out(hits);
+  else if (!hits.length) line("(no similar experiences)");
+  else
+    for (const h of hits) {
+      line(`${Number(h.similarity ?? 0).toFixed(3)}  ${h.agentCode ?? "?"}  ${h.resultSummary ?? ""}`);
+    }
+  return 0;
+}
+
+async function proposalsCmd(
+  client: GatewayClient,
+  sub: string | undefined,
+  rest: string[],
+  flags: Record<string, string | boolean>,
+  json: boolean,
+): Promise<number> {
+  switch (sub) {
+    case undefined:
+    case "list": {
+      const ps = await client.listProposals();
+      if (json) out(ps);
+      else if (!ps.length) line("(no pending proposals)");
+      else
+        for (const p of ps) {
+          const id = String(p.change_id ?? p.id ?? "").slice(0, 12);
+          line(`${id}  ${p.status ?? ""}  ${p.description ?? p.title ?? ""}`);
+        }
+      return 0;
+    }
+    case "approve":
+    case "reject": {
+      const id = rest[0];
+      if (!id) return usage(`forge proposals ${sub} <change_id>`);
+      const reason = typeof flags.reason === "string" ? flags.reason : undefined;
+      const r = await client.decideProposal(id, sub === "approve" ? "approve" : "reject", reason);
+      if (json) out(r);
+      else line(`${id} ${sub}d`);
+      return 0;
+    }
+    default:
+      return usage(`unknown: forge proposals ${sub}`);
+  }
+}
+
 function configCmd(sub: string | undefined, rest: string[], json: boolean): number {
   switch (sub) {
     case undefined:
@@ -230,6 +288,16 @@ export async function runCommand(argv: string[]): Promise<number> {
       }
       case "twin":
         return await twinCmd(client, json);
+      case "sources": {
+        const sources = await client.listSources();
+        if (json) out(sources);
+        else for (const s of sources) line(`${s.knowledgeType ?? "?"}  ${s.sourcePath ?? ""}  (${s.fragmentCount ?? 0})`);
+        return 0;
+      }
+      case "memory":
+        return await memoryCmd(client, sub, rest, flags, json);
+      case "proposals":
+        return await proposalsCmd(client, sub, rest, flags, json);
       case "config":
         return configCmd(sub, rest, json);
       default:

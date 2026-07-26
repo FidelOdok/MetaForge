@@ -44,9 +44,9 @@ jobs:
       - run: npm run bundle:bin
       # Verify the provenance stamp end-to-end — the check that makes
       # "is my CLI stale?" answerable (the trap the Python binary hit).
-      - run: ./dist/forge-tui --version
+      - run: ./dist/forge --version
       - uses: actions/upload-artifact@v4
         with:
-          name: forge-tui-linux-x64
-          path: tui/dist/forge-tui
+          name: forge-linux-x64
+          path: tui/dist/forge
           if-no-files-found: error

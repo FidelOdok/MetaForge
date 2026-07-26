@@ -1,10 +1,10 @@
 {
-  "name": "@metaforge/forge-tui",
+  "name": "@metaforge/forge",
   "version": "0.1.0",
-  "description": "MetaForge terminal UI (Ink) — gated design-flow HITL over the gateway",
+  "description": "MetaForge unified CLI + TUI (Ink) — scriptable commands + interactive gated HITL over the gateway",
   "type": "module",
   "bin": {
-    "forge-tui": "./dist/cli.js"
+    "forge": "./dist/cli.js"
   },
   "scripts": {
     "dev": "tsx src/cli.tsx",
@@ -14,7 +14,7 @@
     "stamp": "node scripts/stamp.mjs",
     "build": "npm run stamp && tsc",
     "start": "node dist/cli.js",
-    "bundle:bin": "npm run stamp && bun build src/cli.tsx --compile --outfile dist/forge-tui"
+    "bundle:bin": "npm run stamp && bun build src/cli.tsx --compile --outfile dist/forge"
   },
   "dependencies": {
     "ink": "^5.1.0",

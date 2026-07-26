@@ -26,11 +26,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: forge-linux-x64
+            asset: forge-legacy-linux-x64
           - os: macos-latest
-            asset: forge-macos-arm64
+            asset: forge-legacy-macos-arm64
           - os: windows-latest
-            asset: forge-windows-x64.exe
+            asset: forge-legacy-windows-x64.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -76,11 +76,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: forge-tui-linux-x64
+            asset: forge-linux-x64
           - os: macos-latest
-            asset: forge-tui-macos-arm64
+            asset: forge-macos-arm64
           - os: windows-latest
-            asset: forge-tui-windows-x64.exe
+            asset: forge-windows-x64.exe
     defaults:
       run:
         working-directory: tui
@@ -99,10 +99,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p ../out
-          if [ -f dist/forge-tui.exe ]; then
-            cp dist/forge-tui.exe "../out/${{ matrix.asset }}"
+          if [ -f dist/forge.exe ]; then
+            cp dist/forge.exe "../out/${{ matrix.asset }}"
           else
-            cp dist/forge-tui "../out/${{ matrix.asset }}"
+            cp dist/forge "../out/${{ matrix.asset }}"
           fi
       - name: Smoke-test the binary
         shell: bash
