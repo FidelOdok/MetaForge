@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# QA harness hermetic HOME (config + logs)
+qa/.qa-home/
