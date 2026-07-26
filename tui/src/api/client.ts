@@ -109,6 +109,34 @@ export class GatewayClient {
     return this.get<{ messages?: ThreadMessage[] }>(`/v1/chat/threads/${id}`);
   }
 
+  async listSources(): Promise<Array<Record<string, unknown>>> {
+    const d = await this.get<{ sources?: Array<Record<string, unknown>> }>("/v1/knowledge/sources");
+    return d.sources ?? [];
+  }
+
+  async memoryRetrieve(goal: string, limit = 5): Promise<Array<Record<string, unknown>>> {
+    const d = await this.post<{ hits?: Array<Record<string, unknown>> }>("/v1/memory/retrieve", {
+      goal,
+      limit,
+    });
+    return d.hits ?? [];
+  }
+
+  async listProposals(): Promise<Array<Record<string, unknown>>> {
+    const d = await this.get<{ proposals?: Array<Record<string, unknown>> }>(
+      "/v1/assistant/proposals",
+    );
+    return d.proposals ?? [];
+  }
+
+  async decideProposal(
+    changeId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ): Promise<unknown> {
+    return this.post(`/v1/assistant/proposals/${changeId}/decide`, { decision, reason });
+  }
+
   baseUrl(): string {
     return this.base();
   }
