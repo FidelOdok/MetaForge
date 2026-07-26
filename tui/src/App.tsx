@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { loadConfig } from "./config.js";
+import { loadConfig, setConfigValue } from "./config.js";
 import { GatewayClient } from "./api/client.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
@@ -24,7 +24,28 @@ export function App() {
   const [health, setHealth] = useState("checking…");
   const [project, setProject] = useState<string | undefined>(undefined);
   const [view, setView] = useState<View>("chat");
+  const [model, setModel] = useState<string | undefined>(cfg.model);
+  const [provider, setProvider] = useState<string | undefined>(cfg.provider);
   const { awaiting, alert } = useRunAlerts(client);
+
+  // Change the session model/provider live and persist it (mirrors `forge
+  // config set`), so /model in chat sticks across launches too.
+  const changeModel = (m: string) => {
+    setModel(m);
+    try {
+      setConfigValue("model", m);
+    } catch {
+      /* best-effort persist */
+    }
+  };
+  const changeProvider = (p: string) => {
+    setProvider(p);
+    try {
+      setConfigValue("provider", p);
+    } catch {
+      /* best-effort persist */
+    }
+  };
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -96,14 +117,20 @@ export function App() {
       <StatusBar
         gatewayUrl={cfg.gateway_url}
         health={health}
-        model={cfg.model}
+        model={model}
         mode={cfg.mode}
         project={project}
       />
 
       <Box marginTop={1}>
         {view === "chat" && (
-          <Chat client={client} model={cfg.model} provider={cfg.provider} />
+          <Chat
+            client={client}
+            model={model}
+            provider={provider}
+            onModelChange={changeModel}
+            onProviderChange={changeProvider}
+          />
         )}
         {view === "runs" && <RunsView client={client} onExit={() => setView("chat")} />}
         {view === "new" && (
