@@ -34,6 +34,7 @@ from orchestrator.harness.providers import (
     resolve_provider,
 )
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
+from orchestrator.harness.providers.registry import OPENAI, get_profile
 from orchestrator.harness.react import run_react
 from orchestrator.harness.tools import Handler
 from skill_registry.mcp_bridge import McpBridge
@@ -104,11 +105,29 @@ async def mcp_tools_from_bridge(
     return defs
 
 
-def native_tools_enabled() -> bool:
-    """True when the chat loop should use native tool-calling instead of the
-    JSON-in-text ReAct loop. Opt-in via METAFORGE_NATIVE_TOOLS. Only meaningful
-    for OpenAI-compatible providers (the adapter that parses tool_calls)."""
-    return os.environ.get("METAFORGE_NATIVE_TOOLS", "").strip().lower() in _TRUTHY
+_FALSY = {"0", "false", "off", "no"}
+
+
+def native_tools_enabled(provider: str | None = None) -> bool:
+    """Whether this turn uses native tool-calling instead of JSON-in-text ReAct.
+
+    ``METAFORGE_NATIVE_TOOLS`` forces it on/off. Otherwise the default is ON for
+    OpenAI-compatible providers — whose adapter parses ``tool_calls`` — and OFF
+    for others (Anthropic/Gemini/...), which stay on the ReAct path until their
+    adapters gain native tool support.
+    """
+    raw = os.environ.get("METAFORGE_NATIVE_TOOLS", "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSY:
+        return False
+    prov = (provider or os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+    if not prov:
+        return False
+    try:
+        return get_profile(prov).api_family == OPENAI
+    except Exception:  # noqa: BLE001 - unknown provider → conservative ReAct default
+        return False
 
 
 def chat_harness_enabled() -> bool:
@@ -211,7 +230,7 @@ async def run_chat_turn(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    if native_tools_enabled():
+    if native_tools_enabled(provider):
         result = await run_native_tools(
             ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
         )
@@ -294,7 +313,7 @@ async def run_chat_turn_streaming(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    if native_tools_enabled():
+    if native_tools_enabled(provider):
         result = await run_native_tools(
             ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
         )
