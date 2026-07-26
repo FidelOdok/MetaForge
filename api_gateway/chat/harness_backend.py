@@ -19,6 +19,7 @@ from typing import Any
 import structlog
 
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
+from orchestrator.harness.native_tools import run_native_tools
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
     CredentialStore,
@@ -33,6 +34,7 @@ from orchestrator.harness.providers import (
     resolve_provider,
 )
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
+from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
 from orchestrator.harness.react import run_react
 from orchestrator.harness.tools import Handler
 from skill_registry.mcp_bridge import McpBridge
@@ -101,6 +103,31 @@ async def mcp_tools_from_bridge(
             )
         )
     return defs
+
+
+_FALSY = {"0", "false", "off", "no"}
+
+
+def native_tools_enabled(provider: str | None = None) -> bool:
+    """Whether this turn uses native tool-calling instead of JSON-in-text ReAct.
+
+    ``METAFORGE_NATIVE_TOOLS`` forces it on/off. Otherwise the default is ON for
+    providers whose adapter parses native ``tool_calls`` (OpenAI-compatible and
+    Anthropic) and OFF for the rest (Gemini/Bedrock/...), which stay on the ReAct
+    path until their adapters gain native tool support.
+    """
+    raw = os.environ.get("METAFORGE_NATIVE_TOOLS", "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSY:
+        return False
+    prov = (provider or os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+    if not prov:
+        return False
+    try:
+        return get_profile(prov).api_family in (OPENAI, ANTHROPIC)
+    except Exception:  # noqa: BLE001 - unknown provider → conservative ReAct default
+        return False
 
 
 def chat_harness_enabled() -> bool:
@@ -203,8 +230,13 @@ async def run_chat_turn(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
-    result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+    if native_tools_enabled(provider):
+        result = await run_native_tools(
+            ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
+        )
+    else:
+        policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
+        result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
     if result.status == "completed":
         return str(result.output)
@@ -281,8 +313,13 @@ async def run_chat_turn_streaming(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
-    result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+    if native_tools_enabled(provider):
+        result = await run_native_tools(
+            ctx.runtime, user_content, role="generator", invoke=invoke, max_steps=max_steps
+        )
+    else:
+        policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
+        result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
 
     # Surface the agent's trace (tool calls, observations, reasoning) so the UI
