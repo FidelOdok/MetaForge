@@ -74,14 +74,17 @@ async def run_native_tools(
     invoke: Invoke = default_invoke,
     max_steps: int = 8,
     system: str = NATIVE_SYSTEM,
+    history: list[dict[str, Any]] | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
 
-    Falls back to a forced text answer if the step cap is hit, so a run never
-    ends without a reply.
+    ``history`` is the prior conversation ([{role, content}], oldest first) so
+    the model can answer with context from earlier turns; it is seeded ahead of
+    the current ``goal``. Falls back to a forced text answer if the step cap is
+    hit, so a run never ends without a reply.
     """
     tools = _tool_schemas(runtime)
-    messages: list[dict[str, Any]] = [{"role": "user", "content": goal}]
+    messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
 
     for step_no in range(1, max_steps + 1):

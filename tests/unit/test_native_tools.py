@@ -51,6 +51,30 @@ async def test_answers_directly_without_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_history_is_seeded_before_the_goal() -> None:
+    """Prior turns are prepended so a follow-up question keeps context."""
+    rt = HarnessRuntime.build(CONFIG)
+    seen: dict[str, Any] = {}
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        seen["messages"] = request["messages"]
+        return {"model": spec.model, "text": "Your name is Fidel.", "tool_calls": []}
+
+    history = [
+        {"role": "user", "content": "My name is Fidel."},
+        {"role": "assistant", "content": "Nice to meet you, Fidel!"},
+    ]
+    res = await run_native_tools(rt, "What is my name?", invoke=invoke, history=history)
+    assert res.output == "Your name is Fidel."
+    # history first, current goal last
+    assert seen["messages"] == [
+        {"role": "user", "content": "My name is Fidel."},
+        {"role": "assistant", "content": "Nice to meet you, Fidel!"},
+        {"role": "user", "content": "What is my name?"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_calls_tool_then_answers() -> None:
     rt = _runtime_with_double()
     inv = _scripted(
