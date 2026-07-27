@@ -7,6 +7,7 @@ import { RunsView } from "./components/RunsView.js";
 import { IntentForm } from "./components/IntentForm.js";
 import { TwinView } from "./components/TwinView.js";
 import { useRunAlerts } from "./hooks/useRunAlerts.js";
+import { useTerminalSize } from "./hooks/useTerminalSize.js";
 
 type View = "chat" | "runs" | "new" | "twin";
 
@@ -26,6 +27,7 @@ export function App() {
   const [model, setModel] = useState<string | undefined>(cfg.model);
   const [provider, setProvider] = useState<string | undefined>(cfg.provider);
   const { awaiting, alert } = useRunAlerts(client);
+  const { rows } = useTerminalSize();
 
   // Change the session model/provider live and persist it (mirrors `forge
   // config set`), so /model in chat sticks across launches too.
@@ -79,7 +81,7 @@ export function App() {
   const gateway = cfg.gateway_url.replace(/^https?:\/\//, "");
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={rows}>
       {alert && (
         <Box paddingX={1}>
           <Text color={ALERT_COLOR[alert.kind]}>
@@ -90,9 +92,9 @@ export function App() {
         </Box>
       )}
 
-      {/* View content flows up; the status/nav footer stays pinned at the bottom
-          (with the chat transcript in <Static> above it). */}
-      <Box flexDirection="column">
+      {/* The view fills all remaining height; the chat input and this footer are
+          the last rows, so the input is pinned to the bottom of the terminal. */}
+      <Box flexGrow={1} flexDirection="column" overflow="hidden">
         {view === "chat" && (
           <Chat
             client={client}
@@ -113,16 +115,17 @@ export function App() {
         {view === "twin" && <TwinView client={client} onExit={() => setView("chat")} />}
       </Box>
 
-      <Box paddingX={1} justifyContent="space-between">
-        <Text dimColor>
+      {/* Two stacked, truncating lines so a long project/model name never
+          collides the way a single space-between row did. */}
+      <Box flexDirection="column" paddingX={1}>
+        <Text dimColor wrap="truncate">
           <Text color={healthColor}>● {health}</Text> · {gateway} · {project ?? "no project"} ·{" "}
           {model ?? "default"} · {cfg.mode}
         </Text>
-        <Text dimColor>
+        <Text dimColor wrap="truncate">
           {awaiting > 0 ? (
             <Text color="yellow" bold>
-              ⏸ {awaiting}
-              {"  "}
+              ⏸ {awaiting} gate{awaiting > 1 ? "s" : ""} ·{" "}
             </Text>
           ) : null}
           <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
@@ -132,7 +135,7 @@ export function App() {
           <Text color={view === "new" ? "cyan" : undefined}>new</Text>
           {" · "}
           <Text color={view === "twin" ? "cyan" : undefined}>twin</Text>
-          {"  ^T/^R/^N/^B"}
+          {"   ^T/^R/^N/^B  ·  PageUp/PageDn scroll"}
         </Text>
       </Box>
     </Box>
