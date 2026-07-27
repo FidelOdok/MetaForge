@@ -106,3 +106,6 @@ dashboard/test-results/
 
 # Playwright MCP logs
 .playwright-mcp/
+
+# Generated eval reports
+evals/report*.json
