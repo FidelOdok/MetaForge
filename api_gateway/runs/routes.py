@@ -133,7 +133,8 @@ def _launch_flow(run_id: str) -> None:
         store=_store,
         brain=hybrid,
         coordinator=_gate_coordinator,
-        gate_evaluator=ProjectGateEvaluator(project_backend),
+        # The twin lets the gate require a *loadable* cad_model, not a bare node.
+        gate_evaluator=ProjectGateEvaluator(project_backend, twin=get_twin()),
     )
     task = asyncio.create_task(executor.run(run_id))
     _flow_tasks.add(task)
