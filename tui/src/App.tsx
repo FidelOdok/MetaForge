@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { loadConfig, setConfigValue } from "./config.js";
 import { GatewayClient } from "./api/client.js";
-import { StatusBar } from "./components/StatusBar.js";
 import { Chat } from "./components/Chat.js";
 import { RunsView } from "./components/RunsView.js";
 import { IntentForm } from "./components/IntentForm.js";
@@ -76,34 +75,11 @@ export function App() {
     };
   }, [client]);
 
+  const healthColor = health === "healthy" ? "green" : health === "checking…" ? "yellow" : "red";
+  const gateway = cfg.gateway_url.replace(/^https?:\/\//, "");
+
   return (
     <Box flexDirection="column">
-      <Box paddingX={1} justifyContent="space-between">
-        <Box>
-          <Text bold color="magenta">
-            MetaForge
-          </Text>
-          <Text dimColor> · gated design-flow harness</Text>
-        </Box>
-        <Box>
-          {awaiting > 0 && (
-            <Text color="yellow" bold>
-              ⏸ {awaiting} gate{awaiting > 1 ? "s" : ""}{"   "}
-            </Text>
-          )}
-          <Text dimColor>
-            <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
-            {" · "}
-            <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
-            {" · "}
-            <Text color={view === "new" ? "cyan" : undefined}>new</Text>
-            {" · "}
-            <Text color={view === "twin" ? "cyan" : undefined}>twin</Text>
-            {"  ^T/^R/^N/^B"}
-          </Text>
-        </Box>
-      </Box>
-
       {alert && (
         <Box paddingX={1}>
           <Text color={ALERT_COLOR[alert.kind]}>
@@ -114,15 +90,9 @@ export function App() {
         </Box>
       )}
 
-      <StatusBar
-        gatewayUrl={cfg.gateway_url}
-        health={health}
-        model={model}
-        mode={cfg.mode}
-        project={project}
-      />
-
-      <Box marginTop={1}>
+      {/* View content flows up; the status/nav footer stays pinned at the bottom
+          (with the chat transcript in <Static> above it). */}
+      <Box flexDirection="column">
         {view === "chat" && (
           <Chat
             client={client}
@@ -141,6 +111,29 @@ export function App() {
           />
         )}
         {view === "twin" && <TwinView client={client} onExit={() => setView("chat")} />}
+      </Box>
+
+      <Box paddingX={1} justifyContent="space-between">
+        <Text dimColor>
+          <Text color={healthColor}>● {health}</Text> · {gateway} · {project ?? "no project"} ·{" "}
+          {model ?? "default"} · {cfg.mode}
+        </Text>
+        <Text dimColor>
+          {awaiting > 0 ? (
+            <Text color="yellow" bold>
+              ⏸ {awaiting}
+              {"  "}
+            </Text>
+          ) : null}
+          <Text color={view === "chat" ? "cyan" : undefined}>chat</Text>
+          {" · "}
+          <Text color={view === "runs" ? "cyan" : undefined}>runs</Text>
+          {" · "}
+          <Text color={view === "new" ? "cyan" : undefined}>new</Text>
+          {" · "}
+          <Text color={view === "twin" ? "cyan" : undefined}>twin</Text>
+          {"  ^T/^R/^N/^B"}
+        </Text>
       </Box>
     </Box>
   );
