@@ -13,7 +13,7 @@ export interface ChatMessage {
   reason?: string;
 }
 
-export type ChatStatus = "connecting" | "idle" | "thinking" | "error";
+export type ChatStatus = "connecting" | "idle" | "thinking" | "reconnecting" | "error";
 
 export interface UseChat {
   status: ChatStatus;
@@ -38,86 +38,108 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
   const threadRef = useRef<string | null>(null);
   const bufRef = useRef<{ text: string; steps: AgentStep[] }>({ text: "", steps: [] });
   const statsRef = useRef<TurnStats>(newTurnStats());
+  const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
 
   useEffect(() => {
     const controller = new AbortController();
     let alive = true;
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const backoff = (ms: number) => Math.min(ms * 2, 8000);
 
     void (async () => {
-      let threadId: string;
-      try {
-        const thread = await client.createThread(`tui-${randomUUID().slice(0, 8)}`, "TUI session");
-        threadId = thread.id;
-        threadRef.current = threadId;
-        log.info("chat.thread_created", { threadId });
-      } catch (e) {
-        if (alive) {
-          setStatus("error");
-          setError(`create thread: ${(e as Error).message}`);
+      // 1. Create the thread, retrying while the gateway is unreachable rather
+      //    than giving up — a cold gateway at launch shouldn't be a dead end.
+      let threadId = "";
+      let wait = 500;
+      while (alive && !threadId) {
+        try {
+          const t = await client.createThread(`tui-${randomUUID().slice(0, 8)}`, "TUI session");
+          threadId = t.id;
+          threadRef.current = threadId;
+          log.info("chat.thread_created", { threadId });
+        } catch (e) {
+          if (!alive) return;
+          setStatus("reconnecting");
+          setError(null);
+          log.warn("chat.thread_create_retry", { error: (e as Error).message, wait });
+          await sleep(wait);
+          wait = backoff(wait);
         }
-        log.error("chat.thread_create_failed", { error: (e as Error).message });
-        return;
       }
-      if (alive) setStatus("idle");
+      if (!alive) return;
 
-      try {
-        log.info("chat.stream_open", { threadId });
-        for await (const ev of streamThread(client.baseUrl(), threadId, controller.signal)) {
-          if (!alive) break;
-          statsRef.current.events += 1;
-          switch (ev.type) {
-            case "message.delta":
-              statsRef.current.deltas += 1;
-              statsRef.current.chars += ev.delta.length;
-              bufRef.current.text += ev.delta;
-              setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
-              break;
-            case "agent.step":
-              bufRef.current.steps.push(ev.step);
-              setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
-              break;
-            case "agent.done": {
-              const buf = bufRef.current;
-              const s = statsRef.current;
-              const reason = describeEmptyTurn(s) ?? undefined;
-              // One structured line per turn — the record that would have made
-              // the "(no reply)" bug a `tail` instead of a pty repro.
-              log.info("chat.turn_done", {
-                events: s.events,
-                deltas: s.deltas,
-                chars: s.chars,
-                errored: s.errored,
-                reason: reason ?? null,
-              });
-              // Always commit a turn's result; carry the cause so an empty turn
-              // shows *why* it was empty rather than an opaque "(no reply)".
-              setMessages((m) => [
-                ...m,
-                { role: "assistant", text: buf.text, steps: buf.steps, reason },
-              ]);
-              bufRef.current = { text: "", steps: [] };
-              statsRef.current = newTurnStats();
-              setPending(null);
-              setStatus("idle");
-              break;
+      // 2. Stream, reconnecting on drop. The thread lives server-side, so on a
+      //    network blip we just reattach to its stream.
+      wait = 500;
+      while (alive) {
+        try {
+          log.info("chat.stream_open", { threadId });
+          const onOpen = () => {
+            wait = 500;
+            setError(null);
+            setStatus(thinkingRef.current ? "thinking" : "idle");
+            log.info("chat.stream_connected", { threadId });
+          };
+          for await (const ev of streamThread(client.baseUrl(), threadId, controller.signal, onOpen)) {
+            if (!alive) break;
+            statsRef.current.events += 1;
+            switch (ev.type) {
+              case "message.delta":
+                statsRef.current.deltas += 1;
+                statsRef.current.chars += ev.delta.length;
+                bufRef.current.text += ev.delta;
+                setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
+                break;
+              case "agent.step":
+                bufRef.current.steps.push(ev.step);
+                setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
+                break;
+              case "agent.done": {
+                const buf = bufRef.current;
+                const s = statsRef.current;
+                const reason = describeEmptyTurn(s) ?? undefined;
+                log.info("chat.turn_done", {
+                  events: s.events,
+                  deltas: s.deltas,
+                  chars: s.chars,
+                  errored: s.errored,
+                  reason: reason ?? null,
+                });
+                setMessages((m) => [
+                  ...m,
+                  { role: "assistant", text: buf.text, steps: buf.steps, reason },
+                ]);
+                bufRef.current = { text: "", steps: [] };
+                statsRef.current = newTurnStats();
+                thinkingRef.current = false;
+                setPending(null);
+                setStatus("idle");
+                break;
+              }
+              case "error":
+                statsRef.current.errored = true;
+                statsRef.current.errorMsg = ev.error;
+                log.error("chat.stream_error_event", { threadId, error: ev.error });
+                setError(ev.error);
+                break;
+              default:
+                break;
             }
-            case "error":
-              statsRef.current.errored = true;
-              statsRef.current.errorMsg = ev.error;
-              log.error("chat.stream_error_event", { threadId, error: ev.error });
-              setError(ev.error);
-              setStatus("error");
-              break;
-            default:
-              break;
           }
+          // Clean end (server closed the stream) — reconnect if still mounted.
+          if (!alive) break;
+          log.warn("chat.stream_closed_reconnecting", { threadId, wait });
+          setStatus("reconnecting");
+          await sleep(wait);
+          wait = backoff(wait);
+        } catch (e) {
+          if (!alive || controller.signal.aborted) break;
+          log.warn("chat.stream_reconnecting", { threadId, error: (e as Error).message, wait });
+          setStatus("reconnecting");
+          setError(null);
+          await sleep(wait);
+          wait = backoff(wait);
         }
-      } catch (e) {
-        if (alive && !controller.signal.aborted) {
-          setStatus("error");
-          setError(`stream: ${(e as Error).message}`);
-        }
-        log.error("chat.stream_failed", { threadId, error: (e as Error).message });
       }
     })();
 
@@ -134,6 +156,7 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
       setMessages((m) => [...m, { role: "user", text: content }]);
       bufRef.current = { text: "", steps: [] };
       statsRef.current = newTurnStats();
+      thinkingRef.current = true;
       setPending({ text: "", steps: [] });
       setStatus("thinking");
       log.info("chat.send", { threadId, chars: content.length, model, provider });

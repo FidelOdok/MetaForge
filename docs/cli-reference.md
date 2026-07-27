@@ -425,6 +425,9 @@ the screen without corrupting the UI. Instead it appends a JSONL session log to
   characters — likely an SSE payload/parse mismatch"`). This is the signal that
   turns a "(no reply)" into a diagnosable cause.
 - `chat.stream_error_event` / `chat.stream_failed` — transport/agent errors
+- `chat.stream_closed_reconnecting` / `chat.stream_reconnecting` / `chat.stream_connected`
+  — the SSE stream auto-reconnects with backoff on a dropped/restarted gateway;
+  the workspace shows a "reconnecting…" indicator and resumes when it's back
 
 Run with `--debug` (or `FORGE_LOG=1`) to also capture every raw SSE frame
 (`sse.frame`) and a `sse.empty_delta` warning whenever a delta event carries no

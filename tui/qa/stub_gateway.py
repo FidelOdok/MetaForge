@@ -122,7 +122,10 @@ def start_stub(port: int = 0) -> tuple[ThreadingHTTPServer, str]:
 
 
 if __name__ == "__main__":
-    server, url = start_stub(8799)
+    import sys
+
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8799
+    server, url = start_stub(port)
     print(f"stub gateway on {url}  (Ctrl+C to stop)")
     try:
         threading.Event().wait()
