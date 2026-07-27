@@ -40,6 +40,40 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
   const statsRef = useRef<TurnStats>(newTurnStats());
   const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
 
+  // Coalesce streamed deltas into ~16 fps repaints. A fast turn can emit 200+
+  // deltas in a couple of seconds; calling setPending on each one repaints the
+  // whole Ink frame per token and flickers badly (worst on WSL). We accumulate
+  // in bufRef and flush on a throttle, with a trailing flush so the last token
+  // always lands.
+  const FLUSH_MS = 60;
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFlush = useRef(0);
+  const flushNow = () => {
+    lastFlush.current = Date.now();
+    setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
+  };
+  const scheduleFlush = () => {
+    const since = Date.now() - lastFlush.current;
+    if (since >= FLUSH_MS) {
+      if (flushTimer.current) {
+        clearTimeout(flushTimer.current);
+        flushTimer.current = null;
+      }
+      flushNow();
+    } else if (!flushTimer.current) {
+      flushTimer.current = setTimeout(() => {
+        flushTimer.current = null;
+        flushNow();
+      }, FLUSH_MS - since);
+    }
+  };
+  const cancelFlush = () => {
+    if (flushTimer.current) {
+      clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+    }
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     let alive = true;
@@ -88,13 +122,14 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
                 statsRef.current.deltas += 1;
                 statsRef.current.chars += ev.delta.length;
                 bufRef.current.text += ev.delta;
-                setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
+                scheduleFlush();
                 break;
               case "agent.step":
                 bufRef.current.steps.push(ev.step);
-                setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
+                scheduleFlush();
                 break;
               case "agent.done": {
+                cancelFlush();
                 const buf = bufRef.current;
                 const s = statsRef.current;
                 const reason = describeEmptyTurn(s) ?? undefined;
@@ -145,6 +180,7 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
 
     return () => {
       alive = false;
+      cancelFlush();
       controller.abort();
     };
   }, [client]);
