@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { GatewayClient, Run } from "../api/client.js";
 import { streamRunStatus, type RunStatusEvent } from "../api/runs.js";
+import { EmptyState } from "./EmptyState.js";
 import { GateModal, statusColor } from "./GateModal.js";
 
 interface Phase {
@@ -23,12 +24,16 @@ export function RunsView({
   const [live, setLive] = useState<RunStatusEvent | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   async function refresh() {
     try {
       setRuns(await client.listRuns());
+      setNote(null);
     } catch (e) {
       setNote((e as Error).message);
+    } finally {
+      setLoaded(true);
     }
   }
 
@@ -98,7 +103,13 @@ export function RunsView({
       <Text bold>Runs ({runs.length}) <Text dimColor>↑/↓ select · Esc chat</Text></Text>
 
       <Box flexDirection="column" marginTop={1}>
-        {runs.length === 0 && <Text dimColor>  (no runs yet)</Text>}
+        {!loaded && runs.length === 0 && !note ? <Text dimColor>  loading…</Text> : null}
+        {loaded && runs.length === 0 ? (
+          <EmptyState
+            title="No runs yet."
+            hints={["Press ^N to start a design-flow run", "or run:  forge runs create"]}
+          />
+        ) : null}
         {runs.slice(0, 8).map((r, i) => {
           const st = i === sel ? (liveForSel?.status ?? r.status) : r.status;
           return (

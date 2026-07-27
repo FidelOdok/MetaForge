@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { GatewayClient, Project, TwinNode, WorkProductRef } from "../api/client.js";
+import { EmptyState } from "./EmptyState.js";
 
 /** Digital-twin browser: projects → work products → node detail. */
 export function TwinView({
@@ -16,13 +17,15 @@ export function TwinView({
   const [level, setLevel] = useState<"projects" | "products">("projects");
   const [node, setNode] = useState<TwinNode | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
     void client
       .listProjects()
       .then((p) => alive && setProjects(p))
-      .catch((e: Error) => alive && setErr(e.message));
+      .catch((e: Error) => alive && setErr(e.message))
+      .finally(() => alive && setLoaded(true));
     return () => {
       alive = false;
     };
@@ -80,6 +83,13 @@ export function TwinView({
 
       <Box marginTop={1} flexDirection="column">
         <Text bold color={level === "projects" ? "cyan" : undefined}>Projects</Text>
+        {!loaded && projects.length === 0 && !err ? <Text dimColor>  loading…</Text> : null}
+        {loaded && projects.length === 0 && !err ? (
+          <EmptyState
+            title="No projects yet."
+            hints={["Start a design in chat (^T), and projects show up here"]}
+          />
+        ) : null}
         {projects.slice(0, 6).map((p, i) => (
           <Text key={p.id}>
             <Text color={level === "projects" && i === pSel ? "cyan" : undefined}>
@@ -95,7 +105,12 @@ export function TwinView({
           <Text bold color="cyan">
             {project.name} — work products
           </Text>
-          {products.length === 0 && <Text dimColor>    (none)</Text>}
+          {products.length === 0 ? (
+            <EmptyState
+              title="No work products yet."
+              hints={["This project has no reviewable artifacts in the twin"]}
+            />
+          ) : null}
           {products.slice(0, 8).map((w, i) => (
             <Text key={w.id}>
               <Text color={i === wSel ? "cyan" : undefined}>{i === wSel ? "  ❯ " : "    "}</Text>
