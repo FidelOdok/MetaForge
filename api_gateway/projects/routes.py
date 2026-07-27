@@ -17,6 +17,7 @@ from api_gateway.projects.schemas import (
     CreateProjectRequest,
     ProjectListResponse,
     ProjectResponse,
+    UpdateProjectRequest,
 )
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
@@ -115,11 +116,14 @@ async def get_project(project_id: str) -> ProjectResponse:
 async def create_project(body: CreateProjectRequest) -> ProjectResponse:
     """Create a new hardware project and seed an initial WorkProduct."""
     with tracer.start_as_current_span("projects.create") as span:
-        project = await _backend.create_project(
-            name=body.name,
-            description=body.description,
-            status=body.status,
-        )
+        try:
+            project = await _backend.create_project(
+                name=body.name,
+                description=body.description,
+                status=body.status,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         span.set_attribute("project.id", project.id)
 
         # Seed an initial CAD_MODEL WorkProduct in the Twin
@@ -153,6 +157,28 @@ async def create_project(body: CreateProjectRequest) -> ProjectResponse:
             name=body.name,
             seed_wp_id=str(created_wp.id),
         )
+        return project
+
+
+@router.patch("/{project_id}", response_model=ProjectResponse)
+async def update_project(project_id: str, body: UpdateProjectRequest) -> ProjectResponse:
+    """Rename, redescribe, or change the status of an existing project."""
+    if body.name is None and body.description is None and body.status is None:
+        raise HTTPException(status_code=400, detail="At least one field must be provided")
+    with tracer.start_as_current_span("projects.update") as span:
+        span.set_attribute("project.id", project_id)
+        try:
+            project = await _backend.update_project(
+                project_id,
+                name=body.name,
+                description=body.description,
+                status=body.status,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        logger.info("project_updated_route", project_id=project_id)
         return project
 
 

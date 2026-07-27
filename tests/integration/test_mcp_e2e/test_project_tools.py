@@ -1,10 +1,12 @@
 """Phase 3 — project.* MCP tools happy-path coverage (MET-477).
 
-Three project tools exposed by ``tool_registry.tools.project``:
+Five project tools exposed by ``tool_registry.tools.project``:
 
 * ``project.create`` — persists a new project, returns id + timestamps
 * ``project.list``   — returns every project the caller can see
 * ``project.get``    — fetch by id or by exact name; null when missing
+* ``project.update`` — patch name/description/status on an existing project
+* ``project.delete`` — permanently remove a project by id
 
 In-process mode wires ``api_gateway.projects.backend.InMemoryProjectBackend``
 which already satisfies the adapter's ``ProjectBackendLike`` Protocol.
@@ -203,6 +205,75 @@ async def test_project_get_requires_id_or_name(
 
 
 # ---------------------------------------------------------------------------
+# project.update
+# ---------------------------------------------------------------------------
+
+
+async def test_project_update_renames(
+    project_mcp_client: httpx.AsyncClient,
+) -> None:
+    created = await call_tool(project_mcp_client, "project.create", {"name": "Epsilon"})
+    project_id = created["data"]["id"]
+
+    envelope = await call_tool(
+        project_mcp_client,
+        "project.update",
+        {"id": project_id, "name": "Epsilon Renamed"},
+    )
+    assert envelope["status"] == "success", envelope
+    assert envelope["data"]["name"] == "Epsilon Renamed"
+
+
+async def test_project_update_requires_a_field(
+    project_mcp_client: httpx.AsyncClient,
+) -> None:
+    created = await call_tool(project_mcp_client, "project.create", {"name": "Zeta"})
+    with pytest.raises(McpRpcError):
+        await call_tool(project_mcp_client, "project.update", {"id": created["data"]["id"]})
+
+
+async def test_project_update_missing_id_raises(
+    project_mcp_client: httpx.AsyncClient,
+) -> None:
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            project_mcp_client,
+            "project.update",
+            {"id": "00000000-0000-0000-0000-000000000000", "name": "Nope"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# project.delete
+# ---------------------------------------------------------------------------
+
+
+async def test_project_delete_removes_project(
+    project_mcp_client: httpx.AsyncClient,
+) -> None:
+    created = await call_tool(project_mcp_client, "project.create", {"name": "Eta"})
+    project_id = created["data"]["id"]
+
+    envelope = await call_tool(project_mcp_client, "project.delete", {"id": project_id})
+    assert envelope["status"] == "success", envelope
+    assert envelope["data"] == {"id": project_id, "deleted": True}
+
+    listed = await call_tool(project_mcp_client, "project.list", {})
+    assert listed["data"]["total"] == 0
+
+
+async def test_project_delete_missing_raises(
+    project_mcp_client: httpx.AsyncClient,
+) -> None:
+    with pytest.raises(McpRpcError):
+        await call_tool(
+            project_mcp_client,
+            "project.delete",
+            {"id": "00000000-0000-0000-0000-000000000000"},
+        )
+
+
+# ---------------------------------------------------------------------------
 # Inventory
 # ---------------------------------------------------------------------------
 
@@ -212,6 +283,12 @@ async def test_project_tools_appear_in_tools_list(
 ) -> None:
     result = await rpc(project_mcp_client, "tools/list")
     tool_ids = {t.get("name") for t in result.get("tools", [])}
-    expected = {"project.create", "project.list", "project.get"}
+    expected = {
+        "project.create",
+        "project.list",
+        "project.get",
+        "project.update",
+        "project.delete",
+    }
     missing = expected - tool_ids
     assert not missing, f"missing project tools: {missing}"

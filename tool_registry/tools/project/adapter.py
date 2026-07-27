@@ -6,8 +6,8 @@ layer rule (``tool_registry`` may not import from ``api_gateway``)
 the adapter defines a structural ``ProjectBackendLike`` protocol; any
 gateway backend that satisfies it can be plugged in unchanged.
 
-Three tools today: ``project.create``, ``project.list``,
-``project.get``.
+Five tools today: ``project.create``, ``project.list``,
+``project.get``, ``project.update``, ``project.delete``.
 
 Late-binding pattern matches ``KnowledgeServer``: the registry can
 register the adapter before the gateway has finished initialising its
@@ -63,6 +63,17 @@ class ProjectBackendLike(Protocol):
         description: str,
         status: str,
     ) -> ProjectLike: ...
+
+    async def update_project(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+    ) -> ProjectLike | None: ...
+
+    async def delete_project(self, project_id: str) -> bool: ...
 
 
 class ProjectServer(McpToolServer):
@@ -210,6 +221,82 @@ class ProjectServer(McpToolServer):
             handler=self.handle_get,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="project.update",
+                adapter_id="project",
+                name="Update Project",
+                description=(
+                    "Rename, redescribe, or change the status of an existing "
+                    "project. Only supplied fields change. Raises if the new "
+                    "name collides (case-insensitively) with another project."
+                ),
+                capability="project_management",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Project UUID to update.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "New project name.",
+                        },
+                        "description": {
+                            "type": "string",
+                            "maxLength": 2000,
+                            "description": "New project description.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "New project status.",
+                        },
+                    },
+                    "required": ["id"],
+                },
+                output_schema=_project_output_schema(),
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=10),
+            ),
+            handler=self.handle_update,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="project.delete",
+                adapter_id="project",
+                name="Delete Project",
+                description=(
+                    "Permanently delete a project by UUID. Does not delete "
+                    "its linked work products from the Digital Twin."
+                ),
+                capability="project_management",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Project UUID to delete.",
+                        },
+                    },
+                    "required": ["id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "deleted": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=10),
+            ),
+            handler=self.handle_delete,
+        )
+
     # ------------------------------------------------------------------
     # Handlers
     # ------------------------------------------------------------------
@@ -307,6 +394,58 @@ class ProjectServer(McpToolServer):
                 logger.info("project_mcp_get_not_found", lookup=project_id or project_name)
                 return None
             return _project_to_dict(project)
+
+    async def handle_update(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("project.mcp.update") as span:
+            project_id = arguments.get("id")
+            if not project_id or not isinstance(project_id, str):
+                raise ValueError("project.update: 'id' is required and must be a string")
+            name = arguments.get("name")
+            description = arguments.get("description")
+            status = arguments.get("status")
+            if name is None and description is None and status is None:
+                raise ValueError(
+                    "project.update: at least one of 'name', 'description', "
+                    "'status' must be provided"
+                )
+            if name is not None and not isinstance(name, str):
+                raise ValueError("project.update: 'name' must be a string")
+            if description is not None and not isinstance(description, str):
+                raise ValueError("project.update: 'description' must be a string")
+            if status is not None and not isinstance(status, str):
+                raise ValueError("project.update: 'status' must be a string")
+
+            span.set_attribute("project.id", project_id)
+            project = await self.backend.update_project(
+                project_id,
+                name=name,
+                description=description,
+                status=status,
+            )
+            if project is None:
+                raise ValueError(f"project.update: no project with id {project_id!r}")
+            logger.info(
+                "project_mcp_update",
+                project_id=project_id,
+                fields=[
+                    k
+                    for k, v in {"name": name, "description": description, "status": status}.items()
+                    if v is not None
+                ],
+            )
+            return _project_to_dict(project)
+
+    async def handle_delete(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("project.mcp.delete") as span:
+            project_id = arguments.get("id")
+            if not project_id or not isinstance(project_id, str):
+                raise ValueError("project.delete: 'id' is required and must be a string")
+            span.set_attribute("project.id", project_id)
+            deleted = await self.backend.delete_project(project_id)
+            if not deleted:
+                raise ValueError(f"project.delete: no project with id {project_id!r}")
+            logger.info("project_mcp_delete", project_id=project_id)
+            return {"id": project_id, "deleted": True}
 
 
 # ---------------------------------------------------------------------------

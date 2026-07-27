@@ -42,6 +42,11 @@ class TestCreateProject:
         list_resp = client.get("/v1/projects")
         assert list_resp.json()["total"] == 1
 
+    def test_duplicate_name_returns_409(self, client: TestClient) -> None:
+        client.post("/v1/projects", json={"name": "Quadruped Robot"})
+        resp = client.post("/v1/projects", json={"name": "quadruped robot"})
+        assert resp.status_code == 409
+
 
 class TestGetProject:
     def test_get_created_project(self, client: TestClient) -> None:
@@ -59,6 +64,37 @@ class TestGetProject:
     def test_404_for_unknown_id(self, client: TestClient) -> None:
         resp = client.get("/v1/projects/nonexistent")
         assert resp.status_code == 404
+
+
+class TestUpdateProject:
+    def test_rename(self, client: TestClient) -> None:
+        project_id = client.post("/v1/projects", json={"name": "old"}).json()["id"]
+        resp = client.patch(f"/v1/projects/{project_id}", json={"name": "new"})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "new"
+
+    def test_status_change_leaves_name_untouched(self, client: TestClient) -> None:
+        project_id = client.post("/v1/projects", json={"name": "keep-me"}).json()["id"]
+        resp = client.patch(f"/v1/projects/{project_id}", json={"status": "active"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "active"
+        assert body["name"] == "keep-me"
+
+    def test_empty_body_returns_400(self, client: TestClient) -> None:
+        project_id = client.post("/v1/projects", json={"name": "p"}).json()["id"]
+        resp = client.patch(f"/v1/projects/{project_id}", json={})
+        assert resp.status_code == 400
+
+    def test_404_for_unknown_id(self, client: TestClient) -> None:
+        resp = client.patch("/v1/projects/nonexistent", json={"name": "x"})
+        assert resp.status_code == 404
+
+    def test_rename_conflict_returns_409(self, client: TestClient) -> None:
+        client.post("/v1/projects", json={"name": "taken"})
+        other_id = client.post("/v1/projects", json={"name": "renamable"}).json()["id"]
+        resp = client.patch(f"/v1/projects/{other_id}", json={"name": "TAKEN"})
+        assert resp.status_code == 409
 
 
 class TestDeleteProject:
