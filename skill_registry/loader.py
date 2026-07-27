@@ -121,6 +121,11 @@ class SkillLoader:
 
             for def_file in sorted(base.glob("*/skills/*/definition.json")):
                 skill_dir = str(def_file.parent)
+                # SKILL.md is part of the skill contract (procedural doc) but is
+                # not needed to *execute* a skill, so load() won't fail on it —
+                # surface a warning here so a doc-less skill is visible.
+                if not (def_file.parent / "SKILL.md").exists():
+                    logger.warning("skill missing SKILL.md", path=skill_dir)
                 try:
                     skill = self.load(skill_dir)
                     loaded.append(skill)
