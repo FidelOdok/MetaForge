@@ -18,6 +18,12 @@ from api_gateway.chat.harness_backend import run_chat_turn
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
 from skill_registry.mcp_bridge import McpBridge
+from skill_registry.skill_context import (
+    SkillCard,
+    cards_for_domains,
+    load_skill_cards,
+    procedural_overlay,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -43,6 +49,9 @@ class ReActPhaseBrain:
         self._max_steps = max_steps
         self._provider = provider
         self._model = model
+        # Load the SKILL.md corpus once; each phase injects the procedures for
+        # its disciplines (the "select" pillar — procedural context).
+        self._cards: list[SkillCard] = load_skill_cards()
 
     def _prompt(self, goal: str, phase: Phase, context: FlowContext) -> str:
         prior = (
@@ -57,6 +66,8 @@ class ReActPhaseBrain:
         )
         expected = ", ".join(phase.expected_artifacts) or "the appropriate work products"
         deliverables = self._deliverable_guidance(phase, context)
+        overlay = procedural_overlay(cards_for_domains(self._cards, phase.disciplines))
+        overlay_block = f"{overlay}\n" if overlay else ""
         return (
             f"You are MetaForge's autonomous design engineer executing the "
             f"**{phase.title}** phase of a gated design flow.\n\n"
@@ -65,6 +76,7 @@ class ReActPhaseBrain:
             f"Prior phases completed:\n{prior}\n\n"
             f"Your objective for THIS phase:\n{phase.objective}\n\n"
             f"{deliverables}\n"
+            f"{overlay_block}"
             f"Use the available MCP tools (project, twin, CAD/FEA/EDA, knowledge) to "
             f"actually perform the work and record {expected} into the digital twin — "
             f"do not just describe it. Work efficiently: prefer one decisive tool call "

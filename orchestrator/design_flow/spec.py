@@ -54,6 +54,9 @@ class Phase:
     required_deliverables: tuple[str, ...] = ()
     enforce_deliverables: bool = True
     gate: Gate | None = None
+    # Skill ``domain``s whose SKILL.md procedures + tool scope the phase brain
+    # loads into context (the "select" pillar). Empty = no discipline skills yet.
+    disciplines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,7 @@ DESIGN_V1 = FlowDefinition(
             # twin.commit_geometry) — the gate cannot pass without a viewable
             # cad_model, so the CAD can never be silently missing.
             required_deliverables=("cad_model",),
+            disciplines=("mechanical",),
             gate=Gate(
                 name="Design review",
                 criteria=(
@@ -134,6 +138,7 @@ DESIGN_V1 = FlowDefinition(
             # The V&V verdict is recorded as a decision today; a typed
             # simulation_result/test_result work product follows with its tool.
             required_deliverables=("design_decision",),
+            disciplines=("simulation",),
             gate=Gate(
                 name="V&V sign-off",
                 criteria=(
@@ -230,6 +235,7 @@ HARDWARE_V1 = FlowDefinition(
             ),
             expected_artifacts=("cad_model", "design_decision"),
             required_deliverables=("cad_model",),
+            disciplines=("mechanical",),
             gate=Gate(
                 name="Mechanical design review",
                 criteria=(
@@ -252,6 +258,7 @@ HARDWARE_V1 = FlowDefinition(
             ),
             expected_artifacts=("schematic", "pcb_layout", "bom", "design_decision"),
             required_deliverables=("design_decision",),
+            disciplines=("electronics",),
             gate=Gate(
                 name="Electronics review",
                 criteria=(
@@ -273,6 +280,7 @@ HARDWARE_V1 = FlowDefinition(
             ),
             expected_artifacts=("firmware_source", "pinmap", "design_decision"),
             required_deliverables=("design_decision",),
+            disciplines=("firmware",),
             gate=Gate(
                 name="Firmware review",
                 criteria=(
@@ -294,6 +302,7 @@ HARDWARE_V1 = FlowDefinition(
             ),
             expected_artifacts=("simulation_result", "test_result", "design_decision"),
             required_deliverables=("design_decision",),
+            disciplines=("simulation",),
             gate=Gate(
                 name="V&V sign-off",
                 criteria=(
@@ -323,6 +332,7 @@ HARDWARE_V1 = FlowDefinition(
                 "design_decision",
             ),
             required_deliverables=("design_decision",),
+            disciplines=("supply_chain", "compliance"),
             gate=Gate(
                 name="Manufacturing readiness",
                 criteria=(
