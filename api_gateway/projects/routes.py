@@ -21,8 +21,6 @@ from api_gateway.projects.schemas import (
 )
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import WorkProductType
-from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.projects")
@@ -114,7 +112,7 @@ async def get_project(project_id: str) -> ProjectResponse:
 
 @router.post("", response_model=ProjectResponse, status_code=201)
 async def create_project(body: CreateProjectRequest) -> ProjectResponse:
-    """Create a new hardware project and seed an initial WorkProduct."""
+    """Create a new hardware project (starts with no work products)."""
     with tracer.start_as_current_span("projects.create") as span:
         try:
             project = await _backend.create_project(
@@ -125,38 +123,11 @@ async def create_project(body: CreateProjectRequest) -> ProjectResponse:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         span.set_attribute("project.id", project.id)
-
-        # Seed an initial CAD_MODEL WorkProduct in the Twin
-        seed_wp = WorkProduct(
-            name=f"{body.name} - CAD Model",
-            type=WorkProductType.CAD_MODEL,
-            domain="mechanical",
-            file_path="",
-            content_hash="",
-            format="step",
-            created_by="project-setup",
-            metadata={"project_id": project.id},
-        )
-        created_wp = await _twin.create_work_product(seed_wp)
-
-        await _backend.link_work_product(
-            project.id,
-            str(created_wp.id),
-            created_wp.name,
-            created_wp.type.value if hasattr(created_wp.type, "value") else str(created_wp.type),
-        )
-
-        # Re-fetch to include the work product
-        project = await _backend.get_project(project.id)
-        if project is None:
-            raise HTTPException(status_code=500, detail="Project creation failed")
-
-        logger.info(
-            "project_created",
-            project_id=project.id,
-            name=body.name,
-            seed_wp_id=str(created_wp.id),
-        )
+        # A project starts empty: work products are produced by the design flow
+        # and agents. (We used to seed an empty CAD_MODEL here — a phantom that
+        # falsely satisfied cad_model gates and misled the design brain into
+        # thinking the CAD deliverable already existed. Removed: MET-10.)
+        logger.info("project_created", project_id=project.id, name=body.name)
         return project
 
 
