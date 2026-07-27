@@ -1,10 +1,18 @@
 import { useState } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import { useChat } from "../hooks/useChat.js";
 import { StepTrace } from "./StepTrace.js";
+import { Thinking } from "./Thinking.js";
 import { Welcome } from "./Welcome.js";
+
+/** Full-width dim rule separating conversation turns. */
+function Divider() {
+  const { stdout } = useStdout();
+  const width = Math.min((stdout?.columns ?? 80) - 2, 64);
+  return <Text dimColor>{"─".repeat(Math.max(8, width))}</Text>;
+}
 
 /** The chat view: streaming assistant answers + tool-call trace + input. */
 export function Chat({
@@ -72,63 +80,89 @@ export function Chat({
   const visible = messages.slice(-MAX_VISIBLE);
   const hidden = messages.length - visible.length;
 
+  const reconnecting = status === "reconnecting";
+  const placeholder =
+    status === "connecting"
+      ? "connecting…"
+      : reconnecting
+        ? "reconnecting…"
+        : "message  (/model <slug> · Esc quit)";
+
   return (
     <Box flexDirection="column" paddingX={1}>
       {messages.length === 0 && !pending ? <Welcome gatewayUrl={client.baseUrl()} /> : null}
       {hidden > 0 && <Text dimColor>… {hidden} earlier message{hidden > 1 ? "s" : ""}</Text>}
       {visible.map((m, i) => (
         <Box key={i} flexDirection="column" marginBottom={1}>
+          {i > 0 || hidden > 0 ? <Divider /> : null}
           {m.role === "user" ? (
-            <Text>
-              <Text color="blue" bold>
-                {"› "}
+            <>
+              <Text color="blueBright" bold>
+                ❯ you
               </Text>
-              {m.text}
-            </Text>
+              <Text>{m.text}</Text>
+            </>
           ) : (
-            <Box flexDirection="column">
-              {m.steps && m.steps.length ? <StepTrace steps={m.steps} /> : null}
-              <Text>
-                <Text color="magenta" bold>
-                  assistant{"  "}
-                </Text>
-                {m.text ? (
-                  m.text
-                ) : (
-                  <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
-                )}
+            <>
+              {m.steps && m.steps.length ? (
+                <Box flexDirection="column">
+                  <Text dimColor>· thinking</Text>
+                  <Box marginLeft={1}>
+                    <StepTrace steps={m.steps} />
+                  </Box>
+                </Box>
+              ) : null}
+              <Text color="magenta" bold>
+                ◆ assistant
               </Text>
-            </Box>
+              {m.text ? (
+                <Text>{m.text}</Text>
+              ) : (
+                <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
+              )}
+            </>
           )}
         </Box>
       ))}
 
       {pending ? (
         <Box flexDirection="column" marginBottom={1}>
-          <StepTrace steps={pending.steps} />
-          <Text>
-            <Text color="magenta" bold>
-              assistant{"  "}
-            </Text>
-            {pending.text}
-            {busy ? <Text color="yellow">▌</Text> : null}
-          </Text>
+          {messages.length ? <Divider /> : null}
+          {pending.steps.length ? (
+            <Box flexDirection="column">
+              <Text dimColor>· thinking</Text>
+              <Box marginLeft={1}>
+                <StepTrace steps={pending.steps} />
+              </Box>
+            </Box>
+          ) : null}
+          {pending.text ? (
+            <>
+              <Text color="magenta" bold>
+                ◆ assistant
+              </Text>
+              <Text>
+                {pending.text}
+                {busy ? <Text color="yellow">▌</Text> : null}
+              </Text>
+            </>
+          ) : busy ? (
+            <Thinking />
+          ) : null}
         </Box>
       ) : null}
 
-      {error ? <Text color="red">error: {error}</Text> : null}
+      {reconnecting ? (
+        <Box>
+          <Thinking label="reconnecting to gateway" />
+        </Box>
+      ) : null}
+      {error && !reconnecting ? <Text color="red">error: {error}</Text> : null}
       {notice ? <Text color="cyan">{notice}</Text> : null}
 
       <Box>
-        <Text color={busy ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
-        <TextInput
-          value={input}
-          onChange={setInput}
-          onSubmit={onSubmit}
-          placeholder={
-            status === "connecting" ? "connecting…" : "message  (/model <slug> · Esc quit)"
-          }
-        />
+        <Text color={busy ? "yellow" : reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
+        <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder={placeholder} />
       </Box>
     </Box>
   );

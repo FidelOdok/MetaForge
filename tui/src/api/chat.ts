@@ -58,17 +58,23 @@ export function parseEvent(raw: string): ChatEvent | null {
   }
 }
 
-/** Open the thread SSE stream and yield parsed chat events until aborted/closed. */
+/** Open the thread SSE stream and yield parsed chat events until aborted/closed.
+ *
+ * ``onOpen`` fires once the connection is established (used to clear a
+ * "reconnecting" state and reset backoff). A thrown error or a clean end lets
+ * the caller reconnect — the thread lives server-side, so we just reattach. */
 export async function* streamThread(
   base: string,
   threadId: string,
   signal: AbortSignal,
+  onOpen?: () => void,
 ): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${base}/v1/chat/threads/${threadId}/stream`, {
     signal,
     headers: { Accept: "text/event-stream" },
   });
   if (!res.ok || !res.body) throw new Error(`chat stream -> ${res.status}`);
+  onOpen?.();
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
