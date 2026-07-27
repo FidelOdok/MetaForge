@@ -1,0 +1,26 @@
+{
+  "id": "mech_cantilever",
+  "level": 1,
+  "title": "Cantilever sensor arm (mechanical, load-bearing)",
+  "flow": "design_v1",
+  "rubric": "mechanical",
+  "goal": "An aluminum cantilever arm that holds a 0.5 kg sensor 150 mm out from a wall mount. It must not yield under 3x the static sensor load with a safety factor >= 2.5, and stay under 120 g. Author and commit the arm geometry, then validate it with FEA against the safety-factor requirement.",
+  "definition_of_done": {
+    "requirements": [
+      "tip load quantified (0.5 kg x 3x static)",
+      "moment arm (150 mm) stated",
+      "safety-factor target >= 2.5 stated",
+      "mass budget (<120 g) stated"
+    ],
+    "design": [
+      "cantilever arm geometry authored and committed as a viewable cad_model",
+      "cross-section + material (aluminum) chosen with rationale tied to bending stress"
+    ],
+    "simulation": [
+      "FEA run on the arm under the tip load",
+      "max stress / safety factor extracted",
+      "pass-fail verdict recorded against the SF>=2.5 requirement"
+    ]
+  },
+  "expected_deliverables": { "design_decision": 1, "cad_model": 1 }
+}
