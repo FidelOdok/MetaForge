@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Static, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import { useChat } from "../hooks/useChat.js";
@@ -116,11 +116,6 @@ export function Chat({
     setInput("");
   };
 
-  // Cap scrollback so a long session doesn't overflow the terminal.
-  const MAX_VISIBLE = 8;
-  const visible = messages.slice(-MAX_VISIBLE);
-  const hidden = messages.length - visible.length;
-
   const reconnecting = status === "reconnecting";
   const placeholder =
     status === "connecting"
@@ -130,85 +125,89 @@ export function Chat({
         : "message  (/model <slug> · Esc quit)";
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      {messages.length === 0 && !pending ? <Welcome gatewayUrl={client.baseUrl()} /> : null}
-      {hidden > 0 && <Text dimColor>… {hidden} earlier message{hidden > 1 ? "s" : ""}</Text>}
-      {visible.map((m, i) => (
-        <Box key={i} flexDirection="column" marginBottom={1}>
-          {i > 0 || hidden > 0 ? <Divider /> : null}
-          {m.role === "user" ? (
-            <>
-              <Text color="blueBright" bold>
-                ❯ you
-              </Text>
-              <Text>{m.text}</Text>
-            </>
-          ) : (
-            <>
-              {m.steps && m.steps.length ? (
-                <Box flexDirection="column">
-                  <Text dimColor>· thinking</Text>
-                  <Box marginLeft={1}>
-                    <StepTrace steps={m.steps} />
-                  </Box>
-                </Box>
-              ) : null}
-              <Text color="magenta" bold>
-                ◆ assistant
-              </Text>
-              {m.text ? (
+    <Box flexDirection="column">
+      {/* Committed transcript: each turn is printed once via <Static> and flows
+          up into terminal scrollback — never repainted, so the input stays
+          pinned at the bottom and streaming can't flicker the history. */}
+      <Static items={messages}>
+        {(m, i) => (
+          <Box key={i} flexDirection="column" paddingX={1} marginBottom={1}>
+            {i > 0 ? <Divider /> : null}
+            {m.role === "user" ? (
+              <>
+                <Text color="blueBright" bold>
+                  ❯ you
+                </Text>
                 <Text>{m.text}</Text>
-              ) : (
-                <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
-              )}
-            </>
-          )}
-        </Box>
-      ))}
+              </>
+            ) : (
+              <>
+                {m.steps && m.steps.length ? (
+                  <Box flexDirection="column">
+                    <Text dimColor>· thinking</Text>
+                    <Box marginLeft={1}>
+                      <StepTrace steps={m.steps} />
+                    </Box>
+                  </Box>
+                ) : null}
+                <Text color="magenta" bold>
+                  ◆ assistant
+                </Text>
+                {m.text ? (
+                  <Text>{m.text}</Text>
+                ) : (
+                  <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
+                )}
+              </>
+            )}
+          </Box>
+        )}
+      </Static>
 
-      {pending ? (
-        <Box flexDirection="column" marginBottom={1}>
-          {messages.length ? <Divider /> : null}
-          {pending.steps.length ? (
-            <Box flexDirection="column">
-              <Text dimColor>· thinking</Text>
-              <Box marginLeft={1}>
-                <StepTrace steps={pending.steps} />
+      {/* Live region pinned at the bottom: welcome (empty), the in-progress
+          turn, and the bordered input box. */}
+      <Box flexDirection="column" paddingX={1}>
+        {messages.length === 0 && !pending ? <Welcome gatewayUrl={client.baseUrl()} /> : null}
+
+        {pending ? (
+          <Box flexDirection="column" marginBottom={1}>
+            {pending.steps.length ? (
+              <Box flexDirection="column">
+                <Text dimColor>· thinking</Text>
+                <Box marginLeft={1}>
+                  <StepTrace steps={pending.steps} />
+                </Box>
               </Box>
-            </Box>
-          ) : null}
-          {pending.text ? (
-            <>
-              <Text color="magenta" bold>
-                ◆ assistant
-              </Text>
-              <Text>
-                {pending.text}
-                {busy ? <Text color="yellow">▌</Text> : null}
-              </Text>
-            </>
-          ) : busy ? (
-            <Thinking />
-          ) : null}
-        </Box>
-      ) : null}
+            ) : null}
+            {pending.text ? (
+              <>
+                <Text color="magenta" bold>
+                  ◆ assistant
+                </Text>
+                <Text>
+                  {pending.text}
+                  {busy ? <Text color="yellow">▌</Text> : null}
+                </Text>
+              </>
+            ) : busy ? (
+              <Thinking />
+            ) : null}
+          </Box>
+        ) : null}
 
-      {reconnecting ? (
-        <Box>
-          <Thinking label="reconnecting to gateway" />
-        </Box>
-      ) : null}
-      {error && !reconnecting ? <Text color="red">error: {error}</Text> : null}
-      {notice ? <Text color="cyan">{notice}</Text> : null}
+        {reconnecting ? <Thinking label="reconnecting to gateway" /> : null}
+        {error && !reconnecting ? <Text color="red">error: {error}</Text> : null}
+        {notice ? <Text color="cyan">{notice}</Text> : null}
 
-      <Box>
-        <Text color={busy ? "yellow" : reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
-        <TextInput
-          value={input}
-          onChange={onInputChange}
-          onSubmit={onSubmit}
-          placeholder={placeholder}
-        />
+        <Box borderStyle="round" borderColor={busy || reconnecting ? "yellow" : "blue"} paddingX={1}>
+          <Text color={busy || reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
+          <TextInput
+            value={input}
+            onChange={onInputChange}
+            onSubmit={onSubmit}
+            placeholder={placeholder}
+          />
+        </Box>
       </Box>
     </Box>
   );
