@@ -1,25 +1,59 @@
 name: release
 
-# Build standalone `forge` CLI binaries for each platform on a version tag and
-# publish them to a GitHub Release (MET-555).
+# Build standalone `forge` CLI binaries for each platform and publish a GitHub
+# Release (MET-555). Two ways in:
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+#   * Automatic — every push to `main`. The `version` job derives the next
+#     version from Conventional-Commit subjects since the last tag (feat→minor,
+#     fix/perf→patch, docs/chore/ci/… → no release), creates the tag, and the
+#     rest of the workflow builds + publishes. No manual step.
+#   * Manual — `git tag v1.2.3 && git push origin v1.2.3` still works and uses
+#     that exact version.
 #
-# Downloadable afterwards at:
-#   https://github.com/FidelOdok/MetaForge/releases/download/v0.1.0/forge-linux-x64
+# Downloadable at:
+#   https://github.com/FidelOdok/MetaForge/releases/download/<tag>/forge-linux-x64
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
-  workflow_dispatch: # manual run builds the matrix but skips publishing
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  version:
+    name: resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      should_release: ${{ steps.v.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for the bump computation
+      - name: Compute next version
+        id: v
+        run: bash scripts/next_version.sh
+      - name: Create tag (auto-release on main)
+        if: github.ref == 'refs/heads/main' && steps.v.outputs.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.v.outputs.version }}" -m "${{ steps.v.outputs.version }} (auto-release)"
+          git push origin "${{ steps.v.outputs.version }}"
+
   build:
     name: build ${{ matrix.asset }}
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -70,6 +104,8 @@ jobs:
 
   build-tui:
     name: build ${{ matrix.asset }}
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -94,6 +130,10 @@ jobs:
           cache-dependency-path: tui/package-lock.json
       - run: npm ci
       - name: Build TUI binary (stamps git provenance)
+        # The auto-release tag is created in the `version` job and isn't fetched
+        # here, so pass the resolved version explicitly for the stamp.
+        env:
+          FORGE_VERSION: ${{ needs.version.outputs.version }}
         run: npm run bundle:bin
       - name: Stage asset
         shell: bash
@@ -115,9 +155,9 @@ jobs:
 
   release:
     name: publish release
-    needs: [build, build-tui]
+    needs: [version, build, build-tui]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: needs.version.outputs.should_release == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -130,6 +170,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.version }}
           files: artifacts/**/*
           generate_release_notes: true
           fail_on_unmatched_files: true

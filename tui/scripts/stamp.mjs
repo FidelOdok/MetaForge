@@ -19,20 +19,27 @@ try {
 const date = new Date().toISOString().slice(0, 10);
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
-// Prefer the git tag so a release binary reports its real version (e.g. v0.1.6
-// -> "0.1.6") without anyone remembering to bump package.json. Falls back to
-// package.json when no tag is reachable (dev checkouts).
+// Resolve the version to stamp, in priority order:
+//   1. FORGE_VERSION env — CI passes the release version explicitly, since the
+//      auto-release tag is created in a sibling job and may not be fetched here.
+//   2. the nearest git tag (e.g. v0.1.6 -> "0.1.6") for manual/tag builds.
+//   3. package.json, for dev checkouts with no tag.
 let version = pkg.version ?? "0.0.0";
-try {
-  const tag = execSync("git describe --tags --abbrev=0", {
-    cwd: root,
-    stdio: ["pipe", "pipe", "ignore"],
-  })
-    .toString()
-    .trim();
-  if (tag) version = tag.replace(/^v/, "");
-} catch {
-  // no tags reachable — keep the package.json version
+const forced = (process.env.FORGE_VERSION ?? "").trim();
+if (forced) {
+  version = forced.replace(/^v/, "");
+} else {
+  try {
+    const tag = execSync("git describe --tags --abbrev=0", {
+      cwd: root,
+      stdio: ["pipe", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    if (tag) version = tag.replace(/^v/, "");
+  } catch {
+    // no tags reachable — keep the package.json version
+  }
 }
 
 const content = `/**
