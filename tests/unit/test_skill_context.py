@@ -58,3 +58,11 @@ def test_phases_declare_disciplines() -> None:
     assert by_id["electronics"].disciplines == ("electronics",)
     assert by_id["firmware"].disciplines == ("firmware",)
     assert by_id["simulation"].disciplines == ("simulation",)
+
+    # The goal-driven mechanical vertical: 3 phases, native brain, mechanical +
+    # simulation procedures injected.
+    mech = get_flow("mech_v1")
+    assert [p.id for p in mech.phases] == ["requirements", "design", "simulation"]
+    mby = {p.id: p for p in mech.phases}
+    assert mby["design"].disciplines == ("mechanical",)
+    assert mby["simulation"].disciplines == ("simulation",)

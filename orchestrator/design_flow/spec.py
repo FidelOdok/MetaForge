@@ -346,7 +346,93 @@ HARDWARE_V1 = FlowDefinition(
 )
 
 
-FLOWS: dict[str, FlowDefinition] = {DESIGN_V1.id: DESIGN_V1, HARDWARE_V1.id: HARDWARE_V1}
+# --------------------------------------------------------------------------
+# Goal-driven mechanical vertical
+# --------------------------------------------------------------------------
+#
+# ``mech_v1`` is the mechanical vertical (Requirements -> Mechanical Design ->
+# V&V) driven end-to-end by the native tool-calling brain — so it designs the
+# part the *goal* describes, not a hardcoded example. (``design_v1`` keeps the
+# deterministic quadruped-demo handlers.) The mechanical/simulation SKILL.md
+# procedures inject via `disciplines`.
+
+MECH_V1 = FlowDefinition(
+    id="mech_v1",
+    name="Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
+    phases=(
+        Phase(
+            id="requirements",
+            title="Requirements",
+            objective=(
+                "Establish the mechanical requirements from the goal. Quantify the load case "
+                "(magnitude and where it acts / moment arm), the material class, the "
+                "safety-factor target, and the mass/envelope budget. Record the requirements "
+                "and load case as a design decision, scoped to the project."
+            ),
+            expected_artifacts=("design_decision",),
+            required_deliverables=("design_decision",),
+            gate=Gate(
+                name="Requirements sign-off",
+                criteria=(
+                    "Load case quantified (magnitude + location)",
+                    "Material class and safety-factor target stated",
+                    "Mass / envelope budget stated",
+                ),
+            ),
+        ),
+        Phase(
+            id="design",
+            title="Mechanical Design",
+            objective=(
+                "Design the part THE GOAL DESCRIBES — not a generic or example part. Author "
+                "its geometry with the FreeCAD tools, sized to the requirements; name the part "
+                "after what it actually is; choose the material; then PERSIST it with the "
+                "commit-geometry tool so it becomes a viewable cad_model (a described-but-"
+                "uncommitted model does NOT count). Record the design rationale: the "
+                "dimensions, the material, and how the section carries the load."
+            ),
+            expected_artifacts=("cad_model", "design_decision"),
+            required_deliverables=("cad_model",),
+            disciplines=("mechanical",),
+            gate=Gate(
+                name="Mechanical design review",
+                criteria=(
+                    "The committed geometry is the part the goal asked for",
+                    "Sized to the requirements; material chosen with rationale",
+                    "Committed as a viewable cad_model",
+                ),
+            ),
+        ),
+        Phase(
+            id="simulation",
+            title="Simulation & V&V",
+            objective=(
+                "Validate the part against its safety-factor requirement. Mesh the committed "
+                "geometry and run CalculiX FEA under the load case; extract the max stress and "
+                "safety factor; record a pass/fail verdict against the requirement. If FEA "
+                "tooling is unavailable, say so explicitly — do NOT present a hand-calc as FEA."
+            ),
+            expected_artifacts=("simulation_result", "design_decision"),
+            required_deliverables=("design_decision",),
+            disciplines=("simulation",),
+            gate=Gate(
+                name="V&V sign-off",
+                criteria=(
+                    "FEA executed on the committed geometry",
+                    "Max stress / safety factor extracted",
+                    "Pass/fail verdict recorded against the requirement",
+                ),
+            ),
+        ),
+    ),
+)
+
+
+FLOWS: dict[str, FlowDefinition] = {
+    DESIGN_V1.id: DESIGN_V1,
+    HARDWARE_V1.id: HARDWARE_V1,
+    MECH_V1.id: MECH_V1,
+}
 
 DEFAULT_FLOW_ID = DESIGN_V1.id
 
