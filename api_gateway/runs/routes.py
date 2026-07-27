@@ -112,14 +112,23 @@ def _launch_flow(run_id: str) -> None:
     bridge = get_mcp_bridge()
     project_backend = get_project_backend()
     recorder = make_geometry_recorder(get_twin(), project_backend)
-    hybrid = HybridBrain(
-        handlers={
+    react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
+    # The deterministic mechanical handlers are tuned to the quadruped demo
+    # vertical (design_v1). For the general hardware/robotics lifecycle every
+    # phase is driven by the shared native tool-calling brain (one brain, any
+    # discipline); design_v1 keeps the deterministic handlers for reliable
+    # geometry.
+    flow_id = _store.get(run_id).request.get("flow")
+    handlers = (
+        {
             "requirements": RequirementsHandler(bridge),
             "design": MechanicalDesignHandler(bridge, recorder),
             "simulation": SimulationHandler(bridge),
-        },
-        fallback=ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}"),
+        }
+        if flow_id == "design_v1"
+        else {}
     )
+    hybrid = HybridBrain(handlers=handlers, fallback=react)
     executor = DesignFlowExecutor(
         store=_store,
         brain=hybrid,

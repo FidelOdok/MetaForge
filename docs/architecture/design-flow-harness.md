@@ -13,7 +13,10 @@ digital thread.
 ## Phases and gates
 
 A flow is an ordered list of phases; each phase has an objective (handed to the
-brain) and an optional gate. Phase 1 ships one built-in flow, `design_v1`:
+brain) and an optional gate. Two flows ship today.
+
+**`design_v1`** — the thin mechanical vertical (deterministic handlers drive the
+mechanical phases for reliable geometry):
 
 | Phase | Objective (summarised) | Gate |
 |-------|------------------------|------|
@@ -21,8 +24,25 @@ brain) and an optional gate. Phase 1 ships one built-in flow, `design_v1`:
 | **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review |
 | **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off |
 
-Adding a phase (Architecture, Digital-Twin consolidation, Release) is a data
-change in `orchestrator/design_flow/spec.py`, not new control flow.
+**`hardware_v1`** — the full hardware/robotics lifecycle, every phase driven by
+the shared native tool-calling brain (one brain, any discipline):
+
+| Phase | Objective (summarised) | Gate |
+|-------|------------------------|------|
+| **Requirements** | Functional reqs, environment, quantified constraints (mass/power/DOF/cost), motion/use cases → twin | Requirements sign-off |
+| **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture review |
+| **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review |
+| **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
+| **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
+| **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off |
+| **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness |
+
+Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
+Required deliverables are only the types producible today (`design_decision`,
+`cad_model`); richer typed products (schematic/bom/firmware_source/…) are
+advisory `expected_artifacts` until their creation tools land. Adding or
+extending a phase is a data change in `orchestrator/design_flow/spec.py`, not new
+control flow.
 
 ## How a run flows
 
