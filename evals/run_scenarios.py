@@ -144,6 +144,12 @@ def run_once(base: str, scenario: dict, idx: int, cap_s: float) -> dict:
     rec["deliverable_completeness"] = completeness(rec["expected_deliverables"], present)
     rec["gates_reached"] = seen_gates
     rec["duration_s"] = round(time.time() - started, 1)
+
+    # Correctness rubric (not just presence). Mechanical today; more to come.
+    if scenario.get("rubric") == "mechanical":
+        from mechanical_rubric import score_mechanical
+
+        rec["mechanical_rubric"] = score_mechanical(base, pid, scenario.get("goal", ""))
     return rec
 
 
@@ -205,6 +211,14 @@ def main() -> int:
                 f"{rec.get('duration_s', 0)}s",
                 file=sys.stderr,
             )
+            rub = rec.get("mechanical_rubric")
+            if rub:
+                failed = [k for k, v in rub.get("checks", {}).items() if not v]
+                print(
+                    f"    mechanical rubric: {rub.get('score')}  "
+                    f"failing={failed or 'none'}  cad={rub.get('cad_names')}",
+                    file=sys.stderr,
+                )
 
     report = {
         "gateway": args.gateway,

@@ -20,5 +20,9 @@
       "pass-fail verdict recorded against the SF>=2 requirement"
     ]
   },
-  "expected_deliverables": { "design_decision": 1, "cad_model": 1 }
+  "expected_deliverables": {
+    "design_decision": 1,
+    "cad_model": 1
+  },
+  "rubric": "mechanical"
 }
