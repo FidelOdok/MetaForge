@@ -1,0 +1,24 @@
+{
+  "id": "l0_bracket",
+  "level": 0,
+  "title": "Mounting bracket (mechanical only)",
+  "flow": "design_v1",
+  "goal": "An aluminum L-bracket that mounts a 200 g camera to a 20 mm T-slot extrusion. It must survive 5x the static camera load with a safety factor >= 2.0, and keep mass under 60 g. Use the CAD tools to author and commit the bracket geometry, and validate it with FEA.",
+  "definition_of_done": {
+    "requirements": [
+      "static load quantified",
+      "safety-factor target >= 2 stated",
+      "mass budget stated"
+    ],
+    "design": [
+      "L-bracket geometry authored and committed to the twin as a viewable cad_model",
+      "material (aluminum grade) and wall thickness chosen with rationale"
+    ],
+    "simulation": [
+      "FEA run on the bracket",
+      "max stress / safety factor extracted",
+      "pass-fail verdict recorded against the SF>=2 requirement"
+    ]
+  },
+  "expected_deliverables": { "design_decision": 1, "cad_model": 1 }
+}

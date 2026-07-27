@@ -1,0 +1,40 @@
+{
+  "id": "l1_breakout",
+  "level": 1,
+  "title": "IMU sensor breakout board (electronics + firmware)",
+  "flow": "hardware_v1",
+  "goal": "A small breakout board exposing an I2C IMU (MPU-6050 class) on a 0.1-inch header, powered by a 3.3 V LDO from a 5 V USB input, with decoupling and two mounting holes. Board must fit within 25 x 20 mm.",
+  "definition_of_done": {
+    "requirements": [
+      "interface (I2C) and pinout stated",
+      "input/output voltages quantified (5 V in, 3.3 V rail)",
+      "board size constraint stated"
+    ],
+    "architecture": [
+      "subsystems identified (sensor, power, connector)",
+      "power budget noted"
+    ],
+    "design": [
+      "board outline / mechanical envelope authored and committed",
+      "mounting-hole placement chosen"
+    ],
+    "electronics": [
+      "schematic topology defined (IMU + LDO + decoupling + header)",
+      "key components selected",
+      "power budget closed"
+    ],
+    "firmware": [
+      "I2C init / read approach noted",
+      "pin map to the header"
+    ],
+    "simulation": [
+      "ERC/DRC or a design check noted",
+      "verdict recorded"
+    ],
+    "manufacturing": [
+      "BOM with the key parts",
+      "assembly / bring-up note"
+    ]
+  },
+  "expected_deliverables": { "design_decision": 3, "cad_model": 1 }
+}
