@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { renderHook, waitFor } from '../../test/test-utils';
-import { useProjects, useProject } from '../use-projects';
+import { renderHook, waitFor, act } from '../../test/test-utils';
+import { useProjects, useProject, useUpdateProject, useDeleteProject } from '../use-projects';
 
 vi.mock('../../api/endpoints/projects', () => ({
   getProjects: vi.fn().mockResolvedValue([
@@ -9,6 +9,10 @@ vi.mock('../../api/endpoints/projects', () => ({
   getProject: vi.fn().mockResolvedValue(
     { id: '1', name: 'P1', description: '', status: 'active', work_products: [], agentCount: 0, lastUpdated: '', createdAt: '' },
   ),
+  updateProject: vi.fn().mockResolvedValue(
+    { id: '1', name: 'Renamed', description: '', status: 'active', work_products: [], agentCount: 0, lastUpdated: '', createdAt: '' },
+  ),
+  deleteProject: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('useProjects', () => {
@@ -29,5 +33,26 @@ describe('useProject', () => {
   it('is disabled when id is undefined', () => {
     const { result } = renderHook(() => useProject(undefined));
     expect(result.current.fetchStatus).toBe('idle');
+  });
+});
+
+describe('useUpdateProject', () => {
+  it('updates a project', async () => {
+    const { result } = renderHook(() => useUpdateProject());
+    await act(async () => {
+      result.current.mutate({ id: '1', payload: { name: 'Renamed' } });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.name).toBe('Renamed');
+  });
+});
+
+describe('useDeleteProject', () => {
+  it('deletes a project', async () => {
+    const { result } = renderHook(() => useDeleteProject());
+    await act(async () => {
+      result.current.mutate('1');
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 });

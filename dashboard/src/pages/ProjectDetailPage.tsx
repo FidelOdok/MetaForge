@@ -1,8 +1,19 @@
-import { Link, useParams } from 'react-router-dom';
-import { useProject } from '../hooks/use-projects';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useProject, useUpdateProject, useDeleteProject } from '../hooks/use-projects';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { Button } from '../components/ui/Button';
+import { useToast } from '../components/ui/Toast';
 import { formatRelativeTime } from '../utils/format-time';
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { data?: { detail?: string } } }).response;
+    if (typeof response?.data?.detail === 'string') return response.data.detail;
+  }
+  return fallback;
+}
 
 const glassCard = {
   background: 'rgba(30,31,38,0.85)',
@@ -63,6 +74,15 @@ function buildActivityFeed(workProducts: { name: string; type: string; status: s
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: project, isLoading } = useProject(id);
+  const navigate = useNavigate();
+  const toast = useToast();
+  const updateProject = useUpdateProject();
+  const deleteProject = useDeleteProject();
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (isLoading) {
     return (
@@ -99,6 +119,42 @@ export function ProjectDetailPage() {
     ? Math.round((validCount / project.work_products.length) * 100)
     : 0;
 
+  const startEditing = () => {
+    setEditName(project.name);
+    setEditDescription(project.description);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editName.trim()) return;
+    updateProject.mutate(
+      { id: project.id, payload: { name: editName.trim(), description: editDescription.trim() } },
+      {
+        onSuccess: () => {
+          toast.success('Project updated');
+          setIsEditing(false);
+        },
+        onError: (error) => {
+          toast.error(getErrorMessage(error, 'Failed to update project'));
+        },
+      },
+    );
+  };
+
+  const handleDelete = () => {
+    deleteProject.mutate(project.id, {
+      onSuccess: () => {
+        toast.success('Project deleted');
+        navigate('/projects');
+      },
+      onError: (error) => {
+        toast.error(getErrorMessage(error, 'Failed to delete project'));
+        setShowDeleteConfirm(false);
+      },
+    });
+  };
+
   return (
     <div>
       {/* Back nav */}
@@ -123,16 +179,87 @@ export function ProjectDetailPage() {
           </span>
           <StatusBadge status={project.status} />
         </div>
-        <span className="font-mono" style={{ fontSize: '11px', color: '#9a9aaa' }}>
-          updated {formatRelativeTime(project.lastUpdated)}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono" style={{ fontSize: '11px', color: '#9a9aaa' }}>
+            updated {formatRelativeTime(project.lastUpdated)}
+          </span>
+          {!isEditing && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label="Rename project"
+                onClick={startEditing}
+                className="flex items-center justify-center rounded transition-colors hover:bg-surface-high"
+                style={{ width: 26, height: 26, color: '#9a9aaa' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Delete project"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center justify-center rounded transition-colors hover:bg-surface-high"
+                style={{ width: 26, height: 26, color: '#9a9aaa' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Description */}
-      {project.description && (
-        <p className="mb-4 font-mono" style={{ fontSize: '11px', color: '#9a9aaa', lineHeight: '1.6' }}>
-          {project.description}
-        </p>
+      {/* Description, or the rename/redescribe form */}
+      {isEditing ? (
+        <form onSubmit={handleSaveEdit} className="glass rounded p-4 mb-4 space-y-3" style={glassCard}>
+          <div>
+            <label
+              htmlFor="edit-project-name"
+              className="block mb-1 font-mono"
+              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}
+            >
+              Project name
+            </label>
+            <input
+              id="edit-project-name"
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="w-full rounded px-3 py-1.5 text-xs outline-none focus:border-[rgba(65,72,90,0.6)]"
+              style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.3)', color: '#e2e2eb' }}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="edit-project-desc"
+              className="block mb-1 font-mono"
+              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}
+            >
+              Description
+            </label>
+            <textarea
+              id="edit-project-desc"
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              rows={2}
+              className="w-full rounded px-3 py-1.5 text-xs outline-none resize-none focus:border-[rgba(65,72,90,0.6)]"
+              style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.3)', color: '#e2e2eb' }}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setIsEditing(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={!editName.trim() || updateProject.isPending}>
+              {updateProject.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        project.description && (
+          <p className="mb-4 font-mono" style={{ fontSize: '11px', color: '#9a9aaa', lineHeight: '1.6' }}>
+            {project.description}
+          </p>
+        )
       )}
 
       {/* Metrics row */}
@@ -332,6 +459,52 @@ export function ProjectDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="w-full max-w-sm rounded p-5" style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.3)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: '#ffb4ab' }}>warning</span>
+              <span style={{ fontSize: '14px', fontWeight: 500, color: '#e2e2eb' }}>Delete project</span>
+            </div>
+            <p className="mb-4" style={{ fontSize: '12px', color: '#9a9aaa', lineHeight: '1.5' }}>
+              Delete <strong style={{ color: '#e2e2eb' }}>{project.name}</strong>? This removes the
+              project record and cannot be undone.
+              {project.work_products.length > 0 && (
+                <>
+                  {' '}
+                  Its {project.work_products.length} work product
+                  {project.work_products.length === 1 ? '' : 's'} will remain in the Digital Twin,
+                  unlinked from this project.
+                </>
+              )}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={handleDelete}
+                disabled={deleteProject.isPending}
+              >
+                {deleteProject.isPending ? 'Deleting...' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

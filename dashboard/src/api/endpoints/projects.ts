@@ -72,3 +72,18 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
   const { data } = await apiClient.post<ProjectResponseRaw>('/projects', payload);
   return mapProject(data);
 }
+
+export interface UpdateProjectPayload {
+  name?: string;
+  description?: string;
+  status?: string;
+}
+
+export async function updateProject(id: string, payload: UpdateProjectPayload): Promise<Project> {
+  const { data } = await apiClient.patch<ProjectResponseRaw>(`/projects/${id}`, payload);
+  return mapProject(data);
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await apiClient.delete(`/projects/${id}`);
+}
