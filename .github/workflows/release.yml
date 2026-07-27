@@ -4,9 +4,10 @@ name: release
 # Release (MET-555). Two ways in:
 #
 #   * Automatic — every push to `main`. The `version` job derives the next
-#     version from Conventional-Commit subjects since the last tag (feat→minor,
-#     fix/perf→patch, docs/chore/ci/… → no release), creates the tag, and the
-#     rest of the workflow builds + publishes. No manual step.
+#     version from Conventional-Commit subjects since the last tag (see
+#     scripts/next_version.sh — "scheme B": on 0.x, breaking→minor and
+#     feat/fix→patch; standard semver after 1.0; docs/chore/ci/… → no release),
+#     creates the tag, and the rest of the workflow builds + publishes.
 #   * Manual — `git tag v1.2.3 && git push origin v1.2.3` still works and uses
 #     that exact version.
 #

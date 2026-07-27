@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Compute the next release version from Conventional-Commit subjects since the
-# last tag, for the auto-release workflow.
+# last tag, for the auto-release workflow. Versioning is "scheme B": while on
+# 0.x the minor slot is the breaking signal and features/fixes are patches; the
+# standard semver mapping only kicks in after 1.0.
 #
-#   feat            -> minor        fix, perf       -> patch
-#   <type>!, BREAKING CHANGE -> minor  (0.x: breaking stays a minor bump)
+#   0.x (major == 0):   <type>!/BREAKING -> minor    feat, fix, perf -> patch
+#   >= 1.0:             <type>!/BREAKING -> major    feat -> minor    fix, perf -> patch
 #   only docs/chore/ci/test/style/refactor/build -> no release
 #
 # When triggered by a tag push, that tag is the version verbatim.
@@ -36,19 +38,21 @@ range="HEAD"
 [ -n "$last" ] && range="${last}..HEAD"
 subjects="$(git log --format='%s' ${range})"
 
-bump=""
+# Highest-precedence change type in the range: breaking > feat > fix/perf.
+level=""
 if printf '%s\n' "$subjects" | grep -qE '^[a-z]+(\([^)]*\))?!:' ||
   printf '%s\n' "$subjects" | grep -qiE 'BREAKING CHANGE'; then
-  bump="minor" # 0.x: breaking is a minor bump, not major
+  level="breaking"
 elif printf '%s\n' "$subjects" | grep -qE '^feat(\([^)]*\))?:'; then
-  bump="minor"
+  level="feat"
 elif printf '%s\n' "$subjects" | grep -qE '^(fix|perf)(\([^)]*\))?:'; then
-  bump="patch"
+  level="fix"
 fi
 
-if [ -z "$bump" ]; then
+if [ -z "$level" ]; then
   should="false"
   new="${last:-v0.0.0}"
+  bump="none"
   emit
   exit 0
 fi
@@ -59,13 +63,40 @@ IFS=. read -r MA MI PA <<<"$base"
 MA=${MA:-0}
 MI=${MI:-0}
 PA=${PA:-0}
-case "$bump" in
-  minor)
-    MI=$((MI + 1))
-    PA=0
-    ;;
-  patch) PA=$((PA + 1)) ;;
-esac
+
+if [ "$MA" -eq 0 ]; then
+  # 0.x: minor is the breaking signal; feat/fix are patches.
+  case "$level" in
+    breaking)
+      MI=$((MI + 1))
+      PA=0
+      bump="minor"
+      ;;
+    *)
+      PA=$((PA + 1))
+      bump="patch"
+      ;;
+  esac
+else
+  # >= 1.0: standard semver.
+  case "$level" in
+    breaking)
+      MA=$((MA + 1))
+      MI=0
+      PA=0
+      bump="major"
+      ;;
+    feat)
+      MI=$((MI + 1))
+      PA=0
+      bump="minor"
+      ;;
+    fix)
+      PA=$((PA + 1))
+      bump="patch"
+      ;;
+  esac
+fi
 new="v${MA}.${MI}.${PA}"
 should="true"
 emit
