@@ -12,6 +12,7 @@ The module-level :func:`create_backend` factory selects the right one.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -25,6 +26,27 @@ from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.projects.backend")
+
+
+def _find_name_conflict(
+    candidates: Iterable[ProjectResponse],
+    name: str,
+    *,
+    exclude_id: str | None = None,
+) -> ProjectResponse | None:
+    """Case-insensitive exact-name match, used to guard create/rename.
+
+    Prevents the accidental-duplicate-project problem (MET-427 follow-up):
+    nothing previously stopped a repeated ``create_project`` call from
+    silently spawning another empty project with the same name.
+    """
+    target = name.strip().lower()
+    for candidate in candidates:
+        if candidate.id == exclude_id:
+            continue
+        if candidate.name.strip().lower() == target:
+            return candidate
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +71,22 @@ class ProjectBackend(ABC):
         description: str,
         status: str,
     ) -> ProjectResponse: ...
+
+    @abstractmethod
+    async def update_project(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+    ) -> ProjectResponse | None:
+        """Patch the supplied fields. Returns None if the project doesn't exist.
+
+        Raises ValueError if renaming would collide (case-insensitively)
+        with another project's name.
+        """
+        ...
 
     @abstractmethod
     async def delete_project(self, project_id: str) -> bool: ...
@@ -103,6 +141,12 @@ class InMemoryProjectBackend(ProjectBackend):
         description: str,
         status: str,
     ) -> ProjectResponse:
+        conflict = _find_name_conflict(self.projects.values(), name)
+        if conflict is not None:
+            raise ValueError(
+                f"A project named {name!r} already exists (id={conflict.id}); "
+                "use project.update or pick a different name."
+            )
         now = datetime.now(UTC).isoformat()
         project_id = str(uuid4())
         project = ProjectResponse(
@@ -116,6 +160,30 @@ class InMemoryProjectBackend(ProjectBackend):
             created_at=now,
         )
         self.projects[project_id] = project
+        return project
+
+    async def update_project(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+    ) -> ProjectResponse | None:
+        project = self.projects.get(project_id)
+        if project is None:
+            return None
+        if name is not None and name.strip().lower() != project.name.strip().lower():
+            conflict = _find_name_conflict(self.projects.values(), name, exclude_id=project_id)
+            if conflict is not None:
+                raise ValueError(f"A project named {name!r} already exists (id={conflict.id})")
+            project.name = name
+        if description is not None:
+            project.description = description
+        if status is not None:
+            project.status = status
+        project.last_updated = datetime.now(UTC).isoformat()
+        logger.info("project_updated", project_id=project_id)
         return project
 
     async def delete_project(self, project_id: str) -> bool:
@@ -238,6 +306,8 @@ class PgProjectBackend(ProjectBackend):
         description: str,
         status: str,
     ) -> ProjectResponse:
+        from sqlalchemy import func, select
+
         from api_gateway.db.engine import get_session
         from api_gateway.db.models import ProjectRow
 
@@ -245,6 +315,17 @@ class PgProjectBackend(ProjectBackend):
         now = datetime.now(UTC)
 
         async with get_session() as session:
+            conflict_stmt = select(ProjectRow).where(
+                func.lower(ProjectRow.name) == name.strip().lower()
+            )
+            conflict_result = await session.execute(conflict_stmt)
+            conflict_row = conflict_result.scalars().first()
+            if conflict_row is not None:
+                raise ValueError(
+                    f"A project named {name!r} already exists (id={conflict_row.id}); "
+                    "use project.update or pick a different name."
+                )
+
             row = ProjectRow(
                 id=project_id,
                 name=name,
@@ -258,6 +339,51 @@ class PgProjectBackend(ProjectBackend):
             await session.flush()
             logger.info("project_created_pg", project_id=project_id, name=name)
             return self._row_to_response(row, [])
+
+    async def update_project(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+    ) -> ProjectResponse | None:
+        from sqlalchemy import func, select
+
+        from api_gateway.db.engine import get_session
+        from api_gateway.db.models import ProjectRow, ProjectWorkProductRow
+
+        async with get_session() as session:
+            row = await session.get(ProjectRow, project_id)
+            if row is None:
+                return None
+
+            if name is not None and name.strip().lower() != row.name.strip().lower():
+                conflict_stmt = select(ProjectRow).where(
+                    func.lower(ProjectRow.name) == name.strip().lower(),
+                    ProjectRow.id != project_id,
+                )
+                conflict_result = await session.execute(conflict_stmt)
+                conflict_row = conflict_result.scalars().first()
+                if conflict_row is not None:
+                    raise ValueError(
+                        f"A project named {name!r} already exists (id={conflict_row.id})"
+                    )
+                row.name = name
+            if description is not None:
+                row.description = description
+            if status is not None:
+                row.status = status
+            row.last_updated = datetime.now(UTC)
+            await session.flush()
+            logger.info("project_updated_pg", project_id=project_id)
+
+            wp_stmt = select(ProjectWorkProductRow).where(
+                ProjectWorkProductRow.project_id == project_id
+            )
+            wp_result = await session.execute(wp_stmt)
+            wp_rows = wp_result.scalars().all()
+            return self._row_to_response(row, wp_rows)
 
     async def delete_project(self, project_id: str) -> bool:
         from api_gateway.db.engine import get_session

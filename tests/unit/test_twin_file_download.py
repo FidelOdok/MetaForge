@@ -274,6 +274,14 @@ async def test_delete_calls_blob_delete(monkeypatch) -> None:
 
 async def test_delete_removes_project_link() -> None:
     from api_gateway.projects import routes as proutes
+    from api_gateway.projects.backend import InMemoryProjectBackend
+
+    # Bind a fresh backend rather than mutating whatever the process-wide
+    # global currently holds — `_backend` is shared module state that other
+    # tests rebind too, so reusing it directly makes this test's outcome
+    # depend on run order (it collided with an unrelated project's name
+    # once name-uniqueness was enforced; see MET-427 follow-up).
+    proutes.init_project_backend(InMemoryProjectBackend.create())
 
     node_id = await _seed(_wp(file_path=""))
     project = await proutes._backend.create_project(name="P", description="", status="draft")

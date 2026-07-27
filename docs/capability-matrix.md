@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (41 across 10 adapters)
+## MCP tools (43 across 10 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -51,9 +51,11 @@ KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
 | `kicad` | `kicad.export_netlist` | Netlist export | _none yet_ |
 | `kicad` | `kicad.export_gerber` | Gerber set for fab | _none yet_ |
 | `kicad` | `kicad.get_pin_mapping` | Connector pinmap → JSON | _none yet_ |
-| `project` (injected) | `project.create` | Create a project | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
+| `project` (injected) | `project.create` | Create a project (rejects a case-insensitive duplicate name) | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.list` | List projects the caller can see | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.get` | Fetch a project by id or name | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
+| `project` | `project.update` | Rename, redescribe, or change status on an existing project | _none yet_ |
+| `project` | `project.delete` | Permanently delete a project by id | _none yet_ |
 | `memory` (injected) | `memory.retrieve_similar_experience` | Semantic recall of past agent experiences | _none yet_ |
 | `memory` | `memory.list_insights` | List consolidated memory insights | _none yet_ |
 | `session` (injected) | `session.start` | Open an agent session to record narrative (MET-494) | live-verified |
@@ -79,7 +81,7 @@ Served by Vite under `dashboard/` — boot with
 
 | Path | Purpose | Backed by |
 |---|---|---|
-| `/projects` | Project list + create / delete | `GET/POST /v1/projects` |
+| `/projects` | Project list + create / update / delete | `GET/POST/PATCH/DELETE /v1/projects` |
 | `/projects/:id` | Project detail, work-product tree | `GET /v1/projects/{id}` |
 | `/sessions` | Workflow run list | `GET /v1/sessions` |
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |

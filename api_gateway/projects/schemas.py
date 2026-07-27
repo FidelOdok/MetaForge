@@ -45,3 +45,11 @@ class ProjectListResponse(BaseModel):
 
     projects: list[ProjectResponse]
     total: int
+
+
+class UpdateProjectRequest(BaseModel):
+    """Body for ``PATCH /v1/projects/{id}``. Only supplied fields change."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    status: str | None = Field(default=None)

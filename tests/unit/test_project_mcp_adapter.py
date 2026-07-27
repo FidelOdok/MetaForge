@@ -50,11 +50,13 @@ async def _call(server: ProjectServer, name: str, args: dict) -> dict:
 
 
 class TestRegistration:
-    def test_three_tools_registered(self, server: ProjectServer) -> None:
+    def test_five_tools_registered(self, server: ProjectServer) -> None:
         assert set(server.tool_ids) == {
             "project.create",
             "project.list",
             "project.get",
+            "project.update",
+            "project.delete",
         }
 
 
@@ -91,6 +93,24 @@ class TestCreate:
         # Empty args → handler raises ValueError("'name' is required")
         assert "error" in response, response
 
+    async def test_duplicate_name_is_rejected(self, server: ProjectServer) -> None:
+        await _call(server, "project.create", {"name": "Quadruped Robot"})
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {
+                        "tool_id": "project.create",
+                        "arguments": {"name": "quadruped robot"},
+                    },
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
+
 
 class TestList:
     async def test_list_empty(self, server: ProjectServer) -> None:
@@ -121,6 +141,97 @@ class TestGet:
     async def test_get_missing_returns_null(self, server: ProjectServer) -> None:
         result = await _call(server, "project.get", {"id": str(uuid4())})
         assert result is None or result == {}  # tools/call may wrap null as {}
+
+
+class TestUpdate:
+    async def test_renames_project(self, server: ProjectServer) -> None:
+        created = await _call(server, "project.create", {"name": "old-name"})
+        updated = await _call(server, "project.update", {"id": created["id"], "name": "new-name"})
+        assert updated["name"] == "new-name"
+        assert updated["id"] == created["id"]
+
+    async def test_updates_description_and_status_independently(
+        self, server: ProjectServer
+    ) -> None:
+        created = await _call(server, "project.create", {"name": "p"})
+        updated = await _call(server, "project.update", {"id": created["id"], "status": "active"})
+        assert updated["status"] == "active"
+        assert updated["name"] == "p"  # untouched
+
+    async def test_requires_at_least_one_field(self, server: ProjectServer) -> None:
+        created = await _call(server, "project.create", {"name": "p2"})
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {"tool_id": "project.update", "arguments": {"id": created["id"]}},
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
+
+    async def test_missing_project_raises(self, server: ProjectServer) -> None:
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {
+                        "tool_id": "project.update",
+                        "arguments": {"id": str(uuid4()), "name": "x"},
+                    },
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
+
+    async def test_rename_to_existing_name_conflicts(self, server: ProjectServer) -> None:
+        await _call(server, "project.create", {"name": "taken"})
+        other = await _call(server, "project.create", {"name": "renamable"})
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {
+                        "tool_id": "project.update",
+                        "arguments": {"id": other["id"], "name": "TAKEN"},
+                    },
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
+
+
+class TestDelete:
+    async def test_deletes_project(self, server: ProjectServer) -> None:
+        created = await _call(server, "project.create", {"name": "to-delete"})
+        result = await _call(server, "project.delete", {"id": created["id"]})
+        assert result == {"id": created["id"], "deleted": True}
+
+        listed = await _call(server, "project.list", {})
+        assert listed["total"] == 0
+
+    async def test_delete_missing_raises(self, server: ProjectServer) -> None:
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {"tool_id": "project.delete", "arguments": {"id": str(uuid4())}},
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
 
 
 class TestLateBinding:

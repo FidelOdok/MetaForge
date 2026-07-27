@@ -101,7 +101,7 @@ class TestToolsListInventory:
     async def test_project_tools_registered_when_backend_supplied(
         self, twin: InMemoryTwinAPI
     ) -> None:
-        """With a project backend wired (MET-427), the three project.* tools appear.
+        """With a project backend wired (MET-427), all five project.* tools appear.
 
         Mirrors the twin/constraint regression — if a future bootstrap
         change forgets the ``project_backend`` kwarg, this catches it.
@@ -114,11 +114,17 @@ class TestToolsListInventory:
             project_backend=InMemoryProjectBackend.create(),
         )
         names = await _tools_list(server)
-        required = {"project.create", "project.list", "project.get"}
+        required = {
+            "project.create",
+            "project.list",
+            "project.get",
+            "project.update",
+            "project.delete",
+        }
         missing = required - names
         assert not missing, f"project tools missing from tools/list: {missing}"
-        # 22 baseline + 3 project = 25 floor with backend supplied.
-        assert len(names) >= 25, f"surface shrank to {len(names)}: {sorted(names)}"
+        # 22 baseline + 5 project = 27 floor with backend supplied.
+        assert len(names) >= 27, f"surface shrank to {len(names)}: {sorted(names)}"
 
     async def test_knowledge_tools_registered_when_service_supplied(
         self, twin: InMemoryTwinAPI
