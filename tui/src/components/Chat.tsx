@@ -4,6 +4,7 @@ import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import { useChat } from "../hooks/useChat.js";
 import { StepTrace } from "./StepTrace.js";
+import { Welcome } from "./Welcome.js";
 
 /** The chat view: streaming assistant answers + tool-call trace + input. */
 export function Chat({
@@ -73,6 +74,7 @@ export function Chat({
 
   return (
     <Box flexDirection="column" paddingX={1}>
+      {messages.length === 0 && !pending ? <Welcome gatewayUrl={client.baseUrl()} /> : null}
       {hidden > 0 && <Text dimColor>… {hidden} earlier message{hidden > 1 ? "s" : ""}</Text>}
       {visible.map((m, i) => (
         <Box key={i} flexDirection="column" marginBottom={1}>

@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { GatewayClient, GatewayError } from "./api/client.js";
 import { isTerminal, streamRunStatus } from "./api/runs.js";
+import { CLI_QUICKSTART, MISSION, plainBanner } from "./banner.js";
 import { BUILD } from "./build-info.js";
 import { configPath, loadConfig, setConfigValue } from "./config.js";
 
@@ -56,17 +57,23 @@ function printVersion(): void {
 }
 
 function printHelp(): void {
+  const quickstart = CLI_QUICKSTART.map(([cmd, desc]) => `  ${cmd.padEnd(36)}${desc}`);
   line(
     [
-      "forge — MetaForge unified CLI + TUI",
+      plainBanner(),
       "",
-      "Run bare in a terminal to launch the interactive TUI:",
-      "  forge                 interactive TUI (chat · runs · new · twin)",
-      "  forge ui              force the TUI",
+      ...MISSION,
       "",
-      "Or use a command (scriptable; add --json for machine output):",
+      "Getting started",
+      ...quickstart,
+      "",
+      "Interactive workspace (bare `forge` in a terminal)",
+      "  type to chat · ^R runs · ^B twin · ^N new run · ^T chat · Esc quit",
+      "  /model <slug>  switch model",
+      "",
+      "All commands (scriptable; add --json for machine output)",
       "  forge runs list|get <id>|create|approve <id>|reject <id>|watch <id>",
-      "  forge chat -m \"message\"        one-shot assistant turn",
+      '  forge chat -m "message"        one-shot assistant turn',
       "  forge projects                list projects",
       "  forge twin list               list twin nodes",
       "  forge sources                 list ingested knowledge sources",
