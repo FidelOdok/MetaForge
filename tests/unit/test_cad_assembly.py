@@ -9,8 +9,47 @@ from typing import Any
 
 import pytest
 
-from api_gateway.cad.builder import build_assembly
+from api_gateway.cad.builder import build_assembly, validate_assembly_spec
 from cli.forge_cli.cad import handle_cad
+
+
+def test_validate_flags_oversize_fillet_and_chamfer() -> None:
+    # fillet 4 on a 6mm plate (half = 3) and chamfer 3 on a Ø... both too big
+    errs = validate_assembly_spec(
+        [
+            {
+                "name": "Plate",
+                "kind": "box",
+                "parameters": {"width": 60, "length": 40, "height": 6},
+                "fillet": 4,
+            },
+            {
+                "name": "Rod",
+                "kind": "cylinder",
+                "parameters": {"radius": 5, "height": 4},
+                "chamfer": 3,
+            },
+        ]
+    )
+    assert len(errs) == 2
+    assert "Plate" in errs[0] and "fillet" in errs[0]
+    assert "Rod" in errs[1] and "chamfer" in errs[1]
+
+
+def test_validate_passes_reasonable_edge_treatments() -> None:
+    assert (
+        validate_assembly_spec(
+            [
+                {
+                    "name": "Plate",
+                    "kind": "box",
+                    "parameters": {"width": 60, "length": 40, "height": 6},
+                    "fillet": 2,
+                }
+            ]
+        )
+        == []
+    )
 
 
 class _Bridge:

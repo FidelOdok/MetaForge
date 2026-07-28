@@ -27,6 +27,43 @@ def _data(envelope: Any, tool: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _min_dimension(part: dict[str, Any]) -> float:
+    """The smallest linear extent (mm) of a primitive, for edge-treatment checks."""
+    p = part.get("parameters") or {}
+    kind = part.get("kind")
+    if kind == "box":
+        dims = [p.get("width"), p.get("length"), p.get("height")]
+    elif kind == "cylinder":
+        dims = [2 * (p.get("radius") or 0), p.get("height")]
+    elif kind == "cone":
+        dims = [2 * (p.get("radius1") or 0), 2 * (p.get("radius2") or 0), p.get("height")]
+    else:  # sphere / unknown
+        dims = [2 * (p.get("radius") or 0)]
+    vals = [float(d) for d in dims if isinstance(d, (int, float)) and d > 0]
+    return min(vals) if vals else 0.0
+
+
+def validate_assembly_spec(parts: list[dict[str, Any]]) -> list[str]:
+    """Return human-readable reasons a spec would fail geometry (empty if OK).
+
+    Catches the common footgun up front — a fillet/chamfer radius >= half the
+    part's thinnest dimension makes OCCT fail with an opaque error — so the API
+    can return a clear 400 instead of a 502 mid-build.
+    """
+    errors: list[str] = []
+    for part in parts:
+        name = part.get("name", "?")
+        min_dim = _min_dimension(part)
+        for kind, key in (("fillet", "fillet"), ("chamfer", "chamfer")):
+            r = part.get(key)
+            if r and min_dim and float(r) >= min_dim / 2.0:
+                errors.append(
+                    f"part {name!r}: {kind} {float(r):g} mm must be smaller than half the "
+                    f"part's thinnest dimension ({min_dim:g} mm)"
+                )
+    return errors
+
+
 def _part_height(part: dict[str, Any]) -> float:
     """Best-effort part thickness (mm) for sizing a through-hole cutter."""
     params = part.get("parameters") or {}
