@@ -159,6 +159,10 @@ def run_once(base: str, scenario: dict, idx: int, cap_s: float) -> dict:
             from electronics_rubric import score_electronics
 
             rec["electronics_rubric"] = score_electronics(base, pid, goal)
+        elif name == "firmware":
+            from firmware_rubric import score_firmware
+
+            rec["firmware_rubric"] = score_firmware(base, pid, goal)
     return rec
 
 
@@ -220,7 +224,7 @@ def main() -> int:
                 f"{rec.get('duration_s', 0)}s",
                 file=sys.stderr,
             )
-            for name in ("mechanical", "electronics"):
+            for name in ("mechanical", "electronics", "firmware"):
                 rub = rec.get(f"{name}_rubric")
                 if rub:
                     failed = [k for k, v in rub.get("checks", {}).items() if not v]
