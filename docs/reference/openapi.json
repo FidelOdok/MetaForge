@@ -545,6 +545,86 @@
         "title": "ChecklistResponse",
         "type": "object"
       },
+      "CompileRequest": {
+        "description": "Compile a description into a spec WITHOUT building it (dry run).",
+        "properties": {
+          "description": {
+            "description": "Plain-English description.",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM model override.",
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the assembly name.",
+            "title": "Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM provider override.",
+            "title": "Provider"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "CompileRequest",
+        "type": "object"
+      },
+      "CompileResponse": {
+        "description": "The compiled spec plus any geometric-feasibility warnings (not built).",
+        "properties": {
+          "buildable": {
+            "description": "True when the spec would build without geometry errors.",
+            "title": "Buildable",
+            "type": "boolean"
+          },
+          "errors": {
+            "description": "Geometric-feasibility problems (e.g. oversize fillet); empty if buildable.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
+            "description": "The compiled declarative spec."
+          }
+        },
+        "required": [
+          "spec",
+          "buildable"
+        ],
+        "title": "CompileResponse",
+        "type": "object"
+      },
       "ComponentHealth": {
         "description": "Health snapshot for one downstream dependency.",
         "properties": {
@@ -4613,6 +4693,48 @@
           }
         },
         "summary": "Create Assembly",
+        "tags": [
+          "cad"
+        ]
+      }
+    },
+    "/v1/cad/compile": {
+      "post": {
+        "description": "Compile a description into a spec and check it \u2014 but do NOT build (dry run).\n\nReturns the spec for review plus any geometric-feasibility warnings, so the\ncaller can tweak it (or save it and run ``/assembly``) before committing.",
+        "operationId": "compile_assembly_v1_cad_compile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compile Assembly",
         "tags": [
           "cad"
         ]

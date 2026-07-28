@@ -24,27 +24,11 @@ def handle_cad(args: argparse.Namespace, client: ForgeClient) -> Any:
     return None
 
 
-def _from_text(args: argparse.Namespace, client: ForgeClient) -> Any:
-    """Compile a plain-English description into an assembly and build it."""
-    body: dict[str, Any] = {"description": args.description}
-    if args.name:
-        body["name"] = args.name
-    if args.project_id:
-        body["project_id"] = args.project_id
-    if getattr(args, "provider", None):
-        body["provider"] = args.provider
-    if getattr(args, "model", None):
-        body["model"] = args.model
-
-    try:
-        result = client.create_assembly_from_text(body)
-    except ForgeClientError as exc:
-        print(f"Error: text→CAD failed: {exc}", file=sys.stderr)
-        return None
-
-    spec = result.get("spec") or {}
+def _print_spec_summary(spec: dict[str, Any], stream: Any = None) -> None:
+    """Print a one-line-per-part summary of a compiled spec to *stream* (default stdout)."""
+    stream = stream if stream is not None else sys.stdout
     parts = spec.get("parts") or []
-    print(f"Compiled '{spec.get('name', '?')}' → {len(parts)} part(s):")
+    print(f"Compiled '{spec.get('name', '?')}' → {len(parts)} part(s):", file=stream)
     for p in parts:
         params = p.get("parameters") or {}
         dims = ", ".join(f"{k}={v:g}" for k, v in params.items())
@@ -56,7 +40,52 @@ def _from_text(args: argparse.Namespace, client: ForgeClient) -> Any:
         if p.get("chamfer"):
             extras.append(f"chamfer {p['chamfer']:g}")
         suffix = f"  [{', '.join(extras)}]" if extras else ""
-        print(f"  · {p.get('name', '?')} ({p.get('kind')}): {dims}{suffix}")
+        print(f"  · {p.get('name', '?')} ({p.get('kind')}): {dims}{suffix}", file=stream)
+
+
+def _from_text(args: argparse.Namespace, client: ForgeClient) -> Any:
+    """Compile a plain-English description into an assembly (and build it, unless --dry-run)."""
+    body: dict[str, Any] = {"description": args.description}
+    if args.name:
+        body["name"] = args.name
+    if getattr(args, "provider", None):
+        body["provider"] = args.provider
+    if getattr(args, "model", None):
+        body["model"] = args.model
+
+    # Dry run: compile + validate only, print the spec JSON for review/editing.
+    if getattr(args, "dry_run", False):
+        try:
+            result = client.compile_assembly(body)
+        except ForgeClientError as exc:
+            print(f"Error: compile failed: {exc}", file=sys.stderr)
+            return None
+        # Human summary → stderr, so stdout is only the JSON spec and
+        # `... --dry-run > spec.json` yields a clean, buildable file.
+        spec = result.get("spec") or {}
+        _print_spec_summary(spec, sys.stderr)
+        for warn in result.get("errors") or []:
+            print(f"  ! {warn}", file=sys.stderr)
+        if not result.get("buildable", True):
+            print("Not buildable as-is — adjust the spec, then `forge cad build`.", file=sys.stderr)
+        else:
+            print(
+                "Buildable. Save this JSON and run `forge cad build <file>`, "
+                "or drop --dry-run to build now.",
+                file=sys.stderr,
+            )
+        print(json.dumps(spec, indent=2))
+        return None
+
+    if args.project_id:
+        body["project_id"] = args.project_id
+    try:
+        result = client.create_assembly_from_text(body)
+    except ForgeClientError as exc:
+        print(f"Error: text→CAD failed: {exc}", file=sys.stderr)
+        return None
+
+    _print_spec_summary(result.get("spec") or {})
     print(f"Committed: node {result.get('node_id')} ({result.get('part_count')} parts)")
     print(f"  view: {result.get('model_url')}")
     return None

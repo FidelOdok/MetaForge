@@ -217,6 +217,17 @@ uses the LLM only to translate text → spec; the geometry is authored by the sa
 deterministic builder as `cad build`). If the description can't be turned into a
 valid spec it returns a clear `422` rather than building something wrong.
 
+Add `--dry-run` to **compile and review the spec without building it** — it
+prints a per-part summary, flags any geometry problems, and emits the full spec
+JSON. Save that JSON and run `forge cad build <file>` for a fully deterministic
+build, or drop `--dry-run` to build immediately:
+
+```bash
+python -m cli.forge_cli cad from-text "a rounded 60x40x8 bracket" --dry-run > bracket.json
+# review/edit bracket.json, then:
+python -m cli.forge_cli cad build bracket.json --project-id <id>
+```
+
 #### Slash commands (interactive)
 
 | Command | Effect |

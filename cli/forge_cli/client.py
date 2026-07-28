@@ -352,6 +352,13 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def compile_assembly(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Compile a description into a spec WITHOUT building via ``POST /v1/cad/compile``."""
+        with self._client() as client:
+            resp = client.post("/v1/cad/compile", json=body, timeout=180.0)
+            resp.raise_for_status()
+            return resp.json()
+
     def create_run(
         self, request: dict[str, Any] | None = None, *, start: bool = True
     ) -> dict[str, Any]:

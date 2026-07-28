@@ -126,6 +126,7 @@ def test_cli_from_text_sends_body_and_prints_spec(
         project_id="p1",
         provider=None,
         model=None,
+        dry_run=False,
     )
     handle_cad(args, client)  # type: ignore[arg-type]
 
@@ -136,3 +137,58 @@ def test_cli_from_text_sends_body_and_prints_spec(
     assert "Base plate" in out and "Boss" in out
     assert "1 hole(s)" in out  # the boss's hole is summarised
     assert "node n1" in out
+
+
+class _CompileClient:
+    def __init__(self, buildable: bool = True, errors: list[str] | None = None) -> None:
+        self.sent: dict[str, Any] = {}
+        self._buildable = buildable
+        self._errors = errors or []
+
+    def compile_assembly(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.sent = body
+        return {
+            "spec": {
+                "name": "Plate",
+                "parts": [{"name": "Base", "kind": "box", "parameters": {"width": 10}}],
+            },
+            "errors": self._errors,
+            "buildable": self._buildable,
+        }
+
+
+def test_cli_dry_run_compiles_without_building(capsys: pytest.CaptureFixture[str]) -> None:
+    client = _CompileClient()
+    args = argparse.Namespace(
+        cad_command="from-text",
+        description="a plate",
+        name=None,
+        project_id="p1",  # must NOT be sent to the compile (dry-run) endpoint
+        provider=None,
+        model=None,
+        dry_run=True,
+    )
+    handle_cad(args, client)  # type: ignore[arg-type]
+
+    assert client.sent["description"] == "a plate"
+    assert "project_id" not in client.sent  # dry run does not build/scope
+    captured = capsys.readouterr()
+    assert "Buildable" in captured.err  # human summary → stderr
+    assert '"name": "Plate"' in captured.out  # only the spec JSON → stdout (redirect-safe)
+
+
+def test_cli_dry_run_flags_unbuildable_spec(capsys: pytest.CaptureFixture[str]) -> None:
+    client = _CompileClient(buildable=False, errors=["part 'Base': fillet too big"])
+    args = argparse.Namespace(
+        cad_command="from-text",
+        description="a plate",
+        name=None,
+        project_id=None,
+        provider=None,
+        model=None,
+        dry_run=True,
+    )
+    handle_cad(args, client)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert "fillet too big" in captured.err
+    assert "Not buildable as-is" in captured.err
