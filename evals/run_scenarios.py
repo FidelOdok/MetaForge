@@ -167,6 +167,10 @@ def run_once(base: str, scenario: dict, idx: int, cap_s: float) -> dict:
             from vv_rubric import score_vv
 
             rec["vv_rubric"] = score_vv(base, pid, goal)
+        elif name == "manufacturing":
+            from manufacturing_rubric import score_manufacturing
+
+            rec["manufacturing_rubric"] = score_manufacturing(base, pid, goal)
     return rec
 
 
@@ -228,7 +232,7 @@ def main() -> int:
                 f"{rec.get('duration_s', 0)}s",
                 file=sys.stderr,
             )
-            for name in ("mechanical", "electronics", "firmware", "vv"):
+            for name in ("mechanical", "electronics", "firmware", "vv", "manufacturing"):
                 rub = rec.get(f"{name}_rubric")
                 if rub:
                     failed = [k for k, v in rub.get("checks", {}).items() if not v]
