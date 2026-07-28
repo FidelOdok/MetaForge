@@ -129,9 +129,7 @@ class ReActPhaseBrain:
         await self._backstop_decision(phase, context, summary)
         return PhaseOutcome(summary=summary, artifacts=[], status=status)
 
-    async def _backstop_decision(
-        self, phase: Phase, context: FlowContext, summary: str
-    ) -> None:
+    async def _backstop_decision(self, phase: Phase, context: FlowContext, summary: str) -> None:
         """Guarantee a phase's ``design_decision`` deliverable.
 
         A native phase sometimes ends without recording a decision (e.g. an
