@@ -99,6 +99,7 @@ def _launch_flow(run_id: str) -> None:
     """
     from api_gateway.chat.routes import get_mcp_bridge
     from api_gateway.projects.routes import get_project_backend
+    from api_gateway.runs.arch_handlers import GoalDrivenArchitectureHandler
     from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
@@ -148,6 +149,7 @@ def _launch_flow(run_id: str) -> None:
         # (backstop covers their decisions).
         handlers = {
             "requirements": GoalDrivenRequirementsHandler(bridge, doc_recorder),
+            "architecture": GoalDrivenArchitectureHandler(bridge, doc_recorder),
             "design": GoalDrivenMechanicalHandler(bridge, recorder),
             "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
             "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),
