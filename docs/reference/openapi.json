@@ -66,6 +66,40 @@
       "AssemblyPart": {
         "description": "One primitive component of an assembly.",
         "properties": {
+          "chamfer": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "If set, bevel every edge of the part by this distance (mm), applied before holes. Must be smaller than half the part's thinnest dimension. Use fillet OR chamfer.",
+            "title": "Chamfer"
+          },
+          "fillet": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "If set, round every edge of the part by this radius (mm), applied before holes. Must be smaller than half the part's thinnest dimension or the fillet fails.",
+            "title": "Fillet"
+          },
+          "holes": {
+            "description": "Mounting/fastener holes drilled into the part.",
+            "items": {
+              "$ref": "#/components/schemas/Hole"
+            },
+            "title": "Holes",
+            "type": "array"
+          },
           "kind": {
             "description": "Primitive kind.",
             "enum": [
@@ -1288,6 +1322,46 @@
           "timestamp"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "Hole": {
+        "description": "A mounting/fastener hole drilled into a part (local part frame, mm).",
+        "properties": {
+          "depth": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Depth from the top face (mm); through-hole if omitted.",
+            "title": "Depth"
+          },
+          "diameter": {
+            "description": "Hole diameter (mm).",
+            "exclusiveMinimum": 0.0,
+            "title": "Diameter",
+            "type": "number"
+          },
+          "x": {
+            "description": "Hole centre X in the part's local frame (mm).",
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "description": "Hole centre Y in the part's local frame (mm).",
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "diameter"
+        ],
+        "title": "Hole",
         "type": "object"
       },
       "ImportWorkProductResponse": {

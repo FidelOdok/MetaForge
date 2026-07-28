@@ -10,7 +10,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, HTTPException
 
-from api_gateway.cad.builder import build_assembly
+from api_gateway.cad.builder import build_assembly, validate_assembly_spec
 from api_gateway.cad.schemas import AssemblyResponse, CreateAssemblyRequest
 
 logger = structlog.get_logger(__name__)
@@ -26,9 +26,15 @@ async def create_assembly(body: CreateAssemblyRequest) -> AssemblyResponse:
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.routes import get_twin
 
+    parts = [p.model_dump() for p in body.parts]
+    # Pre-flight: reject geometrically-impossible specs with a clear 400 rather
+    # than a mid-build 502 (e.g. a fillet radius >= half the part thickness).
+    spec_errors = validate_assembly_spec(parts)
+    if spec_errors:
+        raise HTTPException(status_code=400, detail="; ".join(spec_errors))
+
     bridge = get_mcp_bridge()
     recorder = make_geometry_recorder(get_twin(), get_project_backend())
-    parts = [p.model_dump() for p in body.parts]
     try:
         rec = await build_assembly(
             bridge=bridge,
