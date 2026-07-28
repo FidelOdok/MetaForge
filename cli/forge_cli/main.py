@@ -30,6 +30,7 @@ from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
+from cli.forge_cli.cad import handle_cad
 from cli.forge_cli.projects import handle_projects
 from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_design, handle_runs
@@ -142,6 +143,13 @@ def build_parser() -> argparse.ArgumentParser:
     projects_delete = projects_sub.add_parser("delete", help="Delete a project")
     projects_delete.add_argument("project_id", help="Project id")
     projects_delete.add_argument("--yes", action="store_true", help="Skip confirmation")
+
+    # -- cad (deterministic multi-part assembly authoring) -----------------
+    cad_parser = subparsers.add_parser("cad", help="Author CAD assemblies from a spec")
+    cad_sub = cad_parser.add_subparsers(dest="cad_command", help="CAD subcommands")
+    cad_build = cad_sub.add_parser("build", help="Build + commit a multi-part assembly")
+    cad_build.add_argument("spec", help="Path to an assembly spec JSON ({name, parts, ...})")
+    cad_build.add_argument("--project-id", default=None, help="Scope the cad_model to a project")
 
     # -- design (friendly wrapper over `runs create` for a gated flow) -----
     design_parser = subparsers.add_parser(
@@ -385,6 +393,7 @@ _HANDLERS = {
     "memory": handle_memory,
     "runs": handle_runs,
     "projects": handle_projects,
+    "cad": handle_cad,
     "design": handle_design,
     "chat": handle_chat,
     "routine": handle_routine,

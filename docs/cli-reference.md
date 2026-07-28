@@ -420,6 +420,38 @@ When `--project-id` is omitted the command **auto-creates a project** named from
 the goal and scopes the run to it, so the deliverables show on the Projects page;
 pass `--project-id` to target an existing project instead.
 
+### `cad build` — author a multi-part assembly
+
+```
+cad build <spec.json> [--project-id <uuid>]
+```
+
+```bash
+python -m cli.forge_cli cad build examples/cad/gimbal-base.json --project-id <uuid>
+```
+
+Authors a complex, multi-part CAD assembly **deterministically** (no LLM) from a
+declarative spec and commits it to the twin as a loadable `cad_model`. The spec is
+a JSON object `{ "name", "parts": [ … ], "project_id"? }`, where each part is a
+primitive:
+
+```json
+{
+  "name": "Gimbal Base",
+  "parts": [
+    {"name": "Base Plate", "kind": "box", "parameters": {"width": 100, "length": 100, "height": 6}},
+    {"name": "Yaw Housing", "kind": "cylinder", "parameters": {"radius": 20, "height": 45}, "position": [50, 50, 6]},
+    {"name": "Tripod Boss", "kind": "cylinder", "parameters": {"radius": 10, "height": 8}, "position": [50, 50, -8]}
+  ]
+}
+```
+
+`kind` is one of `box` / `cylinder` / `cone` / `sphere`; `position` is an optional
+`[x, y, z]` in mm. Under the hood it drives the FreeCAD tools
+(`create_primitive → create_assembly → add_part_to_assembly → export_model`) and
+commits via the geometry recorder — the reliable, blob-in-Python path that needs
+no LLM. Prints the committed node id and its viewer URL.
+
 ### `projects` — list, inspect, and delete projects
 
 ```
