@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Box, Static, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
-import { useChat, type ChatMessage } from "../hooks/useChat.js";
+import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
@@ -51,18 +51,19 @@ export function Chat({
   provider,
   onModelChange,
   onProviderChange,
-  onStartedChange,
+  chat,
 }: {
   client: GatewayClient;
   model?: string;
   provider?: string;
   onModelChange?: (model: string) => void;
   onProviderChange?: (provider: string) => void;
-  /** Notify the parent when the transcript goes from empty → non-empty, so it
-   *  can switch from the full-height launch layout to Static content-flow. */
-  onStartedChange?: (started: boolean) => void;
+  /** Chat thread state, owned by App so it survives view switches and so App's
+   *  height policy and this component's layout branch flip in the SAME render
+   *  (a callback would lag one render behind and strand transition frames). */
+  chat: UseChat;
 }) {
-  const { status, error, messages, pending, send } = useChat(client, model, provider);
+  const { status, error, messages, pending, send } = chat;
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const busy = status === "thinking";
@@ -73,11 +74,9 @@ export function Chat({
   // The moment the first message is sent the transcript takes over via <Static>
   // and the input follows the content (flicker-free scrollback). `send` appends
   // the user turn synchronously, so `messages.length` flips this the instant a
-  // message is submitted.
+  // message is submitted — and App reads the same `messages` to drop its fixed
+  // height in that same render, so the two never disagree.
   const started = messages.length > 0;
-  useEffect(() => {
-    onStartedChange?.(started);
-  }, [started, onStartedChange]);
 
   // Shell-style prompt history: ↑/↓ recall previous inputs, persisted across
   // sessions. `histPos` = index into history while browsing (null = live draft,

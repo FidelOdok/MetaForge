@@ -5,48 +5,65 @@ import { render } from "ink-testing-library";
 import { Chat } from "./Chat.js";
 import { TAGLINE } from "../banner.js";
 import type { GatewayClient } from "../api/client.js";
+import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 
-/** A client that never resolves createThread, so useChat stays in "connecting"
- * and no network/SSE is attempted — the render stays a stable first frame. */
 function fakeClient(): GatewayClient {
-  return {
-    baseUrl: () => "http://localhost:8000",
-    createThread: () => new Promise(() => {}),
-  } as unknown as GatewayClient;
+  return { baseUrl: () => "http://localhost:8000" } as unknown as GatewayClient;
 }
 
-test("chat mounts and shows the Welcome splash at the top", () => {
-  const { lastFrame, unmount } = render(React.createElement(Chat, { client: fakeClient() }));
+/** Chat is presentational now — App owns the thread and passes it in. This
+ *  builds a UseChat snapshot for a given status / transcript. */
+function chatState(overrides: Partial<UseChat> = {}): UseChat {
+  return {
+    status: "connecting",
+    error: null,
+    messages: [],
+    pending: null,
+    send: () => {},
+    ...overrides,
+  };
+}
+
+test("launch layout shows the Welcome splash at the top when empty", () => {
+  const { lastFrame, unmount } = render(
+    React.createElement(Chat, { client: fakeClient(), chat: chatState() }),
+  );
   const frame = lastFrame() ?? "";
-  // Welcome renders (its tagline is present) — it's the first <Static> row, so
-  // it sits at the top of the transcript above everything else.
+  // Welcome renders (its tagline is present) and sits at the top of the launch
+  // screen, above the bottom-pinned input.
   assert.ok(frame.includes("intent → manufacturable hardware"), `tagline missing:\n${frame}`);
   assert.ok(TAGLINE.length > 0);
   unmount();
 });
 
-test("chat shows the input box below the transcript", () => {
-  const { lastFrame, unmount } = render(React.createElement(Chat, { client: fakeClient() }));
+test("launch layout shows the input box below the Welcome", () => {
+  const { lastFrame, unmount } = render(
+    React.createElement(Chat, { client: fakeClient(), chat: chatState() }),
+  );
   const frame = lastFrame() ?? "";
   const taglineAt = frame.indexOf("intent → manufacturable hardware");
   const promptAt = frame.lastIndexOf("connecting…");
-  // The connecting placeholder (input box) appears, and after the Welcome — i.e.
-  // Welcome is at the top, input pinned below.
   assert.ok(promptAt >= 0, `input placeholder missing:\n${frame}`);
   assert.ok(taglineAt >= 0 && promptAt > taglineAt, `input not below welcome:\n${frame}`);
   unmount();
 });
 
-test("reports started=false for an empty session (launch layout)", async () => {
-  const seen: boolean[] = [];
-  const { unmount } = render(
-    React.createElement(Chat, { client: fakeClient(), onStartedChange: (s) => seen.push(s) }),
+test("transcript layout renders finalized turns once a session has started", () => {
+  const messages: ChatMessage[] = [
+    { role: "user", text: "hello there" },
+    { role: "assistant", text: "hi — how can I help?" },
+  ];
+  const { lastFrame, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({ status: "idle", messages }),
+    }),
   );
-  // Let the post-commit effect flush.
-  await new Promise((r) => setImmediate(r));
-  // With no turns yet, Chat renders the full-height launch layout and tells the
-  // parent it hasn't started, so App keeps the fixed height that pins the input
-  // to the bottom of the terminal.
-  assert.deepEqual(seen, [false], `expected a single started=false, got ${JSON.stringify(seen)}`);
+  const frame = lastFrame() ?? "";
+  // Both turns are present (rendered via <Static>) and the idle input prompt
+  // follows them — no "connecting…" launch placeholder.
+  assert.ok(frame.includes("hello there"), `user turn missing:\n${frame}`);
+  assert.ok(frame.includes("hi — how can I help?"), `assistant turn missing:\n${frame}`);
+  assert.ok(frame.includes("message  (/model"), `input prompt missing:\n${frame}`);
   unmount();
 });
