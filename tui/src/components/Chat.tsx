@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Static, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
@@ -51,18 +51,33 @@ export function Chat({
   provider,
   onModelChange,
   onProviderChange,
+  onStartedChange,
 }: {
   client: GatewayClient;
   model?: string;
   provider?: string;
   onModelChange?: (model: string) => void;
   onProviderChange?: (provider: string) => void;
+  /** Notify the parent when the transcript goes from empty → non-empty, so it
+   *  can switch from the full-height launch layout to Static content-flow. */
+  onStartedChange?: (started: boolean) => void;
 }) {
   const { status, error, messages, pending, send } = useChat(client, model, provider);
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const busy = status === "thinking";
   const reconnecting = status === "reconnecting";
+
+  // On a fresh session (no turns yet) we render a full-height layout with the
+  // input pinned to the bottom of the terminal — a proper "app" launch screen.
+  // The moment the first message is sent the transcript takes over via <Static>
+  // and the input follows the content (flicker-free scrollback). `send` appends
+  // the user turn synchronously, so `messages.length` flips this the instant a
+  // message is submitted.
+  const started = messages.length > 0;
+  useEffect(() => {
+    onStartedChange?.(started);
+  }, [started, onStartedChange]);
 
   // Shell-style prompt history: ↑/↓ recall previous inputs, persisted across
   // sessions. `histPos` = index into history while browsing (null = live draft,
@@ -165,20 +180,13 @@ export function Chat({
     ...messages.map((m, i) => ({ key: `m${i}`, m })),
   ];
 
-  return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Static items={rows}>
-        {(row) =>
-          row.welcome ? (
-            <Welcome key={row.key} gatewayUrl={client.baseUrl()} />
-          ) : (
-            <Turn key={row.key} m={row.m as ChatMessage} />
-          )
-        }
-      </Static>
-
+  // The live region — the only part that repaints during a turn: the streaming
+  // in-flight answer, transient banners, and the input box. Shared by both the
+  // launch layout and the Static transcript layout.
+  const liveRegion = (
+    <>
       {/* Live in-flight turn: streams here, then moves into <Static> on
-          completion. This is the only part that repaints during a turn. */}
+          completion. */}
       {pending ? (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
           {pending.steps.length ? (
@@ -231,6 +239,38 @@ export function Chat({
           placeholder={placeholder}
         />
       </Box>
+    </>
+  );
+
+  // Launch layout: no turns yet. Welcome at the top, a flexible spacer, then the
+  // input pinned to the bottom of the (fixed-height) terminal — App gives chat a
+  // fixed height while empty so this fills the screen. Welcome renders directly
+  // (not via <Static>) here; it moves into the scrollback the moment a turn
+  // lands and we switch to the transcript layout below.
+  if (!started) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <Welcome gatewayUrl={client.baseUrl()} />
+        <Box flexGrow={1} />
+        {liveRegion}
+      </Box>
+    );
+  }
+
+  // Transcript layout: finalized turns live in <Static> (native scrollback,
+  // never repainted), the live region follows the content below them.
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      <Static items={rows}>
+        {(row) =>
+          row.welcome ? (
+            <Welcome key={row.key} gatewayUrl={client.baseUrl()} />
+          ) : (
+            <Turn key={row.key} m={row.m as ChatMessage} />
+          )
+        }
+      </Static>
+      {liveRegion}
     </Box>
   );
 }

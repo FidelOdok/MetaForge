@@ -36,3 +36,17 @@ test("chat shows the input box below the transcript", () => {
   assert.ok(taglineAt >= 0 && promptAt > taglineAt, `input not below welcome:\n${frame}`);
   unmount();
 });
+
+test("reports started=false for an empty session (launch layout)", async () => {
+  const seen: boolean[] = [];
+  const { unmount } = render(
+    React.createElement(Chat, { client: fakeClient(), onStartedChange: (s) => seen.push(s) }),
+  );
+  // Let the post-commit effect flush.
+  await new Promise((r) => setImmediate(r));
+  // With no turns yet, Chat renders the full-height launch layout and tells the
+  // parent it hasn't started, so App keeps the fixed height that pins the input
+  // to the bottom of the terminal.
+  assert.deepEqual(seen, [false], `expected a single started=false, got ${JSON.stringify(seen)}`);
+  unmount();
+});

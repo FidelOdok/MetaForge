@@ -26,6 +26,7 @@ export function App() {
   const [view, setView] = useState<View>("chat");
   const [model, setModel] = useState<string | undefined>(cfg.model);
   const [provider, setProvider] = useState<string | undefined>(cfg.provider);
+  const [chatStarted, setChatStarted] = useState(false);
   const { awaiting, alert } = useRunAlerts(client);
   const { rows } = useTerminalSize();
 
@@ -80,15 +81,17 @@ export function App() {
   const healthColor = health === "healthy" ? "green" : health === "checking…" ? "yellow" : "red";
   const gateway = cfg.gateway_url.replace(/^https?:\/\//, "");
 
-  // The chat view flows naturally: finalized turns render via Ink <Static>
-  // (committed to the terminal's own scrollback, above the live region), so a
-  // fixed root height + overflow:hidden would clip that scrollback and strand
-  // the input mid-screen. The panel views (runs/twin/new) still fill a fixed
-  // viewport. So we only impose height/clip when NOT in chat.
+  // Height/clip policy. Once a chat is under way its finalized turns render via
+  // Ink <Static> (committed to the terminal's own scrollback, above the live
+  // region); a fixed root height + overflow:hidden would clip that scrollback
+  // and strand the input mid-screen, so we let chat flow naturally then. But an
+  // *empty* chat (no turns yet) and the panel views (runs/twin/new) fill a fixed
+  // viewport — that's what lets the launch screen pin its input to the bottom.
   const isChat = view === "chat";
+  const fill = !isChat || !chatStarted;
 
   return (
-    <Box flexDirection="column" {...(isChat ? {} : { height: rows })}>
+    <Box flexDirection="column" {...(fill ? { height: rows } : {})}>
       {alert && (
         <Box paddingX={1}>
           <Text color={ALERT_COLOR[alert.kind]}>
@@ -101,7 +104,7 @@ export function App() {
 
       {/* The view fills all remaining height; the chat input and this footer are
           the last rows, so the input is pinned to the bottom of the terminal. */}
-      <Box flexGrow={1} flexDirection="column" {...(isChat ? {} : { overflow: "hidden" as const })}>
+      <Box flexGrow={1} flexDirection="column" {...(fill ? { overflow: "hidden" as const } : {})}>
         {view === "chat" && (
           <Chat
             client={client}
@@ -109,6 +112,7 @@ export function App() {
             provider={provider}
             onModelChange={changeModel}
             onProviderChange={changeProvider}
+            onStartedChange={setChatStarted}
           />
         )}
         {view === "runs" && <RunsView client={client} onExit={() => setView("chat")} />}
