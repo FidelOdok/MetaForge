@@ -1,0 +1,7 @@
+{
+  "name": "Pan-Tilt Gimbal Yaw",
+  "parts": [
+    {"name": "Yaw Bearing Ring", "kind": "cylinder", "parameters": {"radius": 25, "height": 10}},
+    {"name": "Yaw Arm", "kind": "box", "parameters": {"width": 80, "length": 20, "height": 8}, "position": [0, 0, 10]}
+  ]
+}

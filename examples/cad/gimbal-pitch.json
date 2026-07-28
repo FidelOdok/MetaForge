@@ -1,0 +1,8 @@
+{
+  "name": "Pan-Tilt Gimbal Pitch",
+  "parts": [
+    {"name": "Pitch Motor Mount", "kind": "box", "parameters": {"width": 40, "length": 30, "height": 8}},
+    {"name": "Pitch Shaft", "kind": "cylinder", "parameters": {"radius": 6, "height": 60}, "position": [20, 15, 8]},
+    {"name": "Camera Cradle", "kind": "box", "parameters": {"width": 60, "length": 45, "height": 4}, "position": [-10, 0, 68]}
+  ]
+}
