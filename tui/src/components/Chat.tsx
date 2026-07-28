@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
@@ -164,24 +164,28 @@ export function Chat({
   // Fit whole turns to the viewport (rows minus input/footer/hint chrome),
   // taking from the newest end back. Rendering only what fits means the
   // bottom-aligned viewport never overflows, so nothing gets clip-garbled.
-  const atBottom = scrollOffset === 0;
-  const end = messages.length - scrollOffset;
-  const pendingHeight = atBottom && pending ? (pending.text ? turnHeight(pending as unknown as ChatMessage, cols) : 2 + (pending.steps.length ? pending.steps.length + 1 : 0)) : 0;
-  const chrome = 3 /* input box */ + 2 /* footer */ + (atBottom ? 0 : 1) /* hint */ + (reconnecting ? 1 : 0) + (error && !reconnecting ? 1 : 0) + (notice ? 1 : 0);
-  let budget = Math.max(4, rows - chrome - 1) - pendingHeight;
-  let startAbs = end;
-  for (let i = end - 1; i >= 0; i--) {
-    const h = turnHeight(messages[i], cols);
-    if (startAbs < end && budget - h < 0) break;
-    budget -= h;
-    startAbs = i;
-  }
-  const shown = messages.slice(startAbs, end);
+  //
+  // Memoized so a keystroke (which only changes `input`) does NOT recompute the
+  // fit loop or rebuild the transcript element tree — otherwise Ink redraws the
+  // whole scrollback on every character and the input visibly glitches. The
+  // transcript depends only on the conversation/viewport state below, never on
+  // `input`, so typing now re-renders just the input box.
+  const transcript = useMemo(() => {
+    const atBottom = scrollOffset === 0;
+    const end = messages.length - scrollOffset;
+    const pendingHeight = atBottom && pending ? (pending.text ? turnHeight(pending as unknown as ChatMessage, cols) : 2 + (pending.steps.length ? pending.steps.length + 1 : 0)) : 0;
+    const chrome = 3 /* input box */ + 2 /* footer */ + (atBottom ? 0 : 1) /* hint */ + (reconnecting ? 1 : 0) + (error && !reconnecting ? 1 : 0) + (notice ? 1 : 0);
+    let budget = Math.max(4, rows - chrome - 1) - pendingHeight;
+    let startAbs = end;
+    for (let i = end - 1; i >= 0; i--) {
+      const h = turnHeight(messages[i], cols);
+      if (startAbs < end && budget - h < 0) break;
+      budget -= h;
+      startAbs = i;
+    }
+    const shown = messages.slice(startAbs, end);
 
-  return (
-    <Box flexDirection="column" flexGrow={1}>
-      {/* Scrollable transcript viewport: fills the height, latest pinned to the
-          bottom, overflow clipped off the top. */}
+    return (
       <Box flexGrow={1} flexDirection="column" justifyContent="flex-end" overflow="hidden">
         {messages.length === 0 && !pending ? <Welcome gatewayUrl={client.baseUrl()} /> : null}
 
@@ -244,6 +248,16 @@ export function Chat({
           </Box>
         ) : null}
       </Box>
+    );
+  }, [messages, pending, scrollOffset, rows, cols, busy, reconnecting, error, notice, client]);
+
+  const atBottom = scrollOffset === 0;
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Scrollable transcript viewport: fills the height, latest pinned to the
+          bottom, overflow clipped off the top. Memoized above. */}
+      {transcript}
 
       {/* Jump-to-bottom affordance when scrolled up. */}
       {!atBottom ? (
