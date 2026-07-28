@@ -416,6 +416,10 @@ mechanical vertical, `design_v1` demo); `--no-watch` returns immediately;
 `--no-start` creates the run without starting it. Each run pauses at every gate
 for human sign-off — approve with `runs approve <run_id>`.
 
+When `--project-id` is omitted the command **auto-creates a project** named from
+the goal and scopes the run to it, so the deliverables show on the Projects page;
+pass `--project-id` to target an existing project instead.
+
 ### `runs` — drive harness runs directly
 
 ```

@@ -122,6 +122,13 @@ def _stream(client: ForgeClient, run_id: str) -> None:
         print("\nStopped.")
 
 
+def _project_name(goal: str) -> str:
+    """A short human project name from the goal (first few words)."""
+    words = goal.strip().split()
+    name = " ".join(words[:6]).rstrip(".,;:")
+    return name[:60] or "Design project"
+
+
 def handle_design(args: argparse.Namespace, client: ForgeClient) -> Any:
     """`forge design <goal>` — start a gated design flow (a friendly `runs create`).
 
@@ -130,8 +137,23 @@ def handle_design(args: argparse.Namespace, client: ForgeClient) -> Any:
     (by default) streams the phase/gate transitions live.
     """
     request: dict[str, Any] = {"goal": args.goal, "flow": args.flow}
-    if args.project_id:
-        request["project_id"] = args.project_id
+    # Scope the run to a project so its deliverables show on the Projects page.
+    # Auto-create one from the goal when the caller didn't supply an id.
+    project_id = args.project_id
+    if not project_id:
+        name = _project_name(args.goal)
+        try:
+            project = client.create_project(name)
+            project_id = project.get("id")
+            print(f"Created project '{name}': {project_id}")
+        except ForgeClientError as exc:
+            print(
+                f"Warning: could not auto-create a project ({exc}); "
+                "the run will not be project-scoped.",
+                file=sys.stderr,
+            )
+    if project_id:
+        request["project_id"] = project_id
     try:
         run = client.create_run(request, start=not args.no_start)
     except ForgeClientError as exc:

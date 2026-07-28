@@ -14,6 +14,11 @@ class _Client:
         self.created: dict[str, Any] = {}
         self.started: bool | None = None
         self.streamed: str | None = None
+        self.project_name: str | None = None
+
+    def create_project(self, name: str) -> dict[str, Any]:
+        self.project_name = name
+        return {"id": "proj-auto", "name": name}
 
     def create_run(self, request: dict[str, Any], *, start: bool = True) -> dict[str, Any]:
         self.created = request
@@ -39,7 +44,7 @@ def test_parser_rejects_unknown_flow() -> None:
         build_parser().parse_args(["design", "x", "--flow", "not_a_flow"])
 
 
-def test_handle_design_builds_request_and_starts() -> None:
+def test_explicit_project_id_skips_auto_create() -> None:
     client = _Client()
     args = argparse.Namespace(
         goal="a BME280 logger",
@@ -50,17 +55,24 @@ def test_handle_design_builds_request_and_starts() -> None:
     )
     handle_design(args, client)
     assert client.created == {"goal": "a BME280 logger", "flow": "hardware_v1", "project_id": "p1"}
+    assert client.project_name is None  # explicit id -> no auto-create
     assert client.started is True
     assert client.streamed is None  # --no-watch
 
 
-def test_handle_design_watches_by_default() -> None:
+def test_auto_creates_project_from_goal_when_none_given() -> None:
     client = _Client()
     args = argparse.Namespace(
-        goal="a bracket", flow="mech_v1", project_id=None, no_start=False, no_watch=False
+        goal="a self-balancing robot controller with dual motor drivers",
+        flow="mech_v1",
+        project_id=None,
+        no_start=False,
+        no_watch=False,
     )
     handle_design(args, client)
-    assert "project_id" not in client.created  # omitted when not given
+    # a project was auto-created from the goal and threaded into the run
+    assert client.project_name == "a self-balancing robot controller with dual"  # first 6 words
+    assert client.created["project_id"] == "proj-auto"
     assert client.streamed == "run-123"  # streamed the started run
 
 
