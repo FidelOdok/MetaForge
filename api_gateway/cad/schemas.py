@@ -35,7 +35,12 @@ class AssemblyPart(BaseModel):
         default_factory=list, description="Mounting/fastener holes drilled into the part."
     )
     fillet: float | None = Field(
-        default=None, gt=0, description="If set, round every edge of the part by this radius (mm)."
+        default=None,
+        gt=0,
+        description=(
+            "If set, round every edge of the part by this radius (mm), applied before holes. "
+            "Must be smaller than half the part's thinnest dimension or the fillet fails."
+        ),
     )
 
 

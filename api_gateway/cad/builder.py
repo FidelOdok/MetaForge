@@ -109,12 +109,9 @@ async def build_assembly(
         if not obj_id:
             raise RuntimeError(f"create_primitive returned no obj_id for {part['name']!r}")
 
-        # Drill holes in the part's LOCAL frame (before it's placed in the
-        # assembly): a cutter cylinder per hole, boolean-subtracted. Plain
-        # primitives can't use fastener_hole (needs a PartDesign body), so we cut.
-        obj_id = await _drill_holes(invoke, sid, obj_id, part)
-
-        # Round the part's edges if requested (before placement).
+        # Round the outer edges FIRST (before holes), so drilled fastener holes
+        # keep crisp rims — filleting all edges after drilling would try to round
+        # the hole edges too and fail when the radius exceeds the hole radius.
         fillet = part.get("fillet")
         if fillet:
             rounded = await invoke(
@@ -127,6 +124,11 @@ async def build_assembly(
                 },
             )
             obj_id = rounded.get("obj_id") or obj_id
+
+        # Drill holes in the part's LOCAL frame (before it's placed in the
+        # assembly): a cutter cylinder per hole, boolean-subtracted. Plain
+        # primitives can't use fastener_hole (needs a PartDesign body), so we cut.
+        obj_id = await _drill_holes(invoke, sid, obj_id, part)
 
         position = part.get("position")
         if position:
