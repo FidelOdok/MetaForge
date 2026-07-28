@@ -1,0 +1,51 @@
+{
+  "id": "l3_balancer",
+  "level": 3,
+  "title": "Self-balancing robot controller (mechatronic: sense + actuate + structure)",
+  "flow": "hardware_v1",
+  "rubric": ["electronics", "firmware", "vv", "manufacturing", "requirements", "architecture"],
+  "goal": "A self-balancing two-wheel robot controller: an MPU-6050 IMU on I2C for tilt sensing, dual DC motor drivers (H-bridge, PWM speed control) for the wheel motors, an ESP32 microcontroller, powered by a 2S LiPo through a 3.3 V buck regulator, on a 60 x 40 mm PCB mounted to an aluminium chassis bracket that carries the motor reaction load. Mass budget 60 g for the board.",
+  "definition_of_done": {
+    "requirements": [
+      "interfaces stated (I2C tilt sense, PWM motor control)",
+      "power quantified (2S LiPo in, 3.3 V rail)",
+      "board size + mass constraint stated"
+    ],
+    "architecture": [
+      "subsystems identified (sense, actuate, compute, power, structure)",
+      "budget allocated across subsystems"
+    ],
+    "design": [
+      "chassis bracket / mechanical envelope authored and committed",
+      "load path for the motor reaction noted"
+    ],
+    "electronics": [
+      "schematic topology defined (IMU + dual H-bridge + ESP32 + buck)",
+      "components selected for THIS product (motor drivers, not just a sensor)",
+      "power budget closed under motor load"
+    ],
+    "firmware": [
+      "IMU read + PWM motor drive approach noted",
+      "pin map covering I2C and the motor PWM/direction pins"
+    ],
+    "simulation": [
+      "ERC/DRC or a design check noted",
+      "verdict recorded"
+    ],
+    "manufacturing": [
+      "BOM with the key parts",
+      "assembly / bring-up note"
+    ]
+  },
+  "expected_deliverables": {
+    "design_decision": 3,
+    "cad_model": 1,
+    "bom": 1,
+    "pinmap": 1,
+    "firmware_source": 1,
+    "test_plan": 1,
+    "manufacturing_file": 1,
+    "prd": 1,
+    "documentation": 1
+  }
+}
