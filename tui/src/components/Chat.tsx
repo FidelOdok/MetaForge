@@ -1,35 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { useRef, useState } from "react";
+import { Box, Static, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import { useChat, type ChatMessage } from "../hooks/useChat.js";
-import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
 import { Welcome } from "./Welcome.js";
 
-/** Estimated rendered height (in terminal rows) of one committed turn, so the
- * viewport can show only whole turns that fit — clipping overflow in Ink garbles
- * multi-line content, so we never overflow in the first place. */
-function turnHeight(m: ChatMessage, cols: number): number {
-  const w = Math.max(20, cols - 4);
-  const body = m.text || "(no reply — the agent didn't answer)";
-  const textLines = body
-    .split("\n")
-    .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / w)), 0);
-  const stepLines = m.role === "assistant" && m.steps?.length ? m.steps.length + 1 : 0;
-  return 1 /* label */ + textLines + stepLines + 1 /* divider */ + 1 /* margin */;
+/** A completed conversation turn, rendered once into <Static> and never again. */
+function Turn({ m }: { m: ChatMessage }) {
+  return (
+    <Box flexDirection="column" paddingX={1} marginTop={1}>
+      {m.role === "user" ? (
+        <>
+          <Text color="blueBright" bold>
+            ❯ you
+          </Text>
+          <Text>{m.text}</Text>
+        </>
+      ) : (
+        <>
+          {m.steps && m.steps.length ? (
+            <Box flexDirection="column">
+              <Text dimColor>· thinking</Text>
+              <Box marginLeft={1}>
+                <StepTrace steps={m.steps} />
+              </Box>
+            </Box>
+          ) : null}
+          <Text color="magenta" bold>
+            ◆ assistant
+          </Text>
+          {m.text ? (
+            <Text>{m.text}</Text>
+          ) : (
+            <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
+          )}
+        </>
+      )}
+    </Box>
+  );
 }
 
-/** Full-width dim rule separating conversation turns. */
-function Divider() {
-  const { stdout } = useStdout();
-  const width = Math.min((stdout?.columns ?? 80) - 2, 64);
-  return <Text dimColor>{"─".repeat(Math.max(8, width))}</Text>;
-}
-
-/** The chat view: streaming assistant answers + tool-call trace + input. */
+/** The chat view: a scrollback of finalized turns (top → down) plus a live,
+ * bottom-pinned region for the streaming answer and the input box. */
 export function Chat({
   client,
   model,
@@ -47,35 +62,18 @@ export function Chat({
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const busy = status === "thinking";
-  const { rows, cols } = useTerminalSize();
+  const reconnecting = status === "reconnecting";
 
   // Shell-style prompt history: ↑/↓ recall previous inputs, persisted across
   // sessions. `histPos` = index into history while browsing (null = live draft,
-  // which we stash so ↓ past the newest restores what was being typed).
+  // which we stash so ↓ past the newest restores what was being typed). The
+  // transcript itself scrolls with the terminal's own scrollback now that
+  // finalized turns render via <Static>, so there is no in-app scroll to manage.
   const [history, setHistory] = useState<string[]>(() => loadHistory());
   const histPos = useRef<number | null>(null);
   const draft = useRef("");
 
-  // Transcript scroll: 0 = pinned to the latest (bottom). >0 = scrolled up that
-  // many messages. Keep the view stable when new turns arrive while scrolled up.
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const prevLen = useRef(0);
-  useEffect(() => {
-    const added = messages.length - prevLen.current;
-    prevLen.current = messages.length;
-    if (added > 0 && scrollOffset > 0) setScrollOffset((o) => o + added);
-  }, [messages.length, scrollOffset]);
-  const jumpToBottom = () => setScrollOffset(0);
-
   useInput((_i, key) => {
-    if (key.pageUp) {
-      setScrollOffset((o) => Math.min(messages.length, o + 5));
-      return;
-    }
-    if (key.pageDown) {
-      setScrollOffset((o) => Math.max(0, o - 5));
-      return;
-    }
     if (history.length === 0) return;
     if (key.upArrow) {
       if (histPos.current === null) {
@@ -96,11 +94,9 @@ export function Chat({
     }
   });
 
-  // Typing exits history-browsing so edits start a fresh draft, and snaps the
-  // transcript back to the latest.
+  // Typing exits history-browsing so edits start a fresh draft.
   const onInputChange = (value: string) => {
     histPos.current = null;
-    if (scrollOffset !== 0) jumpToBottom();
     setInput(value);
   };
 
@@ -144,7 +140,6 @@ export function Chat({
     appendHistory(value);
     histPos.current = null;
     draft.current = "";
-    jumpToBottom();
     if (handleSlash(value)) {
       setInput("");
       return;
@@ -153,7 +148,6 @@ export function Chat({
     setInput("");
   };
 
-  const reconnecting = status === "reconnecting";
   const placeholder =
     status === "connecting"
       ? "connecting…"
@@ -161,108 +155,53 @@ export function Chat({
         ? "reconnecting…"
         : "message  (/model <slug> · Esc quit)";
 
-  // Fit whole turns to the viewport (rows minus input/footer/hint chrome),
-  // taking from the newest end back. Rendering only what fits means the
-  // bottom-aligned viewport never overflows, so nothing gets clip-garbled.
-  //
-  // Memoized so a keystroke (which only changes `input`) does NOT recompute the
-  // fit loop or rebuild the transcript element tree — otherwise Ink redraws the
-  // whole scrollback on every character and the input visibly glitches. The
-  // transcript depends only on the conversation/viewport state below, never on
-  // `input`, so typing now re-renders just the input box.
-  const transcript = useMemo(() => {
-    const atBottom = scrollOffset === 0;
-    const end = messages.length - scrollOffset;
-    const pendingHeight = atBottom && pending ? (pending.text ? turnHeight(pending as unknown as ChatMessage, cols) : 2 + (pending.steps.length ? pending.steps.length + 1 : 0)) : 0;
-    const chrome = 3 /* input box */ + 2 /* footer */ + (atBottom ? 0 : 1) /* hint */ + (reconnecting ? 1 : 0) + (error && !reconnecting ? 1 : 0) + (notice ? 1 : 0);
-    let budget = Math.max(4, rows - chrome - 1) - pendingHeight;
-    let startAbs = end;
-    for (let i = end - 1; i >= 0; i--) {
-      const h = turnHeight(messages[i], cols);
-      if (startAbs < end && budget - h < 0) break;
-      budget -= h;
-      startAbs = i;
-    }
-    const shown = messages.slice(startAbs, end);
-
-    return (
-      <Box flexGrow={1} flexDirection="column" justifyContent="flex-end" overflow="hidden">
-        {messages.length === 0 && !pending ? <Welcome gatewayUrl={client.baseUrl()} /> : null}
-
-        {shown.map((m, i) => (
-          <Box key={startAbs + i} flexDirection="column" paddingX={1} marginBottom={1}>
-            {startAbs + i > 0 ? <Divider /> : null}
-            {m.role === "user" ? (
-              <>
-                <Text color="blueBright" bold>
-                  ❯ you
-                </Text>
-                <Text>{m.text}</Text>
-              </>
-            ) : (
-              <>
-                {m.steps && m.steps.length ? (
-                  <Box flexDirection="column">
-                    <Text dimColor>· thinking</Text>
-                    <Box marginLeft={1}>
-                      <StepTrace steps={m.steps} />
-                    </Box>
-                  </Box>
-                ) : null}
-                <Text color="magenta" bold>
-                  ◆ assistant
-                </Text>
-                {m.text ? (
-                  <Text>{m.text}</Text>
-                ) : (
-                  <Text dimColor>(no reply — {m.reason ?? "the agent didn't answer"})</Text>
-                )}
-              </>
-            )}
-          </Box>
-        ))}
-
-        {atBottom && pending ? (
-          <Box flexDirection="column" paddingX={1} marginBottom={1}>
-            {pending.steps.length ? (
-              <Box flexDirection="column">
-                <Text dimColor>· thinking</Text>
-                <Box marginLeft={1}>
-                  <StepTrace steps={pending.steps} />
-                </Box>
-              </Box>
-            ) : null}
-            {pending.text ? (
-              <>
-                <Text color="magenta" bold>
-                  ◆ assistant
-                </Text>
-                <Text>
-                  {pending.text}
-                  {busy ? <Text color="yellow">▌</Text> : null}
-                </Text>
-              </>
-            ) : busy ? (
-              <Thinking />
-            ) : null}
-          </Box>
-        ) : null}
-      </Box>
-    );
-  }, [messages, pending, scrollOffset, rows, cols, busy, reconnecting, error, notice, client]);
-
-  const atBottom = scrollOffset === 0;
+  // <Static> content: the Welcome splash first (so it sits at the very top of
+  // the session) followed by each finalized turn. Ink commits these to the
+  // terminal exactly once and never repaints them, so a keystroke can only ever
+  // re-render the live input box below — the transcript can't flicker.
+  type Row = { key: string; welcome?: true; m?: ChatMessage };
+  const rows: Row[] = [
+    { key: "welcome", welcome: true },
+    ...messages.map((m, i) => ({ key: `m${i}`, m })),
+  ];
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Scrollable transcript viewport: fills the height, latest pinned to the
-          bottom, overflow clipped off the top. Memoized above. */}
-      {transcript}
+      <Static items={rows}>
+        {(row) =>
+          row.welcome ? (
+            <Welcome key={row.key} gatewayUrl={client.baseUrl()} />
+          ) : (
+            <Turn key={row.key} m={row.m as ChatMessage} />
+          )
+        }
+      </Static>
 
-      {/* Jump-to-bottom affordance when scrolled up. */}
-      {!atBottom ? (
-        <Box paddingX={1}>
-          <Text color="cyan">▼ scrolled up — PageDown or type to jump to latest</Text>
+      {/* Live in-flight turn: streams here, then moves into <Static> on
+          completion. This is the only part that repaints during a turn. */}
+      {pending ? (
+        <Box flexDirection="column" paddingX={1} marginTop={1}>
+          {pending.steps.length ? (
+            <Box flexDirection="column">
+              <Text dimColor>· thinking</Text>
+              <Box marginLeft={1}>
+                <StepTrace steps={pending.steps} />
+              </Box>
+            </Box>
+          ) : null}
+          {pending.text ? (
+            <>
+              <Text color="magenta" bold>
+                ◆ assistant
+              </Text>
+              <Text>
+                {pending.text}
+                {busy ? <Text color="yellow">▌</Text> : null}
+              </Text>
+            </>
+          ) : busy ? (
+            <Thinking />
+          ) : null}
         </Box>
       ) : null}
 
@@ -282,7 +221,7 @@ export function Chat({
         </Box>
       ) : null}
 
-      {/* Input pinned to the bottom of the view area. */}
+      {/* Input pinned to the bottom of the live region. */}
       <Box marginX={1} borderStyle="round" borderColor={busy || reconnecting ? "yellow" : "blue"} paddingX={1}>
         <Text color={busy || reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
         <TextInput

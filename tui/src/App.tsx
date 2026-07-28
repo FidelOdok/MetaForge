@@ -80,8 +80,15 @@ export function App() {
   const healthColor = health === "healthy" ? "green" : health === "checking…" ? "yellow" : "red";
   const gateway = cfg.gateway_url.replace(/^https?:\/\//, "");
 
+  // The chat view flows naturally: finalized turns render via Ink <Static>
+  // (committed to the terminal's own scrollback, above the live region), so a
+  // fixed root height + overflow:hidden would clip that scrollback and strand
+  // the input mid-screen. The panel views (runs/twin/new) still fill a fixed
+  // viewport. So we only impose height/clip when NOT in chat.
+  const isChat = view === "chat";
+
   return (
-    <Box flexDirection="column" height={rows}>
+    <Box flexDirection="column" {...(isChat ? {} : { height: rows })}>
       {alert && (
         <Box paddingX={1}>
           <Text color={ALERT_COLOR[alert.kind]}>
@@ -94,7 +101,7 @@ export function App() {
 
       {/* The view fills all remaining height; the chat input and this footer are
           the last rows, so the input is pinned to the bottom of the terminal. */}
-      <Box flexGrow={1} flexDirection="column" overflow="hidden">
+      <Box flexGrow={1} flexDirection="column" {...(isChat ? {} : { overflow: "hidden" as const })}>
         {view === "chat" && (
           <Chat
             client={client}
