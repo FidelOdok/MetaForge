@@ -42,6 +42,14 @@ class AssemblyPart(BaseModel):
             "Must be smaller than half the part's thinnest dimension or the fillet fails."
         ),
     )
+    chamfer: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "If set, bevel every edge of the part by this distance (mm), applied before holes. "
+            "Must be smaller than half the part's thinnest dimension. Use fillet OR chamfer."
+        ),
+    )
 
 
 class CreateAssemblyRequest(BaseModel):

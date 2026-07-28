@@ -125,6 +125,19 @@ async def build_assembly(
             )
             obj_id = rounded.get("obj_id") or obj_id
 
+        chamfer = part.get("chamfer")
+        if chamfer:
+            beveled = await invoke(
+                "freecad.chamfer",
+                {
+                    "session_id": sid,
+                    "obj_id": obj_id,
+                    "distance": float(chamfer),
+                    "name": part["name"],
+                },
+            )
+            obj_id = beveled.get("obj_id") or obj_id
+
         # Drill holes in the part's LOCAL frame (before it's placed in the
         # assembly): a cutter cylinder per hole, boolean-subtracted. Plain
         # primitives can't use fastener_hole (needs a PartDesign body), so we cut.
