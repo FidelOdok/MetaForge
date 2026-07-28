@@ -30,6 +30,7 @@ from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
+from cli.forge_cli.projects import handle_projects
 from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_design, handle_runs
 from cli.forge_cli.sources import handle_sources
@@ -126,6 +127,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
     runs_watch.add_argument("run_id", help="Run id")
+
+    # -- projects ----------------------------------------------------------
+    projects_parser = subparsers.add_parser("projects", help="List/inspect/delete projects")
+    projects_sub = projects_parser.add_subparsers(
+        dest="projects_command", help="Projects subcommands"
+    )
+    projects_list = projects_sub.add_parser("list", help="List projects")
+    projects_list.add_argument("--json", action="store_true", help="JSON output")
+    projects_list.add_argument("--status", default=None, help="Filter by status (e.g. draft)")
+    projects_get = projects_sub.add_parser("get", help="Fetch one project")
+    projects_get.add_argument("project_id", help="Project id")
+    projects_get.add_argument("--json", action="store_true", help="JSON output")
+    projects_delete = projects_sub.add_parser("delete", help="Delete a project")
+    projects_delete.add_argument("project_id", help="Project id")
+    projects_delete.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # -- design (friendly wrapper over `runs create` for a gated flow) -----
     design_parser = subparsers.add_parser(
@@ -368,6 +384,7 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "projects": handle_projects,
     "design": handle_design,
     "chat": handle_chat,
     "routine": handle_routine,
