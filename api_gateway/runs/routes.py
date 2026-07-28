@@ -135,9 +135,14 @@ def _launch_flow(run_id: str) -> None:
     elif flow_id == "mech_v1":
         handlers = {"design": GoalDrivenMechanicalHandler(bridge, recorder)}
     elif flow_id == "hardware_v1":
-        # Electronics gets a deterministic handler (guaranteed BOM + closed power
-        # budget); the mechanical + remaining phases stay on the native brain.
-        handlers = {"electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder)}
+        # Deterministic handlers where the native brain is flaky: mechanical
+        # design (guaranteed loadable cad_model) and electronics (guaranteed BOM
+        # + closed power budget). Remaining phases stay native (backstop covers
+        # their decisions).
+        handlers = {
+            "design": GoalDrivenMechanicalHandler(bridge, recorder),
+            "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
+        }
     else:
         handlers = {}
     hybrid = HybridBrain(handlers=handlers, fallback=react)
