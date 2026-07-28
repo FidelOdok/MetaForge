@@ -137,7 +137,7 @@ class TestFreecadServer:
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
         # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 7 skills = 40.
-        assert len(server.tool_ids) == 41
+        assert len(server.tool_ids) == 42
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -177,6 +177,7 @@ class TestFreecadServer:
             "freecad.export_model",
             # assembly authoring (MET-530)
             "freecad.boolean",
+            "freecad.fillet",
             "freecad.create_assembly",
             "freecad.add_part_to_assembly",
             "freecad.add_assembly_joint",
@@ -1026,7 +1027,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 41
+        assert len(response["result"]["tools"]) == 42
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1073,7 +1074,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 41
+        assert response["result"]["tools_available"] == 42
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

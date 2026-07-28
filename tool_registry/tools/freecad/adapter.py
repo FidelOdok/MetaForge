@@ -930,6 +930,22 @@ class FreecadServer(McpToolServer):
                 self.boolean,
             ),
             (
+                "fillet",
+                "Round every edge of a session solid by a radius (Part.makeFillet) -> new "
+                "solid. Works on plain primitives (no PartDesign body needed)",
+                "cad_fillet",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "obj_id": {"type": "string", "description": "Solid to round."},
+                        "radius": {"type": "number", "description": "Fillet radius (mm)."},
+                        "name": {"type": "string"},
+                    },
+                    ["session_id", "obj_id", "radius"],
+                ),
+                self.fillet,
+            ),
+            (
                 "create_assembly",
                 "Create an assembly container to group parts in a session",
                 "cad_assembly",
@@ -1466,6 +1482,17 @@ class FreecadServer(McpToolServer):
             session_id, feature, "solid", name or f"{operation}_result"
         )
         return {"obj_id": new_id, "operation": operation, **self._ops.shape_props(feature)}
+
+    async def fillet(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj_id = self._require(arguments, "obj_id")
+        radius = float(self._require(arguments, "radius"))
+        name = arguments.get("name")
+        session = self._sessions.get(session_id)
+        obj = self._sessions.get_object(session_id, obj_id)
+        feature = self._ops.fillet_session(session.document, obj, radius)
+        new_id = self._sessions.register_object(session_id, feature, "solid", name or "filleted")
+        return {"obj_id": new_id, "radius": radius, **self._ops.shape_props(feature)}
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

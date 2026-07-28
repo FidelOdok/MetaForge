@@ -1494,6 +1494,24 @@ class FreecadOperations:
         document.recompute()
         return feature
 
+    def fillet_session(self, document: Any, obj: Any, radius: float) -> Any:
+        """Round every edge of a session solid by ``radius`` (Part.makeFillet).
+
+        Works on plain ``Part`` solids (unlike ``fillet_edges``, which needs a
+        PartDesign body), so it can round the edges of ``create_primitive`` parts.
+        Returns a new ``Part::Feature`` with the rounded shape.
+        """
+        self._require_freecad()
+        shape = obj.Shape
+        edges = shape.Edges
+        if not edges:
+            raise ValueError("fillet: solid has no edges to round")
+        result = shape.makeFillet(radius, edges)
+        feature = document.addObject("Part::Feature", "Fillet")
+        feature.Shape = result
+        document.recompute()
+        return feature
+
     def create_assembly(self, document: Any, name: str = "Assembly") -> Any:
         """Create an assembly container (an ``App::Part``) to group parts."""
         self._require_freecad()
