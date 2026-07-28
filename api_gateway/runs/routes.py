@@ -110,6 +110,7 @@ def _launch_flow(run_id: str) -> None:
         RequirementsHandler,
         SimulationHandler,
     )
+    from api_gateway.runs.mfg_handlers import GoalDrivenManufacturingHandler
     from api_gateway.runs.vv_handlers import GoalDrivenVVHandler
     from api_gateway.twin.bom_recorder import make_bom_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
@@ -149,6 +150,7 @@ def _launch_flow(run_id: str) -> None:
             "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
             "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),
             "simulation": GoalDrivenVVHandler(bridge, doc_recorder),
+            "manufacturing": GoalDrivenManufacturingHandler(bridge, doc_recorder),
         }
     else:
         handlers = {}
