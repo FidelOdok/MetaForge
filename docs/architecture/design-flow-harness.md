@@ -24,8 +24,9 @@ mechanical phases for reliable geometry):
 | **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review |
 | **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off |
 
-**`hardware_v1`** — the full hardware/robotics lifecycle, every phase driven by
-the shared native tool-calling brain (one brain, any discipline):
+**`hardware_v1`** — the full hardware/robotics lifecycle. Every phase is driven
+by a **goal-driven deterministic handler** (see below) so each phase reliably
+lands its real, typed deliverable in the twin:
 
 | Phase | Objective (summarised) | Gate |
 |-------|------------------------|------|
@@ -38,11 +39,62 @@ the shared native tool-calling brain (one brain, any discipline):
 | **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness |
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
-Required deliverables are only the types producible today (`design_decision`,
-`cad_model`); richer typed products (schematic/bom/firmware_source/…) are
-advisory `expected_artifacts` until their creation tools land. Adding or
-extending a phase is a data change in `orchestrator/design_flow/spec.py`, not new
-control flow.
+A full `hardware_v1` run now commits **nine real, typed work products** —
+`prd`, `documentation` (architecture budget), `cad_model`, `bom`, `pinmap`,
+`firmware_source`, `test_plan`, `manufacturing_file`, and `design_decision`.
+Adding or extending a phase is a data change in
+`orchestrator/design_flow/spec.py`, not new control flow.
+
+## Goal-driven deterministic handlers
+
+The native ReAct brain reasons well but is unreliable at *reliably* producing a
+specific typed artifact (it may author prose where a `cad_model` or `bom` is
+required, or claim a result a tool never actually returned). So every
+`hardware_v1` phase is routed to a **goal-driven handler** that follows a hybrid
+pattern:
+
+> the LLM extracts a small structured **spec** from the goal (its strength —
+> reading intent), then a **deterministic** step authors the artifact and commits
+> it through a recorder (the reliable path). The artifact is always goal-named,
+> loadable, and consistent.
+
+| Phase | Handler | Produces |
+|-------|---------|----------|
+| Requirements | `GoalDrivenRequirementsHandler` | `prd` + verifiable constraints (each with an acceptance method) |
+| Architecture | `GoalDrivenArchitectureHandler` | `documentation` (per-subsystem numeric mass/power/cost budgets) |
+| Mechanical Design | `GoalDrivenMechanicalHandler` | loadable `cad_model` (FreeCAD → STEP → MinIO) |
+| Electronics | `GoalDrivenElectronicsHandler` | `bom` + closed numeric power budget |
+| Firmware & Control | `GoalDrivenFirmwareHandler` | `pinmap` + `firmware_source` scaffold |
+| Simulation & V&V | `GoalDrivenVVHandler` | `test_plan` + an honest verdict (deep analyses deferred, never falsely "compliant") |
+| Manufacturing Prep | `GoalDrivenManufacturingHandler` | `manufacturing_file` + honest readiness (Gerbers deferred to Phase 2) |
+
+Handlers share the pattern in `api_gateway/runs/*_handlers.py` and persist via
+the recorders in `api_gateway/twin/` (`geometry_recorder`, `bom_recorder`,
+`document_recorder`). A `HybridBrain` routes each phase to its handler and falls
+back to the `ReActPhaseBrain` for any phase without one (`mech_v1` and the older
+`design_v1` use different handler sets). Where a real analysis needs a
+capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
+Gerber export), the handler records the result **honestly as deferred** rather
+than asserting a compliance the tools never established.
+
+## Eval flywheel and the honest scoreboard
+
+The harness is matured by an **eval flywheel** (`evals/`): reference products are
+driven through the *real* gated flow (`evals/run_scenarios.py`, auto-approving
+each gate), and **correctness rubrics** score the engineering *outcome* — not
+mere presence — of each phase against what a real deliverable must contain. The
+rubrics deliberately score correctness, so a phase that records a `design_decision`
+but no real content scores low.
+
+Seven per-phase rubrics (requirements, architecture, mechanical, electronics,
+firmware, V&V, manufacturing) plus one **cross-phase consistency** rubric
+(digital-thread integrity — does the same device/interface/power thread through
+every phase, and do the artifacts agree?) run over three reference products:
+`l1_breakout` (IMU board), `l2_logger` (BME280 dual-bus logger), and
+`l3_balancer` (a self-balancing robot controller). All three score identically:
+**every phase at 1.0 except the electronics `erc_or_netlist` check** — which is a
+genuine Phase-2 boundary (real ERC needs an authored schematic, a KiCad-write
+capability), not a defect — with the digital thread intact end to end.
 
 ## How a run flows
 
@@ -107,15 +159,19 @@ right.
 
 ## What's built vs. planned
 
-**Built (Phase 1, thin vertical):** the `design_v1` 3-phase gated flow, the
-executor + gate coordinator wired into `/v1/runs`, the ReAct phase brain,
-per-phase deliverable enforcement via `GateEvaluator`, and SSE/CLI drive. Each
-phase records its artifacts + decisions into the digital twin via MCP tools.
+**Built (Phase 1):** the `design_v1`, `mech_v1`, and full 7-phase `hardware_v1`
+gated flows; the executor + gate coordinator wired into `/v1/runs`; goal-driven
+deterministic handlers for every `hardware_v1` phase, committing nine typed work
+products via the twin recorders; per-phase deliverable enforcement via
+`GateEvaluator` (including a *loadable* `cad_model` gate); the ReAct phase brain
+as fallback; SSE/CLI drive; and the `evals/` flywheel with eight correctness
+rubrics over three reference products.
 
-**Planned (next slices):** the full lifecycle (Architecture → Digital-Twin
-consolidation → Release), per-discipline fan-out (a registry routing phases to
-mechanical/electronics/firmware agents), weighted **gate-readiness** scoring via
-`twin_core/gate_engine` (EVT/DVT/PVT), phase/gate linkage stored on twin nodes,
+**Planned (Phase 2+):** real ERC/DRC and Gerber export on an authored schematic
+(KiCad-write) to close the electronics `erc_or_netlist` gap; real CalculiX FEA on
+a load-bearing part inside `hardware_v1` (today only `mech_v1` runs FEA;
+`hardware_v1` V&V honestly defers it); weighted **gate-readiness** scoring via
+`twin_core/gate_engine` (EVT/DVT/PVT); phase/gate linkage stored on twin nodes;
 and a dedicated `forge design` CLI wrapper.
 
 ## Key modules
@@ -124,5 +180,9 @@ and a dedicated `forge design` CLI wrapper.
 |--------|------|
 | `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition`, built-in flows |
 | `orchestrator/design_flow/executor.py` | `DesignFlowExecutor`, `GateCoordinator`, `PhaseBrain` |
-| `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` — per-phase reasoning via the chat harness |
-| `api_gateway/runs/routes.py` | Launches the executor on a design-flow `POST /v1/runs` |
+| `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback + the decision backstop |
+| `api_gateway/runs/{req,arch,mech,elec,fw,vv,mfg}_handlers.py` | Goal-driven deterministic phase handlers |
+| `api_gateway/twin/{geometry,bom,document}_recorder.py` | Persist typed artifacts loadably (blob + `content_hash` + project link) |
+| `api_gateway/runs/gate_eval.py` | `ProjectGateEvaluator` — deliverable enforcement (loadable `cad_model`) |
+| `api_gateway/runs/routes.py` | Per-flow handler routing; launches the executor on a design-flow `POST /v1/runs` |
+| `evals/run_scenarios.py`, `evals/*_rubric.py` | Eval flywheel: scenario runner + correctness rubrics |
