@@ -9,6 +9,7 @@ import pytest
 
 from api_gateway.runs.fw_handlers import (
     GoalDrivenFirmwareHandler,
+    _complete_pins,
     _normalize_fw_spec,
     firmware_scaffold_c,
     pinmap_csv,
@@ -38,6 +39,28 @@ def test_normalize_fills_defaults_and_coerces() -> None:
     assert s2["device_addr"] == "0x69"
     assert s2["sample_rate_hz"] == 100.0
     assert s2["registers"][0]["name"] == "WHO_AM_I" and s2["registers"][0]["addr"] == "0x75"
+
+
+def test_dualbus_pinmap_covers_every_interface() -> None:
+    # A thin extraction (only SDA/SCL) on an I2C+SPI board must still expose SPI.
+    spec = _normalize_fw_spec(
+        {
+            "device": "BME280",
+            "interfaces": ["I2C", "SPI"],
+            "pins": [{"signal": "SDA", "pin": "SDA", "direction": "bidir"}],
+        },
+        "BME280 logger with microSD",
+    )
+    signals = {p["signal"].upper() for p in spec["pins"]}
+    assert {"SDA", "SCL", "SCK", "MOSI", "MISO", "CS"} <= signals  # both buses
+    assert signals & {"VCC", "3V3"} and "GND" in signals  # power + ground
+
+
+def test_complete_pins_dedupes_and_adds_power() -> None:
+    out = _complete_pins([{"signal": "SDA", "pin": "SDA", "direction": "bidir"}], ["I2C"])
+    sigs = [p["signal"] for p in out]
+    assert sigs.count("SDA") == 1  # not duplicated
+    assert "SCL" in sigs and "GND" in sigs
 
 
 def test_scaffold_and_pinmap_have_concrete_tokens() -> None:
