@@ -113,11 +113,17 @@ class GeometryStash:
         self._max = max_entries
 
     def remember(self, arguments: dict[str, Any], result: dict[str, Any]) -> None:
-        """Cache the STEP from a freecad.export_model result."""
+        """Cache the STEP from a freecad.export_model result.
+
+        The adapter wraps the handler's return under ``result["data"]``, so look
+        there first, then fall back to the top level.
+        """
         if not isinstance(result, dict):
             return
+        data = result.get("data")
+        payload = data if isinstance(data, dict) else result
         sid, oid = arguments.get("session_id"), arguments.get("obj_id")
-        blob = result.get("step_base64")
+        blob = payload.get("step_base64")
         if sid and oid and isinstance(blob, str) and blob:
             key = (str(sid), str(oid))
             self._cache[key] = blob
