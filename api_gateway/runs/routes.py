@@ -101,6 +101,7 @@ def _launch_flow(run_id: str) -> None:
     from api_gateway.projects.routes import get_project_backend
     from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
+    from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
     from api_gateway.runs.gate_eval import ProjectGateEvaluator
     from api_gateway.runs.mech_handlers import (
         GoalDrivenMechanicalHandler,
@@ -110,6 +111,7 @@ def _launch_flow(run_id: str) -> None:
         SimulationHandler,
     )
     from api_gateway.twin.bom_recorder import make_bom_recorder
+    from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.routes import get_twin
 
@@ -117,6 +119,7 @@ def _launch_flow(run_id: str) -> None:
     project_backend = get_project_backend()
     recorder = make_geometry_recorder(get_twin(), project_backend)
     bom_recorder = make_bom_recorder(get_twin(), project_backend)
+    doc_recorder = make_document_recorder(get_twin(), project_backend)
     react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
     # Per-flow brain routing:
     #  - design_v1: deterministic quadruped-demo handlers (reliable, hardcoded).
@@ -136,12 +139,13 @@ def _launch_flow(run_id: str) -> None:
         handlers = {"design": GoalDrivenMechanicalHandler(bridge, recorder)}
     elif flow_id == "hardware_v1":
         # Deterministic handlers where the native brain is flaky: mechanical
-        # design (guaranteed loadable cad_model) and electronics (guaranteed BOM
-        # + closed power budget). Remaining phases stay native (backstop covers
-        # their decisions).
+        # design (loadable cad_model), electronics (BOM + closed power budget),
+        # and firmware (pinmap + firmware_source scaffold). Remaining phases stay
+        # native (backstop covers their decisions).
         handlers = {
             "design": GoalDrivenMechanicalHandler(bridge, recorder),
             "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
+            "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),
         }
     else:
         handlers = {}
