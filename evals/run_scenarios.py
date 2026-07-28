@@ -228,8 +228,11 @@ def main() -> int:
                 rub = rec.get(f"{name}_rubric")
                 if rub:
                     failed = [k for k, v in rub.get("checks", {}).items() if not v]
+                    trace = rub.get("goal_traceable")
+                    trace_s = "" if trace is None else f"  goal_traceable={trace}"
                     print(
-                        f"    {name} rubric: {rub.get('score')}  failing={failed or 'none'}",
+                        f"    {name} rubric: {rub.get('score')}  "
+                        f"failing={failed or 'none'}{trace_s}",
                         file=sys.stderr,
                     )
 
