@@ -63,6 +63,102 @@
         "title": "ApprovalRequest",
         "type": "object"
       },
+      "AssemblyPart": {
+        "description": "One primitive component of an assembly.",
+        "properties": {
+          "kind": {
+            "description": "Primitive kind.",
+            "enum": [
+              "box",
+              "cylinder",
+              "cone",
+              "sphere"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human name of the part (STEP PRODUCT).",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Dimensions in mm (box: width/length/height; \u2026).",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional [x, y, z] placement in mm.",
+            "title": "Position"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "AssemblyPart",
+        "type": "object"
+      },
+      "AssemblyResponse": {
+        "properties": {
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "minio_object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minio Object Key"
+          },
+          "model_url": {
+            "title": "Model Url",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "part_count": {
+            "title": "Part Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "model_url",
+          "part_count"
+        ],
+        "title": "AssemblyResponse",
+        "type": "object"
+      },
       "AssistantRequest": {
         "description": "Body for ``POST /api/v1/assistant/request``.\n\nEvery request must belong to a project. An IDE assistant submits a\nrequest to invoke an agent on a specific design work_product.",
         "properties": {
@@ -713,6 +809,44 @@
           "coverage_percent"
         ],
         "title": "CoverageResponse",
+        "type": "object"
+      },
+      "CreateAssemblyRequest": {
+        "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
+        "properties": {
+          "name": {
+            "description": "Assembly name.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parts": {
+            "description": "Parts to author + assemble.",
+            "items": {
+              "$ref": "#/components/schemas/AssemblyPart"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to scope the cad_model to.",
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "name",
+          "parts"
+        ],
+        "title": "CreateAssemblyRequest",
         "type": "object"
       },
       "CreateProjectRequest": {
@@ -4215,6 +4349,48 @@
         ]
       }
     },
+    "/v1/cad/assembly": {
+      "post": {
+        "description": "Author + commit a multi-part assembly from a declarative spec.",
+        "operationId": "create_assembly_v1_cad_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssemblyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssemblyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Assembly",
+        "tags": [
+          "cad"
+        ]
+      }
+    },
     "/v1/chat/channels": {
       "get": {
         "description": "Return all available chat channels.",
@@ -5592,7 +5768,7 @@
         ]
       },
       "post": {
-        "description": "Create a new hardware project and seed an initial WorkProduct.",
+        "description": "Create a new hardware project (starts with no work products).",
         "operationId": "create_project_v1_projects_post",
         "requestBody": {
           "content": {

@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.bom.routes import router as bom_router
+from api_gateway.cad.routes import router as cad_router
 from api_gateway.chat.routes import router as chat_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
@@ -1006,6 +1007,7 @@ def create_app(
     app.include_router(sessions_router)
     app.include_router(projects_router)
     app.include_router(runs_router)
+    app.include_router(cad_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
     app.include_router(bom_router)

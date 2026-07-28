@@ -1,0 +1,8 @@
+{
+  "name": "Pan-Tilt Gimbal Base",
+  "parts": [
+    {"name": "Base Plate", "kind": "box", "parameters": {"width": 100, "length": 100, "height": 6}},
+    {"name": "Yaw Motor Housing", "kind": "cylinder", "parameters": {"radius": 20, "height": 45}, "position": [50, 50, 6]},
+    {"name": "Tripod Boss", "kind": "cylinder", "parameters": {"radius": 10, "height": 8}, "position": [50, 50, -8]}
+  ]
+}

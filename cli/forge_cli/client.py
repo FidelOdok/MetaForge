@@ -338,6 +338,13 @@ class ForgeClient:
                 raise ForgeClientNotFound(f"No project with id {project_id!r}")
             resp.raise_for_status()
 
+    def create_assembly(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Author + commit a multi-part assembly via ``POST /v1/cad/assembly``."""
+        with self._client() as client:
+            resp = client.post("/v1/cad/assembly", json=spec, timeout=180.0)
+            resp.raise_for_status()
+            return resp.json()
+
     def create_run(
         self, request: dict[str, Any] | None = None, *, start: bool = True
     ) -> dict[str, Any]:

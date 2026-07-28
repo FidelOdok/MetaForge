@@ -20,6 +20,7 @@ import json
 import sys
 from typing import Any
 
+from cli.forge_cli.cad import handle_cad
 from cli.forge_cli.chat import handle_chat
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.codex_login import handle_codex_login
@@ -142,6 +143,13 @@ def build_parser() -> argparse.ArgumentParser:
     projects_delete = projects_sub.add_parser("delete", help="Delete a project")
     projects_delete.add_argument("project_id", help="Project id")
     projects_delete.add_argument("--yes", action="store_true", help="Skip confirmation")
+
+    # -- cad (deterministic multi-part assembly authoring) -----------------
+    cad_parser = subparsers.add_parser("cad", help="Author CAD assemblies from a spec")
+    cad_sub = cad_parser.add_subparsers(dest="cad_command", help="CAD subcommands")
+    cad_build = cad_sub.add_parser("build", help="Build + commit a multi-part assembly")
+    cad_build.add_argument("spec", help="Path to an assembly spec JSON ({name, parts, ...})")
+    cad_build.add_argument("--project-id", default=None, help="Scope the cad_model to a project")
 
     # -- design (friendly wrapper over `runs create` for a gated flow) -----
     design_parser = subparsers.add_parser(
@@ -385,6 +393,7 @@ _HANDLERS = {
     "memory": handle_memory,
     "runs": handle_runs,
     "projects": handle_projects,
+    "cad": handle_cad,
     "design": handle_design,
     "chat": handle_chat,
     "routine": handle_routine,
