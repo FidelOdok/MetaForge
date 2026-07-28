@@ -9,7 +9,8 @@
     "vv",
     "manufacturing",
     "requirements",
-    "architecture"
+    "architecture",
+    "consistency"
   ],
   "goal": "A small breakout board exposing an I2C IMU (MPU-6050 class) on a 0.1-inch header, powered by a 3.3 V LDO from a 5 V USB input, with decoupling and two mounting holes. Board must fit within 25 x 20 mm.",
   "definition_of_done": {
