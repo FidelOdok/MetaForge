@@ -20,6 +20,7 @@ import json
 import sys
 from typing import Any
 
+from cli.forge_cli.cad import handle_cad
 from cli.forge_cli.chat import handle_chat
 from cli.forge_cli.client import ForgeClient
 from cli.forge_cli.codex_login import handle_codex_login
@@ -30,7 +31,6 @@ from cli.forge_cli.knowledge import handle_knowledge
 from cli.forge_cli.knowledge import register_subparser as register_knowledge_subparser
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
-from cli.forge_cli.cad import handle_cad
 from cli.forge_cli.projects import handle_projects
 from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_design, handle_runs
