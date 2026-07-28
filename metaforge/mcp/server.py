@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,6 +30,7 @@ import structlog
 
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
+from skill_registry.geometry_stash import GeometryStash
 from tool_registry.bootstrap import bootstrap_tool_registry
 from tool_registry.mcp_server.handlers import (
     ToolHandlerError,
@@ -91,61 +91,6 @@ https://github.com/FidelOdok/MetaForge/blob/main/docs/session-capture.md
 
 Full tool catalog and Phase-1 limits: \
 https://github.com/FidelOdok/MetaForge/blob/main/docs/capability-matrix.md"""
-
-
-class GeometryStash:
-    """Commit-by-reference for authored CAD (MET-10).
-
-    An agent authors geometry over MCP, calls ``freecad.export_model`` (which
-    returns a multi-KB base64 STEP), then must call ``twin.commit_geometry`` with
-    that blob — but agents can't reliably thread a large value between tool calls,
-    so the commit arrives with an empty ``step_base64`` and fails. The design flow
-    avoids this by keeping the blob in Python; agents have no equivalent.
-
-    This stash lets the sidecar remember each export's STEP keyed by
-    ``(session_id, obj_id)``, so ``twin.commit_geometry`` can be called *by
-    reference* — with just those small ids — and have the blob filled in
-    server-side. Bounded LRU so it never grows unbounded.
-    """
-
-    def __init__(self, max_entries: int = 32) -> None:
-        self._cache: OrderedDict[tuple[str, str], str] = OrderedDict()
-        self._max = max_entries
-
-    def remember(self, arguments: dict[str, Any], result: dict[str, Any]) -> None:
-        """Cache the STEP from a freecad.export_model result.
-
-        The adapter wraps the handler's return under ``result["data"]``, so look
-        there first, then fall back to the top level.
-        """
-        if not isinstance(result, dict):
-            return
-        data = result.get("data")
-        payload = data if isinstance(data, dict) else result
-        sid, oid = arguments.get("session_id"), arguments.get("obj_id")
-        blob = payload.get("step_base64")
-        if sid and oid and isinstance(blob, str) and blob:
-            key = (str(sid), str(oid))
-            self._cache[key] = blob
-            self._cache.move_to_end(key)
-            while len(self._cache) > self._max:
-                self._cache.popitem(last=False)
-
-    def fill(self, arguments: dict[str, Any]) -> bool:
-        """Fill a commit_geometry call's ``step_base64`` from a prior export.
-
-        Explicit ``step_base64`` always wins. Returns True if a blob was injected.
-        """
-        if arguments.get("step_base64"):
-            return False
-        sid, oid = arguments.get("session_id"), arguments.get("obj_id")
-        if not (sid and oid):
-            return False
-        blob = self._cache.get((str(sid), str(oid)))
-        if blob:
-            arguments["step_base64"] = blob
-            return True
-        return False
 
 
 class UnifiedMcpServer:
