@@ -139,6 +139,60 @@ _HISTORY_ROLE = {"user": "user", "agent": "assistant"}
 _HISTORY_LIMIT = 20  # most-recent turns fed back as context
 
 
+_PROJECT_WP_LIMIT = 30  # most work products listed in the project brief
+
+
+async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
+    """A leading context turn describing the thread's project (empty if none).
+
+    When a thread is scoped to a project (``scope_kind == "project"``), the agent
+    should reason over the project's digital thread — its existing work products —
+    and persist new CAD/decisions back into it. The agent loop can't be handed the
+    project object, so we frame it as the earliest ``history`` exchange: a synthetic
+    user turn stating the project context, plus an assistant acknowledgement. This
+    reaches both the native-tool and ReAct loops without touching harness core.
+    """
+    if thread.scope_kind != "project" or not thread.scope_entity_id:
+        return []
+    project = await _project_backend.get_project(thread.scope_entity_id)
+    if project is None:
+        return []
+
+    lines = [
+        f"You are working inside the MetaForge project **{project.name}** "
+        f"(project_id `{project.id}`, status {project.status}).",
+    ]
+    if project.description:
+        lines.append(f"Project intent: {project.description}")
+
+    wps = project.work_products[:_PROJECT_WP_LIMIT]
+    if wps:
+        lines.append(f"\nExisting work products in this project ({len(project.work_products)}):")
+        for wp in wps:
+            lines.append(f"- {wp.name} — {wp.type} (status {wp.status})")
+        if len(project.work_products) > _PROJECT_WP_LIMIT:
+            lines.append(f"- …and {len(project.work_products) - _PROJECT_WP_LIMIT} more")
+    else:
+        lines.append("\nThis project has no work products yet.")
+
+    lines.append(
+        f"\nTo save any CAD model or design decision into this project, pass "
+        f'`project_id="{project.id}"` when you call `twin.commit_geometry` or '
+        f"`twin.record_decision`. Ground your answers in the work products above."
+    )
+    brief = "\n".join(lines)
+    return [
+        {"role": "user", "content": f"[project context]\n{brief}"},
+        {
+            "role": "assistant",
+            "content": (
+                f"Understood — I'm working within project {project.name} "
+                f"({project.id}) and will scope new work products to it."
+            ),
+        },
+    ]
+
+
 async def _thread_history(thread_id: str) -> list[dict[str, str]]:
     """Prior conversation for *thread_id* as [{role, content}], oldest first.
 
@@ -190,7 +244,9 @@ async def _invoke_agent(
                     await notify_agent_step(thread.id, step, "harness-agent")
 
                 await notify_agent_typing(thread.id, "harness-agent")
-                history = await _thread_history(thread.id)
+                # Project-scoped threads lead with a project brief so the agent
+                # reasons over the digital thread and scopes new work to it.
+                history = await _project_brief(thread) + await _thread_history(thread.id)
                 text = await run_chat_turn_streaming(
                     user_content,
                     on_delta=_on_delta,

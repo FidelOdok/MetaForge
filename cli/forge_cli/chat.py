@@ -316,7 +316,12 @@ def _review_new_proposals(
 
 
 def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None:
-    """Reuse ``--thread`` if given, else create a fresh assistant-scope thread."""
+    """Reuse ``--thread`` if given, else create a fresh thread.
+
+    ``--project <id>`` creates a *project-scoped* thread so the agent sees the
+    project's work products and saves new CAD/decisions into it; otherwise the
+    thread is assistant-scoped.
+    """
     if args.thread:
         try:
             client.get_thread(args.thread)
@@ -328,9 +333,13 @@ def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None
             return None
         return args.thread
 
-    entity = args.session or f"cli-{uuid.uuid4().hex[:8]}"
+    project = getattr(args, "project", None)
+    if project:
+        scope_kind, entity = "project", project
+    else:
+        scope_kind, entity = _SCOPE_KIND, (args.session or f"cli-{uuid.uuid4().hex[:8]}")
     try:
-        thread = client.create_thread(_SCOPE_KIND, entity, title=args.title or "CLI session")
+        thread = client.create_thread(scope_kind, entity, title=args.title or "CLI session")
     except ForgeClientError as exc:
         print(f"Error: could not start chat: {exc}", file=sys.stderr)
         return None

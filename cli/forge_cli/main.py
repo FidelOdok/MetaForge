@@ -177,6 +177,12 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument(
         "--session", default=None, help="Scope entity id for a new thread (default: random)"
     )
+    chat_parser.add_argument(
+        "--project",
+        default=None,
+        help="Scope the chat to a project id: the agent sees the project's work "
+        "products and saves new CAD/decisions into it",
+    )
     chat_parser.add_argument("--title", default=None, help="Title for a new thread")
     chat_parser.add_argument("--provider", default=None, help="Override provider for the turn")
     chat_parser.add_argument("--model", default=None, help="Override model for the turn")
