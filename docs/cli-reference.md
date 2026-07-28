@@ -193,15 +193,29 @@ There are three paths from a typed intent to a committed `cad_model` work produc
 
 | Path | Command | When |
 |---|---|---|
-| **Deterministic assembly** (no LLM) | `forge cad build <spec.json> [--project-id <id>]` | Reliable, repeatable multi-part geometry from a declarative spec — the recommended path for complex assemblies |
-| **Agent-driven** | `forge chat --project <id>` then ask it to build the part | Exploratory / conversational authoring; needs a live LLM. The agent drives the FreeCAD tools and commits by reference |
+| **Text → CAD** (LLM compiles a spec, deterministic build) | `forge cad from-text "<description>" [--project-id <id>]` | Plain-English input with reproducible output: the LLM emits the spec, which is then built deterministically and echoed back for review |
+| **Deterministic assembly** (no LLM) | `forge cad build <spec.json> [--project-id <id>]` | Reliable, repeatable multi-part geometry from a hand-authored spec — best when you already know the exact geometry |
+| **Agent-driven** | `forge chat --project <id>` then ask it to build the part | Exploratory / conversational authoring; the agent drives the FreeCAD tools and commits by reference |
 | **Single primitive** | `forge design "<goal>" --project-id <id>` | A quick one-shot primitive via the gated design flow |
 
-The declarative spec for `cad build` is a JSON object `{name, parts:[…], project_id?}`
-where each part is a `box`/`cylinder`/`cone`/`sphere` with `parameters`, and
-optional `position`, `holes`, `fillet`, and `chamfer`. See
+The declarative spec (shared by `cad build` and produced by `cad from-text`) is a
+JSON object `{name, parts:[…], project_id?}` where each part is a
+`box`/`cylinder`/`cone`/`sphere` with `parameters`, and optional `position`,
+`holes`, `fillet`, and `chamfer`. See
 [`examples/cad/`](https://github.com/FidelOdok/MetaForge/tree/main/examples/cad)
 for the full Pan-Tilt Gimbal reference (base, yaw, pitch).
+
+```bash
+# Text → CAD: describe it, get a reviewable spec + committed model
+python -m cli.forge_cli cad from-text \
+  "a 100x100x6 base plate with 4 M3 corner holes and a 40mm dia, 45mm tall boss" \
+  --project-id 250aec91-6d31-4a26-bb71-5e0d1e6fedb9
+```
+
+`from-text` needs the gateway's chat harness + an LLM provider configured (it
+uses the LLM only to translate text → spec; the geometry is authored by the same
+deterministic builder as `cad build`). If the description can't be turned into a
+valid spec it returns a clear `422` rather than building something wrong.
 
 #### Slash commands (interactive)
 

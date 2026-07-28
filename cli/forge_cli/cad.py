@@ -18,7 +18,47 @@ def handle_cad(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Dispatch `forge cad <subcommand>`."""
     if args.cad_command == "build":
         return _build(args, client)
+    if args.cad_command == "from-text":
+        return _from_text(args, client)
     print("Error: unknown cad subcommand", file=sys.stderr)
+    return None
+
+
+def _from_text(args: argparse.Namespace, client: ForgeClient) -> Any:
+    """Compile a plain-English description into an assembly and build it."""
+    body: dict[str, Any] = {"description": args.description}
+    if args.name:
+        body["name"] = args.name
+    if args.project_id:
+        body["project_id"] = args.project_id
+    if getattr(args, "provider", None):
+        body["provider"] = args.provider
+    if getattr(args, "model", None):
+        body["model"] = args.model
+
+    try:
+        result = client.create_assembly_from_text(body)
+    except ForgeClientError as exc:
+        print(f"Error: text→CAD failed: {exc}", file=sys.stderr)
+        return None
+
+    spec = result.get("spec") or {}
+    parts = spec.get("parts") or []
+    print(f"Compiled '{spec.get('name', '?')}' → {len(parts)} part(s):")
+    for p in parts:
+        params = p.get("parameters") or {}
+        dims = ", ".join(f"{k}={v:g}" for k, v in params.items())
+        extras = []
+        if p.get("holes"):
+            extras.append(f"{len(p['holes'])} hole(s)")
+        if p.get("fillet"):
+            extras.append(f"fillet {p['fillet']:g}")
+        if p.get("chamfer"):
+            extras.append(f"chamfer {p['chamfer']:g}")
+        suffix = f"  [{', '.join(extras)}]" if extras else ""
+        print(f"  · {p.get('name', '?')} ({p.get('kind')}): {dims}{suffix}")
+    print(f"Committed: node {result.get('node_id')} ({result.get('part_count')} parts)")
+    print(f"  view: {result.get('model_url')}")
     return None
 
 

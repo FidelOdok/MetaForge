@@ -345,6 +345,13 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def create_assembly_from_text(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Compile a description into a spec + build it via ``POST /v1/cad/from-text``."""
+        with self._client() as client:
+            resp = client.post("/v1/cad/from-text", json=body, timeout=240.0)
+            resp.raise_for_status()
+            return resp.json()
+
     def create_run(
         self, request: dict[str, Any] | None = None, *, start: bool = True
     ) -> dict[str, Any]:

@@ -150,6 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
     cad_build = cad_sub.add_parser("build", help="Build + commit a multi-part assembly")
     cad_build.add_argument("spec", help="Path to an assembly spec JSON ({name, parts, ...})")
     cad_build.add_argument("--project-id", default=None, help="Scope the cad_model to a project")
+    cad_ft = cad_sub.add_parser(
+        "from-text", help="Compile a plain-English description into an assembly + build it"
+    )
+    cad_ft.add_argument("description", help="e.g. 'a 100x100x6 plate with 4 M3 corner holes'")
+    cad_ft.add_argument("--name", default=None, help="Override the assembly name")
+    cad_ft.add_argument("--project-id", default=None, help="Scope the cad_model to a project")
+    cad_ft.add_argument("--provider", default=None, help="LLM provider override for translation")
+    cad_ft.add_argument("--model", default=None, help="LLM model override for translation")
 
     # -- design (friendly wrapper over `runs create` for a gated flow) -----
     design_parser = subparsers.add_parser(

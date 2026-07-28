@@ -845,7 +845,45 @@
         "title": "CoverageResponse",
         "type": "object"
       },
-      "CreateAssemblyRequest": {
+      "CreateAssemblyRequest-Input": {
+        "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
+        "properties": {
+          "name": {
+            "description": "Assembly name.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parts": {
+            "description": "Parts to author + assemble.",
+            "items": {
+              "$ref": "#/components/schemas/AssemblyPart"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to scope the cad_model to.",
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "name",
+          "parts"
+        ],
+        "title": "CreateAssemblyRequest",
+        "type": "object"
+      },
+      "CreateAssemblyRequest-Output": {
         "description": "Author a multi-part assembly deterministically (no LLM) and commit it.",
         "properties": {
           "name": {
@@ -1272,6 +1310,121 @@
           "created_at"
         ],
         "title": "FileLinkResponse",
+        "type": "object"
+      },
+      "FromTextRequest": {
+        "description": "Compile a plain-English description into an assembly, then build it.",
+        "properties": {
+          "description": {
+            "description": "Plain-English description of the part/assembly.",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM model override for translation.",
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the assembly name (else the model chooses one).",
+            "title": "Name"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to scope the cad_model to.",
+            "title": "Project Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM provider override for translation.",
+            "title": "Provider"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "FromTextRequest",
+        "type": "object"
+      },
+      "FromTextResponse": {
+        "description": "The built assembly plus the spec the model generated (for review).",
+        "properties": {
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "minio_object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minio Object Key"
+          },
+          "model_url": {
+            "title": "Model Url",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "part_count": {
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/CreateAssemblyRequest-Output",
+            "description": "The declarative spec compiled from the description."
+          }
+        },
+        "required": [
+          "node_id",
+          "model_url",
+          "part_count",
+          "spec"
+        ],
+        "title": "FromTextResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -4431,7 +4584,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateAssemblyRequest"
+                "$ref": "#/components/schemas/CreateAssemblyRequest-Input"
               }
             }
           },
@@ -4460,6 +4613,48 @@
           }
         },
         "summary": "Create Assembly",
+        "tags": [
+          "cad"
+        ]
+      }
+    },
+    "/v1/cad/from-text": {
+      "post": {
+        "description": "Compile a plain-English description into a spec (LLM), then build it.\n\nThe LLM only produces the small declarative spec \u2014 the geometry itself is\nauthored deterministically by the same builder as ``/assembly``, so the\noutput is reproducible and the spec is returned for review.",
+        "operationId": "create_assembly_from_text_v1_cad_from_text_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromTextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FromTextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Assembly From Text",
         "tags": [
           "cad"
         ]
