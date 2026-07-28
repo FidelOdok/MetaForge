@@ -135,6 +135,22 @@ def chat_harness_enabled() -> bool:
     return os.environ.get("METAFORGE_CHAT_HARNESS", "").strip().lower() in _TRUTHY
 
 
+_DEFAULT_CHAT_MAX_STEPS = 24
+
+
+def chat_max_steps() -> int:
+    """Tool-call budget for a chat turn (``METAFORGE_CHAT_MAX_STEPS``, default 24).
+
+    Six was far too few for real agentic work — a multi-part CAD assembly alone
+    needs ~15-20 tool calls, so the agent hit the ceiling and bailed to prose.
+    Configurable so heavy tasks can raise it further without a code change.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_MAX_STEPS") or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return _DEFAULT_CHAT_MAX_STEPS
+
+
 def rotation_strategy_from_env() -> RotationStrategy:
     """Credential rotation strategy from METAFORGE_ROTATION_STRATEGY (default round_robin)."""
     raw = (os.environ.get("METAFORGE_ROTATION_STRATEGY") or "").strip().lower()
@@ -210,7 +226,7 @@ async def run_chat_turn(
     user_content: str,
     *,
     invoke: Invoke = default_invoke,
-    max_steps: int = 6,
+    max_steps: int | None = None,
     session_id: str = "chat",
     credentials: CredentialStore | None = None,
     mcp_bridge: McpBridge | None = None,
@@ -228,6 +244,7 @@ async def run_chat_turn(
     ``provider``/``model``/``enabled_tools`` are the chat UI's per-turn selection.
     ``history`` is the prior conversation so multi-turn chats keep context.
     """
+    steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
@@ -238,12 +255,12 @@ async def run_chat_turn(
             user_content,
             role="generator",
             invoke=invoke,
-            max_steps=max_steps,
+            max_steps=steps,
             history=history,
         )
     else:
         policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
-        result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+        result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
     if result.status == "completed":
         return str(result.output)
@@ -299,7 +316,7 @@ async def run_chat_turn_streaming(
     on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
-    max_steps: int = 6,
+    max_steps: int | None = None,
     session_id: str = "chat",
     credentials: CredentialStore | None = None,
     mcp_bridge: McpBridge | None = None,
@@ -318,6 +335,7 @@ async def run_chat_turn_streaming(
     given, its tools are registered so the loop can call them. ``history`` is the
     prior conversation so multi-turn chats keep context.
     """
+    steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
@@ -328,12 +346,12 @@ async def run_chat_turn_streaming(
             user_content,
             role="generator",
             invoke=invoke,
-            max_steps=max_steps,
+            max_steps=steps,
             history=history,
         )
     else:
         policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke)
-        result = await run_react(ctx.runtime, policy, user_content, max_steps=max_steps)
+        result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
 
     # Surface the agent's trace (tool calls, observations, reasoning) so the UI
