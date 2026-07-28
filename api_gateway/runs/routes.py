@@ -110,6 +110,7 @@ def _launch_flow(run_id: str) -> None:
         RequirementsHandler,
         SimulationHandler,
     )
+    from api_gateway.runs.vv_handlers import GoalDrivenVVHandler
     from api_gateway.twin.bom_recorder import make_bom_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
@@ -138,14 +139,16 @@ def _launch_flow(run_id: str) -> None:
     elif flow_id == "mech_v1":
         handlers = {"design": GoalDrivenMechanicalHandler(bridge, recorder)}
     elif flow_id == "hardware_v1":
-        # Deterministic handlers where the native brain is flaky: mechanical
-        # design (loadable cad_model), electronics (BOM + closed power budget),
-        # and firmware (pinmap + firmware_source scaffold). Remaining phases stay
-        # native (backstop covers their decisions).
+        # Deterministic handlers where the native brain is flaky or dishonest:
+        # mechanical design (loadable cad_model), electronics (BOM + closed power
+        # budget), firmware (pinmap + firmware_source scaffold), and V&V (honest
+        # verdict + test_plan, no false compliance). Remaining phases stay native
+        # (backstop covers their decisions).
         handlers = {
             "design": GoalDrivenMechanicalHandler(bridge, recorder),
             "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
             "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),
+            "simulation": GoalDrivenVVHandler(bridge, doc_recorder),
         }
     else:
         handlers = {}
