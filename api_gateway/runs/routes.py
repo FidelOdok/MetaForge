@@ -99,6 +99,7 @@ def _launch_flow(run_id: str) -> None:
     """
     from api_gateway.chat.routes import get_mcp_bridge
     from api_gateway.projects.routes import get_project_backend
+    from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.gate_eval import ProjectGateEvaluator
     from api_gateway.runs.mech_handlers import (
@@ -108,18 +109,22 @@ def _launch_flow(run_id: str) -> None:
         RequirementsHandler,
         SimulationHandler,
     )
+    from api_gateway.twin.bom_recorder import make_bom_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.routes import get_twin
 
     bridge = get_mcp_bridge()
     project_backend = get_project_backend()
     recorder = make_geometry_recorder(get_twin(), project_backend)
+    bom_recorder = make_bom_recorder(get_twin(), project_backend)
     react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
     # Per-flow brain routing:
     #  - design_v1: deterministic quadruped-demo handlers (reliable, hardcoded).
     #  - mech_v1:   goal-driven hybrid — the LLM specs the part, a deterministic
     #               step authors+commits it so the cad_model is always loadable.
-    #  - others (hardware_v1, …): the native brain drives every phase.
+    #  - hardware_v1: electronics uses a deterministic handler (guaranteed BOM +
+    #               closed power budget); other phases stay native.
+    #  - others: the native brain drives every phase.
     flow_id = _store.get(run_id).request.get("flow")
     if flow_id == "design_v1":
         handlers: dict[str, Any] = {
@@ -129,6 +134,10 @@ def _launch_flow(run_id: str) -> None:
         }
     elif flow_id == "mech_v1":
         handlers = {"design": GoalDrivenMechanicalHandler(bridge, recorder)}
+    elif flow_id == "hardware_v1":
+        # Electronics gets a deterministic handler (guaranteed BOM + closed power
+        # budget); the mechanical + remaining phases stay on the native brain.
+        handlers = {"electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder)}
     else:
         handlers = {}
     hybrid = HybridBrain(handlers=handlers, fallback=react)
