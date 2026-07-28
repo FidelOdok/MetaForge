@@ -31,13 +31,38 @@ from skill_registry.mcp_bridge import McpBridge
 
 logger = structlog.get_logger(__name__)
 
-_DEFAULT_PINS: list[dict[str, str]] = [
-    {"signal": "SDA", "pin": "SDA", "direction": "bidir"},
-    {"signal": "SCL", "pin": "SCL", "direction": "in"},
-    {"signal": "VCC", "pin": "3V3", "direction": "power"},
-    {"signal": "GND", "pin": "GND", "direction": "power"},
-    {"signal": "INT", "pin": "GPIO", "direction": "in"},
-]
+# Standard pins each bus contributes — used to guarantee a pin map that covers
+# every interface on the board (a dual-bus board must expose both buses).
+_STD_PINS: dict[str, list[tuple[str, str]]] = {
+    "I2C": [("SDA", "bidir"), ("SCL", "in")],
+    "SPI": [("SCK", "in"), ("MOSI", "in"), ("MISO", "out"), ("CS", "in")],
+    "UART": [("TX", "out"), ("RX", "in")],
+    "SMBUS": [("SDA", "bidir"), ("SCL", "in")],
+    "1-WIRE": [("DQ", "bidir")],
+}
+_POWER_ALIASES = {"VCC", "3V3", "VDD", "3.3V", "VIN", "5V"}
+
+
+def _complete_pins(pins: list[dict[str, str]], interfaces: list[str]) -> list[dict[str, str]]:
+    """Union the extracted pins with the standard pins for every interface + power.
+
+    A thin extraction (e.g. just SDA/SCL for an I2C+SPI board) would drop half the
+    board's connections; this guarantees each named bus and power/ground appear.
+    """
+    out = [dict(p) for p in pins]
+    have = {p["signal"].strip().upper() for p in out}
+    for iface in interfaces:
+        for sig, direction in _STD_PINS.get(iface.strip().upper(), []):
+            if sig not in have:
+                out.append({"signal": sig, "pin": sig, "direction": direction})
+                have.add(sig)
+    if not (have & _POWER_ALIASES):
+        out.append({"signal": "VCC", "pin": "3V3", "direction": "power"})
+    if "GND" not in have:
+        out.append({"signal": "GND", "pin": "GND", "direction": "power"})
+    return out
+
+
 _DEFAULT_REGISTERS: list[dict[str, str]] = [
     {"name": "WHO_AM_I", "addr": "0x75", "note": "identity check"},
     {"name": "PWR_MGMT_1", "addr": "0x6B", "note": "wake device"},
@@ -103,8 +128,15 @@ def _normalize_fw_spec(spec: dict[str, Any], goal: str) -> dict[str, Any]:
                         "direction": str(p.get("direction") or "in").strip()[:8],
                     }
                 )
-    if not pins:
-        pins = [dict(p) for p in _DEFAULT_PINS]
+
+    # Every interface on the board — the primary bus plus any others named — so
+    # the pin map covers them all even when the extraction is thin.
+    ifaces_raw = spec.get("interfaces")
+    interfaces = [bus]
+    if isinstance(ifaces_raw, list):
+        interfaces += [str(i).strip().upper()[:8] for i in ifaces_raw if isinstance(i, str) and i]
+    interfaces = list(dict.fromkeys(i for i in interfaces if i))  # dedupe, keep order
+    pins = _complete_pins(pins, interfaces)
 
     name = str(spec.get("name") or "").strip() or f"{_slug_title(goal)} firmware"
     return {
@@ -114,6 +146,7 @@ def _normalize_fw_spec(spec: dict[str, Any], goal: str) -> dict[str, Any]:
         "device_addr": device_addr,
         "sample_rate_hz": round(sample_rate_hz, 3),
         "registers": registers,
+        "interfaces": interfaces,
         "pins": pins,
     }
 
@@ -168,12 +201,14 @@ async def _extract_fw_spec(
     prompt = (
         "You are extracting a firmware bring-up spec for a small sensor board. "
         "Reply with ONLY a JSON object, no prose:\n"
-        '{"name": "<firmware name>", "bus": "I2C", "device": "<sensor part>", '
+        '{"name": "<firmware name>", "bus": "I2C", '
+        '"interfaces": ["I2C", "SPI"], "device": "<sensor part>", '
         '"device_addr": "0x68", "sample_rate_hz": 100, '
         '"registers": [{"name": "WHO_AM_I", "addr": "0x75", "note": "id check"}], '
         '"pins": [{"signal": "SDA", "pin": "SDA", "direction": "bidir"}]}\n'
         "Use the real device address and register map for the part in the goal. "
-        "Give sample_rate_hz as a NUMBER.\n\n"
+        "List EVERY bus the board uses in interfaces (e.g. I2C for the sensor and "
+        "SPI for a microSD). Give sample_rate_hz as a NUMBER.\n\n"
         f"Goal: {goal}\nContext: {prior}"
     )
     try:
@@ -263,12 +298,13 @@ class GoalDrivenFirmwareHandler:
         # 3. Decision with concrete driver + register + bring-up detail.
         regs = ", ".join(f"{r['name']} ({r['addr']})" for r in spec["registers"])
         whoami = next((r["addr"] for r in spec["registers"] if r["name"] == "WHO_AM_I"), "0x75")
+        ifaces = ", ".join(spec["interfaces"])
         rationale = (
             f"{spec['bus']} driver for {spec['device']} at {spec['device_addr']}: init the bus, "
             f"read WHO_AM_I at {whoami} as a bring-up self-test, configure the "
             f"{spec['sample_rate_hz']:g} Hz sample rate, then poll the data registers "
-            f"({regs}). Pin map committed ({len(spec['pins'])} signals) and a firmware_source "
-            "scaffold with the register defines and read loop."
+            f"({regs}). Pin map covers all interfaces ({ifaces}) — {len(spec['pins'])} signals — "
+            "and a firmware_source scaffold carries the register defines and read loop."
         )
         await self._record_decision(
             title=f"{spec['name']} driver + pin map",
