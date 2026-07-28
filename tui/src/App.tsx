@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { loadConfig, setConfigValue } from "./config.js";
 import { GatewayClient } from "./api/client.js";
+import { useChat } from "./hooks/useChat.js";
 import { Chat } from "./components/Chat.js";
 import { RunsView } from "./components/RunsView.js";
 import { IntentForm } from "./components/IntentForm.js";
@@ -26,9 +27,15 @@ export function App() {
   const [view, setView] = useState<View>("chat");
   const [model, setModel] = useState<string | undefined>(cfg.model);
   const [provider, setProvider] = useState<string | undefined>(cfg.provider);
-  const [chatStarted, setChatStarted] = useState(false);
   const { awaiting, alert } = useRunAlerts(client);
   const { rows } = useTerminalSize();
+
+  // Own the chat thread here (not inside <Chat>) for two reasons: it survives
+  // view switches (^R/^B/^N no longer tear down the SSE stream and drop the
+  // thread), and App's height policy below reads the SAME `messages` that Chat's
+  // layout branch does — so both flip in one render with no stranded frames.
+  const chat = useChat(client, model, provider);
+  const chatStarted = chat.messages.length > 0;
 
   // Change the session model/provider live and persist it (mirrors `forge
   // config set`), so /model in chat sticks across launches too.
@@ -112,7 +119,7 @@ export function App() {
             provider={provider}
             onModelChange={changeModel}
             onProviderChange={changeProvider}
-            onStartedChange={setChatStarted}
+            chat={chat}
           />
         )}
         {view === "runs" && <RunsView client={client} onExit={() => setView("chat")} />}
