@@ -123,7 +123,11 @@ transition triggered by the approval route.
 ## Driving it from the CLI
 
 ```bash
-# Start a gated design flow for a product goal, scoped to a project
+# The friendly way: start a gated flow for a goal and stream transitions
+python -m cli.forge_cli design "quadruped robot leg able to carry 5 kg body mass" \
+  --flow design_v1 --project-id <uuid>
+
+# The explicit equivalent (what `design` wraps)
 python -m cli.forge_cli runs create --request-json \
   '{"goal": "quadruped robot leg able to carry 5 kg body mass",
     "flow": "design_v1",

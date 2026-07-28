@@ -392,6 +392,45 @@ python -m cli.forge_cli sources delete 'datasheet://rp2040' --yes
 Removes every chunk for a source. Without `--yes` the CLI asks for
 interactive confirmation. Returns the count of deleted chunks.
 
+### `design` — run a gated design flow
+
+```
+design <goal> [--flow hardware_v1|mech_v1|design_v1] [--project-id <uuid>]
+              [--no-start] [--no-watch]
+```
+
+```bash
+# Design a board end to end and watch the phase/gate transitions stream
+python -m cli.forge_cli design "an I2C IMU breakout board, 3.3 V from 5 V USB, 25 x 20 mm"
+
+# Scope it to a project and pick a flow
+python -m cli.forge_cli design "a self-balancing robot controller" \
+  --flow hardware_v1 --project-id <uuid>
+```
+
+A friendly wrapper over `runs create` for the [design-flow
+harness](architecture/design-flow-harness.md): it starts the gated flow for a
+product goal, prints the run id, and (by default) streams the live phase/gate
+transitions. `--flow` picks the lifecycle (`hardware_v1` full 7-phase, `mech_v1`
+mechanical vertical, `design_v1` demo); `--no-watch` returns immediately;
+`--no-start` creates the run without starting it. Each run pauses at every gate
+for human sign-off — approve with `runs approve <run_id>`.
+
+### `runs` — drive harness runs directly
+
+```
+runs create [--goal <text>] [--request-json <json>] [--no-start]
+runs list [--json]
+runs get <run_id> [--json]
+runs watch <run_id>
+runs approve <run_id>
+runs reject <run_id>
+```
+
+The lower-level surface over `/v1/runs`. `runs create --request-json '{...}'`
+takes a full run request (used by `design` under the hood); `watch` streams a
+run's SSE status; `approve`/`reject` resolve a run paused at a gate.
+
 ## Output formats
 
 `--format table` (default) prints a fixed-column ASCII table.
