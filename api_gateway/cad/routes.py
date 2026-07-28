@@ -14,6 +14,8 @@ from api_gateway.cad.builder import build_assembly, validate_assembly_spec
 from api_gateway.cad.nl_compiler import compile_spec
 from api_gateway.cad.schemas import (
     AssemblyResponse,
+    CompileRequest,
+    CompileResponse,
     CreateAssemblyRequest,
     FromTextRequest,
     FromTextResponse,
@@ -74,13 +76,19 @@ async def create_assembly(body: CreateAssemblyRequest) -> AssemblyResponse:
     )
 
 
-@router.post("/from-text", response_model=FromTextResponse, status_code=201)
-async def create_assembly_from_text(body: FromTextRequest) -> FromTextResponse:
-    """Compile a plain-English description into a spec (LLM), then build it.
+async def _compile_to_spec(
+    *,
+    description: str,
+    name: str | None,
+    provider: str | None,
+    model: str | None,
+    project_id: str | None = None,
+) -> CreateAssemblyRequest:
+    """Translate a description into a validated ``CreateAssemblyRequest``.
 
-    The LLM only produces the small declarative spec — the geometry itself is
-    authored deterministically by the same builder as ``/assembly``, so the
-    output is reproducible and the spec is returned for review.
+    Raises a 422 ``HTTPException`` when the model output can't be recovered into
+    a structurally-valid spec. Geometric feasibility is checked separately (by
+    ``validate_assembly_spec``) so a dry run can surface those as warnings.
     """
     from api_gateway.chat.harness_backend import run_chat_turn
 
@@ -90,27 +98,57 @@ async def create_assembly_from_text(body: FromTextRequest) -> FromTextResponse:
             prompt,
             max_steps=2,
             mcp_bridge=None,
-            provider=body.provider,
-            model=body.model,
+            provider=provider,
+            model=model,
             enabled_tools=[],
         )
 
     try:
-        raw_spec = await compile_spec(body.description, translate=translate, name=body.name)
+        raw_spec = await compile_spec(description, translate=translate, name=name)
     except ValueError as exc:
         raise HTTPException(
             status_code=422, detail=f"could not translate description into a spec: {exc}"
         ) from exc
 
     try:
-        spec = CreateAssemblyRequest(
+        return CreateAssemblyRequest(
             name=str(raw_spec["name"]),
             parts=raw_spec["parts"],
-            project_id=body.project_id,
+            project_id=project_id,
         )
     except Exception as exc:  # noqa: BLE001 — pydantic validation → clear 422
         raise HTTPException(status_code=422, detail=f"generated spec is invalid: {exc}") from exc
 
+
+@router.post("/compile", response_model=CompileResponse, status_code=200)
+async def compile_assembly(body: CompileRequest) -> CompileResponse:
+    """Compile a description into a spec and check it — but do NOT build (dry run).
+
+    Returns the spec for review plus any geometric-feasibility warnings, so the
+    caller can tweak it (or save it and run ``/assembly``) before committing.
+    """
+    spec = await _compile_to_spec(
+        description=body.description, name=body.name, provider=body.provider, model=body.model
+    )
+    errors = validate_assembly_spec([p.model_dump() for p in spec.parts])
+    return CompileResponse(spec=spec, errors=errors, buildable=not errors)
+
+
+@router.post("/from-text", response_model=FromTextResponse, status_code=201)
+async def create_assembly_from_text(body: FromTextRequest) -> FromTextResponse:
+    """Compile a plain-English description into a spec (LLM), then build it.
+
+    The LLM only produces the small declarative spec — the geometry itself is
+    authored deterministically by the same builder as ``/assembly``, so the
+    output is reproducible and the spec is returned for review.
+    """
+    spec = await _compile_to_spec(
+        description=body.description,
+        name=body.name,
+        provider=body.provider,
+        model=body.model,
+        project_id=body.project_id,
+    )
     rec = await _build_spec(spec)
     node_id = rec["node_id"]
     return FromTextResponse(

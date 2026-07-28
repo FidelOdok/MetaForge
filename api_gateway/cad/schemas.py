@@ -88,3 +88,25 @@ class FromTextResponse(AssemblyResponse):
     spec: CreateAssemblyRequest = Field(
         ..., description="The declarative spec compiled from the description."
     )
+
+
+class CompileRequest(BaseModel):
+    """Compile a description into a spec WITHOUT building it (dry run)."""
+
+    description: str = Field(..., min_length=1, description="Plain-English description.")
+    name: str | None = Field(default=None, description="Override the assembly name.")
+    provider: str | None = Field(default=None, description="LLM provider override.")
+    model: str | None = Field(default=None, description="LLM model override.")
+
+
+class CompileResponse(BaseModel):
+    """The compiled spec plus any geometric-feasibility warnings (not built)."""
+
+    spec: CreateAssemblyRequest = Field(..., description="The compiled declarative spec.")
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Geometric-feasibility problems (e.g. oversize fillet); empty if buildable.",
+    )
+    buildable: bool = Field(
+        ..., description="True when the spec would build without geometry errors."
+    )
