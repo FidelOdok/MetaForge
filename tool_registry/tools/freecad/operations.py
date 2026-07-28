@@ -1471,6 +1471,29 @@ class FreecadOperations:
     # the on-Apply full solve is the FreeCAD-runtime follow-up.
     # ------------------------------------------------------------------
 
+    def boolean_session(self, document: Any, obj_a: Any, obj_b: Any, operation: str) -> Any:
+        """Boolean two session solids (Part.cut/fuse/common); return a new feature.
+
+        Works on plain ``Part`` solids (unlike ``fastener_hole``, which needs a
+        PartDesign body), so it can cut holes/pockets into ``create_primitive``
+        parts. Returns a new ``Part::Feature`` carrying the result shape; the
+        caller decides what to do with the inputs.
+        """
+        self._require_freecad()
+        shape_a, shape_b = obj_a.Shape, obj_b.Shape
+        if operation in ("subtract", "cut"):
+            result = shape_a.cut(shape_b)
+        elif operation in ("union", "fuse"):
+            result = shape_a.fuse(shape_b)
+        elif operation in ("intersect", "common"):
+            result = shape_a.common(shape_b)
+        else:
+            raise ValueError(f"Unsupported boolean operation: {operation}")
+        feature = document.addObject("Part::Feature", "Boolean")
+        feature.Shape = result
+        document.recompute()
+        return feature
+
     def create_assembly(self, document: Any, name: str = "Assembly") -> Any:
         """Create an assembly container (an ``App::Part``) to group parts."""
         self._require_freecad()
