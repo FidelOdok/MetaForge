@@ -145,11 +145,20 @@ def run_once(base: str, scenario: dict, idx: int, cap_s: float) -> dict:
     rec["gates_reached"] = seen_gates
     rec["duration_s"] = round(time.time() - started, 1)
 
-    # Correctness rubric (not just presence). Mechanical today; more to come.
-    if scenario.get("rubric") == "mechanical":
-        from mechanical_rubric import score_mechanical
+    # Correctness rubrics (not just presence). A scenario may request several
+    # (e.g. hardware_v1 exercises both mechanical and electronics phases).
+    rubrics = scenario.get("rubric")
+    rubrics = [rubrics] if isinstance(rubrics, str) else (rubrics or [])
+    goal = scenario.get("goal", "")
+    for name in rubrics:
+        if name == "mechanical":
+            from mechanical_rubric import score_mechanical
 
-        rec["mechanical_rubric"] = score_mechanical(base, pid, scenario.get("goal", ""))
+            rec["mechanical_rubric"] = score_mechanical(base, pid, goal)
+        elif name == "electronics":
+            from electronics_rubric import score_electronics
+
+            rec["electronics_rubric"] = score_electronics(base, pid, goal)
     return rec
 
 
@@ -211,14 +220,14 @@ def main() -> int:
                 f"{rec.get('duration_s', 0)}s",
                 file=sys.stderr,
             )
-            rub = rec.get("mechanical_rubric")
-            if rub:
-                failed = [k for k, v in rub.get("checks", {}).items() if not v]
-                print(
-                    f"    mechanical rubric: {rub.get('score')}  "
-                    f"failing={failed or 'none'}  cad={rub.get('cad_names')}",
-                    file=sys.stderr,
-                )
+            for name in ("mechanical", "electronics"):
+                rub = rec.get(f"{name}_rubric")
+                if rub:
+                    failed = [k for k, v in rub.get("checks", {}).items() if not v]
+                    print(
+                        f"    {name} rubric: {rub.get('score')}  failing={failed or 'none'}",
+                        file=sys.stderr,
+                    )
 
     report = {
         "gateway": args.gateway,
