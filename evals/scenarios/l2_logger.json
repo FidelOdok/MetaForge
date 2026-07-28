@@ -9,7 +9,8 @@
     "vv",
     "manufacturing",
     "requirements",
-    "architecture"
+    "architecture",
+    "consistency"
   ],
   "goal": "A compact environmental data logger: a BME280 temperature/humidity/pressure sensor on I2C, a microSD card on SPI for storage, powered by a 3.3 V LDO from a 5 V USB input, with a coin-cell-backed RTC. Board must fit within 40 x 30 mm and have two mounting holes.",
   "definition_of_done": {

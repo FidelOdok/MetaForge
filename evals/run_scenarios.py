@@ -179,6 +179,10 @@ def run_once(base: str, scenario: dict, idx: int, cap_s: float) -> dict:
             from architecture_rubric import score_architecture
 
             rec["architecture_rubric"] = score_architecture(base, pid, goal)
+        elif name == "consistency":
+            from consistency_rubric import score_consistency
+
+            rec["consistency_rubric"] = score_consistency(base, pid, goal)
     return rec
 
 
@@ -248,6 +252,7 @@ def main() -> int:
                 "manufacturing",
                 "requirements",
                 "architecture",
+                "consistency",
             ):
                 rub = rec.get(f"{name}_rubric")
                 if rub:

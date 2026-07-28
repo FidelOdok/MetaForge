@@ -3,7 +3,15 @@
   "level": 3,
   "title": "Self-balancing robot controller (mechatronic: sense + actuate + structure)",
   "flow": "hardware_v1",
-  "rubric": ["electronics", "firmware", "vv", "manufacturing", "requirements", "architecture"],
+  "rubric": [
+    "electronics",
+    "firmware",
+    "vv",
+    "manufacturing",
+    "requirements",
+    "architecture",
+    "consistency"
+  ],
   "goal": "A self-balancing two-wheel robot controller: an MPU-6050 IMU on I2C for tilt sensing, dual DC motor drivers (H-bridge, PWM speed control) for the wheel motors, an ESP32 microcontroller, powered by a 2S LiPo through a 3.3 V buck regulator, on a 60 x 40 mm PCB mounted to an aluminium chassis bracket that carries the motor reaction load. Mass budget 60 g for the board.",
   "definition_of_done": {
     "requirements": [
