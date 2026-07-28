@@ -913,6 +913,23 @@ class FreecadServer(McpToolServer):
                 self.export_model,
             ),
             (
+                "boolean",
+                "CSG boolean on two session solids (subtract/union/intersect) -> new solid. "
+                "subtract cuts holes/pockets into plain primitives (no PartDesign body needed)",
+                "cad_boolean",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "obj_a": {"type": "string", "description": "Base solid obj_id."},
+                        "obj_b": {"type": "string", "description": "Tool solid obj_id."},
+                        "operation": {"enum": ["subtract", "union", "intersect"]},
+                        "name": {"type": "string"},
+                    },
+                    ["session_id", "obj_a", "obj_b"],
+                ),
+                self.boolean,
+            ),
+            (
                 "create_assembly",
                 "Create an assembly container to group parts in a session",
                 "cad_assembly",
@@ -1434,6 +1451,21 @@ class FreecadServer(McpToolServer):
         }
 
     # ---- assembly authoring (MET-530) ---------------------------------
+
+    async def boolean(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj_a = self._require(arguments, "obj_a")
+        obj_b = self._require(arguments, "obj_b")
+        operation = str(arguments.get("operation") or "subtract")
+        name = arguments.get("name")
+        session = self._sessions.get(session_id)
+        a = self._sessions.get_object(session_id, obj_a)
+        b = self._sessions.get_object(session_id, obj_b)
+        feature = self._ops.boolean_session(session.document, a, b, operation)
+        new_id = self._sessions.register_object(
+            session_id, feature, "solid", name or f"{operation}_result"
+        )
+        return {"obj_id": new_id, "operation": operation, **self._ops.shape_props(feature)}
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
