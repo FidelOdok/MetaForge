@@ -119,7 +119,7 @@ Precedence: an explicit CLI flag wins over the config file, which wins over the
 ### `chat` — interactive assistant REPL
 
 ```
-chat [-m MESSAGE] [--thread ID] [--session ID] [--title T]
+chat [-m MESSAGE] [--thread ID] [--session ID] [--project ID] [--title T]
      [--provider P] [--model M] [--timeout S]
      [--mode {ask,auto,plan}] [--no-stream] [--no-color]
      [--hooks PATH] [--no-hooks]
@@ -144,6 +144,7 @@ python -m cli.forge_cli chat -m "What is the stress margin on the bracket?"
 | `-m, --message <text>` | — | One-shot: send a single message and exit |
 | `--thread <id>` | new thread | Reuse an existing chat thread |
 | `--session <id>` | random | Scope-entity id for a new thread |
+| `--project <id>` | — | Scope the chat to a project (see [Project-scoped chat](#project-scoped-chat)) |
 | `--title <text>` | `CLI session` | Title for a new thread |
 | `--provider <id>` | gateway default | Per-turn provider override |
 | `--model <id>` | gateway default | Per-turn model override |
@@ -165,6 +166,42 @@ proposals are handled after each turn:
 | `ask` (default) | Prompt `[a]pprove / [r]eject / [s]kip` per proposal (interactive); one-shot mode just prints a notice |
 | `auto` | Auto-approve new proposals (prints a warning on entry) |
 | `plan` | Hold — list proposals but never apply them (nothing mutates the twin) |
+
+#### Project-scoped chat
+
+Pass `--project <id>` to tie the conversation to a project. The thread is created
+with `scope_kind=project`, and every turn is led by a **project brief** injected
+into the agent's context: the project name, intent, and the list of work products
+already in its digital thread. The agent grounds its answers in that context and
+is told to pass `project_id="<id>"` when it commits new CAD or records a decision,
+so new deliverables land in the same project.
+
+```bash
+# List projects, then chat scoped to one
+python -m cli.forge_cli projects list
+python -m cli.forge_cli chat --project 250aec91-6d31-4a26-bb71-5e0d1e6fedb9
+```
+
+Once scoped, ask the agent about the project ("what's in this project?", "what
+did we decide about the base plate?") and it answers from the work products; ask
+it to build geometry and the result is saved back into the project.
+
+#### From prompt to CAD
+
+There are three paths from a typed intent to a committed `cad_model` work product
+(all record into the twin as loadable, dashboard-visible geometry):
+
+| Path | Command | When |
+|---|---|---|
+| **Deterministic assembly** (no LLM) | `forge cad build <spec.json> [--project-id <id>]` | Reliable, repeatable multi-part geometry from a declarative spec — the recommended path for complex assemblies |
+| **Agent-driven** | `forge chat --project <id>` then ask it to build the part | Exploratory / conversational authoring; needs a live LLM. The agent drives the FreeCAD tools and commits by reference |
+| **Single primitive** | `forge design "<goal>" --project-id <id>` | A quick one-shot primitive via the gated design flow |
+
+The declarative spec for `cad build` is a JSON object `{name, parts:[…], project_id?}`
+where each part is a `box`/`cylinder`/`cone`/`sphere` with `parameters`, and
+optional `position`, `holes`, `fillet`, and `chamfer`. See
+[`examples/cad/`](https://github.com/FidelOdok/MetaForge/tree/main/examples/cad)
+for the full Pan-Tilt Gimbal reference (base, yaw, pitch).
 
 #### Slash commands (interactive)
 
