@@ -307,6 +307,13 @@ class ForgeClient:
     # Harness runs (MET-548) — served at /v1/runs (no /api prefix)
     # ------------------------------------------------------------------
 
+    def create_project(self, name: str) -> dict[str, Any]:
+        """Create a project via ``POST /v1/projects``."""
+        with self._client() as client:
+            resp = client.post("/v1/projects", json={"name": name})
+            resp.raise_for_status()
+            return resp.json()
+
     def create_run(
         self, request: dict[str, Any] | None = None, *, start: bool = True
     ) -> dict[str, Any]:
