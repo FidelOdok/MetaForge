@@ -111,6 +111,7 @@ def _launch_flow(run_id: str) -> None:
         SimulationHandler,
     )
     from api_gateway.runs.mfg_handlers import GoalDrivenManufacturingHandler
+    from api_gateway.runs.req_handlers import GoalDrivenRequirementsHandler
     from api_gateway.runs.vv_handlers import GoalDrivenVVHandler
     from api_gateway.twin.bom_recorder import make_bom_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
@@ -146,6 +147,7 @@ def _launch_flow(run_id: str) -> None:
         # verdict + test_plan, no false compliance). Remaining phases stay native
         # (backstop covers their decisions).
         handlers = {
+            "requirements": GoalDrivenRequirementsHandler(bridge, doc_recorder),
             "design": GoalDrivenMechanicalHandler(bridge, recorder),
             "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
             "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),
