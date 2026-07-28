@@ -103,7 +103,6 @@ def _launch_flow(run_id: str) -> None:
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
     from api_gateway.runs.gate_eval import ProjectGateEvaluator
-    from api_gateway.runs.vv_handlers import GoalDrivenVVHandler
     from api_gateway.runs.mech_handlers import (
         GoalDrivenMechanicalHandler,
         HybridBrain,
@@ -111,6 +110,7 @@ def _launch_flow(run_id: str) -> None:
         RequirementsHandler,
         SimulationHandler,
     )
+    from api_gateway.runs.vv_handlers import GoalDrivenVVHandler
     from api_gateway.twin.bom_recorder import make_bom_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
