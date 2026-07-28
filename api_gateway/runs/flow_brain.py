@@ -126,4 +126,28 @@ class ReActPhaseBrain:
         )
         # run_chat_turn returns a fallback sentence when the loop doesn't converge.
         status = "exhausted" if summary.startswith("I couldn't converge") else "completed"
+        await self._backstop_decision(phase, context, summary)
         return PhaseOutcome(summary=summary, artifacts=[], status=status)
+
+    async def _backstop_decision(self, phase: Phase, context: FlowContext, summary: str) -> None:
+        """Guarantee a phase's ``design_decision`` deliverable.
+
+        A native phase sometimes ends without recording a decision (e.g. an
+        electronics phase runs ERC checks but never records the design). Record
+        the phase summary as a decision so the deliverable can't be silently
+        skipped — an extra summary ADR is harmless, and it strengthens the
+        digital thread. Best-effort: never fails the phase.
+        """
+        if "design_decision" not in phase.required_deliverables or self._bridge is None:
+            return
+        try:
+            args: dict[str, str] = {
+                "title": f"{phase.title} — phase summary",
+                "rationale": summary,
+            }
+            if context.project_id:
+                args["project_id"] = context.project_id
+            await self._bridge.invoke("twin.record_decision", args)
+            logger.info("phase_decision_backstop_recorded", phase=phase.id)
+        except Exception as exc:  # noqa: BLE001 - backstop must never break the phase
+            logger.warning("phase_decision_backstop_failed", phase=phase.id, error=str(exc))
