@@ -646,32 +646,40 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Commit Authored Geometry",
                 description=(
-                    "Persist CAD geometry authored over MCP (the base64 STEP from "
-                    "freecad.export_model) as a CAD_MODEL work product: stores the "
-                    "blob in MinIO, creates a twin node, and links it to a project "
-                    "so it renders in the 3D viewer. Call after authoring a part to "
-                    "make it durable and visible."
+                    "Persist CAD geometry authored over MCP as a CAD_MODEL work "
+                    "product: stores the STEP blob in MinIO, creates a twin node, "
+                    "and links it to a project so it renders in the 3D viewer. "
+                    "PREFER commit-by-reference: after freecad.export_model, call "
+                    "this with the SAME session_id and obj_id (plus name) and the "
+                    "server fills the STEP itself — you do NOT need to copy the "
+                    "large base64 string. (Passing step_base64 directly also works.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "step_base64": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Base64 STEP bytes from freecad.export_model.",
-                        },
                         "name": {
                             "type": "string",
                             "minLength": 1,
                             "description": "Display name for the work product.",
                         },
+                        "session_id": {
+                            "type": "string",
+                            "description": "freecad session id (with obj_id: commit by reference).",
+                        },
+                        "obj_id": {
+                            "type": "string",
+                            "description": "exported obj_id (with session_id: by reference).",
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
-                        "session_id": {"type": "string", "description": "Originating session id."},
+                        "step_base64": {
+                            "type": "string",
+                            "description": "Base64 STEP (optional if session_id + obj_id given).",
+                        },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
                     },
-                    "required": ["step_base64", "name"],
+                    "required": ["name"],
                 },
                 output_schema={
                     "type": "object",
@@ -693,7 +701,10 @@ class TwinServer(McpToolServer):
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
         if not step_base64 or not isinstance(step_base64, str):
-            raise ValueError("twin.commit_geometry: 'step_base64' is required (non-empty string)")
+            raise ValueError(
+                "twin.commit_geometry: no geometry to commit — call freecad.export_model "
+                "first, then commit with the same session_id + obj_id (or pass step_base64)."
+            )
         if not name or not isinstance(name, str):
             raise ValueError("twin.commit_geometry: 'name' is required (non-empty string)")
         project_id = arguments.get("project_id")

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -92,6 +93,55 @@ Full tool catalog and Phase-1 limits: \
 https://github.com/FidelOdok/MetaForge/blob/main/docs/capability-matrix.md"""
 
 
+class GeometryStash:
+    """Commit-by-reference for authored CAD (MET-10).
+
+    An agent authors geometry over MCP, calls ``freecad.export_model`` (which
+    returns a multi-KB base64 STEP), then must call ``twin.commit_geometry`` with
+    that blob — but agents can't reliably thread a large value between tool calls,
+    so the commit arrives with an empty ``step_base64`` and fails. The design flow
+    avoids this by keeping the blob in Python; agents have no equivalent.
+
+    This stash lets the sidecar remember each export's STEP keyed by
+    ``(session_id, obj_id)``, so ``twin.commit_geometry`` can be called *by
+    reference* — with just those small ids — and have the blob filled in
+    server-side. Bounded LRU so it never grows unbounded.
+    """
+
+    def __init__(self, max_entries: int = 32) -> None:
+        self._cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+        self._max = max_entries
+
+    def remember(self, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+        """Cache the STEP from a freecad.export_model result."""
+        if not isinstance(result, dict):
+            return
+        sid, oid = arguments.get("session_id"), arguments.get("obj_id")
+        blob = result.get("step_base64")
+        if sid and oid and isinstance(blob, str) and blob:
+            key = (str(sid), str(oid))
+            self._cache[key] = blob
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._max:
+                self._cache.popitem(last=False)
+
+    def fill(self, arguments: dict[str, Any]) -> bool:
+        """Fill a commit_geometry call's ``step_base64`` from a prior export.
+
+        Explicit ``step_base64`` always wins. Returns True if a blob was injected.
+        """
+        if arguments.get("step_base64"):
+            return False
+        sid, oid = arguments.get("session_id"), arguments.get("obj_id")
+        if not (sid and oid):
+            return False
+        blob = self._cache.get((str(sid), str(oid)))
+        if blob:
+            arguments["step_base64"] = blob
+            return True
+        return False
+
+
 class UnifiedMcpServer:
     """Holds a set of ``McpToolServer`` adapters and dispatches across them.
 
@@ -113,6 +163,9 @@ class UnifiedMcpServer:
         # MET-496: when set, every tool call is recorded into the agent
         # session store as an action/error event. None = capture off.
         self._capture = session_capture
+        # Commit-by-reference stash: remembers freecad.export_model STEP output so
+        # twin.commit_geometry can be called with just (session_id, obj_id).
+        self._geom_stash = GeometryStash()
         # tool_id → adapter (built once at construction; tool sets are
         # static after each adapter's ``__init__``).
         self._tool_index: dict[str, McpToolServer] = {}
@@ -407,6 +460,14 @@ class UnifiedMcpServer:
         if adapter is None:
             raise ToolNotFoundError(tool_id)
 
+        # Commit-by-reference: fill a commit_geometry call's step_base64 from the
+        # last export for this (session_id, obj_id) so agents needn't thread the
+        # blob. Explicit step_base64 always wins.
+        if tool_id == "twin.commit_geometry":
+            args = params.get("arguments")
+            if isinstance(args, dict) and self._geom_stash.fill(args):
+                logger.info("geometry_commit_by_reference", obj_id=args.get("obj_id"))
+
         # Delegate to the adapter's own JSON-RPC dispatcher so its
         # per-tool error handling, timing, and structlog records all
         # apply unchanged.
@@ -432,7 +493,13 @@ class UnifiedMcpServer:
                 data.get("details") or err.get("message", "Tool execution failed"),
                 float(data.get("duration_ms", 0.0)),
             )
-        return sub_response.get("result", {})
+        result = sub_response.get("result", {})
+        # Remember an export's STEP so a later commit can reference it (see above).
+        if tool_id == "freecad.export_model":
+            args = params.get("arguments")
+            if isinstance(args, dict) and isinstance(result, dict):
+                self._geom_stash.remember(args, result)
+        return result
 
     async def _health_check(self) -> dict[str, Any]:
         """Aggregate health across every adapter into one report."""
