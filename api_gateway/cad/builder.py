@@ -114,6 +114,20 @@ async def build_assembly(
         # primitives can't use fastener_hole (needs a PartDesign body), so we cut.
         obj_id = await _drill_holes(invoke, sid, obj_id, part)
 
+        # Round the part's edges if requested (before placement).
+        fillet = part.get("fillet")
+        if fillet:
+            rounded = await invoke(
+                "freecad.fillet",
+                {
+                    "session_id": sid,
+                    "obj_id": obj_id,
+                    "radius": float(fillet),
+                    "name": part["name"],
+                },
+            )
+            obj_id = rounded.get("obj_id") or obj_id
+
         position = part.get("position")
         if position:
             await invoke(

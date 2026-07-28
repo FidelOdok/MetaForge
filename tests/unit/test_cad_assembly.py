@@ -32,6 +32,9 @@ class _Bridge:
         if tool == "freecad.boolean":
             self._n += 1
             return {"status": "ok", "data": {"obj_id": f"solid_{self._n}"}}
+        if tool == "freecad.fillet":
+            self._n += 1
+            return {"status": "ok", "data": {"obj_id": f"filleted_{self._n}"}}
         if tool == "freecad.create_assembly":
             return {"status": "ok", "data": {"obj_id": "assembly_9"}}
         if tool == "freecad.add_part_to_assembly":
@@ -108,6 +111,24 @@ async def test_build_assembly_drills_holes_via_boolean() -> None:
     assert bridge.calls.count("freecad.create_primitive") == 3
     # one boolean subtract per hole
     assert bridge.calls.count("freecad.boolean") == 2
+
+
+@pytest.mark.asyncio
+async def test_build_assembly_fillets_part_when_requested() -> None:
+    async def recorder(**kwargs: Any) -> dict[str, Any]:
+        return {"node_id": "n1"}
+
+    bridge = _Bridge()
+    parts = [
+        {
+            "name": "Rounded Block",
+            "kind": "box",
+            "parameters": {"width": 40, "length": 40, "height": 10},
+            "fillet": 3,
+        }
+    ]
+    await build_assembly(bridge=bridge, recorder=recorder, name="Block", parts=parts)
+    assert bridge.calls.count("freecad.fillet") == 1
 
 
 @pytest.mark.asyncio
