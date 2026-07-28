@@ -475,6 +475,7 @@ async def build_unified_server(
     agent_session_store: Any = None,
     capture_sessions: bool = False,
     decision_recorder: Any = None,
+    geometry_recorder: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -511,6 +512,7 @@ async def build_unified_server(
         twin_allow_mutations=twin_allow_mutations,
         agent_session_store=agent_session_store,
         decision_recorder=decision_recorder,
+        geometry_recorder=geometry_recorder,
     )
     capture = (
         SessionCapture(agent_session_store)

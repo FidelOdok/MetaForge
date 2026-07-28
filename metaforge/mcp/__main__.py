@@ -928,6 +928,17 @@ async def _bootstrap(
         decision_recorder = make_decision_recorder(twin, project_backend)
     except Exception as exc:  # noqa: BLE001 — degrade; record_decision just absent
         logger.warning("mcp_decision_recorder_init_failed", error=str(exc))
+    # MET-529: mirror the decision recorder so twin.commit_geometry works over
+    # the sidecar too — without it, agents/chat that author CAD over MCP get
+    # "Tool execution failed" (the recorder is None). MinIO is configured in the
+    # sidecar env, so authored STEP persists to the shared bucket.
+    geometry_recorder = None
+    try:
+        from api_gateway.twin.geometry_recorder import make_geometry_recorder
+
+        geometry_recorder = make_geometry_recorder(twin, project_backend)
+    except Exception as exc:  # noqa: BLE001 — degrade; commit_geometry just absent
+        logger.warning("mcp_geometry_recorder_init_failed", error=str(exc))
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -940,6 +951,7 @@ async def _bootstrap(
         agent_session_store=agent_session_store,
         capture_sessions=getattr(args, "capture_sessions", False),
         decision_recorder=decision_recorder,
+        geometry_recorder=geometry_recorder,
     )
     return server, twin, knowledge_service, memory_store, insight_store
 
