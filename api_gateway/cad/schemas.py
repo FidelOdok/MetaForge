@@ -66,3 +66,25 @@ class AssemblyResponse(BaseModel):
     minio_object_key: str | None = None
     content_hash: str | None = None
     part_count: int
+
+
+class FromTextRequest(BaseModel):
+    """Compile a plain-English description into an assembly, then build it."""
+
+    description: str = Field(
+        ..., min_length=1, description="Plain-English description of the part/assembly."
+    )
+    name: str | None = Field(
+        default=None, description="Override the assembly name (else the model chooses one)."
+    )
+    project_id: str | None = Field(default=None, description="Project to scope the cad_model to.")
+    provider: str | None = Field(default=None, description="LLM provider override for translation.")
+    model: str | None = Field(default=None, description="LLM model override for translation.")
+
+
+class FromTextResponse(AssemblyResponse):
+    """The built assembly plus the spec the model generated (for review)."""
+
+    spec: CreateAssemblyRequest = Field(
+        ..., description="The declarative spec compiled from the description."
+    )
