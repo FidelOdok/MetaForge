@@ -11,6 +11,7 @@ from typing import Any
 import structlog
 
 from mcp_core.schemas import ToolCallRequest
+from skill_registry.geometry_stash import GeometryStash
 from skill_registry.mcp_bridge import McpBridge, McpToolError
 from tool_registry.registry import ToolRegistry
 
@@ -33,6 +34,10 @@ class RegistryMcpBridge(McpBridge):
 
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
+        # Commit-by-reference: remember freecad.export_model STEP so
+        # twin.commit_geometry can be called with just (session_id, obj_id).
+        # This is the gateway chat's dispatch seam (mirrors the sidecar's stash).
+        self._geom_stash = GeometryStash()
 
     async def invoke(
         self,
@@ -49,6 +54,10 @@ class RegistryMcpBridge(McpBridge):
         if client is None:
             raise McpToolError(tool_id, f"No MCP client for adapter '{adapter_id}'")
 
+        # Fill a commit-by-reference geometry commit from the last export.
+        if tool_id == "twin.commit_geometry":
+            self._geom_stash.fill(params)
+
         request = ToolCallRequest(
             tool_id=tool_id,
             arguments=params,
@@ -62,6 +71,10 @@ class RegistryMcpBridge(McpBridge):
 
         if result.status != "success":
             raise McpToolError(tool_id, f"Tool returned status: {result.status}")
+
+        # Remember an export's STEP so a later commit can reference it.
+        if tool_id == "freecad.export_model" and isinstance(result.data, dict):
+            self._geom_stash.remember(params, result.data)
 
         return result.data
 
