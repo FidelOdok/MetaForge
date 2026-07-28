@@ -133,14 +133,18 @@ def score_electronics(base: str, project_id: str, goal: str) -> dict:
         text_parts.append(str(node.get("name") or ""))
         text_parts.extend(str(v) for v in props.values() if isinstance(v, str))
 
+    text = " ".join(text_parts)
     checks = evaluate_electronics(
-        decision_text=" ".join(text_parts),
+        decision_text=text,
         artifact_types=artifact_types,
         goal=goal,
     )
+    from rubric_common import goal_traceable
+
     return {
         "score": electronics_score(checks),
         "checks": checks,
+        "goal_traceable": goal_traceable(text, goal),
         "artifact_types": sorted(artifact_types),
         "n_decisions": len(decisions),
     }

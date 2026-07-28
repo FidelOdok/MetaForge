@@ -123,9 +123,12 @@ def score_firmware(base: str, project_id: str, goal: str) -> dict:
         artifact_types=artifact_types,
         goal=goal,
     )
+    from rubric_common import goal_traceable
+
     return {
         "score": firmware_score(checks),
         "checks": checks,
+        "goal_traceable": goal_traceable(text, goal),
         "artifact_types": sorted(artifact_types),
         "n_firmware_decisions": len(fw_text),
     }

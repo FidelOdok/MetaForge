@@ -1,0 +1,47 @@
+{
+  "id": "l2_logger",
+  "level": 2,
+  "title": "Environmental data logger (different device, dual-bus, larger board)",
+  "flow": "hardware_v1",
+  "rubric": ["electronics", "firmware"],
+  "goal": "A compact environmental data logger: a BME280 temperature/humidity/pressure sensor on I2C, a microSD card on SPI for storage, powered by a 3.3 V LDO from a 5 V USB input, with a coin-cell-backed RTC. Board must fit within 40 x 30 mm and have two mounting holes.",
+  "definition_of_done": {
+    "requirements": [
+      "interfaces stated (I2C for sensor, SPI for microSD)",
+      "input/output voltages quantified (5 V in, 3.3 V rail)",
+      "board size constraint stated (40 x 30 mm)"
+    ],
+    "architecture": [
+      "subsystems identified (sense, storage, power, timekeeping)",
+      "power budget noted"
+    ],
+    "design": [
+      "board outline / mechanical envelope authored and committed",
+      "mounting-hole placement chosen"
+    ],
+    "electronics": [
+      "schematic topology defined (BME280 + microSD + LDO + RTC)",
+      "key components selected for THIS product (not an IMU breakout)",
+      "power budget closed"
+    ],
+    "firmware": [
+      "BME280 I2C read + microSD SPI write approach noted",
+      "pin map covering both buses"
+    ],
+    "simulation": [
+      "ERC/DRC or a design check noted",
+      "verdict recorded"
+    ],
+    "manufacturing": [
+      "BOM with the key parts",
+      "assembly / bring-up note"
+    ]
+  },
+  "expected_deliverables": {
+    "design_decision": 3,
+    "cad_model": 1,
+    "bom": 1,
+    "pinmap": 1,
+    "firmware_source": 1
+  }
+}
