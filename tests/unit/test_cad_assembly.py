@@ -29,6 +29,9 @@ class _Bridge:
             return {"status": "ok", "data": {"obj_id": f"primitive_{self._n}"}}
         if tool == "freecad.transform_object":
             return {"status": "ok", "data": {}}
+        if tool == "freecad.boolean":
+            self._n += 1
+            return {"status": "ok", "data": {"obj_id": f"solid_{self._n}"}}
         if tool == "freecad.create_assembly":
             return {"status": "ok", "data": {"obj_id": "assembly_9"}}
         if tool == "freecad.add_part_to_assembly":
@@ -80,6 +83,31 @@ async def test_build_assembly_authors_all_parts_and_commits() -> None:
     assert recorded["step_base64"] == "U1RFUA=="
     assert recorded["name"] == "Gimbal Base"
     assert recorded["extra_metadata"]["part_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_build_assembly_drills_holes_via_boolean() -> None:
+    async def recorder(**kwargs: Any) -> dict[str, Any]:
+        return {"node_id": "n1"}
+
+    bridge = _Bridge()
+    parts = [
+        {
+            "name": "Mount Plate",
+            "kind": "box",
+            "parameters": {"width": 40, "length": 40, "height": 6},
+            "holes": [
+                {"x": 5, "y": 5, "diameter": 3.4},
+                {"x": 35, "y": 35, "diameter": 3.4},
+            ],
+        }
+    ]
+    await build_assembly(bridge=bridge, recorder=recorder, name="Plate", parts=parts)
+
+    # one primitive for the plate + one cutter cylinder per hole = 3 primitives
+    assert bridge.calls.count("freecad.create_primitive") == 3
+    # one boolean subtract per hole
+    assert bridge.calls.count("freecad.boolean") == 2
 
 
 @pytest.mark.asyncio

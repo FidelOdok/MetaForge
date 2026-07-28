@@ -27,6 +27,54 @@ def _data(envelope: Any, tool: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _part_height(part: dict[str, Any]) -> float:
+    """Best-effort part thickness (mm) for sizing a through-hole cutter."""
+    params = part.get("parameters") or {}
+    for key in ("height", "length", "width"):
+        v = params.get(key)
+        if isinstance(v, (int, float)) and v > 0:
+            return float(v)
+    return 20.0
+
+
+async def _drill_holes(invoke: Any, sid: str, obj_id: str, part: dict[str, Any]) -> str:
+    """Subtract a cutter cylinder per hole; return the resulting solid's obj_id."""
+    holes = part.get("holes") or []
+    height = _part_height(part)
+    for i, hole in enumerate(holes):
+        diameter = float(hole["diameter"])
+        depth = hole.get("depth")
+        # Through-hole: overshoot both faces. Blind: from the top face down.
+        cutter_h = (float(depth) if depth else height) + 2.0
+        z0 = (height - float(depth)) if depth else -1.0
+        cutter = await invoke(
+            "freecad.create_primitive",
+            {
+                "session_id": sid,
+                "kind": "cylinder",
+                "name": f"{part['name']} hole {i + 1}",
+                "parameters": {"radius": diameter / 2.0, "height": cutter_h},
+            },
+        )
+        cutter_id = cutter.get("obj_id")
+        await invoke(
+            "freecad.transform_object",
+            {"session_id": sid, "obj_id": cutter_id, "position": [hole["x"], hole["y"], z0]},
+        )
+        cut = await invoke(
+            "freecad.boolean",
+            {
+                "session_id": sid,
+                "obj_a": obj_id,
+                "obj_b": cutter_id,
+                "operation": "subtract",
+                "name": part["name"],
+            },
+        )
+        obj_id = cut.get("obj_id") or obj_id
+    return obj_id
+
+
 async def build_assembly(
     *,
     bridge: Any,
@@ -60,6 +108,12 @@ async def build_assembly(
         obj_id = prim.get("obj_id")
         if not obj_id:
             raise RuntimeError(f"create_primitive returned no obj_id for {part['name']!r}")
+
+        # Drill holes in the part's LOCAL frame (before it's placed in the
+        # assembly): a cutter cylinder per hole, boolean-subtracted. Plain
+        # primitives can't use fastener_hole (needs a PartDesign body), so we cut.
+        obj_id = await _drill_holes(invoke, sid, obj_id, part)
+
         position = part.get("position")
         if position:
             await invoke(

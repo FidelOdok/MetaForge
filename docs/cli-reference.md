@@ -447,7 +447,16 @@ primitive:
 ```
 
 `kind` is one of `box` / `cylinder` / `cone` / `sphere`; `position` is an optional
-`[x, y, z]` in mm. Under the hood it drives the FreeCAD tools
+`[x, y, z]` in mm. A part may also carry `holes` — mounting/fastener holes drilled
+into it (a boolean subtract, so no PartDesign body is needed):
+
+```json
+{"name": "Mount Plate", "kind": "box", "parameters": {"width": 50, "length": 50, "height": 5},
+ "holes": [{"x": 6, "y": 6, "diameter": 3.4}, {"x": 44, "y": 44, "diameter": 3.4}]}
+```
+
+Each hole has `x`, `y` (centre in the part's local frame), `diameter`, and an
+optional `depth` (through-hole if omitted). Under the hood it drives the FreeCAD tools
 (`create_primitive → create_assembly → add_part_to_assembly → export_model`) and
 commits via the geometry recorder — the reliable, blob-in-Python path that needs
 no LLM. Prints the committed node id and its viewer URL.

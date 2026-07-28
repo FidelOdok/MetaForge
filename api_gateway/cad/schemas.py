@@ -9,6 +9,17 @@ from pydantic import BaseModel, Field
 _Kind = Literal["box", "cylinder", "cone", "sphere"]
 
 
+class Hole(BaseModel):
+    """A mounting/fastener hole drilled into a part (local part frame, mm)."""
+
+    x: float = Field(..., description="Hole centre X in the part's local frame (mm).")
+    y: float = Field(..., description="Hole centre Y in the part's local frame (mm).")
+    diameter: float = Field(..., gt=0, description="Hole diameter (mm).")
+    depth: float | None = Field(
+        default=None, description="Depth from the top face (mm); through-hole if omitted."
+    )
+
+
 class AssemblyPart(BaseModel):
     """One primitive component of an assembly."""
 
@@ -19,6 +30,9 @@ class AssemblyPart(BaseModel):
     )
     position: list[float] | None = Field(
         default=None, description="Optional [x, y, z] placement in mm."
+    )
+    holes: list[Hole] = Field(
+        default_factory=list, description="Mounting/fastener holes drilled into the part."
     )
 
 
