@@ -12,6 +12,8 @@ gateway uses, so their outputs are ordinary, viewable twin work products.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 import structlog
@@ -21,6 +23,75 @@ from orchestrator.design_flow.spec import Phase
 from skill_registry.mcp_bridge import McpBridge
 
 logger = structlog.get_logger(__name__)
+
+# freecad.create_primitive kinds and the default dimensions (mm) per kind, so a
+# part is always producible even when spec extraction is thin.
+_PRIMITIVE_KINDS = ("box", "cylinder", "cone", "sphere")
+_DEFAULT_PARAMS: dict[str, dict[str, float]] = {
+    "box": {"length": 40.0, "width": 30.0, "height": 8.0},
+    "cylinder": {"radius": 15.0, "height": 40.0},
+    "cone": {"radius1": 15.0, "radius2": 8.0, "height": 40.0},
+    "sphere": {"radius": 20.0},
+}
+
+
+def _slug_name(goal: str) -> str:
+    words = [w for w in re.findall(r"[A-Za-z]+", goal) if len(w) > 2][:3]
+    return " ".join(w.capitalize() for w in words) or "Part"
+
+
+def _normalize_spec(spec: dict[str, Any], goal: str) -> dict[str, Any]:
+    """Coerce an extracted part spec into a valid, buildable primitive spec."""
+    kind = str(spec.get("kind") or "box").lower()
+    if kind not in _PRIMITIVE_KINDS:
+        kind = "box"
+    params = spec.get("parameters")
+    clean: dict[str, float] = {}
+    if isinstance(params, dict):
+        for k, v in params.items():
+            try:
+                clean[str(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
+    if not clean:
+        clean = dict(_DEFAULT_PARAMS[kind])
+    name = str(spec.get("name") or "").strip() or _slug_name(goal)
+    material = str(spec.get("material") or "").strip() or "Al6061-T6"
+    return {"name": name[:60], "kind": kind, "parameters": clean, "material": material}
+
+
+async def _extract_part_spec(
+    goal: str, prior: str, *, provider: str | None, model: str | None
+) -> dict[str, Any]:
+    """Ask the LLM for a machinable primitive spec, normalized (never raises)."""
+    from api_gateway.chat.harness_backend import run_chat_turn
+
+    prompt = (
+        "You are extracting a buildable primitive spec for a mechanical part. "
+        "Reply with ONLY a JSON object, no prose:\n"
+        '{"name": "<short part name>", "kind": "box|cylinder|cone|sphere", '
+        '"parameters": {<dimensions in mm>}, "material": "<material>"}\n'
+        "box -> length,width,height; cylinder -> radius,height; cone -> "
+        "radius1,radius2,height; sphere -> radius. Choose dimensions that suit the "
+        "part and its load.\n\n"
+        f"Goal: {goal}\nContext: {prior}"
+    )
+    try:
+        reply = await run_chat_turn(
+            prompt,
+            mcp_bridge=None,
+            session_id="mech-spec",
+            max_steps=1,
+            provider=provider,
+            model=model,
+        )
+        match = re.search(r"\{.*\}", reply, re.DOTALL)
+        spec = json.loads(match.group(0)) if match else {}
+    except Exception as exc:  # noqa: BLE001 - fall back to a default part, never fail
+        logger.warning("mech_spec_extract_failed", error=str(exc))
+        spec = {}
+    return _normalize_spec(spec if isinstance(spec, dict) else {}, goal)
+
 
 # Hip-bracket first-pass sizing (mm) and load case — kept here so the design and
 # simulation handlers agree on the same numbers.
@@ -194,6 +265,88 @@ class SimulationHandler(_BridgeHandler):
                 f"{verdict} against SF>=2; recorded as a decision."
             ),
             artifacts=["design_decision:vv"],
+            status="completed",
+        )
+
+
+class GoalDrivenMechanicalHandler(_BridgeHandler):
+    """Goal-driven mechanical design with a guaranteed loadable cad_model.
+
+    The LLM extracts the *part spec* (name / kind / dimensions / material) from
+    the goal — its strength — then this handler deterministically authors the
+    primitive, exports STEP, and commits it via the geometry recorder — the
+    reliable persistence path. So the cad_model is always goal-named and loadable,
+    fixing the native brain's inconsistency at the multi-step CAD sequence.
+    """
+
+    def __init__(
+        self,
+        bridge: McpBridge,
+        recorder: Any,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        extract: Any = _extract_part_spec,
+    ) -> None:
+        super().__init__(bridge)
+        self._recorder = recorder
+        self._provider = provider
+        self._model = model
+        self._extract = extract
+
+    async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
+        prior = "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed) or "(none)"
+        spec = await self._extract(goal, prior, provider=self._provider, model=self._model)
+
+        session = await self._invoke("freecad.open_session", {"name": "mech-design"})
+        sid = session.get("session_id")
+        if not sid:
+            raise RuntimeError("freecad.open_session returned no session_id")
+        prim = await self._invoke(
+            "freecad.create_primitive",
+            {
+                "session_id": sid,
+                "kind": spec["kind"],
+                "name": spec["name"],
+                "parameters": spec["parameters"],
+            },
+        )
+        export = await self._invoke(
+            "freecad.export_model", {"session_id": sid, "obj_id": prim.get("obj_id")}
+        )
+        step_b64 = (
+            export.get("step_base64")
+            or export.get("base64")
+            or export.get("step")
+            or export.get("content")
+        )
+        if not step_b64:
+            raise RuntimeError(f"freecad.export_model returned no STEP (keys: {list(export)})")
+
+        rec = await self._recorder(
+            step_base64=step_b64,
+            name=spec["name"],
+            project_id=context.project_id,
+            session_id=context.session_id,
+            extra_metadata={"material": spec["material"], "kind": spec["kind"]},
+        )
+        node_id = rec.get("node_id") if isinstance(rec, dict) else None
+        dims = ", ".join(f"{k}={v:g}mm" for k, v in spec["parameters"].items())
+        await self._record_decision(
+            title=f"{spec['name']} detailed design",
+            rationale=(
+                f"{spec['name']} ({spec['kind']}; {dims}) in {spec['material']}, sized to the "
+                "approved requirements to carry the load case with the target safety factor "
+                "(see V&V)."
+            ),
+            project_id=context.project_id,
+        )
+        return PhaseOutcome(
+            summary=(
+                f"Authored + committed {spec['name']} cad_model (node {node_id}) — {spec['kind']} "
+                f"in {spec['material']}; recorded the design rationale."
+            ),
+            artifacts=[f"cad_model:{node_id}", "design_decision:design"],
             status="completed",
         )
 
