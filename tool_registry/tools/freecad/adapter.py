@@ -946,6 +946,22 @@ class FreecadServer(McpToolServer):
                 self.fillet,
             ),
             (
+                "chamfer",
+                "Bevel every edge of a session solid by a distance (Part.makeChamfer) -> new "
+                "solid. Works on plain primitives (no PartDesign body needed)",
+                "cad_chamfer",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "obj_id": {"type": "string", "description": "Solid to bevel."},
+                        "distance": {"type": "number", "description": "Chamfer distance (mm)."},
+                        "name": {"type": "string"},
+                    },
+                    ["session_id", "obj_id", "distance"],
+                ),
+                self.chamfer,
+            ),
+            (
                 "create_assembly",
                 "Create an assembly container to group parts in a session",
                 "cad_assembly",
@@ -1493,6 +1509,17 @@ class FreecadServer(McpToolServer):
         feature = self._ops.fillet_session(session.document, obj, radius)
         new_id = self._sessions.register_object(session_id, feature, "solid", name or "filleted")
         return {"obj_id": new_id, "radius": radius, **self._ops.shape_props(feature)}
+
+    async def chamfer(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        obj_id = self._require(arguments, "obj_id")
+        distance = float(self._require(arguments, "distance"))
+        name = arguments.get("name")
+        session = self._sessions.get(session_id)
+        obj = self._sessions.get_object(session_id, obj_id)
+        feature = self._ops.chamfer_session(session.document, obj, distance)
+        new_id = self._sessions.register_object(session_id, feature, "solid", name or "chamfered")
+        return {"obj_id": new_id, "distance": distance, **self._ops.shape_props(feature)}
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

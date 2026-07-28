@@ -1512,6 +1512,23 @@ class FreecadOperations:
         document.recompute()
         return feature
 
+    def chamfer_session(self, document: Any, obj: Any, distance: float) -> Any:
+        """Bevel every edge of a session solid by ``distance`` (Part.makeChamfer).
+
+        Plain-``Part`` analog of ``chamfer_edges`` (which needs a PartDesign body),
+        so it works on ``create_primitive`` parts. Returns a new ``Part::Feature``.
+        """
+        self._require_freecad()
+        shape = obj.Shape
+        edges = shape.Edges
+        if not edges:
+            raise ValueError("chamfer: solid has no edges to bevel")
+        result = shape.makeChamfer(distance, edges)
+        feature = document.addObject("Part::Feature", "Chamfer")
+        feature.Shape = result
+        document.recompute()
+        return feature
+
     def create_assembly(self, document: Any, name: str = "Assembly") -> Any:
         """Create an assembly container (an ``App::Part``) to group parts."""
         self._require_freecad()
