@@ -15,6 +15,7 @@ persistence lands in Phase 4. Domain errors map to clean HTTP status:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -101,6 +102,7 @@ def _launch_flow(run_id: str) -> None:
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.gate_eval import ProjectGateEvaluator
     from api_gateway.runs.mech_handlers import (
+        GoalDrivenMechanicalHandler,
         HybridBrain,
         MechanicalDesignHandler,
         RequirementsHandler,
@@ -113,21 +115,22 @@ def _launch_flow(run_id: str) -> None:
     project_backend = get_project_backend()
     recorder = make_geometry_recorder(get_twin(), project_backend)
     react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
-    # The deterministic mechanical handlers are tuned to the quadruped demo
-    # vertical (design_v1). For the general hardware/robotics lifecycle every
-    # phase is driven by the shared native tool-calling brain (one brain, any
-    # discipline); design_v1 keeps the deterministic handlers for reliable
-    # geometry.
+    # Per-flow brain routing:
+    #  - design_v1: deterministic quadruped-demo handlers (reliable, hardcoded).
+    #  - mech_v1:   goal-driven hybrid — the LLM specs the part, a deterministic
+    #               step authors+commits it so the cad_model is always loadable.
+    #  - others (hardware_v1, …): the native brain drives every phase.
     flow_id = _store.get(run_id).request.get("flow")
-    handlers = (
-        {
+    if flow_id == "design_v1":
+        handlers: dict[str, Any] = {
             "requirements": RequirementsHandler(bridge),
             "design": MechanicalDesignHandler(bridge, recorder),
             "simulation": SimulationHandler(bridge),
         }
-        if flow_id == "design_v1"
-        else {}
-    )
+    elif flow_id == "mech_v1":
+        handlers = {"design": GoalDrivenMechanicalHandler(bridge, recorder)}
+    else:
+        handlers = {}
     hybrid = HybridBrain(handlers=handlers, fallback=react)
     executor = DesignFlowExecutor(
         store=_store,
