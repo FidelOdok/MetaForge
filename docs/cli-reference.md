@@ -420,6 +420,28 @@ When `--project-id` is omitted the command **auto-creates a project** named from
 the goal and scopes the run to it, so the deliverables show on the Projects page;
 pass `--project-id` to target an existing project instead.
 
+### `projects` — list, inspect, and delete projects
+
+```
+projects list [--json] [--status <status>]
+projects get <project_id> [--json]
+projects delete <project_id> [--yes]
+```
+
+```bash
+# See every project (or just the drafts)
+python -m cli.forge_cli projects list
+python -m cli.forge_cli projects list --status draft
+
+# Inspect one, then delete a stale draft
+python -m cli.forge_cli projects get <uuid>
+python -m cli.forge_cli projects delete <uuid> --yes
+```
+
+The Projects API surface (`/v1/projects`). `list` prints a table of id / name /
+status / work-product count (`--status` filters, e.g. to find `draft` projects to
+clean up); `delete` asks for confirmation unless `--yes` is passed.
+
 ### `runs` — drive harness runs directly
 
 ```

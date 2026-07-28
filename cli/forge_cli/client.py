@@ -314,6 +314,30 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def list_projects(self) -> dict[str, Any]:
+        """List projects via ``GET /v1/projects``."""
+        with self._client() as client:
+            resp = client.get("/v1/projects")
+            resp.raise_for_status()
+            return resp.json()
+
+    def get_project(self, project_id: str) -> dict[str, Any]:
+        """Fetch one project via ``GET /v1/projects/{id}``."""
+        with self._client() as client:
+            resp = client.get(f"/v1/projects/{project_id}")
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No project with id {project_id!r}")
+            resp.raise_for_status()
+            return resp.json()
+
+    def delete_project(self, project_id: str) -> None:
+        """Delete a project via ``DELETE /v1/projects/{id}``."""
+        with self._client() as client:
+            resp = client.delete(f"/v1/projects/{project_id}")
+            if resp.status_code == 404:
+                raise ForgeClientNotFound(f"No project with id {project_id!r}")
+            resp.raise_for_status()
+
     def create_run(
         self, request: dict[str, Any] | None = None, *, start: bool = True
     ) -> dict[str, Any]:
