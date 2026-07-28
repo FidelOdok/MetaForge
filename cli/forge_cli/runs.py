@@ -104,8 +104,13 @@ def _approval(args: argparse.Namespace, client: ForgeClient, decision: str) -> A
 
 def _watch(args: argparse.Namespace, client: ForgeClient) -> Any:
     print(f"Watching run {args.run_id} (Ctrl-C to stop)...")
+    _stream(client, args.run_id)
+    return None
+
+
+def _stream(client: ForgeClient, run_id: str) -> None:
     try:
-        for event in client.stream_run_events(args.run_id):
+        for event in client.stream_run_events(run_id):
             status = str(event.get("status", ""))
             detail = event.get("error") or event.get("approval_reason") or ""
             print(f"  {status:<18} {detail}")
@@ -115,4 +120,29 @@ def _watch(args: argparse.Namespace, client: ForgeClient) -> Any:
         print(f"Error: stream failed: {exc}", file=sys.stderr)
     except KeyboardInterrupt:
         print("\nStopped.")
+
+
+def handle_design(args: argparse.Namespace, client: ForgeClient) -> Any:
+    """`forge design <goal>` — start a gated design flow (a friendly `runs create`).
+
+    Wraps the verbose ``runs create --request-json '{...flow...}'`` in a first-class
+    command: it builds the design-flow request, starts it, prints the run id, and
+    (by default) streams the phase/gate transitions live.
+    """
+    request: dict[str, Any] = {"goal": args.goal, "flow": args.flow}
+    if args.project_id:
+        request["project_id"] = args.project_id
+    try:
+        run = client.create_run(request, start=not args.no_start)
+    except ForgeClientError as exc:
+        print(f"Error: failed to start design flow: {exc}", file=sys.stderr)
+        return None
+
+    run_id = run.get("id", "")
+    print(f"Started {args.flow} design flow: run {run_id}")
+    print("Approve each gate with:  forge runs approve " + run_id)
+    if args.no_start or args.no_watch:
+        return None
+    print(f"\nWatching {run_id} (Ctrl-C to stop)...")
+    _stream(client, run_id)
     return None

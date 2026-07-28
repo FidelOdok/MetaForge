@@ -31,7 +31,7 @@ from cli.forge_cli.knowledge import register_subparser as register_knowledge_sub
 from cli.forge_cli.memory import handle_memory
 from cli.forge_cli.memory import register_subparser as register_memory_subparser
 from cli.forge_cli.routines import handle_routine
-from cli.forge_cli.runs import handle_runs
+from cli.forge_cli.runs import handle_design, handle_runs
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
 
@@ -126,6 +126,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
     runs_watch.add_argument("run_id", help="Run id")
+
+    # -- design (friendly wrapper over `runs create` for a gated flow) -----
+    design_parser = subparsers.add_parser(
+        "design", help="Start a gated design flow for a product goal"
+    )
+    design_parser.add_argument("goal", help="What to design (e.g. 'an I2C IMU breakout board')")
+    design_parser.add_argument(
+        "--flow",
+        default="hardware_v1",
+        choices=["hardware_v1", "mech_v1", "design_v1"],
+        help="Design flow to run (default: hardware_v1)",
+    )
+    design_parser.add_argument("--project-id", default=None, help="Scope the run to a project")
+    design_parser.add_argument("--no-start", action="store_true", help="Create but don't start")
+    design_parser.add_argument("--no-watch", action="store_true", help="Don't stream transitions")
 
     # -- chat --------------------------------------------------------------
     chat_parser = subparsers.add_parser(
@@ -353,6 +368,7 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "design": handle_design,
     "chat": handle_chat,
     "routine": handle_routine,
     "config": handle_config,
