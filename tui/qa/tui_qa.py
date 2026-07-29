@@ -312,6 +312,23 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
             f"reason={reason!r}, shown_on_screen={cause_shown}",
         )
 
+        # 4b. A completion event lost on reconnect must not wedge the chat. The
+        #     stub streams a reply but never sends `agent.done`; a fixed client
+        #     finalizes via the POST-resolve fallback (grace ~2.5s) — the reply
+        #     lands and the turn goes idle instead of hanging on "thinking".
+        prev = len(read_turns(log_path))
+        tui.type("__drop_done__ say hello")
+        tui.key("Enter")
+        turn = wait_for_new_turn(tui, log_path, prev, timeout=20)
+        recovered = not tui.wait_for("thinking", timeout=1)
+        shows_reply = "stub reply" in tui.capture()
+        tui.snap("after dropped agent.done")
+        rep.add(
+            "wedge_recovers_without_agent_done",
+            bool(turn) and recovered and shows_reply,
+            f"turn={_fmt(turn)}, not_thinking={recovered}, reply_shown={shows_reply}",
+        )
+
     # 5. Pane navigation: chat → runs (C-r) → twin (C-b) → chat (C-t).
     tui.key("C-r")
     time.sleep(0.8)

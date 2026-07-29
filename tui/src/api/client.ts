@@ -200,7 +200,11 @@ export class GatewayClient {
         provider: opts.provider,
         model: opts.model,
       },
-      120000,
+      // A turn runs synchronously inside this POST (the harness can make many
+      // tool calls — a CAD build takes minutes), so allow a long ceiling. The
+      // turn is finalized on this POST resolving; a client abort here would
+      // finalize prematurely, so keep it well above realistic turn times.
+      600000,
     );
   }
 }
