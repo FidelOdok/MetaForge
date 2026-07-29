@@ -23,6 +23,10 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MALFORMED = "__malformed__"
+# Stream the reply but deliberately omit `agent.done`, reproducing a completion
+# event lost on an SSE reconnect. A correct client finalizes the turn anyway
+# (POST-resolve fallback) instead of hanging on "thinking" forever.
+DROP_DONE = "__drop_done__"
 REPLY_TOKENS = ["Hello", "! ", "This ", "is ", "the ", "QA ", "stub ", "reply."]
 
 # Per-thread queues bridge POST /messages -> the open GET /stream (like the real
@@ -103,7 +107,9 @@ class Handler(BaseHTTPRequestHandler):
                     if not self._emit("message.delta", {"delta": tok, "agent_id": "agent"}, tid):
                         return
                     time.sleep(0.05)
-            self._emit("agent.done", {"agent_id": "qa"}, tid)
+            # A dropped-completion turn streams its reply but never signals done.
+            if DROP_DONE not in content:
+                self._emit("agent.done", {"agent_id": "qa"}, tid)
 
     def _emit(self, event: str, data: dict, tid: str) -> bool:
         env = {"data": data, "thread_id": tid, "timestamp": "qa"}

@@ -42,6 +42,8 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
   const bufRef = useRef<{ text: string; steps: AgentStep[] }>({ text: "", steps: [] });
   const statsRef = useRef<TurnStats>(newTurnStats());
   const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
+  const turnSeq = useRef(0); // bumped per send; guards the fallback finalizer against a stale turn
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Coalesce streamed deltas into ~16 fps repaints. A fast turn can emit 200+
   // deltas in a couple of seconds; calling setPending on each one repaints the
@@ -75,6 +77,39 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
       clearTimeout(flushTimer.current);
       flushTimer.current = null;
     }
+  };
+
+  // End the in-flight turn exactly once: commit the buffered answer as a message
+  // and go idle. Called by BOTH the SSE `agent.done` event and the send() POST
+  // resolving — whichever happens first wins (guarded on `thinkingRef`). This is
+  // what stops a lost `agent.done` (dropped on an SSE reconnect) from leaving the
+  // chat stuck on "thinking" forever: the POST resolves only when the turn is
+  // done server-side, so it's an authoritative fallback terminal signal.
+  const finalizeTurn = (fallback?: string) => {
+    if (!thinkingRef.current) return; // already finalized by the other path
+    thinkingRef.current = false;
+    if (fallbackTimer.current) {
+      clearTimeout(fallbackTimer.current);
+      fallbackTimer.current = null;
+    }
+    cancelFlush();
+    const buf = bufRef.current;
+    const s = statsRef.current;
+    const emptyReason = describeEmptyTurn(s) ?? undefined;
+    const reason = buf.text ? undefined : (emptyReason ?? fallback);
+    log.info("chat.turn_done", {
+      events: s.events,
+      deltas: s.deltas,
+      chars: s.chars,
+      errored: s.errored,
+      reason: reason ?? null,
+      fallback: fallback ?? null,
+    });
+    setMessages((m) => [...m, { role: "assistant", text: buf.text, steps: buf.steps, reason }]);
+    bufRef.current = { text: "", steps: [] };
+    statsRef.current = newTurnStats();
+    setPending(null);
+    setStatus("idle");
   };
 
   useEffect(() => {
@@ -122,41 +157,23 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
             statsRef.current.events += 1;
             switch (ev.type) {
               case "message.delta":
+                if (!thinkingRef.current) break; // stray event after finalize
                 statsRef.current.deltas += 1;
                 statsRef.current.chars += ev.delta.length;
                 bufRef.current.text += ev.delta;
                 scheduleFlush();
                 break;
               case "agent.step":
+                if (!thinkingRef.current) break;
                 bufRef.current.steps.push(ev.step);
                 scheduleFlush();
                 break;
               case "context.stats":
                 setContextStats(ev.stats);
                 break;
-              case "agent.done": {
-                cancelFlush();
-                const buf = bufRef.current;
-                const s = statsRef.current;
-                const reason = describeEmptyTurn(s) ?? undefined;
-                log.info("chat.turn_done", {
-                  events: s.events,
-                  deltas: s.deltas,
-                  chars: s.chars,
-                  errored: s.errored,
-                  reason: reason ?? null,
-                });
-                setMessages((m) => [
-                  ...m,
-                  { role: "assistant", text: buf.text, steps: buf.steps, reason },
-                ]);
-                bufRef.current = { text: "", steps: [] };
-                statsRef.current = newTurnStats();
-                thinkingRef.current = false;
-                setPending(null);
-                setStatus("idle");
+              case "agent.done":
+                finalizeTurn();
                 break;
-              }
               case "error":
                 statsRef.current.errored = true;
                 statsRef.current.errorMsg = ev.error;
@@ -187,6 +204,7 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
     return () => {
       alive = false;
       cancelFlush();
+      if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
       controller.abort();
     };
   }, [client]);
@@ -195,6 +213,8 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
     (content: string) => {
       const threadId = threadRef.current;
       if (!threadId || !content.trim()) return;
+      const myTurn = (turnSeq.current += 1);
+      if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
       setMessages((m) => [...m, { role: "user", text: content }]);
       bufRef.current = { text: "", steps: [] };
       statsRef.current = newTurnStats();
@@ -202,12 +222,29 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
       setPending({ text: "", steps: [] });
       setStatus("thinking");
       log.info("chat.send", { threadId, chars: content.length, model, provider });
-      void client.sendMessage(threadId, content, { model, provider }).catch((e: Error) => {
-        setStatus("error");
-        setError(`send: ${e.message}`);
-        log.error("chat.send_failed", { threadId, error: e.message });
-        setPending(null);
-      });
+
+      // Fallback terminal signal so a lost `agent.done` can't wedge the chat.
+      // The message POST resolves when the turn is done (real gateway; the turn
+      // runs inside the POST) OR immediately (async backends), so on resolve we
+      // wait a short grace for the SSE `agent.done` and only finalize ourselves
+      // if it never arrives — and only if this is still the active turn.
+      const GRACE_MS = 2500;
+      const armFallback = (fallback: string) => {
+        if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
+        fallbackTimer.current = setTimeout(() => {
+          if (turnSeq.current === myTurn) finalizeTurn(fallback);
+        }, GRACE_MS);
+      };
+      void client.sendMessage(threadId, content, { model, provider }).then(
+        () => armFallback("stream ended without a completion event"),
+        (e: Error) => {
+          log.error("chat.send_failed", { threadId, error: e.message });
+          if (turnSeq.current === myTurn && thinkingRef.current) {
+            setError(`send: ${e.message}`);
+            armFallback(`request failed: ${e.message}`);
+          }
+        },
+      );
     },
     [client, model, provider],
   );
