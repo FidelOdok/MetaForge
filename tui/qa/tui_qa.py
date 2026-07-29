@@ -63,6 +63,17 @@ class Tmux:
         )
         return r.stdout
 
+    def capture_full(self, scrollback: int = 120) -> str:
+        """Capture the visible pane plus `scrollback` lines of history — needed to
+        catch frames Ink may have orphaned above the viewport (the class of bug
+        where a mid-transition layout strands a duplicate input box / footer)."""
+        r = subprocess.run(
+            ["tmux", "capture-pane", "-t", SESSION, "-p", "-S", f"-{scrollback}"],
+            capture_output=True,
+            text=True,
+        )
+        return r.stdout
+
     def wait_for(self, needle: str, timeout: float) -> bool:
         end = time.time() + timeout
         while time.time() < end:
@@ -151,6 +162,34 @@ def _fmt(turn: dict | None) -> str:
     return f"chars={turn.get('chars')}, deltas={turn.get('deltas')}, reason={turn.get('reason')}"
 
 
+# The idle input box always shows this placeholder when empty; the footer always
+# shows the nav-key hint. Counting each across a scrollback-inclusive capture is
+# how we detect a stranded/duplicated frame.
+INPUT_PLACEHOLDER = "message  (/model"
+FOOTER_FINGERPRINT = "^T/^R"
+
+
+def max_blank_run(text: str) -> int:
+    """Longest run of consecutive blank (whitespace-only) lines."""
+    best = run = 0
+    for line in text.splitlines():
+        run = run + 1 if not line.strip() else 0
+        best = max(best, run)
+    return best
+
+
+def input_row_fraction(pane: str) -> float | None:
+    """Where the input box sits vertically in the visible pane, 0.0 (top) →
+    1.0 (bottom). None if the placeholder isn't visible (input has text)."""
+    lines = pane.splitlines()
+    if not lines:
+        return None
+    for i, line in enumerate(lines):
+        if INPUT_PLACEHOLDER in line:
+            return i / max(1, len(lines) - 1)
+    return None
+
+
 # --- scenarios -------------------------------------------------------------
 
 
@@ -161,6 +200,24 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
     nav = "chat" in scr and "twin" in scr
     tui.snap("after launch")
     rep.add("launch_and_health", healthy and nav, f"healthy={healthy}, nav_bar={nav}")
+
+    # Wait until the chat stream is connected (idle input placeholder shows) —
+    # "healthy" in the footer can render before the SSE stream opens, and typing
+    # into a still-"connecting…" input drops the send.
+    ready = tui.wait_for(INPUT_PLACEHOLDER, timeout=20)
+
+    # 1b. Launch layout: the input box is pinned to the BOTTOM of the terminal
+    #     (a proper "app" launch screen), not clustered at the top. Checked
+    #     before the first turn, while the empty-session full-height layout is up.
+    launch_pane = tui.capture()
+    frac = input_row_fraction(launch_pane)
+    bottom_pinned = frac is not None and frac >= 0.6
+    tui.snap("launch layout")
+    rep.add(
+        "launch_input_bottom_pinned",
+        bottom_pinned and ready,
+        f"ready={ready}, input_row_fraction={None if frac is None else round(frac, 2)} (want >= 0.6)",
+    )
 
     # 2. Greeting → a real streamed reply (screen + log oracle).
     prev = len(read_turns(log_path))
@@ -174,6 +231,25 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
         "chat_greeting_streams_reply",
         log_ok and screen_ok,
         f"turn={_fmt(turn)}, no_reply_on_screen={not screen_ok}",
+    )
+
+    # 2b. Layout after the first turn: the launch→transcript switch must be clean.
+    #     Regression guard for the App/Chat desync where a mid-transition frame
+    #     stranded a DUPLICATE input box + footer into scrollback and opened a
+    #     huge blank gap. Assert exactly one input box + one footer across the
+    #     full scrollback, and no oversized blank gap in the visible frame.
+    time.sleep(0.8)  # let the frame settle
+    full = tui.capture_full()
+    inputs = full.count(INPUT_PLACEHOLDER)
+    footers = full.count(FOOTER_FINGERPRINT)
+    gap = max_blank_run(tui.capture())  # visible pane: content-hug, so no spacer
+    clean = inputs == 1 and footers == 1 and gap <= 6
+    tui.snap("layout after first turn")
+    rep.add(
+        "chat_transition_no_gap_no_duplication",
+        clean,
+        f"input_boxes={inputs} (want 1), footers={footers} (want 1), "
+        f"max_blank_gap={gap} (want <= 6)",
     )
 
     # 3. Second turn → confirms the stream stays open across turns.

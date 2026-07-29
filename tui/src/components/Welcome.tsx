@@ -2,6 +2,24 @@ import { Box, Text, useStdout } from "ink";
 import { MISSION, TAGLINE, TUI_HINTS, WORDMARK } from "../banner.js";
 
 /**
+ * The exact rendered height (in terminal rows) of <Welcome/> at a given width,
+ * accounting for the wide/compact wordmark and line wrapping. The launch layout
+ * reserves this many rows for the (Static) splash so it can size the spacer that
+ * pins the input to the bottom without pushing the splash off-screen. Kept in
+ * lock-step with the render below — change one, change the other.
+ */
+export function welcomeHeight(cols: number, gatewayUrl?: string): number {
+  const wrap = (s: string) => Math.max(1, Math.ceil(s.length / Math.max(1, cols)));
+  const wordmark = cols >= 46 ? WORDMARK.length : 1;
+  const tagline = wrap(TAGLINE);
+  const mission = MISSION.reduce((n, l) => n + wrap(l), 0);
+  const hints = TUI_HINTS.reduce((n, [k, d]) => n + wrap(k.padEnd(18) + d), 0);
+  const gateway = gatewayUrl ? 1 + wrap(`gateway ${gatewayUrl}`) : 0;
+  // + marginTop before mission (1) and before hints (1) + marginBottom (1).
+  return wordmark + tagline + 1 + mission + 1 + hints + gateway + 1;
+}
+
+/**
  * First-impression splash shown at the top of an empty chat: brand wordmark,
  * what MetaForge does, and how to get moving. Replaced by the conversation once
  * the first message is sent. Falls back to a compact title on narrow terminals.
