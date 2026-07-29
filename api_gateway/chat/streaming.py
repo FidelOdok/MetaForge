@@ -42,6 +42,7 @@ class StreamEventType(StrEnum):
     AGENT_TYPING = "agent.typing"
     AGENT_STEP = "agent.step"
     AGENT_DONE = "agent.done"
+    CONTEXT_STATS = "context.stats"
     ERROR = "error"
 
 
@@ -261,6 +262,23 @@ async def notify_agent_done(thread_id: str, agent_id: str = "agent") -> int:
     event = StreamEvent(
         event=StreamEventType.AGENT_DONE,
         data={"agent_id": agent_id},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_context_stats(thread_id: str, stats: dict[str, Any]) -> int:
+    """Push a ``context.stats`` event — the state of the model's context window.
+
+    Emitted once at the start of a harness turn so a client can show what is
+    going into this turn (system prompt, project brief, history, tool schemas,
+    the message) versus what is available (the model's context window, and how
+    many work products / history turns / tools were included vs. exist). ``stats``
+    is the JSON-safe dict from ``harness_backend.compute_context_stats``.
+    """
+    event = StreamEvent(
+        event=StreamEventType.CONTEXT_STATS,
+        data=stats,
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)

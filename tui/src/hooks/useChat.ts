@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { randomUUID } from "node:crypto";
 import type { GatewayClient } from "../api/client.js";
-import { streamThread, type AgentStep } from "../api/chat.js";
+import { streamThread, type AgentStep, type ContextStats } from "../api/chat.js";
 import { describeEmptyTurn, newTurnStats, type TurnStats } from "../chat-diagnostics.js";
 import { log } from "../log.js";
 
@@ -21,6 +21,8 @@ export interface UseChat {
   messages: ChatMessage[];
   /** In-flight assistant turn (text + tool steps), or null when idle. */
   pending: { text: string; steps: AgentStep[] } | null;
+  /** Most recent per-turn context-window snapshot, or null before the first turn. */
+  contextStats: ContextStats | null;
   send: (content: string) => void;
 }
 
@@ -34,6 +36,7 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<{ text: string; steps: AgentStep[] } | null>(null);
+  const [contextStats, setContextStats] = useState<ContextStats | null>(null);
 
   const threadRef = useRef<string | null>(null);
   const bufRef = useRef<{ text: string; steps: AgentStep[] }>({ text: "", steps: [] });
@@ -128,6 +131,9 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
                 bufRef.current.steps.push(ev.step);
                 scheduleFlush();
                 break;
+              case "context.stats":
+                setContextStats(ev.stats);
+                break;
               case "agent.done": {
                 cancelFlush();
                 const buf = bufRef.current;
@@ -206,5 +212,5 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
     [client, model, provider],
   );
 
-  return { status, error, messages, pending, send };
+  return { status, error, messages, pending, contextStats, send };
 }

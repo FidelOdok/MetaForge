@@ -5069,7 +5069,7 @@
     },
     "/v1/chat/threads/{thread_id}/stream": {
       "get": {
-        "description": "Stream real-time events for a chat thread via Server-Sent Events.\n\nThe client receives events as they occur:\n\n- ``message.created`` -- a new message was added\n- ``agent.typing``    -- an agent is processing\n- ``agent.done``      -- an agent finished\n- ``error``           -- an error occurred\n\nThe connection stays open until the client disconnects or the server\ncloses the stream.",
+        "description": "Stream real-time events for a chat thread via Server-Sent Events.\n\nThe client receives events as they occur:\n\n- ``message.created`` -- a new message was added\n- ``agent.typing``    -- an agent is processing\n- ``context.stats``   -- the turn's context-window snapshot: tokens used vs.\n  the model's window, broken down by system prompt / project brief / history /\n  tool schemas / message, with included-vs-available counts (harness turns)\n- ``agent.step``      -- one reasoning/tool-call step in the agent's trace\n- ``message.delta``   -- one token/chunk of the streaming answer\n- ``agent.done``      -- an agent finished\n- ``error``           -- an error occurred\n\nThe connection stays open until the client disconnects or the server\ncloses the stream.",
         "operationId": "stream_thread_events_v1_chat_threads__thread_id__stream_get",
         "parameters": [
           {

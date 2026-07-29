@@ -85,6 +85,37 @@ def _render_step(step: dict[str, Any], *, color: bool) -> None:
         print(_c(f"  {error}", _DIM, enabled=color))
 
 
+def _fmt_tok(n: int) -> str:
+    """Compact token count: 92 → '92', 4210 → '4.2k', 1_000_000 → '1.0M'."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(int(n))
+
+
+def _render_context_stats(data: dict[str, Any], *, color: bool) -> None:
+    """Render the per-turn context-window snapshot as a compact 2-line meter."""
+    window = int(data.get("window") or 0)
+    used = int(data.get("used") or 0)
+    pct = round(100 * used / window) if window else 0
+    free = max(0, window - used)
+    header = (
+        f"⊞ context  {_fmt_tok(used)}/{_fmt_tok(window)} tok · {pct}% used · {_fmt_tok(free)} free"
+    )
+    print(_c(header, _CYAN, enabled=color))
+    bits: list[str] = []
+    for comp in data.get("components") or []:
+        label = str(comp.get("label", comp.get("key", "")))
+        piece = f"{label} {_fmt_tok(int(comp.get('tokens') or 0))}"
+        if comp.get("items_available") is not None:
+            unit = comp.get("items_label", "")
+            piece += f" ({comp.get('items_included', 0)}/{comp['items_available']} {unit})".rstrip()
+        bits.append(piece)
+    if bits:
+        print(_c("  " + "  ·  ".join(bits), _DIM, enabled=color))
+
+
 def _render_stream(events: Iterable[dict[str, Any]], *, color: bool) -> str:
     """Consume chat SSE events, render timeline + streamed answer, return the text.
 
@@ -97,7 +128,9 @@ def _render_stream(events: Iterable[dict[str, Any]], *, color: bool) -> str:
     for evt in events:
         etype = evt.get("event")
         data = evt.get("data") or {}
-        if etype == "agent.step":
+        if etype == "context.stats":
+            _render_context_stats(data, color=color)
+        elif etype == "agent.step":
             _render_step(data.get("step") or {}, color=color)
         elif etype == "message.delta":
             if not answering:

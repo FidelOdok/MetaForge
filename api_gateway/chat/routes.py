@@ -44,6 +44,7 @@ from api_gateway.chat.streaming import (
     notify_agent_done,
     notify_agent_step,
     notify_agent_typing,
+    notify_context_stats,
     notify_message_delta,
     stream_manager,
     stream_thread,
@@ -193,6 +194,25 @@ async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
     ]
 
 
+async def _context_availability(thread: ChatThreadRecord) -> dict[str, int]:
+    """Totals for the context meter: what *exists* vs. what the brief/history show.
+
+    Lets ``context.stats`` report "30 of 42 work products" / "20 of 57 turns" so a
+    client can see what was trimmed to fit the window. Cheap best-effort reads;
+    returns only the keys it can resolve.
+    """
+    avail: dict[str, int] = {}
+    if thread.scope_kind == "project" and thread.scope_entity_id:
+        project = await _project_backend.get_project(thread.scope_entity_id)
+        if project is not None:
+            total = len(project.work_products)
+            avail["work_products_total"] = total
+            avail["work_products_shown"] = min(total, _PROJECT_WP_LIMIT)
+    msgs = await _backend.get_messages(thread.id)
+    avail["history_turns_total"] = max(0, len(msgs) - 1)  # exclude the current turn
+    return avail
+
+
 async def _thread_history(thread_id: str) -> list[dict[str, str]]:
     """Prior conversation for *thread_id* as [{role, content}], oldest first.
 
@@ -243,20 +263,26 @@ async def _invoke_agent(
                 async def _on_step(step: dict[str, object]) -> None:
                     await notify_agent_step(thread.id, step, "harness-agent")
 
+                async def _on_context(stats: dict[str, object]) -> None:
+                    await notify_context_stats(thread.id, stats)
+
                 await notify_agent_typing(thread.id, "harness-agent")
                 # Project-scoped threads lead with a project brief so the agent
                 # reasons over the digital thread and scopes new work to it.
                 history = await _project_brief(thread) + await _thread_history(thread.id)
+                availability = await _context_availability(thread)
                 text = await run_chat_turn_streaming(
                     user_content,
                     on_delta=_on_delta,
                     on_step=_on_step,
+                    on_context=_on_context,
                     session_id=thread.id,
                     mcp_bridge=_mcp_bridge,
                     provider=provider,
                     model=model,
                     enabled_tools=tools,
                     history=history,
+                    availability=availability,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 return ChatMessageRecord(
@@ -579,6 +605,11 @@ async def stream_thread_events(thread_id: str) -> StreamingResponse:
 
     - ``message.created`` -- a new message was added
     - ``agent.typing``    -- an agent is processing
+    - ``context.stats``   -- the turn's context-window snapshot: tokens used vs.
+      the model's window, broken down by system prompt / project brief / history /
+      tool schemas / message, with included-vs-available counts (harness turns)
+    - ``agent.step``      -- one reasoning/tool-call step in the agent's trace
+    - ``message.delta``   -- one token/chunk of the streaming answer
     - ``agent.done``      -- an agent finished
     - ``error``           -- an error occurred
 

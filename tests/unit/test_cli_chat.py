@@ -215,6 +215,41 @@ def test_render_stream_skips_final_step() -> None:
     assert _render_stream(events, color=False) == ""
 
 
+def test_render_stream_renders_context_stats(capsys: Any) -> None:
+    events = [
+        {
+            "event": "context.stats",
+            "data": {
+                "window": 200000,
+                "used": 4200,
+                "available": 195800,
+                "utilization": 0.021,
+                "components": [
+                    {"key": "system", "label": "System prompt", "tokens": 92},
+                    {
+                        "key": "tools",
+                        "label": "Tool schemas",
+                        "tokens": 1600,
+                        "items_included": 12,
+                        "items_available": 48,
+                        "items_label": "tools",
+                    },
+                ],
+                "estimated": True,
+            },
+        },
+        {"event": "message.delta", "data": {"delta": "hi"}},
+        {"event": "agent.done", "data": {}},
+    ]
+    text = _render_stream(events, color=False)
+    out = capsys.readouterr().out
+    assert text == "hi"
+    assert "context" in out
+    assert "4.2k/200.0k" in out  # used/window, compact
+    assert "2% used" in out
+    assert "Tool schemas 1.6k (12/48 tools)" in out
+
+
 # --- inline approval (MET-558) ---------------------------------------------
 
 

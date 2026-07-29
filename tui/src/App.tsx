@@ -4,6 +4,7 @@ import { loadConfig, setConfigValue } from "./config.js";
 import { GatewayClient } from "./api/client.js";
 import { useChat } from "./hooks/useChat.js";
 import { Chat } from "./components/Chat.js";
+import { ContextMeter } from "./components/ContextMeter.js";
 import { RunsView } from "./components/RunsView.js";
 import { IntentForm } from "./components/IntentForm.js";
 import { TwinView } from "./components/TwinView.js";
@@ -129,6 +130,10 @@ export function App() {
         )}
         {view === "twin" && <TwinView client={client} onExit={() => setView("chat")} />}
       </Box>
+
+      {/* Context-window gauge for the latest turn (chat only), just above the
+          status footer. Only present once a harness turn has reported stats. */}
+      {isChat && chat.contextStats ? <ContextMeter stats={chat.contextStats} /> : null}
 
       {/* Two stacked, truncating lines so a long project/model name never
           collides the way a single space-between row did. */}
