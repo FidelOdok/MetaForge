@@ -1375,10 +1375,53 @@ class FreecadOperations:
         document.recompute()
         return feat
 
+    def _shape_leaves(self, obj: Any, _seen: set[int] | None = None) -> list[Any]:
+        """Flatten an object into its exportable leaf shapes.
+
+        A leaf (Part::Feature, PartDesign::Body, a primitive) has a non-null
+        ``.Shape`` and returns itself. A container (``App::Part`` assembly,
+        document group, or ``App::Link``) has no ``.Shape`` of its own, so we
+        recurse into its ``.Group`` / ``.LinkedObject`` and collect the leaves.
+        Skips empty shapes (e.g. a PartDesign body with no features).
+        """
+        _seen = _seen if _seen is not None else set()
+        if id(obj) in _seen:
+            return []
+        _seen.add(id(obj))
+        shape = getattr(obj, "Shape", None)
+        if shape is not None:
+            try:
+                if not shape.isNull():
+                    return [shape]
+            except Exception:  # noqa: BLE001 — a weird Shape shouldn't abort the walk
+                return [shape]
+        leaves: list[Any] = []
+        group = getattr(obj, "Group", None)
+        if group:
+            for child in group:
+                leaves.extend(self._shape_leaves(child, _seen))
+        elif getattr(obj, "LinkedObject", None) is not None:
+            leaves.extend(self._shape_leaves(obj.LinkedObject, _seen))
+        return leaves
+
+    def _resolve_shape(self, obj: Any) -> Any:
+        """The shape to export/measure for ``obj`` — its own, or a compound of an
+        assembly's children (MET-10: ``export_model`` on an ``App::Part`` used to
+        crash with ``'App.Part' object has no attribute 'Shape'``)."""
+        self._require_freecad()
+        leaves = self._shape_leaves(obj)
+        if not leaves:
+            label = getattr(obj, "Label", getattr(obj, "Name", obj))
+            raise ValueError(
+                f"nothing to export: {label!r} has no exportable geometry "
+                "(an empty assembly, or a body with no features yet)"
+            )
+        return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
+
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
         self._require_freecad()
-        shape = obj.Shape
+        shape = self._resolve_shape(obj)
         return {
             "volume_mm3": round(shape.Volume, 2),
             "surface_area_mm2": round(shape.Area, 2),
@@ -1394,7 +1437,7 @@ class FreecadOperations:
     def measure(self, obj: Any) -> dict[str, Any]:
         """Full geometric measurement of an object's shape."""
         self._require_freecad()
-        shape = obj.Shape
+        shape = self._resolve_shape(obj)
         com = shape.CenterOfMass
         return {
             "volume_mm3": round(shape.Volume, 2),
@@ -1410,7 +1453,7 @@ class FreecadOperations:
     def describe_model(self, obj: Any) -> dict[str, Any]:
         """Human-oriented geometry summary: dimensions, solid/hollow, counts."""
         self._require_freecad()
-        shape = obj.Shape
+        shape = self._resolve_shape(obj)
         bb = shape.BoundBox
         solids = shape.Solids
         # A solid whose volume is well below its bounding box is likely hollow/thin.
@@ -1442,10 +1485,11 @@ class FreecadOperations:
         self._require_freecad()
         import tempfile
 
+        shape = self._resolve_shape(obj)
         with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
             tmp_path = tmp.name
         try:
-            obj.Shape.exportStep(tmp_path)
+            shape.exportStep(tmp_path)
             return Path(tmp_path).read_bytes()
         finally:
             try:
