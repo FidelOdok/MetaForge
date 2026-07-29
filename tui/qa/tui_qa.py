@@ -213,10 +213,11 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
     frac = input_row_fraction(launch_pane)
     bottom_pinned = frac is not None and frac >= 0.6
     tui.snap("launch layout")
+    frac_str = "None" if frac is None else round(frac, 2)
     rep.add(
         "launch_input_bottom_pinned",
         bottom_pinned and ready,
-        f"ready={ready}, input_row_fraction={None if frac is None else round(frac, 2)} (want >= 0.6)",
+        f"ready={ready}, input_row_fraction={frac_str} (want >= 0.6)",
     )
 
     # 2. Greeting → a real streamed reply (screen + log oracle).
