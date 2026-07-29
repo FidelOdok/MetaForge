@@ -81,6 +81,9 @@ class ProviderSpec:
     model: str
     api_key_env: str | None = None
     base_url: str | None = None
+    # A raw API key resolved from the gateway auth store (`forge auth login`),
+    # preferred over reading ``api_key_env`` from the environment when set.
+    api_key: str | None = None
     weight: int = 1
     extra: Mapping[str, str] = field(default_factory=dict)
 

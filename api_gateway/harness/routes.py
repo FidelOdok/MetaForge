@@ -15,14 +15,21 @@ All read-only and best-effort — a provider's model API being down never 500s.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from orchestrator.harness.providers import registry
-from orchestrator.harness.providers.codex_auth import auth_json_path
+from orchestrator.harness.providers.auth_store import AuthStore
+from orchestrator.harness.providers.codex_auth import (
+    CodexCredentials,
+    auth_json_path,
+    parse_credentials,
+    save_credentials,
+)
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/v1/harness", tags=["harness"])
@@ -32,6 +39,10 @@ _KEYLESS_PROVIDERS = frozenset({"ollama", "vllm", "llamacpp", "lmstudio", "sglan
 
 
 def _active_provider() -> str:
+    """Active provider id — the durable store selection wins over env."""
+    sel = AuthStore().get_selection()
+    if sel is not None:
+        return sel.provider.strip().lower()
     return (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
 
 
@@ -73,6 +84,8 @@ def _is_configured(profile: registry.ProviderProfile) -> bool:
         return auth_json_path() is not None
     if profile.id in _KEYLESS_PROVIDERS:
         return True
+    if AuthStore().get_credential(profile.id) is not None:  # logged in via `forge auth`
+        return True
     key, _ = _credentials_for(profile)
     return bool(key)
 
@@ -89,10 +102,17 @@ async def list_providers() -> ProvidersResponse:
             )
         )
     infos.sort(key=lambda i: (not i.configured, i.id))
+    sel = AuthStore().get_selection()
+    active_provider = (
+        sel.provider if sel else (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip() or None
+    )
+    active_model = (
+        (sel.model if sel and sel.model else None)
+        or (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
+        or None
+    )
     return ProvidersResponse(
-        active_provider=(os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip() or None,
-        active_model=(os.environ.get("METAFORGE_LLM_MODEL") or "").strip() or None,
-        providers=infos,
+        active_provider=active_provider, active_model=active_model, providers=infos
     )
 
 
@@ -186,3 +206,102 @@ async def list_tools() -> list[ToolInfo]:
             )
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Credential + selection writes (`forge auth login` / `use` / `logout`)
+#
+# These accept SECRETS. When METAFORGE_HARNESS_ADMIN_TOKEN is set they require a
+# matching `X-MetaForge-Admin` header; otherwise (dev) they're allowed but log a
+# warning. Production MUST set the token (or front the gateway with auth).
+# ---------------------------------------------------------------------------
+
+
+def _require_admin(x_metaforge_admin: str | None = Header(default=None)) -> None:
+    token = os.environ.get("METAFORGE_HARNESS_ADMIN_TOKEN", "").strip()
+    if not token:
+        logger.warning("harness_credential_write_unauthenticated")
+        return
+    if (x_metaforge_admin or "").strip() != token:
+        raise HTTPException(status_code=401, detail="invalid or missing X-MetaForge-Admin token")
+
+
+def _codex_target_path() -> Path:
+    """Where to write Codex OAuth creds (existing file, else CODEX_HOME/~/.codex)."""
+    existing = auth_json_path()
+    if existing is not None:
+        return existing
+    base = os.environ.get("CODEX_HOME", "").strip()
+    return (Path(base) if base else Path.home() / ".codex") / "auth.json"
+
+
+class SetCredentialRequest(BaseModel):
+    provider: str = Field(..., description="Registry provider id (e.g. openai, openai-codex).")
+    method: str = Field("api_key", description="'api_key' or 'oauth'.")
+    api_key: str | None = Field(default=None, description="Raw API key (method=api_key).")
+    base_url: str | None = Field(default=None, description="Optional base_url override.")
+    tokens: dict[str, Any] | None = Field(
+        default=None, description="OAuth token blob in auth.json shape (method=oauth)."
+    )
+
+
+class SetSelectionRequest(BaseModel):
+    provider: str = Field(..., description="Registry provider id to make active.")
+    model: str | None = Field(default=None, description="Optional model id.")
+
+
+class OkResponse(BaseModel):
+    ok: bool = True
+    provider: str
+    method: str | None = None
+
+
+@router.post("/credentials", response_model=OkResponse)
+async def set_credential(
+    body: SetCredentialRequest, _: None = Depends(_require_admin)
+) -> OkResponse:
+    """Store a provider credential so the runtime uses it (no restart).
+
+    ``api_key`` → the gateway auth store; ``oauth`` → the Codex ``auth.json`` the
+    codex adapter reads. Validates the provider against the registry.
+    """
+    provider = body.provider.strip().lower()
+    try:
+        registry.get_profile(provider)
+    except registry.UnknownProviderError as exc:
+        raise HTTPException(status_code=400, detail=f"unknown provider '{provider}'") from exc
+
+    if body.method == "oauth":
+        if not body.tokens:
+            raise HTTPException(status_code=400, detail="method=oauth requires 'tokens'")
+        try:
+            creds: CodexCredentials = parse_credentials(body.tokens)
+        except Exception as exc:  # noqa: BLE001 - surface a clear 400 on a bad blob
+            raise HTTPException(status_code=400, detail=f"bad oauth tokens: {exc}") from exc
+        save_credentials(_codex_target_path(), creds)
+        logger.info("harness_oauth_credential_saved", provider=provider)
+        return OkResponse(provider=provider, method="oauth")
+
+    if not body.api_key or not body.api_key.strip():
+        raise HTTPException(status_code=400, detail="method=api_key requires 'api_key'")
+    AuthStore().set_credential(provider, body.api_key.strip(), body.base_url)
+    return OkResponse(provider=provider, method="api_key")
+
+
+@router.put("/selection", response_model=OkResponse)
+async def set_selection(body: SetSelectionRequest, _: None = Depends(_require_admin)) -> OkResponse:
+    """Set the durable active provider/model (overrides the METAFORGE_LLM_* env)."""
+    provider = body.provider.strip().lower()
+    try:
+        registry.get_profile(provider)
+    except registry.UnknownProviderError as exc:
+        raise HTTPException(status_code=400, detail=f"unknown provider '{provider}'") from exc
+    AuthStore().set_selection(provider, (body.model or "").strip() or None)
+    return OkResponse(provider=provider, method="selection")
+
+
+@router.delete("/credentials/{provider}", response_model=OkResponse)
+async def delete_credential(provider: str, _: None = Depends(_require_admin)) -> OkResponse:
+    """Forget a provider's stored API key (and clear the selection if it pointed there)."""
+    AuthStore().delete_credential(provider.strip().lower())
+    return OkResponse(provider=provider.strip().lower(), method="logout")

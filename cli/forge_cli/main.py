@@ -20,6 +20,8 @@ import json
 import sys
 from typing import Any
 
+from cli.forge_cli.auth import handle_auth
+from cli.forge_cli.auth import register_subparser as register_auth_subparser
 from cli.forge_cli.cad import handle_cad
 from cli.forge_cli.chat import handle_chat
 from cli.forge_cli.client import ForgeClient
@@ -316,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- codex-login (MET-550) --------------------------------------------
     register_codex_login_subparser(subparsers)
+    register_auth_subparser(subparsers)
 
     return parser
 
@@ -418,6 +421,7 @@ _HANDLERS = {
     "routine": handle_routine,
     "config": handle_config,
     "codex-login": handle_codex_login,
+    "auth": handle_auth,
 }
 
 

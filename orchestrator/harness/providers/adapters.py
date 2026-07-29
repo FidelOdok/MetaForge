@@ -68,6 +68,10 @@ def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], 
 
 
 def _require_key(spec: ProviderSpec, default_env: str) -> str:
+    # A raw key from the gateway auth store (`forge auth login`) wins over the
+    # environment; fall back to the env var named by the spec/profile.
+    if spec.api_key and spec.api_key.strip():
+        return spec.api_key.strip()
     env = spec.api_key_env or default_env
     key = os.environ.get(env, "").strip()
     if not key:
