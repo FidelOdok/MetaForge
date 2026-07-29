@@ -3,10 +3,11 @@ import { Box, Static, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import type { ChatMessage, UseChat } from "../hooks/useChat.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
-import { Welcome } from "./Welcome.js";
+import { Welcome, welcomeHeight } from "./Welcome.js";
 
 /** A completed conversation turn, rendered once into <Static> and never again. */
 function Turn({ m }: { m: ChatMessage }) {
@@ -68,14 +69,13 @@ export function Chat({
   const [notice, setNotice] = useState<string | null>(null);
   const busy = status === "thinking";
   const reconnecting = status === "reconnecting";
+  const { rows: termRows, cols } = useTerminalSize();
 
-  // On a fresh session (no turns yet) we render a full-height layout with the
-  // input pinned to the bottom of the terminal — a proper "app" launch screen.
-  // The moment the first message is sent the transcript takes over via <Static>
-  // and the input follows the content (flicker-free scrollback). `send` appends
-  // the user turn synchronously, so `messages.length` flips this the instant a
-  // message is submitted — and App reads the same `messages` to drop its fixed
-  // height in that same render, so the two never disagree.
+  // On a fresh session (no turns yet) we still want the input pinned to the
+  // bottom of the terminal — a proper "app" launch screen — but the Welcome
+  // splash must live in <Static> from the very first frame (see below), never
+  // moved between the dynamic frame and Static. `started` selects the launch
+  // spacer vs. the plain content-flow transcript.
   const started = messages.length > 0;
 
   // Shell-style prompt history: ↑/↓ recall previous inputs, persisted across
@@ -172,12 +172,26 @@ export function Chat({
   // <Static> content: the Welcome splash first (so it sits at the very top of
   // the session) followed by each finalized turn. Ink commits these to the
   // terminal exactly once and never repaints them, so a keystroke can only ever
-  // re-render the live input box below — the transcript can't flicker.
+  // re-render the live input box below — the transcript can't flicker. Crucially
+  // Welcome is a Static row from the FIRST frame, empty session included: moving
+  // it between the dynamic frame and Static is what stranded a whole duplicate
+  // splash + input into the scrollback on the first turn.
   type Row = { key: string; welcome?: true; m?: ChatMessage };
   const rows: Row[] = [
     { key: "welcome", welcome: true },
     ...messages.map((m, i) => ({ key: `m${i}`, m })),
   ];
+  const staticContent = (
+    <Static items={rows}>
+      {(row) =>
+        row.welcome ? (
+          <Welcome key={row.key} gatewayUrl={client.baseUrl()} />
+        ) : (
+          <Turn key={row.key} m={row.m as ChatMessage} />
+        )
+      }
+    </Static>
+  );
 
   // The live region — the only part that repaints during a turn: the streaming
   // in-flight answer, transient banners, and the input box. Shared by both the
@@ -241,17 +255,25 @@ export function Chat({
     </>
   );
 
-  // Launch layout: no turns yet. Welcome at the top, a flexible spacer, then the
-  // input pinned to the bottom of the (fixed-height) terminal — App gives chat a
-  // fixed height while empty so this fills the screen. Welcome renders directly
-  // (not via <Static>) here; it moves into the scrollback the moment a turn
-  // lands and we switch to the transcript layout below.
+  // Launch layout: no turns yet. Welcome is already committed to Static (above);
+  // below it we reserve a fixed-height box for exactly the rows between the
+  // splash and the status footer, and justify its content to the bottom so the
+  // input pins to the bottom of the terminal. Because Welcome never leaves
+  // Static, the first turn just appends to the scrollback and drops this spacer
+  // box — no frame is stranded. `FOOTER_ROWS` is App's two-line status bar; the
+  // extra row keeps the splash fully on-screen if the height estimate is off.
   if (!started) {
+    const FOOTER_ROWS = 2;
+    const spacerHeight = Math.max(
+      3,
+      termRows - welcomeHeight(cols, client.baseUrl()) - FOOTER_ROWS - 1,
+    );
     return (
       <Box flexDirection="column" flexGrow={1}>
-        <Welcome gatewayUrl={client.baseUrl()} />
-        <Box flexGrow={1} />
-        {liveRegion}
+        {staticContent}
+        <Box flexDirection="column" height={spacerHeight} justifyContent="flex-end">
+          {liveRegion}
+        </Box>
       </Box>
     );
   }
@@ -260,15 +282,7 @@ export function Chat({
   // never repainted), the live region follows the content below them.
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Static items={rows}>
-        {(row) =>
-          row.welcome ? (
-            <Welcome key={row.key} gatewayUrl={client.baseUrl()} />
-          ) : (
-            <Turn key={row.key} m={row.m as ChatMessage} />
-          )
-        }
-      </Static>
+      {staticContent}
       {liveRegion}
     </Box>
   );

@@ -30,12 +30,9 @@ export function App() {
   const { awaiting, alert } = useRunAlerts(client);
   const { rows } = useTerminalSize();
 
-  // Own the chat thread here (not inside <Chat>) for two reasons: it survives
-  // view switches (^R/^B/^N no longer tear down the SSE stream and drop the
-  // thread), and App's height policy below reads the SAME `messages` that Chat's
-  // layout branch does — so both flip in one render with no stranded frames.
+  // Own the chat thread here (not inside <Chat>) so it survives view switches —
+  // ^R/^B/^N no longer tear down the SSE stream and drop the conversation.
   const chat = useChat(client, model, provider);
-  const chatStarted = chat.messages.length > 0;
 
   // Change the session model/provider live and persist it (mirrors `forge
   // config set`), so /model in chat sticks across launches too.
@@ -88,14 +85,14 @@ export function App() {
   const healthColor = health === "healthy" ? "green" : health === "checking…" ? "yellow" : "red";
   const gateway = cfg.gateway_url.replace(/^https?:\/\//, "");
 
-  // Height/clip policy. Once a chat is under way its finalized turns render via
-  // Ink <Static> (committed to the terminal's own scrollback, above the live
-  // region); a fixed root height + overflow:hidden would clip that scrollback
-  // and strand the input mid-screen, so we let chat flow naturally then. But an
-  // *empty* chat (no turns yet) and the panel views (runs/twin/new) fill a fixed
-  // viewport — that's what lets the launch screen pin its input to the bottom.
+  // Height/clip policy. Chat renders its finalized turns via Ink <Static>
+  // (committed to the terminal's own scrollback, above the live region), so a
+  // fixed root height + overflow:hidden would clip that scrollback and strand
+  // the input mid-screen — chat flows naturally instead. Its launch screen pins
+  // the input to the bottom with its own sized spacer (see <Chat/>). The panel
+  // views (runs/twin/new) still fill a fixed viewport.
   const isChat = view === "chat";
-  const fill = !isChat || !chatStarted;
+  const fill = !isChat;
 
   return (
     <Box flexDirection="column" {...(fill ? { height: rows } : {})}>
