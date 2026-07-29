@@ -15,6 +15,20 @@ test("parses agent.step with the step payload", () => {
   assert.equal(ev?.type === "agent.step" ? ev.step.tool : "", "twin.get_node");
 });
 
+test("parses context.stats (unwraps the data envelope)", () => {
+  const raw =
+    'event: context.stats\ndata: {"data":{"window":200000,"used":4200,"available":195800,' +
+    '"utilization":0.021,"components":[{"key":"system","label":"System prompt","tokens":92}],' +
+    '"estimated":true},"thread_id":"t1"}';
+  const ev = parseEvent(raw);
+  assert.equal(ev?.type, "context.stats");
+  if (ev?.type === "context.stats") {
+    assert.equal(ev.stats.window, 200000);
+    assert.equal(ev.stats.used, 4200);
+    assert.equal(ev.stats.components[0].key, "system");
+  }
+});
+
 test("parses agent.done and error", () => {
   assert.deepEqual(parseEvent("event: agent.done\ndata: {}"), { type: "agent.done" });
   assert.deepEqual(parseEvent('event: error\ndata: {"error":"boom"}'), {

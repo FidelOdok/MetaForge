@@ -12,6 +12,7 @@ network; production defaults to the real provider adapters.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -19,7 +20,8 @@ from typing import Any
 import structlog
 
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
-from orchestrator.harness.native_tools import run_native_tools
+from orchestrator.harness.compression import default_token_count
+from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
     CredentialStore,
@@ -309,11 +311,151 @@ def _step_to_dict(step: Any, index: int) -> dict[str, Any]:
     }
 
 
+# Approximate context-window sizes (in tokens) keyed by a substring of the model
+# id, longest/most-specific first. Heuristic — override with METAFORGE_CONTEXT_WINDOW.
+# Only used to report headroom in context.stats; nothing gates on it.
+_MODEL_WINDOWS: tuple[tuple[str, int], ...] = (
+    ("[1m]", 1_000_000),
+    ("gpt-4.1", 1_000_000),
+    ("llama-4", 1_000_000),
+    ("gemini", 1_000_000),
+    ("gpt-5.5", 400_000),
+    ("gpt-5", 400_000),
+    ("opus", 200_000),
+    ("sonnet", 200_000),
+    ("haiku", 200_000),
+    ("claude", 200_000),
+    ("o1", 200_000),
+    ("o3", 200_000),
+    ("gpt-4o", 128_000),
+    ("gpt-4-turbo", 128_000),
+    ("qwen", 128_000),
+    ("deepseek", 128_000),
+    ("mistral", 32_000),
+    ("gpt-4", 8_192),
+)
+_DEFAULT_WINDOW = 128_000
+_BRIEF_MARKER = "[project context]"
+
+
+def context_window_for(provider: str | None, model: str | None) -> int:
+    """Best-effort context-window size (tokens) for a provider/model.
+
+    ``METAFORGE_CONTEXT_WINDOW`` overrides everything (for local/unknown models);
+    otherwise the first matching model-id substring wins, else a safe default.
+    """
+    override = os.getenv("METAFORGE_CONTEXT_WINDOW", "").strip()
+    if override.isdigit():
+        return int(override)
+    m = (model or "").lower()
+    for key, window in _MODEL_WINDOWS:
+        if key in m:
+            return window
+    return _DEFAULT_WINDOW
+
+
+def _tools_payload(runtime: Any) -> tuple[int, int]:
+    """(#tools registered, token estimate of their schemas as sent to the model)."""
+    parts: list[str] = []
+    n = 0
+    for t in runtime.tools.all_tools():
+        n += 1
+        schema = t.input_schema if isinstance(t.input_schema, dict) else {}
+        parts.append(f"{t.name}\n{t.description or ''}\n{json.dumps(schema, default=str)}")
+    return n, default_token_count("\n".join(parts))
+
+
+def compute_context_stats(
+    *,
+    runtime: Any,
+    system: str,
+    history: list[dict[str, Any]] | None,
+    user_content: str,
+    provider: str | None,
+    model: str | None,
+    tools_available: int,
+    availability: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Snapshot of what goes into this turn's context window vs. what's available.
+
+    Token counts are heuristic (~4 chars/token; ``estimated=True``) until tiktoken
+    lands. The leading project-brief history pair (a synthetic ``[project context]``
+    turn + ack) is bucketed separately from real conversation. Each bucket reports
+    tokens, and where meaningful ``items_included`` vs ``items_available`` (work
+    products, history turns, tools) — i.e. what's shown vs. what exists.
+    """
+    avail = availability or {}
+    hist = history or []
+    brief_msgs: list[dict[str, Any]] = []
+    convo_msgs = hist
+    if hist and str(hist[0].get("content", "")).startswith(_BRIEF_MARKER):
+        brief_msgs, convo_msgs = hist[:2], hist[2:]
+
+    def _tok(msgs: list[dict[str, Any]]) -> int:
+        return default_token_count("\n".join(str(m.get("content", "")) for m in msgs))
+
+    sys_tok = default_token_count(system or "")
+    brief_tok = _tok(brief_msgs)
+    convo_tok = _tok(convo_msgs)
+    n_tools, tools_tok = _tools_payload(runtime)
+    msg_tok = default_token_count(user_content or "")
+    used = sys_tok + brief_tok + convo_tok + tools_tok + msg_tok
+    window = context_window_for(provider, model)
+
+    components: list[dict[str, Any]] = [
+        {"key": "system", "label": "System prompt", "tokens": sys_tok},
+    ]
+    if brief_msgs or avail.get("work_products_total"):
+        brief_comp: dict[str, Any] = {
+            "key": "project_brief",
+            "label": "Project brief",
+            "tokens": brief_tok,
+        }
+        if "work_products_total" in avail:
+            brief_comp["items_included"] = avail.get("work_products_shown", 0)
+            brief_comp["items_available"] = avail["work_products_total"]
+            brief_comp["items_label"] = "work products"
+        components.append(brief_comp)
+    history_comp: dict[str, Any] = {
+        "key": "history",
+        "label": "Conversation history",
+        "tokens": convo_tok,
+        "items_included": len(convo_msgs),
+        "items_label": "turns",
+    }
+    if "history_turns_total" in avail:
+        history_comp["items_available"] = avail["history_turns_total"]
+    components.append(history_comp)
+    components.append(
+        {
+            "key": "tools",
+            "label": "Tool schemas",
+            "tokens": tools_tok,
+            "items_included": n_tools,
+            "items_available": tools_available,
+            "items_label": "tools",
+        }
+    )
+    components.append({"key": "message", "label": "Current message", "tokens": msg_tok})
+
+    return {
+        "provider": provider or "(default)",
+        "model": model or "(default)",
+        "window": window,
+        "used": used,
+        "available": max(0, window - used),
+        "utilization": round(used / window, 4) if window else None,
+        "components": components,
+        "estimated": True,
+    }
+
+
 async def run_chat_turn_streaming(
     user_content: str,
     *,
     on_delta: Callable[[str], Awaitable[None]],
     on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_context: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
     max_steps: int | None = None,
@@ -324,6 +466,7 @@ async def run_chat_turn_streaming(
     model: str | None = None,
     enabled_tools: list[str] | None = None,
     history: list[dict[str, Any]] | None = None,
+    availability: dict[str, int] | None = None,
 ) -> str:
     """Run the ReAct loop, then stream the final answer token-by-token (Option B).
 
@@ -340,6 +483,29 @@ async def run_chat_turn_streaming(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
+
+    # Emit a context-window snapshot for this turn before the loop runs, so a
+    # client can show what's going into the model vs. what's available. Best-effort:
+    # a bad stats computation must never break the turn.
+    if on_context is not None:
+        try:
+            tools_available = len(ctx.runtime.tools.all_tools())
+            if mcp_bridge is not None:
+                tools_available = len(await mcp_bridge.list_tools())
+            stats = compute_context_stats(
+                runtime=ctx.runtime,
+                system=NATIVE_SYSTEM,
+                history=history,
+                user_content=user_content,
+                provider=provider,
+                model=model,
+                tools_available=tools_available,
+                availability=availability,
+            )
+            await on_context(stats)
+        except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
+            logger.warning("chat_context_stats_failed", error=str(exc))
+
     if native_tools_enabled(provider):
         result = await run_native_tools(
             ctx.runtime,

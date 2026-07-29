@@ -1,7 +1,7 @@
 /**
  * Chat SSE client for /v1/chat. Mirrors the gateway's event contract
- * (api_gateway/chat/streaming.py): message.delta / agent.step / agent.done /
- * error. `streamThread` yields parsed events off the fetch body stream.
+ * (api_gateway/chat/streaming.py): message.delta / agent.step / context.stats /
+ * agent.done / error. `streamThread` yields parsed events off the fetch body stream.
  */
 
 import { log } from "../log.js";
@@ -16,9 +16,32 @@ export interface AgentStep {
   final?: unknown;
 }
 
+/** One bucket of the context window (system / project brief / history / tools / message). */
+export interface ContextComponent {
+  key: string;
+  label: string;
+  tokens: number;
+  items_included?: number;
+  items_available?: number;
+  items_label?: string;
+}
+
+/** Per-turn context-window snapshot (gateway `context.stats` event). */
+export interface ContextStats {
+  provider: string;
+  model: string;
+  window: number;
+  used: number;
+  available: number;
+  utilization: number | null;
+  components: ContextComponent[];
+  estimated: boolean;
+}
+
 export type ChatEvent =
   | { type: "message.delta"; delta: string }
   | { type: "agent.step"; step: AgentStep }
+  | { type: "context.stats"; stats: ContextStats }
   | { type: "agent.done" }
   | { type: "error"; error: string }
   | { type: "other"; event: string; data: unknown };
@@ -49,6 +72,8 @@ export function parseEvent(raw: string): ChatEvent | null {
       return { type: "message.delta", delta: String(data.delta ?? "") };
     case "agent.step":
       return { type: "agent.step", step: (data.step as AgentStep) ?? {} };
+    case "context.stats":
+      return { type: "context.stats", stats: data as unknown as ContextStats };
     case "agent.done":
       return { type: "agent.done" };
     case "error":

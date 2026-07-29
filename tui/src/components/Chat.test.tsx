@@ -19,6 +19,7 @@ function chatState(overrides: Partial<UseChat> = {}): UseChat {
     error: null,
     messages: [],
     pending: null,
+    contextStats: null,
     send: () => {},
     ...overrides,
   };
