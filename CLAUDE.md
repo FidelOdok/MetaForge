@@ -95,6 +95,10 @@ MetaForge supports two operational modes:
 - **Assistant Mode** (default): Human edits design files directly; MetaForge validates post-edit and flags issues. Read-only by default — explicit approval required for writes.
 - **Autonomous Mode**: AI agents drive the design loop (propose → validate → refine). Human reviews and approves at gate checkpoints.
 
+## Artifacts & Scratch Deliverables
+
+**Never publish artifacts to `https://claude.ai/code/artifact/`.** When you build an artifact-style deliverable (architecture briefings, visual reports, standalone HTML/Markdown pages), do **not** use the hosted Artifact/publish tool. Instead write the file into the repo's gitignored **`.artifacts/`** directory as a temporary local file and share that local path. These are scratch outputs: they are ignored by `.gitignore` and **must never be committed** or land in git history.
+
 ## Build & Development Commands
 
 ```bash
