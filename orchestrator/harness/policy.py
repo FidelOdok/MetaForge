@@ -48,6 +48,8 @@ _SYSTEM = (
     "answer the goal. Prefer the fewest calls.\n"
     "- If a tool call FAILED in the progress above, do NOT repeat the same call — try a "
     "different approach or give your best `final` answer with what you have.\n"
+    "- If a tool call already SUCCEEDED in the progress above with the same arguments, "
+    "do NOT call it again — its result is already visible above; reuse it.\n"
     "- Always finish with a `final` answer; never leave the user without a reply.\n"
     "\n"
     "Available tools:\n"
