@@ -48,6 +48,13 @@ services:
       # assembly (5 primitives + holes + assembly + export + commit, plus any
       # retries) can genuinely need more than 24 real tool calls.
       - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
+      # Gates the credential-write endpoints (POST/DELETE /v1/harness/credentials,
+      # PUT /v1/harness/selection — see api_gateway/harness/routes.py::_require_admin).
+      # Unset (dev default) leaves them open with a logged warning; set this on
+      # any shared box so `forge auth login`/`use`/`logout` require a matching
+      # X-MetaForge-Admin header. Was never forwarded here — same gap as
+      # METAFORGE_CHAT_MAX_STEPS above.
+      - METAFORGE_HARNESS_ADMIN_TOKEN=${METAFORGE_HARNESS_ADMIN_TOKEN:-}
       - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
       # OpenRouter — read by digital_twin/knowledge/openrouter_lightrag.py
       # and openrouter_property_llm.py. Tunables fall back to in-code defaults.
