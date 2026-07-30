@@ -29,3 +29,17 @@ test("request-json value is kept intact", () => {
   const p = parseArgs(["runs", "create", "--request-json", '{"goal":"x","flow":"design_v1"}']);
   assert.equal(p.flags["request-json"], '{"goal":"x","flow":"design_v1"}');
 });
+
+test("auth login flags parse (provider/method/api-key)", () => {
+  const p = parseArgs(["auth", "login", "--provider", "openai", "--method", "api-key", "--api-key", "sk-x"]);
+  assert.deepEqual(p._, ["auth", "login"]);
+  assert.equal(p.flags.provider, "openai");
+  assert.equal(p.flags.method, "api-key");
+  assert.equal(p.flags["api-key"], "sk-x");
+});
+
+test("auth use positionals + model flag", () => {
+  const p = parseArgs(["auth", "use", "openai-codex", "--model", "gpt-5-codex"]);
+  assert.deepEqual(p._, ["auth", "use", "openai-codex"]);
+  assert.equal(p.flags.model, "gpt-5-codex");
+});

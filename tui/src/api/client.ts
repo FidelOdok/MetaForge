@@ -71,11 +71,51 @@ export class GatewayError extends Error {
   }
 }
 
+export interface HarnessProvider {
+  id: string;
+  family: string;
+  configured: boolean;
+  base_url?: string | null;
+}
+export interface HarnessProvidersResponse {
+  active_provider?: string | null;
+  active_model?: string | null;
+  providers: HarnessProvider[];
+}
+
 export class GatewayClient {
   constructor(private readonly cfg: ForgeConfig) {}
 
   private base(): string {
     return this.cfg.gateway_url.replace(/\/+$/, "");
+  }
+
+  /** Credential-write admin token (sent when the gateway requires one). */
+  private adminHeaders(): Record<string, string> {
+    const t = (process.env.METAFORGE_HARNESS_ADMIN_TOKEN ?? "").trim();
+    return t ? { "X-MetaForge-Admin": t } : {};
+  }
+
+  private async send<T>(
+    method: "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown,
+    timeoutMs = 15000,
+  ): Promise<T> {
+    const res = await fetch(`${this.base()}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...this.adminHeaders() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.status === 401) {
+      throw new GatewayError(
+        `${method} ${path} -> 401 (set METAFORGE_HARNESS_ADMIN_TOKEN to authorize)`,
+        401,
+      );
+    }
+    if (!res.ok) throw new GatewayError(`${method} ${path} -> ${res.status}`, res.status);
+    return (await res.json()) as T;
   }
 
   private async get<T>(path: string, timeoutMs = 8000): Promise<T> {
@@ -139,6 +179,31 @@ export class GatewayClient {
 
   baseUrl(): string {
     return this.base();
+  }
+
+  // ---- provider auth (forge auth) ----
+
+  async listHarnessProviders(): Promise<HarnessProvidersResponse> {
+    return this.get<HarnessProvidersResponse>("/v1/harness/providers");
+  }
+
+  /** Store a provider credential on the gateway. api_key OR an oauth token blob. */
+  async setCredential(body: {
+    provider: string;
+    method: "api_key" | "oauth";
+    api_key?: string;
+    base_url?: string;
+    tokens?: Record<string, unknown>;
+  }): Promise<unknown> {
+    return this.send("POST", "/v1/harness/credentials", body);
+  }
+
+  async setSelection(provider: string, model?: string): Promise<unknown> {
+    return this.send("PUT", "/v1/harness/selection", { provider, model });
+  }
+
+  async deleteCredential(provider: string): Promise<unknown> {
+    return this.send("DELETE", `/v1/harness/credentials/${provider}`);
   }
 
   private async post<T>(path: string, body: unknown, timeoutMs = 15000): Promise<T> {
