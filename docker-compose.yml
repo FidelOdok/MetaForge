@@ -85,6 +85,15 @@ services:
       # rebuild, ...) silently wipes it and the next chat turn fails with
       # "no Codex credentials found", even though the login had succeeded.
       - codex-home:/root/.codex
+      # Same class of bug for `forge auth use`/`login` (API-key path): the
+      # AuthStore (orchestrator/harness/providers/auth_store.py) persists the
+      # active provider/model selection + raw API keys to
+      # ~/.metaforge/harness-auth.json. Without a named volume, a selection
+      # set via `PUT /v1/harness/selection` silently reverts to the
+      # METAFORGE_LLM_* env default on the next container recreate — live-
+      # caught (MET-10): a selection set minutes earlier was gone by the next
+      # chat turn.
+      - metaforge-home:/root/.metaforge
     depends_on:
       postgres:
         condition: service_healthy
@@ -646,6 +655,7 @@ volumes:
   temporal-db-data:
   adapter-workspace:
   codex-home:
+  metaforge-home:
   prometheus-data:
   grafana-data:
   tempo-data:
