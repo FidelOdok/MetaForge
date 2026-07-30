@@ -111,10 +111,44 @@ Precedence: an explicit CLI flag wins over the config file, which wins over the
 `METAFORGE_GATEWAY_URL` env var, which wins over the built-in default.
 
 !!! note "What this does and doesn't configure"
-    This stores *your client's* choice of gateway and the per-turn
-    provider/model it sends (which the gateway honors via its selector). It does
-    **not** set the gateway's own API keys or the `METAFORGE_CHAT_HARNESS` flag —
-    those are server-side settings on the gateway host, not the CLI.
+    `config` stores *your client's* choice of gateway and the per-turn
+    provider/model it sends. To give the gateway a **credential** (API key or a
+    ChatGPT subscription), use [`auth`](#auth-provider-login-selection) — it does
+    not set the `METAFORGE_CHAT_HARNESS` flag, which is a server-side setting.
+
+### `auth` — provider login & selection
+
+```
+auth list                          # providers with configured/active state
+auth login [--provider P] [--method {api-key,oauth}] [--model M] [--no-activate]
+           [--mode {auto,loopback,device,manual}] [--port N] [--no-browser]
+auth use <provider> [-m MODEL]     # set the durable active provider/model
+auth logout <provider>             # forget a stored credential
+```
+
+Log in to an LLM provider **from the CLI** — like `opencode`/OpenClaw — and the
+credential is **pushed once to the gateway** (the shared runtime for CLI, TUI,
+and dashboard) and stored `0600`, so every client uses it with no restart.
+
+- **API key** (any provider): `forge auth login` → pick a provider → enter the
+  key at a hidden prompt. Stored in the gateway's auth store and injected into
+  the model call (preferred over env).
+- **ChatGPT/Codex OAuth** (subscription, no API key): pick `openai-codex` → a
+  browser OAuth loopback runs **on your machine** (localhost:1455); only the
+  resulting token is sent to the gateway (written where the Codex adapter reads
+  it). On a headless client use `--mode device` or `--mode manual`.
+
+```bash
+forge auth login --provider openai            # API key for OpenAI
+forge auth login --provider openai-codex      # ChatGPT subscription (browser)
+forge auth use openai gpt-4o                   # make it the active model
+forge auth list
+```
+
+Active-selection precedence: an explicit `chat --provider/--model` flag → the
+`auth use` selection stored on the gateway → the gateway's `METAFORGE_LLM_*`
+env. If the gateway sets `METAFORGE_HARNESS_ADMIN_TOKEN`, the CLI sends it
+automatically (from the same env var) so writes are authorized.
 
 ### `chat` — interactive assistant REPL
 
@@ -576,6 +610,7 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 | Var | Used by | Purpose |
 |---|---|---|
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
+| `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | If set on the gateway, credential writes require it; the CLI sends the matching value from this env var |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
 | `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |

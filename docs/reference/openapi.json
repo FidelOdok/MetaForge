@@ -2589,6 +2589,35 @@
         "title": "ModelsResponse",
         "type": "object"
       },
+      "OkResponse": {
+        "properties": {
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "OkResponse",
+        "type": "object"
+      },
       "ProjectListResponse": {
         "description": "List of projects.",
         "properties": {
@@ -3358,6 +3387,89 @@
           "status"
         ],
         "title": "SessionUpdateRequest",
+        "type": "object"
+      },
+      "SetCredentialRequest": {
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw API key (method=api_key).",
+            "title": "Api Key"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional base_url override.",
+            "title": "Base Url"
+          },
+          "method": {
+            "default": "api_key",
+            "description": "'api_key' or 'oauth'.",
+            "title": "Method",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Registry provider id (e.g. openai, openai-codex).",
+            "title": "Provider",
+            "type": "string"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OAuth token blob in auth.json shape (method=oauth).",
+            "title": "Tokens"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "SetCredentialRequest",
+        "type": "object"
+      },
+      "SetSelectionRequest": {
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional model id.",
+            "title": "Model"
+          },
+          "provider": {
+            "description": "Registry provider id to make active.",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "SetSelectionRequest",
         "type": "object"
       },
       "SourceDeleteResponse": {
@@ -5367,6 +5479,125 @@
         ]
       }
     },
+    "/v1/harness/credentials": {
+      "post": {
+        "description": "Store a provider credential so the runtime uses it (no restart).\n\n``api_key`` \u2192 the gateway auth store; ``oauth`` \u2192 the Codex ``auth.json`` the\ncodex adapter reads. Validates the provider against the registry.",
+        "operationId": "set_credential_v1_harness_credentials_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-metaforge-admin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Metaforge-Admin"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Credential",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/v1/harness/credentials/{provider}": {
+      "delete": {
+        "description": "Forget a provider's stored API key (and clear the selection if it pointed there).",
+        "operationId": "delete_credential_v1_harness_credentials__provider__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-metaforge-admin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Metaforge-Admin"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Credential",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
     "/v1/harness/models": {
       "get": {
         "description": "Models for a provider. OpenAI-compatible + configured \u2192 live-fetched; else empty.",
@@ -5429,6 +5660,66 @@
           }
         },
         "summary": "List Providers",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/v1/harness/selection": {
+      "put": {
+        "description": "Set the durable active provider/model (overrides the METAFORGE_LLM_* env).",
+        "operationId": "set_selection_v1_harness_selection_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-metaforge-admin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Metaforge-Admin"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Selection",
         "tags": [
           "harness"
         ]

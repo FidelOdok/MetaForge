@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 import structlog
@@ -35,6 +36,7 @@ from orchestrator.harness.providers import (
     default_stream,
     resolve_provider,
 )
+from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
 from orchestrator.harness.react import run_react
@@ -166,17 +168,24 @@ def rotation_strategy_from_env() -> RotationStrategy:
 def provider_config_from_env(
     *, provider: str | None = None, model: str | None = None
 ) -> HarnessProviderConfig:
-    """Build a single-role provider config, honoring per-turn UI overrides.
+    """Build a single-role provider config from (in precedence order): per-turn
+    UI override → the gateway auth store (`forge auth login` / `use`) → the
+    METAFORGE_LLM_* env defaults.
 
-    ``provider``/``model`` (from the chat selector) win over the METAFORGE_LLM_*
-    env defaults. When the selected provider matches the env-configured one, the
-    env key/base_url overrides (METAFORGE_LLM_API_KEY / _BASE_URL) apply; when a
-    *different* provider is selected, its own registry key env + base_url are
-    used, so switching models in the UI uses that provider's credentials.
+    The active provider/model come from an explicit arg, else the store's durable
+    ``selection``, else env. When a provider has a raw key in the store it is
+    injected into the ``ProviderSpec`` (``_require_key`` prefers it over env), so
+    a CLI login takes effect on the next turn with no restart. Env remains the
+    fallback everywhere, so an empty store changes nothing.
     """
+    store = AuthStore()
+    selection = store.get_selection()
     env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
-    prov = (provider or env_provider or "anthropic").strip().lower()
-    mdl = (model or os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
+    sel_provider = selection.provider.strip().lower() if selection else ""
+    prov = (provider or sel_provider or env_provider or "anthropic").strip().lower()
+    # Only take the selection's model when it belongs to the active provider.
+    sel_model = selection.model if (selection and sel_provider == prov) else None
+    mdl = (model or sel_model or os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
 
     if prov == env_provider or not env_provider:
         api_key_env: str | None = "METAFORGE_LLM_API_KEY"
@@ -194,6 +203,10 @@ def provider_config_from_env(
             api_key_env=api_key_env or "METAFORGE_LLM_API_KEY",
             base_url=base_url,
         )
+    # Inject a stored raw key (and its base_url) for this provider, if logged in.
+    stored = store.get_credential(prov)
+    if stored is not None:
+        spec = replace(spec, api_key=stored.api_key, base_url=stored.base_url or spec.base_url)
     return HarnessProviderConfig(
         slots=RoleModelSlots(slots={"generator": [spec]}), retry=RetryPolicy(), rotor=None
     )
