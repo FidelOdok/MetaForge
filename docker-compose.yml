@@ -43,6 +43,11 @@ services:
       # registry incl. openrouter/codex). Without this, chat falls back to the
       # legacy openai/anthropic-only path and ignores other providers.
       - METAFORGE_CHAT_HARNESS=${METAFORGE_CHAT_HARNESS:-off}
+      # Tool-call budget for one chat turn (harness_backend.chat_max_steps,
+      # default 24). Was never actually forwarded here — a multi-part CAD
+      # assembly (5 primitives + holes + assembly + export + commit, plus any
+      # retries) can genuinely need more than 24 real tool calls.
+      - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
       - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
       # OpenRouter — read by digital_twin/knowledge/openrouter_lightrag.py
       # and openrouter_property_llm.py. Tunables fall back to in-code defaults.
