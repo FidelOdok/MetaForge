@@ -114,6 +114,61 @@ def test_provider_config_explicit_arg_wins_over_store(
     assert spec.name == "anthropic" and spec.model == "claude-opus-4-8"
 
 
+# --- provider_config_from_env builds a real fallback chain (MET-10) -------
+#
+# Live-caught: the chain used to be a single-element list, so whichever
+# provider won precedence had nowhere to fall through to on failure -- a
+# stored selection pointing at a working provider didn't matter if a
+# misconfigured env default (or vice versa) was the one actually resolved
+# and it errored out on the first attempt.
+
+
+def test_fallback_chain_falls_through_to_env_default(
+    store_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api_gateway.chat.harness_backend import provider_config_from_env
+    from orchestrator.harness.providers.auth_store import AuthStore
+
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_LLM_MODEL", "openai/gpt-4o-mini")
+    AuthStore().set_selection("openai-codex", "gpt-5.5")
+
+    candidates = provider_config_from_env().slots.candidates("generator")
+    assert [c.name for c in candidates] == ["openai-codex", "openrouter"]
+    assert candidates[0].model == "gpt-5.5"
+    assert candidates[1].model == "openai/gpt-4o-mini"
+
+
+def test_fallback_chain_includes_other_stored_credential_providers(
+    store_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api_gateway.chat.harness_backend import provider_config_from_env
+    from orchestrator.harness.providers.auth_store import AuthStore
+
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openai")
+    store = AuthStore()
+    store.set_credential("openai", "sk-primary")
+    store.set_credential("deepseek", "sk-secondary")
+    store.set_selection("openai", "gpt-4o")
+
+    names = [c.name for c in provider_config_from_env().slots.candidates("generator")]
+    # primary (openai) first, then every other stored-credential provider —
+    # deepseek isn't the env default and isn't the selection, but it's a
+    # real, ready-to-use fallback that a length-1 chain would have discarded.
+    assert names == ["openai", "deepseek"]
+
+
+def test_fallback_chain_has_no_duplicate_when_primary_is_env_default(
+    store_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api_gateway.chat.harness_backend import provider_config_from_env
+
+    monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    candidates = provider_config_from_env().slots.candidates("generator")
+    assert len(candidates) == 1
+    assert candidates[0].name == "anthropic"
+
+
 # --- write endpoints -------------------------------------------------------
 
 

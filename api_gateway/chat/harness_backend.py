@@ -168,15 +168,23 @@ def rotation_strategy_from_env() -> RotationStrategy:
 def provider_config_from_env(
     *, provider: str | None = None, model: str | None = None
 ) -> HarnessProviderConfig:
-    """Build a single-role provider config from (in precedence order): per-turn
-    UI override → the gateway auth store (`forge auth login` / `use`) → the
-    METAFORGE_LLM_* env defaults.
+    """Build the 'generator' role's provider fallback chain from (in precedence
+    order): per-turn UI override → the gateway auth store (`forge auth login` /
+    `use`) → the METAFORGE_LLM_* env defaults.
 
     The active provider/model come from an explicit arg, else the store's durable
     ``selection``, else env. When a provider has a raw key in the store it is
     injected into the ``ProviderSpec`` (``_require_key`` prefers it over env), so
     a CLI login takes effect on the next turn with no restart. Env remains the
     fallback everywhere, so an empty store changes nothing.
+
+    Live-caught (MET-10): this used to return a single-element candidate list,
+    so a turn died outright on the FIRST error from whichever provider won
+    precedence -- a rate limit, an expired key, an out-of-credit account --
+    with no fallback even when a perfectly good provider was configured right
+    next to it. Returns a real chain instead: primary, then the env default
+    (if it's a different provider), then every other provider with a stored
+    raw key, each deduped by id.
     """
     store = AuthStore()
     selection = store.get_selection()
@@ -185,30 +193,47 @@ def provider_config_from_env(
     prov = (provider or sel_provider or env_provider or "anthropic").strip().lower()
     # Only take the selection's model when it belongs to the active provider.
     sel_model = selection.model if (selection and sel_provider == prov) else None
-    mdl = (model or sel_model or os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
+    default_model = (os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
+    mdl = (model or sel_model or default_model).strip()
 
-    if prov == env_provider or not env_provider:
-        api_key_env: str | None = "METAFORGE_LLM_API_KEY"
-        base_url = (os.environ.get("METAFORGE_LLM_BASE_URL") or "").strip() or None
-    else:
-        # Different provider than the env default → use its registry credentials.
-        api_key_env = None
-        base_url = None
-    try:
-        spec = resolve_provider(prov, mdl, base_url=base_url, api_key_env=api_key_env)
-    except UnknownProviderError:
-        spec = ProviderSpec(
-            name=prov,
-            model=mdl,
-            api_key_env=api_key_env or "METAFORGE_LLM_API_KEY",
-            base_url=base_url,
-        )
-    # Inject a stored raw key (and its base_url) for this provider, if logged in.
-    stored = store.get_credential(prov)
-    if stored is not None:
-        spec = replace(spec, api_key=stored.api_key, base_url=stored.base_url or spec.base_url)
+    def _is_env_default(name: str) -> bool:
+        return name == env_provider or not env_provider
+
+    def _spec_for(name: str, model_: str) -> ProviderSpec:
+        if _is_env_default(name):
+            api_key_env: str | None = "METAFORGE_LLM_API_KEY"
+            base_url = (os.environ.get("METAFORGE_LLM_BASE_URL") or "").strip() or None
+        else:
+            # Different provider than the env default → use its registry credentials.
+            api_key_env = None
+            base_url = None
+        try:
+            spec = resolve_provider(name, model_, base_url=base_url, api_key_env=api_key_env)
+        except UnknownProviderError:
+            spec = ProviderSpec(
+                name=name,
+                model=model_,
+                api_key_env=api_key_env or "METAFORGE_LLM_API_KEY",
+                base_url=base_url,
+            )
+        # Inject a stored raw key (and its base_url) for this provider, if logged in.
+        stored = store.get_credential(name)
+        if stored is not None:
+            spec = replace(spec, api_key=stored.api_key, base_url=stored.base_url or spec.base_url)
+        return spec
+
+    candidates = [_spec_for(prov, mdl)]
+    seen = {prov}
+    env_default = env_provider or "anthropic"
+    if env_default not in seen:
+        candidates.append(_spec_for(env_default, default_model))
+        seen.add(env_default)
+    for other in sorted(store.configured_providers() - seen):
+        candidates.append(_spec_for(other, mdl))
+        seen.add(other)
+
     return HarnessProviderConfig(
-        slots=RoleModelSlots(slots={"generator": [spec]}), retry=RetryPolicy(), rotor=None
+        slots=RoleModelSlots(slots={"generator": candidates}), retry=RetryPolicy(), rotor=None
     )
 
 
