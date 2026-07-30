@@ -104,10 +104,27 @@ class ModelPolicy:
     system_prefix: str = _SYSTEM
 
     def _tool_catalog(self) -> str:
+        """Render the tool catalog as name + description + argument schema.
+
+        Live-caught: with only name+description (no schema), a model on this
+        text-only ReAct path had no way to know a tool's actual argument names
+        — it guessed ("shape_type", "kind" omitted, "body_id" omitted) and
+        every real tool call failed. The native tool-calling path has always
+        sent the full JSON schema as a structured API field (see
+        native_tools._tool_schemas); this inlines the same ``input_schema`` as
+        text so a ReAct-path model has the same information to work from.
+        """
         tools = self.runtime.tools.all_tools()
         if not tools:
             return "(no tools registered)"
-        return "\n".join(f"- {t.name}: {t.description}" for t in tools)
+        lines = []
+        for t in tools:
+            schema = t.input_schema if isinstance(t.input_schema, dict) else {}
+            lines.append(
+                f"- {t.name}: {t.description}\n"
+                f"  arguments schema: {json.dumps(schema, separators=(',', ':'))}"
+            )
+        return "\n".join(lines)
 
     def _render_trace(self, steps: list[ReActStep]) -> str:
         if not steps:

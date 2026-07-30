@@ -87,6 +87,41 @@ async def test_policy_lists_tools_in_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_policy_includes_argument_schema_in_prompt() -> None:
+    """Live-caught: without a schema, a ReAct-path model has no way to know a
+    tool's real argument names and guesses wrong (missing/misnamed required
+    fields) — every attempted tool call then fails. The catalog must carry the
+    same input_schema the native tool-calling path already sends."""
+    tools = ToolRegistry()
+
+    async def _h(args: dict[str, object]) -> dict[str, object]:
+        return {"result": args.get("kind")}
+
+    tools.register_native(
+        "freecad.create_primitive",
+        description="Create a primitive solid",
+        input_schema={
+            "type": "object",
+            "properties": {"kind": {"type": "string"}, "session_id": {"type": "string"}},
+            "required": ["kind", "session_id"],
+        },
+        handler=_h,
+    )
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["system"] = request["system"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    system = seen["system"]
+    assert isinstance(system, str)
+    assert '"required":["kind","session_id"]' in system.replace(" ", "")
+
+
+@pytest.mark.asyncio
 async def test_model_policy_drives_react_loop() -> None:
     """End to end: model calls a tool, sees the result, then finalizes."""
     tools = ToolRegistry()
