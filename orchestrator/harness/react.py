@@ -65,6 +65,18 @@ class ReActResult:
     steps: list[ReActStep]
 
 
+class ReActParseError(Exception):
+    """A model's reply didn't follow the ReAct JSON protocol (no tool/final key).
+
+    Raised by ``policy.next_action`` (see ``policy.parse_action``) instead of
+    silently treating stray prose as a final answer — a model that ignores the
+    protocol must not be able to "succeed" with a plausible-sounding narrative
+    substituted for the tool calls it never made. ``run_react`` catches this
+    the same way it catches a tool-call failure: fed back as an observation,
+    not fatal, so the model gets a concrete chance to self-correct.
+    """
+
+
 @runtime_checkable
 class Policy(Protocol):
     """Decides the next action given the goal and the trace so far."""
@@ -81,12 +93,30 @@ async def run_react(
 ) -> ReActResult:
     """Drive the reason/act/observe loop until final or the step cap.
 
-    A tool error is fed back as an observation (``error`` set) and the loop
-    continues, so the policy can recover or give up -- it is not fatal.
+    A tool error, or a policy reply that fails the ReAct protocol
+    (``ReActParseError``), is fed back as an observation (``error`` set) and
+    the loop continues, so the policy can recover or give up — neither is
+    fatal to the turn.
     """
     steps: list[ReActStep] = []
     for step_no in range(1, max_steps + 1):
-        action = await policy.next_action(goal, steps)
+        try:
+            action = await policy.next_action(goal, steps)
+        except ReActParseError as exc:
+            # No tool_call was ever decided — a synthetic marker lets this
+            # render through the same "- called X -> error" trace line the
+            # model already sees for a real tool failure, and keeps it
+            # visible to ``ModelPolicy._render_trace`` (which only renders
+            # steps that have a ``tool_call``).
+            steps.append(
+                ReActStep(
+                    thought="(malformed reply)",
+                    tool_call=ToolCall("(invalid_reply)", {}),
+                    error=str(exc),
+                )
+            )
+            logger.warning("react_parse_error", goal=goal, step=step_no, error=str(exc))
+            continue
 
         if action.is_final:
             steps.append(

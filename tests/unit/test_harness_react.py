@@ -7,6 +7,7 @@ import pytest
 from orchestrator.harness import HarnessRuntime
 from orchestrator.harness.react import (
     ReActAction,
+    ReActParseError,
     ReActStep,
     ToolCall,
     run_react,
@@ -15,15 +16,22 @@ from orchestrator.harness.tools import ToolRegistry
 
 
 class ScriptedPolicy:
-    """Returns a fixed sequence of actions, ignoring the trace."""
+    """Returns a fixed sequence of actions, ignoring the trace.
 
-    def __init__(self, actions: list[ReActAction]) -> None:
+    An entry that's an ``Exception`` instance is raised instead of returned —
+    lets a test script a policy that fails the ReAct protocol on some steps
+    (see ``ReActParseError``).
+    """
+
+    def __init__(self, actions: list[ReActAction | Exception]) -> None:
         self._actions = actions
         self._i = 0
 
     async def next_action(self, goal: str, steps: list[ReActStep]) -> ReActAction:
         action = self._actions[min(self._i, len(self._actions) - 1)]
         self._i += 1
+        if isinstance(action, Exception):
+            raise action
         return action
 
 
@@ -76,6 +84,36 @@ async def test_tool_error_is_fed_back_not_fatal() -> None:
     assert result.status == "completed"
     assert result.output == "handled"
     assert result.steps[0].error is not None  # tool error captured, loop continued
+
+
+@pytest.mark.asyncio
+async def test_parse_error_is_fed_back_not_fatal() -> None:
+    """A policy reply that fails the ReAct protocol (ReActParseError) must be
+    recorded as an errored step and the loop must continue — not crash the
+    turn, and not silently treat the malformed reply as a final answer."""
+    rt = _runtime_with_tool()
+    policy = ScriptedPolicy(
+        [
+            ReActParseError("no JSON object found"),
+            ReActAction(thought="recovered", final_output="ok"),
+        ]
+    )
+    result = await run_react(rt, policy, "goal")
+    assert result.status == "completed"
+    assert result.output == "ok"
+    assert result.steps[0].tool_call.name == "(invalid_reply)"
+    assert result.steps[0].error == "no JSON object found"
+
+
+@pytest.mark.asyncio
+async def test_repeated_parse_errors_exhaust_not_hang() -> None:
+    rt = _runtime_with_tool()
+    policy = ScriptedPolicy([ReActParseError("never valid")])
+    result = await run_react(rt, policy, "goal", max_steps=3)
+    assert result.status == "exhausted"
+    assert result.output is None
+    assert len(result.steps) == 3
+    assert all(s.tool_call.name == "(invalid_reply)" for s in result.steps)
 
 
 @pytest.mark.asyncio
