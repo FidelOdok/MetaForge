@@ -4,7 +4,27 @@
  * are hand-declared for now; `npm run gen:types` regenerates the full schema
  * from the gateway's OpenAPI spec so these can be replaced by generated types.
  */
+import { Agent } from "undici";
 import type { ForgeConfig } from "../config.js";
+
+/**
+ * A chat turn's POST sends no response headers until the whole handler
+ * settles (the harness can run many tool calls — a CAD build takes minutes),
+ * so it needs a long ceiling. `AbortSignal.timeout` alone isn't enough:
+ * Node's global `fetch` is backed by undici, whose default Agent applies its
+ * own `headersTimeout`/`bodyTimeout` (~300s) independently of any abort
+ * signal the caller sets, cutting a real multi-minute turn off early even
+ * though `sendMessage` already asks for up to 600000ms below. Live-caught via
+ * a decoupling test: a direct `curl -m 900` to the same endpoint completed in
+ * 253-488s while this client aborted every time with "The operation timed
+ * out." Passing this dispatcher only to the long-running turn POST keeps
+ * every other call (health, projects, runs) on the default Agent.
+ */
+const LONG_TURN_TIMEOUT_MS = 600000;
+const longTurnDispatcher = new Agent({
+  headersTimeout: LONG_TURN_TIMEOUT_MS + 30000,
+  bodyTimeout: LONG_TURN_TIMEOUT_MS + 30000,
+});
 
 export interface HealthComponent {
   name: string;
@@ -217,13 +237,19 @@ export class GatewayClient {
     return this.send("DELETE", `/v1/harness/credentials/${provider}`);
   }
 
-  private async post<T>(path: string, body: unknown, timeoutMs = 15000): Promise<T> {
+  private async post<T>(
+    path: string,
+    body: unknown,
+    timeoutMs = 15000,
+    dispatcher?: Agent,
+  ): Promise<T> {
     const res = await fetch(`${this.base()}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
-    });
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit);
     if (!res.ok) throw new GatewayError(`POST ${path} -> ${res.status}`, res.status);
     return (await res.json()) as T;
   }
@@ -280,7 +306,8 @@ export class GatewayClient {
       // tool calls — a CAD build takes minutes), so allow a long ceiling. The
       // turn is finalized on this POST resolving; a client abort here would
       // finalize prematurely, so keep it well above realistic turn times.
-      600000,
+      LONG_TURN_TIMEOUT_MS,
+      longTurnDispatcher,
     );
   }
 }
