@@ -71,6 +71,13 @@ services:
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
     volumes:
       - adapter-workspace:/workspace:ro
+      # `forge auth login --provider openai-codex` (OAuth) writes the ChatGPT
+      # subscription token to ~/.codex/auth.json (HOME=/root in this image).
+      # Without a named volume here, that file lives on the container's
+      # ephemeral layer — any recreate (a compose config change, an image
+      # rebuild, ...) silently wipes it and the next chat turn fails with
+      # "no Codex credentials found", even though the login had succeeded.
+      - codex-home:/root/.codex
     depends_on:
       postgres:
         condition: service_healthy
@@ -631,6 +638,7 @@ volumes:
   kafka-data:
   temporal-db-data:
   adapter-workspace:
+  codex-home:
   prometheus-data:
   grafana-data:
   tempo-data:
