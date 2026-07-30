@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { execSync } from 'node:child_process';
@@ -9,22 +9,41 @@ import path from 'path';
 // when Docker DNS and Node 20's Happy Eyeballs interact badly.
 dns.setDefaultResultOrder('ipv4first');
 
-// Resolve VITE_API_URL at startup; fallback to localhost for local dev.
-// When running in Docker, resolve the hostname to an IPv4 address to avoid
-// http-proxy ECONNREFUSED issues with Node 20's autoSelectFamily.
-let apiTarget = process.env.VITE_API_URL || 'http://localhost:8000';
-try {
-  const targetUrl = new URL(apiTarget);
-  if (targetUrl.hostname !== 'localhost' && targetUrl.hostname !== '127.0.0.1') {
-    const ip = execSync(`getent hosts ${targetUrl.hostname} | awk '{print $1}'`, {
+// Resolve VITE_API_URL's hostname to a raw IPv4 address -- http-proxy fails
+// with ECONNREFUSED against a bare Docker-internal hostname on Node 20+
+// (autoSelectFamily/Happy-Eyeballs interacting badly with http-proxy's own
+// connection setup). Returns the URL unchanged for localhost, or on any
+// resolution failure.
+function resolveApiTarget(): string {
+  const raw = process.env.VITE_API_URL || 'http://localhost:8000';
+  try {
+    const url = new URL(raw);
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return raw;
+    const ip = execSync(`getent hosts ${url.hostname} | awk '{print $1}'`, {
       encoding: 'utf-8',
     }).trim();
-    if (ip) {
-      apiTarget = `${targetUrl.protocol}//${ip}:${targetUrl.port}`;
-    }
+    return ip ? `${url.protocol}//${ip}:${url.port}` : raw;
+  } catch {
+    return raw;
   }
-} catch {
-  /* keep original target */
+}
+
+/**
+ * Live-caught (MET-10): resolving once at Vite startup goes stale the moment
+ * the gateway container is recreated (`docker compose up -d gateway` assigns
+ * it a new internal IP) -- every proxied dashboard call then fails with
+ * ECONNREFUSED until the dev server itself is restarted. http-proxy reads
+ * `options.target` fresh on every proxied request (it's the same options
+ * object handed to `httpProxy.createProxyServer`), so refreshing it in place
+ * on a short interval makes the proxy self-healing without a restart.
+ */
+function attachLiveTarget(options: ProxyOptions, toWs = false): void {
+  const refresh = () => {
+    const target = resolveApiTarget();
+    options.target = toWs ? target.replace('http', 'ws') : target;
+  };
+  refresh();
+  setInterval(refresh, 5000);
 }
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -49,13 +68,15 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: apiTarget,
+        target: resolveApiTarget(),
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/api/, ''),
+        configure: (_proxy, options) => attachLiveTarget(options),
       },
       '/ws': {
-        target: apiTarget.replace('http', 'ws'),
+        target: resolveApiTarget().replace('http', 'ws'),
         ws: true,
+        configure: (_proxy, options) => attachLiveTarget(options, true),
       },
     },
   },
