@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { renderCallbackPage } from "./callback-page.js";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
@@ -112,18 +113,16 @@ export function loginChatGPT(opts: { open?: boolean; onUrl?: (url: string) => vo
       const code = u.searchParams.get("code");
       const returnedState = u.searchParams.get("state");
       const finish = (ok: boolean, msg: string) => {
-        res.writeHead(ok ? 200 : 400, { "Content-Type": "text/html" });
-        res.end(`<html><body style="font-family:sans-serif;text-align:center;padding-top:3rem">
-          <h2>${ok ? "✓ Authorization successful" : "Login failed"}</h2>
-          <p>${msg}</p></body></html>`);
+        res.writeHead(ok ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(renderCallbackPage(ok, msg));
         server.close();
       };
       if (!code || returnedState !== state) {
-        finish(false, "state mismatch or missing code");
+        finish(false, "The request's state didn't match, or no code was returned. Close this window and run the login again.");
         reject(new Error("OAuth callback: state mismatch or missing code"));
         return;
       }
-      finish(true, "You can close this window and return to the terminal.");
+      finish(true, "MetaForge is now connected to your ChatGPT account. You can close this window and return to the terminal.");
       exchangeCode(code, verifier).then(resolve, reject);
     });
 
