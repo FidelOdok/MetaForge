@@ -8,9 +8,13 @@ protocol:
     {"thought": "...", "tool": "mcp_calculix_run_fea", "arguments": {...}}   # act
     {"thought": "...", "final": "the answer"}                                # done
 
-Parsing is lenient — fenced JSON, surrounding prose, or a plain non-JSON reply
-(treated as a final answer) all resolve — so a model that doesn't perfectly
-follow the protocol still makes progress instead of crashing the loop.
+Parsing tolerates fenced JSON or surrounding prose AROUND the JSON object, but
+a reply with no parseable JSON object at all, or a JSON object with neither a
+`tool` nor a `final` key, raises ``ReActParseError`` rather than silently
+treating the stray text as a final answer — a model that ignores the protocol
+must not be able to "succeed" with a narrative substituted for real tool
+calls. ``run_react`` catches this and feeds it back as an observation, giving
+the model a concrete chance to self-correct instead of crashing the loop.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ import structlog
 
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke
-from orchestrator.harness.react import ReActAction, ReActStep, ToolCall
+from orchestrator.harness.react import ReActAction, ReActParseError, ReActStep, ToolCall
 from orchestrator.harness.runtime import HarnessRuntime
 
 logger = structlog.get_logger(__name__)
@@ -51,7 +55,15 @@ _SYSTEM = (
 
 
 def parse_action(text: str) -> ReActAction:
-    """Parse a model reply into a ReActAction (lenient)."""
+    """Parse a model reply into a ReActAction.
+
+    Raises ``ReActParseError`` when the reply has no parseable ``{...}`` JSON
+    object, or a JSON object with neither a ``tool`` nor a ``final`` key — the
+    only two shapes the protocol defines. Tolerates a fenced code block or
+    prose surrounding the JSON object itself (models often wrap it in
+    ```json ... ``` or a short preamble); it does NOT tolerate a reply that
+    never emits the object at all.
+    """
     raw = text.strip()
     fenced = _FENCE_RE.search(raw)
     if fenced:
@@ -64,8 +76,12 @@ def parse_action(text: str) -> ReActAction:
         except json.JSONDecodeError:
             obj = None
     if not isinstance(obj, dict):
-        # Model didn't emit JSON — treat the whole reply as a final answer.
-        return ReActAction(thought="(unstructured reply)", final_output=text.strip())
+        raise ReActParseError(
+            "reply must be ONLY a JSON object shaped "
+            '{"thought": "...", "tool": "<name>", "arguments": {...}} or '
+            '{"thought": "...", "final": "<answer>"} — no such object was found in: '
+            + text.strip()[:200]
+        )
     thought = str(obj.get("thought", ""))
     if "final" in obj:
         return ReActAction(thought=thought, final_output=obj["final"])
@@ -73,7 +89,9 @@ def parse_action(text: str) -> ReActAction:
     if tool:
         arguments = obj.get("arguments") or {}
         return ReActAction(thought=thought, tool_call=ToolCall(str(tool), dict(arguments)))
-    return ReActAction(thought=thought, final_output=obj.get("output", text.strip()))
+    raise ReActParseError(
+        'the JSON object must have a "tool" or "final" key — got: ' + json.dumps(obj)[:200]
+    )
 
 
 @dataclass

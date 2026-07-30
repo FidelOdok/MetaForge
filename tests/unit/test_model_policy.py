@@ -7,7 +7,7 @@ import pytest
 from orchestrator.harness import HarnessRuntime
 from orchestrator.harness.policy import ModelPolicy, parse_action
 from orchestrator.harness.providers import ProviderSpec, load_provider_config
-from orchestrator.harness.react import run_react
+from orchestrator.harness.react import ReActParseError, run_react
 from orchestrator.harness.tools import ToolRegistry
 
 CONFIG = load_provider_config(
@@ -32,9 +32,18 @@ def test_parse_fenced_json() -> None:
     assert a.is_final and a.final_output == "ok"
 
 
-def test_parse_unstructured_is_final() -> None:
-    a = parse_action("I could not produce JSON but the answer is 5.")
-    assert a.is_final and "answer is 5" in a.final_output
+def test_parse_unstructured_raises() -> None:
+    """A model that ignores the protocol must not silently "succeed" with a
+    narrative substituted for real tool calls (the exact hallucination this
+    guards against: a plausible-sounding answer that never called a tool)."""
+    with pytest.raises(ReActParseError):
+        parse_action("I could not produce JSON but the answer is 5.")
+
+
+def test_parse_json_missing_tool_and_final_raises() -> None:
+    """A JSON object is present but doesn't follow either defined shape."""
+    with pytest.raises(ReActParseError):
+        parse_action('{"thought": "I built the assembly and committed it."}')
 
 
 # --- ModelPolicy -----------------------------------------------------------
@@ -99,3 +108,38 @@ async def test_model_policy_drives_react_loop() -> None:
     assert result.status == "completed"
     assert result.output == "the answer is 42"
     assert result.steps[0].observation == {"result": 42}
+
+
+@pytest.mark.asyncio
+async def test_react_recovers_from_a_malformed_reply_instead_of_hallucinating() -> None:
+    """The exact scenario this fix targets: the model narrates a result in
+    plain prose instead of calling the tool it was asked to use. The loop must
+    NOT accept that narrative as the final answer — it should feed back a
+    parse error and give the model another chance, which then calls the real
+    tool and finalizes correctly."""
+    tools = ToolRegistry()
+
+    async def _double(args: dict[str, object]) -> dict[str, object]:
+        return {"result": args["x"] * 2}  # type: ignore[operator]
+
+    tools.register_native("double", description="x2", input_schema={}, handler=_double)
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+
+    policy = ModelPolicy(
+        rt,
+        invoke=_scripted_invoke(
+            "Sure! I ran the tool and the result is 42.",  # malformed: no JSON at all
+            '{"thought": "for real this time", "tool": "double", "arguments": {"x": 21}}',
+            '{"thought": "report", "final": "the answer is 42"}',
+        ),
+    )
+    result = await run_react(rt, policy, "double 21", max_steps=5)
+
+    assert result.status == "completed"
+    assert result.output == "the answer is 42"
+    # The malformed first reply is recorded as a step with an error, NOT
+    # silently accepted as the final answer — and the real tool call that
+    # followed actually ran.
+    assert result.steps[0].tool_call.name == "(invalid_reply)"
+    assert result.steps[0].error is not None
+    assert result.steps[1].observation == {"result": 42}
