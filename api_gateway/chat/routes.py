@@ -13,11 +13,15 @@ Endpoints live under ``/v1/chat``.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TypeVar
 from uuid import uuid4
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api_gateway.chat.agent_router import default_router
@@ -61,6 +65,43 @@ from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.chat.routes")
+
+_T = TypeVar("_T")
+
+
+async def _run_cancellable_on_disconnect(
+    is_disconnected: Callable[[], Awaitable[bool]],
+    coro: Awaitable[_T],
+    *,
+    poll_interval: float = 1.0,
+) -> _T:
+    """Run *coro*, cancelling it the first time *is_disconnected* reports true.
+
+    A chat turn runs synchronously inside this POST and can take minutes (the
+    harness may make many tool calls) -- without this, a client that
+    disconnects early (TUI abort, closed browser tab, dropped network) left
+    the turn running server-side to completion with nothing left to consume
+    the result: wasted compute, and for design turns, wasted tool/LLM spend.
+    Raises ``asyncio.CancelledError`` when cancelled, same as the underlying
+    task -- callers decide how to respond to that.
+    """
+    task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+
+    async def _watch() -> None:
+        while not task.done():
+            if await is_disconnected():
+                task.cancel()
+                return
+            await asyncio.sleep(poll_interval)
+
+    watcher = asyncio.ensure_future(_watch())
+    try:
+        return await task
+    finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+
 
 # ---------------------------------------------------------------------------
 # Module-level backend & router
@@ -554,7 +595,9 @@ async def create_thread(body: CreateThreadRequest) -> ThreadResponse:
     response_model=MessageResponse,
     status_code=201,
 )
-async def send_message(thread_id: str, body: SendMessageRequest) -> MessageResponse:
+async def send_message(
+    thread_id: str, body: SendMessageRequest, request: Request
+) -> MessageResponse:
     """Append a message to an existing thread.
 
     After persisting the user message, the handler routes it to the
@@ -577,9 +620,18 @@ async def send_message(thread_id: str, body: SendMessageRequest) -> MessageRespo
 
     # --- Agent invocation (async) ----------------------------------------
     if body.actor_kind == "user":
-        agent_msg = await _invoke_agent(
-            thread, body.content, provider=body.provider, model=body.model, tools=body.tools
-        )
+        try:
+            agent_msg = await _run_cancellable_on_disconnect(
+                request.is_disconnected,
+                _invoke_agent(
+                    thread, body.content, provider=body.provider, model=body.model, tools=body.tools
+                ),
+            )
+        except asyncio.CancelledError:
+            # The client is gone -- no response will ever be read, so there's
+            # nothing left to do but stop the turn and record why.
+            logger.warning("chat_turn_cancelled_client_disconnected", thread_id=thread_id)
+            return _make_message_response(msg)
         if agent_msg is not None:
             await _backend.add_message(
                 thread_id=thread_id,

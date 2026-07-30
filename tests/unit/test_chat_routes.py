@@ -7,12 +7,14 @@ tests so they remain independent.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api_gateway.chat.backend import InMemoryChatBackend
-from api_gateway.chat.routes import init_chat_backend, router
+from api_gateway.chat.routes import _run_cancellable_on_disconnect, init_chat_backend, router
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -359,3 +361,64 @@ class TestSendMessage:
         resp = client.get(f"/v1/chat/threads/{created['id']}")
         updated_ts = resp.json()["last_message_at"]
         assert updated_ts >= original_ts
+
+
+# ===================================================================
+# _run_cancellable_on_disconnect (MET-10): a chat turn runs synchronously
+# inside the POST for as long as the harness takes; a client that
+# disconnects early must not leave it running server-side forever.
+# ===================================================================
+
+
+class TestRunCancellableOnDisconnect:
+    @pytest.mark.asyncio
+    async def test_returns_result_when_never_disconnected(self) -> None:
+        async def _never() -> bool:
+            return False
+
+        async def _work() -> str:
+            return "done"
+
+        result = await _run_cancellable_on_disconnect(_never, _work(), poll_interval=0.01)
+        assert result == "done"
+
+    @pytest.mark.asyncio
+    async def test_cancels_the_task_on_disconnect(self) -> None:
+        cancelled = False
+
+        async def _disconnected_after_first_check() -> bool:
+            return True
+
+        async def _work() -> str:
+            nonlocal cancelled
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+            return "should not get here"
+
+        with pytest.raises(asyncio.CancelledError):
+            await _run_cancellable_on_disconnect(
+                _disconnected_after_first_check, _work(), poll_interval=0.01
+            )
+        assert cancelled
+
+    @pytest.mark.asyncio
+    async def test_does_not_poll_after_task_completes(self) -> None:
+        """The watcher must stop once the task is done, not keep polling."""
+        checks = 0
+
+        async def _counting_is_disconnected() -> bool:
+            nonlocal checks
+            checks += 1
+            return False
+
+        async def _work() -> str:
+            return "fast"
+
+        await _run_cancellable_on_disconnect(_counting_is_disconnected, _work(), poll_interval=0.01)
+        await asyncio.sleep(0.05)
+        checks_after_settle = checks
+        await asyncio.sleep(0.05)
+        assert checks == checks_after_settle  # no further polling once done
