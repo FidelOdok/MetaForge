@@ -87,6 +87,27 @@ async def test_policy_lists_tools_in_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_policy_warns_against_repeating_a_successful_call() -> None:
+    """Live-caught: the model would occasionally re-issue a tool call whose
+    result was already visible in the trace as successful (harmless but
+    wasteful — extra steps, extra latency). The system prompt already warned
+    against repeating a FAILED call; this checks the matching warning for an
+    already-SUCCEEDED one is present too."""
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["system"] = request["system"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    system = seen["system"]
+    assert isinstance(system, str)
+    assert "already SUCCEEDED" in system
+
+
+@pytest.mark.asyncio
 async def test_policy_includes_argument_schema_in_prompt() -> None:
     """Live-caught: without a schema, a ReAct-path model has no way to know a
     tool's real argument names and guesses wrong (missing/misnamed required
