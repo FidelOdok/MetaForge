@@ -137,6 +137,20 @@ def _provider_family(client: ForgeClient, provider: str) -> str | None:
     return None
 
 
+def resolve_login_method(explicit: str | None, family: str | None, provider_id: str) -> str:
+    """Which `auth login` method to use: an explicit --method always wins;
+    otherwise codex-family providers default to OAuth, everything else to an
+    API key. Checked by BOTH ``family`` and ``provider_id`` since the
+    registry's CODEX constant is literally the string "openai-codex", not
+    "codex" — matching only on a bare "codex" family silently defaulted every
+    codex login to api-key (sitting on a hidden prompt instead of starting
+    OAuth)."""
+    if explicit in ("oauth", "api-key"):
+        return explicit
+    is_codex = family == "openai-codex" or provider_id == "openai-codex"
+    return "oauth" if is_codex else "api-key"
+
+
 def _cmd_login(
     client: ForgeClient,
     args: argparse.Namespace,
@@ -147,11 +161,7 @@ def _cmd_login(
 ) -> None:
     provider = _pick_provider(client, args.provider, input_fn)
     family = _provider_family(client, provider)
-
-    # Method: explicit flag → else default by family (codex → oauth, else api-key).
-    method = args.method
-    if method is None:
-        method = "oauth" if family == "codex" else "api-key"
+    method = resolve_login_method(args.method, family, provider)
 
     if method == "oauth":
         print(f"\nStarting OAuth login for {provider} …")

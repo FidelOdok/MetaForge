@@ -265,6 +265,23 @@ function configCmd(sub: string | undefined, rest: string[], json: boolean): numb
   }
 }
 
+/**
+ * Which `forge auth login` method to use for a provider: an explicit
+ * `--method` flag always wins; otherwise codex-family providers (checked by
+ * BOTH `family` and `providerId`, since the registry's CODEX constant is
+ * literally the string "openai-codex", not "codex") default to OAuth, and
+ * everything else defaults to an API key.
+ */
+export function resolveLoginMethod(
+  explicit: string | undefined,
+  family: string | undefined,
+  providerId: string,
+): "oauth" | "api-key" {
+  if (explicit === "oauth" || explicit === "api-key") return explicit;
+  const isCodex = family === "openai-codex" || providerId === "openai-codex";
+  return isCodex ? "oauth" : "api-key";
+}
+
 function ask(q: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => rl.question(q, (a) => (rl.close(), resolve(a.trim()))));
@@ -342,8 +359,11 @@ async function authCmd(
             : pick.toLowerCase();
       }
       const family = resp.providers.find((p) => p.id.toLowerCase() === provider)?.family;
-      const method =
-        typeof flags.method === "string" ? flags.method : family === "codex" ? "oauth" : "api-key";
+      const method = resolveLoginMethod(
+        typeof flags.method === "string" ? flags.method : undefined,
+        family,
+        provider!,
+      );
 
       if (method === "oauth") {
         line(`Starting OAuth login for ${provider} — a browser will open (localhost:1455)…`);

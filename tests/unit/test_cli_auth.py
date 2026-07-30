@@ -39,7 +39,9 @@ class FakeClient:
 
 _PROVIDERS = [
     {"id": "openai", "family": "openai", "configured": True, "base_url": None},
-    {"id": "openai-codex", "family": "codex", "configured": False, "base_url": None},
+    # family is genuinely "openai-codex" on the real gateway (verified live) —
+    # never the bare "codex" the original (buggy) method-resolution checked for.
+    {"id": "openai-codex", "family": "openai-codex", "configured": False, "base_url": None},
 ]
 
 
@@ -129,3 +131,55 @@ def test_handle_auth_dispatch_list() -> None:
         SimpleNamespace(auth_command="list"), FakeClient(_PROVIDERS, active="openai")
     )
     assert isinstance(rows, list) and rows[0]["provider"] == "openai"
+
+
+# Regression: the registry's CODEX family constant is literally "openai-codex"
+# (never the bare string "codex") — checking for "codex" silently defaulted every
+# `auth login --provider openai-codex` to the api-key method, which sat on a
+# hidden getpass prompt instead of starting OAuth (looked like a hang).
+def test_resolve_login_method_defaults_openai_codex_to_oauth() -> None:
+    assert auth.resolve_login_method(None, "openai-codex", "openai-codex") == "oauth"
+    assert auth.resolve_login_method(None, None, "openai-codex") == "oauth"
+    assert auth.resolve_login_method(None, "codex", "some-other-id") == "api-key"
+
+
+def test_resolve_login_method_defaults_others_to_api_key() -> None:
+    assert auth.resolve_login_method(None, "openai", "openai") == "api-key"
+    assert auth.resolve_login_method(None, "anthropic", "anthropic") == "api-key"
+
+
+def test_resolve_login_method_explicit_wins() -> None:
+    assert auth.resolve_login_method("api-key", "openai-codex", "openai-codex") == "api-key"
+    assert auth.resolve_login_method("oauth", "openai", "openai") == "oauth"
+
+
+def test_login_defaults_to_oauth_for_openai_codex_without_explicit_method() -> None:
+    """End-to-end through _cmd_login: no --method given, provider=openai-codex
+    must take the OAuth branch, not silently prompt for an API key."""
+    client = FakeClient(_PROVIDERS)
+    args = SimpleNamespace(
+        provider="openai-codex",
+        method=None,
+        model=None,
+        no_activate=True,
+        mode="auto",
+        port=1455,
+        no_browser=False,
+    )
+    called_getpass = False
+
+    def _getpass(_p: str) -> str:
+        nonlocal called_getpass
+        called_getpass = True
+        return "should-not-be-used"
+
+    auth._cmd_login(
+        client,
+        args,
+        input_fn=_scripted([]),
+        getpass_fn=_getpass,
+        oauth_login=lambda _a: {"tokens": {"access_token": "a"}},
+    )
+    assert called_getpass is False
+    cred = next(c for c in client.calls if c[0] == "set_credential")
+    assert cred[2]["method"] == "oauth"

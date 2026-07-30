@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs } from "./commands.js";
+import { parseArgs, resolveLoginMethod } from "./commands.js";
 
 test("splits positionals from long and short flags", () => {
   const p = parseArgs(["runs", "get", "run_123", "--json"]);
@@ -42,4 +42,24 @@ test("auth use positionals + model flag", () => {
   const p = parseArgs(["auth", "use", "openai-codex", "--model", "gpt-5-codex"]);
   assert.deepEqual(p._, ["auth", "use", "openai-codex"]);
   assert.equal(p.flags.model, "gpt-5-codex");
+});
+
+// Regression: the registry's CODEX family constant is literally "openai-codex"
+// (never the bare string "codex") — checking for "codex" silently defaulted
+// every `auth login --provider openai-codex` to the api-key method, which sat
+// on a hidden prompt instead of starting OAuth (looked like a hang).
+test("resolveLoginMethod defaults openai-codex to oauth, by family or by id", () => {
+  assert.equal(resolveLoginMethod(undefined, "openai-codex", "openai-codex"), "oauth");
+  assert.equal(resolveLoginMethod(undefined, undefined, "openai-codex"), "oauth");
+  assert.equal(resolveLoginMethod(undefined, "codex", "some-other-id"), "api-key");
+});
+
+test("resolveLoginMethod defaults non-codex providers to api-key", () => {
+  assert.equal(resolveLoginMethod(undefined, "openai", "openai"), "api-key");
+  assert.equal(resolveLoginMethod(undefined, "anthropic", "anthropic"), "api-key");
+});
+
+test("resolveLoginMethod: an explicit --method always wins", () => {
+  assert.equal(resolveLoginMethod("api-key", "openai-codex", "openai-codex"), "api-key");
+  assert.equal(resolveLoginMethod("oauth", "openai", "openai"), "oauth");
 });
