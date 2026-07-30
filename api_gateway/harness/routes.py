@@ -80,7 +80,11 @@ class ProvidersResponse(BaseModel):
 
 
 def _is_configured(profile: registry.ProviderProfile) -> bool:
-    if profile.api_family == "codex":
+    # registry.CODEX == "openai-codex" — the family is never the bare string
+    # "codex". Checking for that let this fall through to the "active provider
+    # borrows METAFORGE_LLM_API_KEY" branch below and report a false positive
+    # (e.g. the openrouter env key) instead of the real auth.json check.
+    if profile.api_family == registry.CODEX:
         return auth_json_path() is not None
     if profile.id in _KEYLESS_PROVIDERS:
         return True
@@ -278,8 +282,16 @@ async def set_credential(
             creds: CodexCredentials = parse_credentials(body.tokens)
         except Exception as exc:  # noqa: BLE001 - surface a clear 400 on a bad blob
             raise HTTPException(status_code=400, detail=f"bad oauth tokens: {exc}") from exc
-        save_credentials(_codex_target_path(), creds)
-        logger.info("harness_oauth_credential_saved", provider=provider)
+        target = _codex_target_path()
+        if not save_credentials(target, creds):
+            # save_credentials is best-effort (never raises) — a write failure
+            # (e.g. read-only mount) must not be reported as a successful login,
+            # or the token is silently lost and the next chat turn fails with a
+            # confusing "no Codex credentials found".
+            raise HTTPException(
+                status_code=500, detail=f"failed to persist Codex credentials to {target}"
+            )
+        logger.info("harness_oauth_credential_saved", provider=provider, path=str(target))
         return OkResponse(provider=provider, method="oauth")
 
     if not body.api_key or not body.api_key.strip():
