@@ -17,6 +17,7 @@ from orchestrator.harness.providers.codex_auth import (
     load_credentials,
     parse_credentials,
     refresh_credentials,
+    save_credentials,
 )
 
 
@@ -117,3 +118,40 @@ async def test_get_valid_refreshes_when_expired(tmp_path: Path) -> None:
 
 async def _unused(url: str, body: dict) -> dict:  # pragma: no cover - never called
     return {}
+
+
+# --- save_credentials: must create the parent dir (regression) -------------
+#
+# `save_credentials` was written to REFRESH an existing auth.json (whose parent
+# dir the official `codex login` CLI already created). `forge auth login`'s
+# OAuth path reuses it for the FIRST write too, on a host that has never run
+# `codex login` — so there was no `~/.codex/` yet. Missing `mkdir(parents=True)`
+# made this raise FileNotFoundError -> caught by `except OSError` -> silently
+# returned False, while the caller (api_gateway/harness/routes.py) ignored the
+# return value and reported success. The token was lost with no error shown.
+
+
+def test_save_credentials_creates_missing_parent_dir(tmp_path: Path) -> None:
+    target = tmp_path / "does" / "not" / "exist" / "auth.json"
+    assert not target.parent.is_dir()
+    creds = CodexCredentials(access_token="a", refresh_token="r", account_id="acct")
+
+    ok = save_credentials(target, creds)
+
+    assert ok is True
+    assert target.is_file()
+    saved = json.loads(target.read_text(encoding="utf-8"))
+    assert saved["tokens"]["access_token"] == "a"
+    assert saved["tokens"]["refresh_token"] == "r"
+
+
+def test_save_credentials_preserves_existing_file_shape(tmp_path: Path) -> None:
+    target = tmp_path / "auth.json"
+    target.write_text(json.dumps({"tokens": {"access_token": "old"}, "extra": "kept"}))
+
+    ok = save_credentials(target, CodexCredentials(access_token="new"))
+
+    assert ok is True
+    saved = json.loads(target.read_text(encoding="utf-8"))
+    assert saved["tokens"]["access_token"] == "new"
+    assert saved["extra"] == "kept"

@@ -114,7 +114,18 @@ export class GatewayClient {
         401,
       );
     }
-    if (!res.ok) throw new GatewayError(`${method} ${path} -> ${res.status}`, res.status);
+    if (!res.ok) {
+      // Surface FastAPI's `detail` when present — a write that fails (e.g.
+      // couldn't persist a credential) must say why, not just a status code.
+      let detail: string | undefined;
+      try {
+        const body = (await res.clone().json()) as { detail?: string };
+        detail = body?.detail;
+      } catch {
+        /* body wasn't JSON — fall back to the bare status below */
+      }
+      throw new GatewayError(detail ?? `${method} ${path} -> ${res.status}`, res.status);
+    }
     return (await res.json()) as T;
   }
 
