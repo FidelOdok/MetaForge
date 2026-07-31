@@ -199,3 +199,45 @@ async def test_react_recovers_from_a_malformed_reply_instead_of_hallucinating() 
     assert result.steps[0].tool_call.name == "(invalid_reply)"
     assert result.steps[0].error is not None
     assert result.steps[1].observation == {"result": 42}
+
+
+@pytest.mark.asyncio
+async def test_policy_renders_history_into_prompt() -> None:
+    """MET-565: the ReAct path used to drop conversation history entirely —
+    every non-native-tools provider answered each turn with total amnesia.
+    History handed to the policy must reach the model, rendered as text inside
+    the goal message (not as real chat turns, which would teach the JSON-only
+    protocol to answer in prose)."""
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["content"] = request["messages"][0]["content"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    history = [
+        {"role": "user", "content": "my bracket is 40mm wide"},
+        {"role": "assistant", "content": "Noted — a 40mm-wide bracket."},
+    ]
+    await ModelPolicy(rt, invoke=invoke, history=history).next_action("how wide is it?", [])
+
+    content = seen["content"]
+    assert isinstance(content, str)
+    assert "my bracket is 40mm wide" in content
+    assert "Conversation so far:" in content
+    assert content.index("40mm") < content.index("Goal:")  # history precedes the goal
+
+
+@pytest.mark.asyncio
+async def test_policy_without_history_omits_preamble() -> None:
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["content"] = request["messages"][0]["content"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    assert "Conversation so far:" not in str(seen["content"])

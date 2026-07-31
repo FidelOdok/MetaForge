@@ -32,12 +32,13 @@ class StubClient:
         self.proposals = proposals or []
         self.sent: list[str] = []
         self.created = False
+        self.threads_created: list[tuple[str, str]] = []  # (scope_kind, scope_entity_id)
         self.approved: list[str] = []
         self.rejected: list[str] = []
 
     def create_thread(self, scope_kind: str, scope_entity_id: str, **_: Any) -> dict[str, Any]:
         self.created = True
-        assert scope_kind == "assistant"
+        self.threads_created.append((scope_kind, scope_entity_id))
         return {"id": "t-123"}
 
     def get_thread(self, thread_id: str) -> dict[str, Any]:
@@ -338,6 +339,18 @@ def test_dispatch_slash_clear_starts_new_thread() -> None:
     assert _dispatch_slash("/clear", client, _args(), state, color=False) == "handled"  # type: ignore[arg-type]
     assert state.thread_id == "t-123"  # StubClient.create_thread returns t-123
     assert client.created is True
+    assert client.threads_created[0][0] == "assistant"  # no --project → assistant scope
+
+
+def test_dispatch_slash_clear_keeps_project_scope() -> None:
+    """MET-565 regression: /clear used to hardcode an assistant-scoped thread,
+    silently dropping --project — the agent lost the project brief mid-session."""
+    client = StubClient()
+    state = _ReplState(thread_id="t-old")
+    args = _args(project="proj-9")
+    assert _dispatch_slash("/clear", client, args, state, color=False) == "handled"  # type: ignore[arg-type]
+    assert client.threads_created[0] == ("project", "proj-9")
+    assert state.thread_id == "t-123"
 
 
 def test_dispatch_slash_unknown_is_handled_not_passed(capsys: Any) -> None:

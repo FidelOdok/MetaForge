@@ -52,6 +52,22 @@ def _classify_error(exc: Exception) -> ProviderError:
     return ProviderError(str(exc) or type(exc).__name__, status_code=status, retryable=retryable)
 
 
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
+
+def default_max_output_tokens() -> int:
+    """Output-token cap applied when a request doesn't set ``max_tokens``.
+
+    ``METAFORGE_MAX_OUTPUT_TOKENS`` overrides (for models with smaller or
+    larger output limits). The old default of 1024 silently truncated long
+    answers and large tool arguments on every completion (MET-565).
+    """
+    raw = (os.environ.get("METAFORGE_MAX_OUTPUT_TOKENS") or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return DEFAULT_MAX_OUTPUT_TOKENS
+
+
 def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], int, float]:
     if not isinstance(request, dict):
         request = {"prompt": str(request)}
@@ -62,7 +78,7 @@ def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], 
     return (
         system,
         list(messages),
-        int(request.get("max_tokens", 1024)),
+        int(request.get("max_tokens", default_max_output_tokens())),
         float(request.get("temperature", 1.0)),
     )
 

@@ -89,3 +89,28 @@ async def test_run_chat_turn_rotates_stored_credentials(monkeypatch, tmp_path):
     out = await run_chat_turn("hi", invoke=invoke, credentials=store)
     assert out == "ok via B"
     assert [c.name for c in store.healthy("openrouter")] == ["b"]  # A blacklisted
+
+
+@pytest.mark.asyncio
+async def test_run_chat_turn_react_path_receives_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MET-565 regression: run_chat_turn accepted ``history`` but the ReAct
+    branch never passed it to ModelPolicy, so non-native-tools providers got
+    zero conversation context (and zero project brief) every turn."""
+    monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")
+
+    seen: dict[str, object] = {}
+
+    async def fake_invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["content"] = request["messages"][-1]["content"]  # type: ignore[index]
+        return {"text": '{"thought": "recall", "final": "40mm"}', "model": spec.model}
+
+    history = [
+        {"role": "user", "content": "the bracket is 40mm wide"},
+        {"role": "assistant", "content": "Understood."},
+    ]
+    out = await run_chat_turn("how wide?", invoke=fake_invoke, history=history)
+    assert out == "40mm"
+    assert "the bracket is 40mm wide" in str(seen["content"])

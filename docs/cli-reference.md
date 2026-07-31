@@ -271,7 +271,7 @@ python -m cli.forge_cli cad build bracket.json --project-id <id>
 | `/mode [ask\|auto\|plan]` | Show or set the permission mode |
 | `/plan` | Shortcut for `/mode plan` |
 | `/thread` | Show the current thread id |
-| `/clear` | Start a fresh thread (clears context) |
+| `/clear` | Start a fresh thread (clears context; keeps the `--project` scope) |
 | `/exit`, `/quit` | Leave the chat |
 
 #### Hooks
@@ -612,6 +612,7 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
 | `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | If set on the gateway, credential writes require it; the CLI sends the matching value from this env var |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
+| `METAFORGE_MAX_OUTPUT_TOKENS` | chat (gateway-side) | Output-token cap per model completion (default 8192) |
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
 | `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |
 

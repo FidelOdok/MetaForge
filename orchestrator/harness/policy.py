@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 
@@ -104,6 +105,23 @@ class ModelPolicy:
     role: str = "generator"
     invoke: Invoke = field(default=default_invoke)
     system_prefix: str = _SYSTEM
+    # Prior conversation ([{role, content}], oldest first). Rendered as text
+    # inside the goal message rather than as real chat turns: this policy's
+    # protocol demands JSON-only replies, and prose assistant turns in the
+    # message list would teach the model to answer in prose (MET-565).
+    history: list[dict[str, Any]] | None = None
+
+    def _render_history(self) -> str:
+        if not self.history:
+            return ""
+        lines = [
+            f"{m.get('role', 'user')}: {m.get('content', '')}"
+            for m in self.history
+            if str(m.get("content", "")).strip()
+        ]
+        if not lines:
+            return ""
+        return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
 
     def _tool_catalog(self) -> str:
         """Render the tool catalog as name + description + argument schema.
@@ -139,7 +157,10 @@ class ModelPolicy:
         return "\n".join(lines) or "(no tool calls yet)"
 
     async def next_action(self, goal: str, steps: list[ReActStep]) -> ReActAction:
-        content = f"Goal: {goal}\n\nProgress so far:\n{self._render_trace(steps)}\n\nNext action?"
+        content = (
+            f"{self._render_history()}Goal: {goal}\n\n"
+            f"Progress so far:\n{self._render_trace(steps)}\n\nNext action?"
+        )
         request = {
             "system": self.system_prefix + self._tool_catalog(),
             "messages": [{"role": "user", "content": content}],

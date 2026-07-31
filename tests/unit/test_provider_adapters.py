@@ -84,7 +84,13 @@ def test_normalize_prompt_shorthand() -> None:
     system, messages, max_tokens, temp = _normalize_request({"prompt": "hi"})
     assert system is None
     assert messages == [{"role": "user", "content": "hi"}]
-    assert max_tokens == 1024
+    assert max_tokens == 8192  # MET-565: the old 1024 silently truncated long answers
+
+
+def test_normalize_max_tokens_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("METAFORGE_MAX_OUTPUT_TOKENS", "2048")
+    _, _, max_tokens, _ = _normalize_request({"prompt": "hi"})
+    assert max_tokens == 2048
 
 
 def test_normalize_full_request() -> None:
