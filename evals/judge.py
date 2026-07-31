@@ -18,11 +18,17 @@ pass/fail; judge scores are quality signal for trend diffs.
     python3 evals/judge.py --report evals/report.json --gateway http://fidel-dev:8000
     python3 evals/judge.py --report evals/chat_report.json --only chat_brief_project
 
-Requires the ``anthropic`` SDK (a project dependency) and an Anthropic
-credential (``ANTHROPIC_API_KEY`` or an ``ant auth login`` profile). The judge
-opts into server-side refusal fallbacks (``fallbacks="default"``) so a safety
-decline re-runs on Anthropic's recommended fallback model instead of losing
-the verdict.
+Two backends:
+
+- ``--backend sdk`` (default): the ``anthropic`` SDK with an API credential
+  (``ANTHROPIC_API_KEY`` or an ``ant auth login`` profile). Uses structured
+  outputs for guaranteed-valid verdicts and opts into server-side refusal
+  fallbacks (``fallbacks="default"``) so a safety decline re-runs on
+  Anthropic's recommended fallback model instead of losing the verdict.
+- ``--backend claude-cli``: the Claude Code CLI in headless print mode
+  (``claude -p``) as a judge subagent — runs on the CLI's own login
+  (subscription), no API key needed. Verdict parsing is fence-tolerant since
+  print mode has no structured-output guarantee.
 """
 
 from __future__ import annotations
@@ -201,6 +207,14 @@ def load_scenario_index() -> dict[str, dict]:
 
 
 # --- judge invocation --------------------------------------------------------------
+class JudgeRefusal(Exception):
+    """The judge model's safety classifiers declined the request."""
+
+
+# A backend turns a prompt into (verdict text, model that produced it).
+Complete = Callable[[str], tuple[str, str]]
+
+
 def judge_request(dod: Any, deliverables: str, goal: str, model: str) -> dict[str, Any]:
     """The messages.create kwargs for one judgement (kept pure for tests)."""
     return {
@@ -216,22 +230,84 @@ def judge_request(dod: Any, deliverables: str, goal: str, model: str) -> dict[st
     }
 
 
-def judge_run(client: Any, rec: dict, dod: Any, goal: str, base: str, model: str) -> dict:
+def sdk_complete(client: Any, model: str) -> Complete:
+    """Judge through the Anthropic SDK (structured outputs + refusal fallbacks)."""
+
+    def complete(prompt: str) -> tuple[str, str]:
+        request = judge_request({}, "", "", model)
+        request["messages"] = [{"role": "user", "content": prompt}]
+        response = client.beta.messages.create(**request)
+        if response.stop_reason == "refusal":
+            raise JudgeRefusal()
+        text = next(b.text for b in response.content if b.type == "text")
+        return text, str(getattr(response, "model", model))
+
+    return complete
+
+
+def cli_judge_cmd(model: str) -> list[str]:
+    """The Claude Code CLI invocation for one headless judge call."""
+    return [
+        "claude",
+        "-p",
+        "--output-format",
+        "json",
+        "--model",
+        model,
+        "--append-system-prompt",
+        _SYSTEM,
+    ]
+
+
+def parse_cli_envelope(stdout: str) -> str:
+    """Extract the reply text from `claude -p --output-format json` output."""
+    envelope = json.loads(stdout)
+    if not isinstance(envelope, dict) or envelope.get("is_error"):
+        raise ValueError(f"claude CLI returned an error envelope: {stdout[:200]}")
+    return str(envelope.get("result", ""))
+
+
+def cli_complete(model: str, runner: Callable[..., Any] | None = None) -> Complete:
+    """Judge through the Claude Code CLI (`claude -p`) as a headless subagent.
+
+    Uses the CLI's own login (a Claude subscription or `claude setup-token`),
+    so no ANTHROPIC_API_KEY is needed. The prompt goes in on stdin; the reply
+    comes back in the CLI's JSON envelope. No tools run — it is a single
+    print-mode completion.
+    """
+    import subprocess
+
+    def _run(cmd: list[str], prompt: str) -> Any:
+        return subprocess.run(  # noqa: S603 - fixed argv, prompt via stdin
+            cmd, input=prompt, capture_output=True, text=True, timeout=600
+        )
+
+    run = runner or _run
+
+    def complete(prompt: str) -> tuple[str, str]:
+        proc = run(cli_judge_cmd(model), prompt)
+        if proc.returncode != 0:
+            raise RuntimeError(f"claude CLI exited {proc.returncode}: {proc.stderr[:200]}")
+        return parse_cli_envelope(proc.stdout), f"claude-cli/{model}"
+
+    return complete
+
+
+def judge_run(complete: Complete, rec: dict, dod: Any, goal: str, base: str) -> dict:
     """Judge one run record's work products; returns the advisory judge block."""
     project_id = rec.get("project_id")
     if not project_id:
         return {"skipped": "run has no project_id (no work products to judge)"}
     deliverables = collect_deliverables(base, str(project_id))
     try:
-        response = client.beta.messages.create(**judge_request(dod, deliverables, goal, model))
-        if response.stop_reason == "refusal":
-            return {"error": "judge model refused", "prompt_version": PROMPT_VERSION}
-        text = next(b.text for b in response.content if b.type == "text")
+        text, model_used = complete(build_judge_prompt(dod, deliverables, goal))
         verdict = parse_judge_reply(text)
+    except JudgeRefusal:
+        return {"error": "judge model refused", "prompt_version": PROMPT_VERSION}
     except Exception as exc:  # noqa: BLE001 - eval tooling, record not raise
         return {"error": f"judge failed: {exc}"[:300], "prompt_version": PROMPT_VERSION}
     return {
-        "model": getattr(response, "model", model),
+        "model": model_used,
         "prompt_version": PROMPT_VERSION,
         "overall_score": clamp_score(verdict.get("overall_score")),
         "phases": verdict.get("phases", []),
@@ -246,16 +322,34 @@ def main() -> int:
         "--gateway", default=os.environ.get("FORGE_QA_GATEWAY", "http://fidel-dev:8000")
     )
     ap.add_argument("--only", default=None, help="judge a single scenario id")
-    ap.add_argument("--model", default=os.environ.get("METAFORGE_JUDGE_MODEL", DEFAULT_JUDGE_MODEL))
+    ap.add_argument("--model", default=os.environ.get("METAFORGE_JUDGE_MODEL"))
+    ap.add_argument(
+        "--backend",
+        choices=["sdk", "claude-cli"],
+        default=os.environ.get("METAFORGE_JUDGE_BACKEND", "sdk"),
+        help="sdk = Anthropic API (needs ANTHROPIC_API_KEY); "
+        "claude-cli = headless `claude -p` subagent (uses the CLI's own login)",
+    )
     ap.add_argument("--out", default=None, help="output path (default: augment --report in place)")
     args = ap.parse_args()
 
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        print("judge: the `anthropic` SDK is not installed (pip install -e .)", file=sys.stderr)
-        return 2
-    client = Anthropic()  # resolves ANTHROPIC_API_KEY / auth profile from env
+    if args.backend == "claude-cli":
+        # The CLI resolves its own credentials; model aliases like `opus` are fine.
+        model = args.model or "opus"
+        complete = cli_complete(model)
+    else:
+        try:
+            from anthropic import Anthropic
+        except ImportError:
+            print(
+                "judge: the `anthropic` SDK is not installed (pip install -e .), "
+                "or use --backend claude-cli",
+                file=sys.stderr,
+            )
+            return 2
+        model = args.model or DEFAULT_JUDGE_MODEL
+        # Client resolves ANTHROPIC_API_KEY / auth profile from env.
+        complete = sdk_complete(Anthropic(), model)
 
     with open(args.report, encoding="utf-8") as fh:
         report = json.load(fh)
@@ -272,9 +366,7 @@ def main() -> int:
         if not dod:
             continue
         print(f"  ⚖ judging {sid} run {rec.get('run')} …", file=sys.stderr)
-        rec["judge"] = judge_run(
-            client, rec, dod, scenario.get("goal", ""), args.gateway, args.model
-        )
+        rec["judge"] = judge_run(complete, rec, dod, scenario.get("goal", ""), args.gateway)
         judged += 1
         if "overall_score" in rec["judge"]:
             print(f"    overall={rec['judge']['overall_score']}", file=sys.stderr)
@@ -286,7 +378,8 @@ def main() -> int:
         return 0
 
     report["judge"] = {
-        "model": args.model,
+        "model": model,
+        "backend": args.backend,
         "prompt_version": PROMPT_VERSION,
         **summarize_judgements(report.get("runs", [])),
     }

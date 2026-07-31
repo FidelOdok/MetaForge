@@ -18,10 +18,14 @@ from judge import (  # noqa: E402
     VERDICT_SCHEMA,
     build_judge_prompt,
     clamp_score,
+    cli_complete,
+    cli_judge_cmd,
     judge_request,
     judge_run,
+    parse_cli_envelope,
     parse_judge_reply,
     render_deliverables,
+    sdk_complete,
     summarize_judgements,
 )
 
@@ -134,7 +138,7 @@ def test_verdict_schema_avoids_unsupported_constraints() -> None:
     assert VERDICT_SCHEMA["additionalProperties"] is False
 
 
-# --- judge_run with a fake client ------------------------------------------------------
+# --- judge_run with the SDK backend (fake client) ---------------------------------------
 class _FakeClient:
     def __init__(self, response: object) -> None:
         self.calls: list[dict] = []
@@ -157,27 +161,29 @@ def _response(text: str, stop_reason: str = "end_turn") -> object:
 
 
 def test_judge_run_skips_projectless_runs() -> None:
-    out = judge_run(_FakeClient(_response("{}")), {}, _DOD, "g", "http://x", "m")
+    out = judge_run(lambda prompt: ("{}", "m"), {}, _DOD, "g", "http://x")
     assert "skipped" in out
 
 
-def test_judge_run_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_judge_run_happy_path_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     import judge as judge_mod
 
     monkeypatch.setattr(judge_mod, "collect_deliverables", lambda base, pid: "- [bom] B")
     client = _FakeClient(_response(json.dumps(_VERDICT)))
-    out = judge_run(client, {"project_id": "p1"}, _DOD, "goal", "http://x", "claude-opus-5")
+    complete = sdk_complete(client, "claude-opus-5")
+    out = judge_run(complete, {"project_id": "p1"}, _DOD, "goal", "http://x")
     assert out["overall_score"] == 0.5
     assert out["prompt_version"] == PROMPT_VERSION
     assert client.calls[0]["model"] == "claude-opus-5"
+    assert client.calls[0]["fallbacks"] == "default"
 
 
 def test_judge_run_handles_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     import judge as judge_mod
 
     monkeypatch.setattr(judge_mod, "collect_deliverables", lambda base, pid: "")
-    client = _FakeClient(_response("", stop_reason="refusal"))
-    out = judge_run(client, {"project_id": "p1"}, _DOD, "g", "http://x", "m")
+    complete = sdk_complete(_FakeClient(_response("", stop_reason="refusal")), "m")
+    out = judge_run(complete, {"project_id": "p1"}, _DOD, "g", "http://x")
     assert out["error"] == "judge model refused"
 
 
@@ -186,19 +192,60 @@ def test_judge_run_records_api_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(judge_mod, "collect_deliverables", lambda base, pid: "")
 
-    class _Boom:
-        def __init__(self) -> None:
-            outer = self
+    def boom(prompt: str) -> tuple[str, str]:
+        raise RuntimeError("rate limited")
 
-            class _Messages:
-                def create(self, **kwargs: object) -> object:
-                    raise RuntimeError("rate limited")
-
-            self.beta = SimpleNamespace(messages=_Messages())
-            del outer
-
-    out = judge_run(_Boom(), {"project_id": "p1"}, _DOD, "g", "http://x", "m")
+    out = judge_run(boom, {"project_id": "p1"}, _DOD, "g", "http://x")
     assert "judge failed" in out["error"]
+
+
+# --- claude-cli backend ---------------------------------------------------------------
+def test_cli_judge_cmd_is_headless_json_print_mode() -> None:
+    cmd = cli_judge_cmd("opus")
+    assert cmd[:2] == ["claude", "-p"]
+    assert "--output-format" in cmd and "json" in cmd
+    assert "--model" in cmd and "opus" in cmd
+
+
+def test_parse_cli_envelope_extracts_result() -> None:
+    stdout = json.dumps({"type": "result", "is_error": False, "result": "verdict text"})
+    assert parse_cli_envelope(stdout) == "verdict text"
+
+
+def test_parse_cli_envelope_rejects_error_envelope() -> None:
+    with pytest.raises(ValueError):
+        parse_cli_envelope(json.dumps({"is_error": True, "result": "boom"}))
+
+
+def _cli_proc(stdout: str, returncode: int = 0, stderr: str = "") -> object:
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_judge_run_via_cli_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    import judge as judge_mod
+
+    monkeypatch.setattr(judge_mod, "collect_deliverables", lambda base, pid: "- [bom] B")
+    seen: list[tuple[list[str], str]] = []
+
+    def fake_runner(cmd: list[str], prompt: str) -> object:
+        seen.append((cmd, prompt))
+        return _cli_proc(json.dumps({"is_error": False, "result": json.dumps(_VERDICT)}))
+
+    complete = cli_complete("opus", runner=fake_runner)
+    out = judge_run(complete, {"project_id": "p1"}, _DOD, "goal", "http://x")
+    assert out["overall_score"] == 0.5
+    assert out["model"] == "claude-cli/opus"
+    assert seen[0][0][0] == "claude"
+    assert "numeric safety factor" in seen[0][1]  # the dod reached the subagent
+
+
+def test_cli_backend_records_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    import judge as judge_mod
+
+    monkeypatch.setattr(judge_mod, "collect_deliverables", lambda base, pid: "")
+    complete = cli_complete("opus", runner=lambda cmd, prompt: _cli_proc("", 1, "not logged in"))
+    out = judge_run(complete, {"project_id": "p1"}, _DOD, "g", "http://x")
+    assert "judge failed" in out["error"] and "not logged in" in out["error"]
 
 
 # --- aggregation ------------------------------------------------------------------------

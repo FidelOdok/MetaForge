@@ -109,6 +109,8 @@ dashboard/test-results/
 
 # Generated eval reports
 evals/report*.json
+evals/chat_report*.json
+evals/reports/
 
 # Local scratch artifacts (architecture briefings, visual reports) — never committed
 .artifacts/
