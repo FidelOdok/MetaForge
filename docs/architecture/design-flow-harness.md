@@ -108,6 +108,12 @@ ships — so re-running the identical baseline command measures each
 context-engineering phase as it lands. See `evals/README.md` for the scenario
 schema and rubric catalog.
 
+Work-product **quality** (substance, not structure) is scored by an optional
+LLM-as-judge pass, `evals/judge.py` (MET-571): it grades each run's twin work
+products against the scenario's `definition_of_done` and attaches advisory
+`judge` blocks to the report. Deterministic rubric checks remain authoritative
+for pass/fail.
+
 ## How a run flows
 
 ```

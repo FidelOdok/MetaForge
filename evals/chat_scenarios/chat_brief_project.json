@@ -4,6 +4,10 @@
   "scope": "project",
   "project_description": "Eval fixture: a 100x60x25 mm IP54 sensor-node enclosure design project.",
   "rubric": ["chat_brief", "chat_tooluse"],
+  "definition_of_done": {
+    "decision_substance": "Each recorded design decision carries a substantive rationale that names a real engineering trade-off (impact resistance, cost, manufacturability), not a restatement of the title, and lists plausible alternatives.",
+    "project_relevance": "Recorded work products relate to the project's actual subject (an IP54 sensor-node enclosure), not generic filler."
+  },
   "variants": [
     { "name": "native", "provider": null, "model": null }
   ],

@@ -10,9 +10,9 @@ happened, and let the gaps prioritise development.
       └──────────────────────────────────────────────────────────┘
 ```
 
-This directory is **step 1–2** (scenarios + experimentation → structured data).
-Rubric/quality scoring (step 3) consumes the `definition_of_done` carried in the
-report.
+This directory is **step 1–2** (scenarios + experimentation → structured data)
+plus the first slice of step 3: `judge.py` scores work-product *quality*
+against each scenario's `definition_of_done` (see below).
 
 ## Scenarios (`scenarios/*.json`)
 
@@ -118,3 +118,30 @@ The wiring guard (`tests/unit/test_chat_eval_wiring.py`) fails CI when a
 scenario's rubric isn't dispatched, a check id is unknown to `expected_today`,
 or a check type isn't supported — the chat-suite sibling of
 `test_eval_wiring.py`.
+
+## Work-product quality judge (`judge.py`, MET-571)
+
+The deterministic rubrics catch structural hollowness but can't grade
+substance — a `design_decision` with a thin rationale passes them. `judge.py`
+is an optional post-processing pass over **either suite's report**: for each
+run that created a project, it fetches the work products that landed in the
+twin and has a judge model (default `claude-opus-5`, override with
+`METAFORGE_JUDGE_MODEL` or `--model`) score them against the scenario's
+`definition_of_done`, attaching an advisory `judge` block per run plus a
+report-level summary. Deterministic checks stay authoritative for pass/fail;
+judge scores are quality signal for trend diffs.
+
+```bash
+# Judge a runs-suite report (uses ANTHROPIC_API_KEY / ant auth profile)
+python3 evals/judge.py --report evals/report.json --gateway http://fidel-dev:8000
+
+# Judge chat-suite work products (chat_brief_* scenarios carry a definition_of_done)
+python3 evals/judge.py --report evals/chat_report.json --only chat_brief_project
+```
+
+Verdicts are structured-output JSON (per-phase `score`/`verdict`/`missing` +
+`overall_score`), the judge model and `prompt_version` are pinned in the
+report for comparability, and the call opts into server-side refusal
+fallbacks so a safety decline re-runs on Anthropic's recommended fallback
+model instead of losing the verdict. Runs without a `definition_of_done` or a
+`project_id` are skipped, never failed.

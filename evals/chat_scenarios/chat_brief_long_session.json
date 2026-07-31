@@ -4,6 +4,10 @@
   "scope": "project",
   "project_description": "Eval fixture: a handheld gas-detector product design project.",
   "rubric": ["chat_brief", "chat_window"],
+  "definition_of_done": {
+    "decision_substance": "Both recorded design decisions carry substantive rationales grounded in the gas-detector product (sensor stability, field-swappable power), not title restatements.",
+    "late_session_quality": "The decision recorded after the long filler stretch is as substantive as the one recorded at the start."
+  },
   "variants": [
     { "name": "native", "provider": null, "model": null }
   ],

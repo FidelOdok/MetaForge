@@ -398,6 +398,11 @@ def main() -> int:
         "suite": "chat_context_v1",
         "summary": summarize(records),
         "runs": records,
+        # Carried through for the LLM-as-judge scorer (evals/judge.py), same
+        # convention as run_scenarios.py.
+        "definitions_of_done": {
+            s["id"]: s["definition_of_done"] for s in scenarios if s.get("definition_of_done")
+        },
     }
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
