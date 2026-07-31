@@ -69,3 +69,52 @@ Plus a per-scenario `summary` (completed-rate, avg completeness, avg duration).
 The top recurring gaps become the next development: deliverable creation tools
 for the missing types, constraint-as-gate-criteria, skill depth, adapter
 reliability.
+
+## Chat context-engineering suite (MET-570)
+
+A second, independent suite: multi-turn conversation evals for the
+harness-backed chat surface (`/v1/chat`), scoring the context engineering the
+runs suite never touches — needle recall across turns, project-brief
+adherence, window/trim telemetry, and tool-call trajectory quality.
+
+```bash
+# All chat scenarios, against a live gateway (METAFORGE_CHAT_HARNESS=1)
+python3 evals/run_chat_scenarios.py --gateway http://fidel-dev:8000
+
+# One scenario / one variant, threshold-gated
+python3 evals/run_chat_scenarios.py --scenario chat_mem_needle --variant native --strict
+```
+
+### Scenarios (`chat_scenarios/*.json`)
+
+Pure data: ordered `turns` (with `repeat` blocks for long-conversation
+filler), declarative per-turn `checks` (`reply_contains`, `tool_called`,
+`tool_arg_equals`, `no_duplicate_tool_calls`, ...), a provider `variants`
+matrix (native tool-calling vs the text ReAct path), and `expected_today` —
+checks **known** to fail on the current harness. Those score `xfail`
+(confirmed baseline) instead of failing the run, and flip to `xpass` when the
+fix ships, so re-running the identical command after MET-566/MET-568 measures
+the improvement directly.
+
+| Fixture | Scope | Exercises |
+|---|---|---|
+| `chat_mem_needle` | assistant | Fact recall a few turns later, both paths (MET-565 amnesia class) |
+| `chat_mem_long_window` | assistant | Recall past the 20-turn history slice (xfail until MET-568) |
+| `chat_brief_project` | project | Brief adherence: project known, twin writes carry `project_id` |
+| `chat_brief_long_session` | project | Brief survives a long session (re-prepended every turn) |
+| `chat_tool_bigobs` | assistant | Huge tool observations: 8KB native cap vs uncapped ReAct trace |
+| `chat_tool_dedupe` | assistant | Multi-tool turn without duplicate identical calls |
+
+### Rubrics
+
+`chat_memory`, `chat_brief`, `chat_window`, `chat_tooluse` — each a pure
+`evaluate_*` (unit-tested in CI, no gateway) plus a `score_*` the runner
+dispatches. `agent.step` and `context.stats` are SSE-only, so the runner holds
+a background subscription to each thread's `/stream` and slices events per
+turn; replies come from refetching the thread (the agent turn completes inside
+the message POST).
+
+The wiring guard (`tests/unit/test_chat_eval_wiring.py`) fails CI when a
+scenario's rubric isn't dispatched, a check id is unknown to `expected_today`,
+or a check type isn't supported — the chat-suite sibling of
+`test_eval_wiring.py`.

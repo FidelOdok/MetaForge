@@ -1,0 +1,29 @@
+{
+  "id": "chat_tool_bigobs",
+  "title": "A turn with large tool observations still reaches a real answer (8KB native cap vs uncapped ReAct trace)",
+  "scope": "assistant",
+  "rubric": ["chat_tooluse"],
+  "variants": [
+    { "name": "native", "provider": null, "model": null },
+    { "name": "react", "provider": "gemini", "model": "gemini-2.5-flash" }
+  ],
+  "turns": [
+    {
+      "say": "Use your twin tools to survey what exists in the digital twin right now — query broadly and summarize the kinds of nodes you find.",
+      "tag": "bigobs",
+      "checks": [
+        { "id": "twin_tool_called", "type": "tool_called", "tool_prefix": "mcp_twin_" },
+        { "id": "bigobs_reply_not_fallback", "type": "reply_is_not_fallback" }
+      ]
+    },
+    {
+      "say": "Based on what you just found, roughly how many distinct kinds of nodes are there? Answer briefly.",
+      "checks": [
+        { "id": "followup_not_fallback", "type": "reply_is_not_fallback" }
+      ]
+    }
+  ],
+  "expected_today": {
+    "bigobs_reply_not_fallback": { "react": "fail" }
+  }
+}

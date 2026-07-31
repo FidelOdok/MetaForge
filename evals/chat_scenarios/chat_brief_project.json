@@ -1,0 +1,37 @@
+{
+  "id": "chat_brief_project",
+  "title": "Project-scoped thread: agent knows the project and scopes twin writes to it",
+  "scope": "project",
+  "project_description": "Eval fixture: a 100x60x25 mm IP54 sensor-node enclosure design project.",
+  "rubric": ["chat_brief", "chat_tooluse"],
+  "variants": [
+    { "name": "native", "provider": null, "model": null }
+  ],
+  "turns": [
+    {
+      "say": "Record a design decision in this project titled 'Enclosure material: ABS' with rationale 'good impact resistance at low cost' and alternatives 'polycarbonate, aluminum'.",
+      "checks": [
+        { "id": "decision_tool_called", "type": "tool_called", "tool": "mcp_twin_record_decision" },
+        {
+          "id": "decision_project_scoped",
+          "type": "tool_arg_equals",
+          "tool": "mcp_twin_record_decision",
+          "arg": "project_id",
+          "value": "$PROJECT_ID"
+        }
+      ]
+    },
+    {
+      "say": "Which project are we working in? Reply with its name and its id.",
+      "checks": [
+        { "id": "project_id_in_reply", "type": "reply_contains", "pattern": "$PROJECT_ID" }
+      ]
+    },
+    {
+      "say": "Summarize the design decisions recorded so far in this project.",
+      "checks": [
+        { "id": "decision_summarized", "type": "reply_contains", "pattern": "ABS" }
+      ]
+    }
+  ]
+}
