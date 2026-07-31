@@ -25,7 +25,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -284,7 +284,10 @@ async def gemini_invoke(
     if client is None:
         from google import genai
 
-        client = genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY"))
+        # cast(Any, …): keep the SDK seam untyped — request payloads here are
+        # normalized plain dicts, which the SDK accepts at runtime but whose
+        # narrowed client type makes mypy demand its TypedDict param shapes.
+        client = cast(Any, genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY")))
     contents = "\n\n".join(m.get("content", "") for m in messages)
     config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
     if system:
@@ -555,8 +558,15 @@ async def openai_stream(
     if client is None:
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(
-            api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+        # cast(Any, …): keep the SDK seam untyped — messages are normalized
+        # plain dicts and ``stream=True`` returns an async iterator; the
+        # narrowed client type makes mypy demand SDK TypedDicts and a union
+        # return that hides ``__aiter__``.
+        client = cast(
+            Any,
+            AsyncOpenAI(
+                api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+            ),
         )
     try:
         stream = await client.chat.completions.create(
@@ -584,7 +594,10 @@ async def gemini_stream(
     if client is None:
         from google import genai
 
-        client = genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY"))
+        # cast(Any, …): keep the SDK seam untyped — request payloads here are
+        # normalized plain dicts, which the SDK accepts at runtime but whose
+        # narrowed client type makes mypy demand its TypedDict param shapes.
+        client = cast(Any, genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY")))
     contents = "\n\n".join(m.get("content", "") for m in messages)
     config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
     if system:
