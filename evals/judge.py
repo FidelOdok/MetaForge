@@ -105,8 +105,12 @@ def build_judge_prompt(dod: Any, deliverables: str, goal: str) -> str:
         + (deliverables or "(no work products were recorded)")
     )
     parts.append(
-        "Score each definition-of-done entry as one item in `phases` "
-        "(use the entry's key as `phase`)."
+        "Score each definition-of-done entry as one item in `phases` (use the "
+        "entry's key as `phase`). Reply with ONLY a JSON object of exactly this "
+        'shape: {"phases": [{"phase": str, "score": 0.0-1.0, "verdict": '
+        '"met"|"partial"|"unmet", "missing": [str], "rationale": str}], '
+        '"overall_score": 0.0-1.0, "summary": str} — all three top-level keys '
+        "are required."
     )
     return "\n\n".join(parts)
 
@@ -121,8 +125,15 @@ def parse_judge_reply(text: str) -> dict[str, Any]:
     if start != -1 and end > start:
         raw = raw[start : end + 1]
     obj = json.loads(raw)
-    if not isinstance(obj, dict) or "phases" not in obj or "overall_score" not in obj:
-        raise ValueError(f"judge reply missing phases/overall_score: {raw[:200]}")
+    if not isinstance(obj, dict) or "phases" not in obj:
+        raise ValueError(f"judge reply missing phases: {raw[:200]}")
+    if "overall_score" not in obj:
+        # Backends without structured-output enforcement (claude-cli) sometimes
+        # omit the top-level score — derive it from the per-phase scores.
+        phases = [p for p in obj.get("phases") or [] if isinstance(p, dict)]
+        if not phases:
+            raise ValueError(f"judge reply has no scoreable phases: {raw[:200]}")
+        obj["overall_score"] = sum(clamp_score(p.get("score")) for p in phases) / len(phases)
     return obj
 
 

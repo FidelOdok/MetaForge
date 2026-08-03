@@ -79,6 +79,24 @@ def test_parse_rejects_shapeless_reply() -> None:
         parse_judge_reply('{"not_a_verdict": true}')
 
 
+def test_parse_derives_missing_overall_score_from_phases() -> None:
+    # claude-cli backend has no structured-output guarantee: the model may
+    # omit overall_score — derive it as the mean of phase scores.
+    verdict = {
+        "phases": [
+            {"phase": "a", "score": 1.0, "verdict": "met", "missing": [], "rationale": "r"},
+            {"phase": "b", "score": 0.0, "verdict": "unmet", "missing": ["x"], "rationale": "r"},
+        ],
+        "summary": "half",
+    }
+    assert parse_judge_reply(json.dumps(verdict))["overall_score"] == 0.5
+
+
+def test_parse_rejects_missing_overall_with_no_phases() -> None:
+    with pytest.raises(ValueError):
+        parse_judge_reply('{"phases": [], "summary": "nothing"}')
+
+
 def test_clamp_score_bounds_and_garbage() -> None:
     assert clamp_score(1.7) == 1.0
     assert clamp_score(-3) == 0.0

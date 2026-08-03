@@ -124,3 +124,11 @@ def test_mismatched_suites_raise() -> None:
 def test_no_change_yields_empty_diff() -> None:
     result = compare(_chat_report(), _chat_report())
     assert result["improvements"] == [] and result["regressions"] == []
+
+
+def test_foreign_report_shapes_do_not_crash() -> None:
+    # A session-scores report has scalar summary values — history walks must
+    # skip them, not crash.
+    foreign = {"summary": {"sessions_scored": 24, "avg_score": 0.97}}
+    assert extract_rows(foreign) == {}
+    assert headline(foreign)["scenarios"] == 0

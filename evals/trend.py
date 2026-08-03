@@ -47,11 +47,18 @@ def extract_rows(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     if suite_of(report) == "chat":
         for sid, variants in summary.items():
+            if not isinstance(variants, dict):
+                continue
             for vname, stats in variants.items():
-                rows[f"{sid}::{vname}"] = dict(stats)
+                if isinstance(stats, dict):
+                    rows[f"{sid}::{vname}"] = dict(stats)
     else:
+        # Skip scalar summary entries so foreign report shapes (e.g. the
+        # session-scores report, whose summary holds aggregates) don't crash
+        # a directory-wide history walk.
         for sid, stats in summary.items():
-            rows[sid] = dict(stats)
+            if isinstance(stats, dict):
+                rows[sid] = dict(stats)
     return rows
 
 
