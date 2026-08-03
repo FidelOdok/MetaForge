@@ -16,6 +16,7 @@ sys.path.insert(0, str(_EVALS))
 from judge import (  # noqa: E402
     PROMPT_VERSION,
     VERDICT_SCHEMA,
+    aggregate_votes,
     build_judge_prompt,
     clamp_score,
     cli_complete,
@@ -264,6 +265,50 @@ def test_cli_backend_records_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> No
     complete = cli_complete("opus", runner=lambda cmd, prompt: _cli_proc("", 1, "not logged in"))
     out = judge_run(complete, {"project_id": "p1"}, _DOD, "g", "http://x")
     assert "judge failed" in out["error"] and "not logged in" in out["error"]
+
+
+# --- majority vote ----------------------------------------------------------------------
+def _vote(score: float, summary: str = "s") -> dict:
+    return {"phases": [], "overall_score": score, "summary": summary}
+
+
+def test_aggregate_votes_takes_median_verdict() -> None:
+    out = aggregate_votes([_vote(0.9, "high"), _vote(0.2, "low"), _vote(0.5, "mid")])
+    assert out["overall_score"] == 0.5
+    assert out["summary"] == "mid"  # the median verdict itself, not a blend
+    assert out["votes"] == [0.9, 0.2, 0.5]
+
+
+def test_aggregate_votes_single_vote_is_identity() -> None:
+    assert aggregate_votes([_vote(0.7)])["overall_score"] == 0.7
+
+
+def test_aggregate_votes_empty_raises() -> None:
+    with pytest.raises(ValueError):
+        aggregate_votes([])
+
+
+def test_judge_run_with_votes_tolerates_partial_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import judge as judge_mod
+
+    monkeypatch.setattr(judge_mod, "collect_deliverables", lambda base, pid: "")
+    calls: list[str | Exception] = [
+        RuntimeError("blip"),
+        json.dumps(_VERDICT),
+        json.dumps(_VERDICT),
+    ]
+
+    def flaky(prompt: str) -> tuple[str, str]:
+        item = calls.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item, "m"
+
+    out = judge_run(flaky, {"project_id": "p1"}, _DOD, "g", "http://x", votes=3)
+    assert out["overall_score"] == 0.5
+    assert out["votes"] == [0.5, 0.5]  # two votes landed, one failed
 
 
 # --- aggregation ------------------------------------------------------------------------

@@ -304,26 +304,63 @@ def cli_complete(model: str, runner: Callable[..., Any] | None = None) -> Comple
     return complete
 
 
-def judge_run(complete: Complete, rec: dict, dod: Any, goal: str, base: str) -> dict:
-    """Judge one run record's work products; returns the advisory judge block."""
+def aggregate_votes(verdicts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Median-of-N aggregation for repeated judgements (MET-571 majority vote).
+
+    The representative verdict is the one whose overall score is the median of
+    all votes (middle element of the sorted scores), so phases/summary stay a
+    coherent single judgement rather than a chimera of averages. All vote
+    scores are kept for variance inspection.
+    """
+    if not verdicts:
+        raise ValueError("no verdicts to aggregate")
+    scored = sorted(verdicts, key=lambda v: clamp_score(v.get("overall_score")))
+    median_verdict = scored[(len(scored) - 1) // 2]
+    return {
+        **median_verdict,
+        "overall_score": clamp_score(median_verdict.get("overall_score")),
+        "votes": [clamp_score(v.get("overall_score")) for v in verdicts],
+    }
+
+
+def judge_run(
+    complete: Complete, rec: dict, dod: Any, goal: str, base: str, votes: int = 1
+) -> dict:
+    """Judge one run record's work products; returns the advisory judge block.
+
+    ``votes > 1`` repeats the judgement and takes the median verdict — use for
+    high-variance dimensions. Individual vote failures are tolerated as long
+    as at least one vote lands.
+    """
     project_id = rec.get("project_id")
     if not project_id:
         return {"skipped": "run has no project_id (no work products to judge)"}
     deliverables = collect_deliverables(base, str(project_id))
-    try:
-        text, model_used = complete(build_judge_prompt(dod, deliverables, goal))
-        verdict = parse_judge_reply(text)
-    except JudgeRefusal:
-        return {"error": "judge model refused", "prompt_version": PROMPT_VERSION}
-    except Exception as exc:  # noqa: BLE001 - eval tooling, record not raise
-        return {"error": f"judge failed: {exc}"[:300], "prompt_version": PROMPT_VERSION}
-    return {
+    prompt = build_judge_prompt(dod, deliverables, goal)
+    verdicts: list[dict[str, Any]] = []
+    model_used = ""
+    last_error = ""
+    for _ in range(max(1, votes)):
+        try:
+            text, model_used = complete(prompt)
+            verdicts.append(parse_judge_reply(text))
+        except JudgeRefusal:
+            return {"error": "judge model refused", "prompt_version": PROMPT_VERSION}
+        except Exception as exc:  # noqa: BLE001 - eval tooling, record not raise
+            last_error = f"judge failed: {exc}"[:300]
+    if not verdicts:
+        return {"error": last_error, "prompt_version": PROMPT_VERSION}
+    verdict = aggregate_votes(verdicts)
+    block = {
         "model": model_used,
         "prompt_version": PROMPT_VERSION,
-        "overall_score": clamp_score(verdict.get("overall_score")),
+        "overall_score": verdict["overall_score"],
         "phases": verdict.get("phases", []),
         "summary": str(verdict.get("summary", ""))[:1000],
     }
+    if len(verdicts) > 1:
+        block["votes"] = verdict["votes"]
+    return block
 
 
 def main() -> int:
@@ -342,6 +379,12 @@ def main() -> int:
         "claude-cli = headless `claude -p` subagent (uses the CLI's own login)",
     )
     ap.add_argument("--out", default=None, help="output path (default: augment --report in place)")
+    ap.add_argument(
+        "--votes",
+        type=int,
+        default=1,
+        help="judge each run N times and take the median verdict (majority vote)",
+    )
     args = ap.parse_args()
 
     if args.backend == "claude-cli":
@@ -377,7 +420,9 @@ def main() -> int:
         if not dod:
             continue
         print(f"  ⚖ judging {sid} run {rec.get('run')} …", file=sys.stderr)
-        rec["judge"] = judge_run(complete, rec, dod, scenario.get("goal", ""), args.gateway)
+        rec["judge"] = judge_run(
+            complete, rec, dod, scenario.get("goal", ""), args.gateway, votes=args.votes
+        )
         judged += 1
         if "overall_score" in rec["judge"]:
             print(f"    overall={rec['judge']['overall_score']}", file=sys.stderr)
