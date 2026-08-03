@@ -150,6 +150,25 @@ refusal fallbacks so a safety decline re-runs on Anthropic's recommended
 fallback model instead of losing the verdict. Runs without a
 `definition_of_done` or a `project_id` are skipped, never failed.
 
+## Online evals over production traces (`score_sessions.py`, MET-572)
+
+Session capture records every MCP tool call into `/v1/sessions`, but the
+corpus was write-only. `score_sessions.py` replays the `chat_tooluse`
+trajectory rubric over those captured sessions — duplicate identical calls,
+identical retries of failing calls, error-rate bounds — so production
+behavior gets the same discipline checks as scripted scenarios:
+
+```bash
+python3 evals/score_sessions.py --gateway http://fidel-dev:8000
+python3 evals/score_sessions.py --project <id> --since 2026-08-01 --strict
+```
+
+Each session's `action` events become one scored trajectory; sessions without
+actions are skipped. Output is per-session checks + an aggregate
+(`avg_score`, `sessions_with_failing_checks`); `--strict` exits 1 when any
+session fails a check. Dataset promotion (captured failures → eval fixtures)
+and per-model trends remain on MET-572.
+
 ## Trends, regressions, and scheduled runs (`trend.py` + `nightly.sh`, MET-574)
 
 Reports were write-only — nothing compared two runs. `trend.py` closes that:
