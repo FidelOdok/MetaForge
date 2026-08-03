@@ -96,6 +96,24 @@ every phase, and do the artifacts agree?) run over three reference products:
 genuine Phase-2 boundary (real ERC needs an authored schematic, a KiCad-write
 capability), not a defect — with the digital thread intact end to end.
 
+A second suite, `evals/run_chat_scenarios.py` (MET-570), applies the same
+flywheel to the harness-backed **chat** surface: scripted multi-turn
+conversations over `/v1/chat` scored for needle recall across turns,
+project-brief adherence, context-window telemetry honesty, and tool-call
+trajectory quality (duplicate/retry discipline, error rates, big-observation
+survival). Scenarios declare `expected_today` for behavior known broken on the
+current harness (e.g. facts beyond the 20-turn history slice, until MET-568
+lands compaction), which reports as `xfail` and flips to `xpass` when the fix
+ships — so re-running the identical baseline command measures each
+context-engineering phase as it lands. See `evals/README.md` for the scenario
+schema and rubric catalog.
+
+Work-product **quality** (substance, not structure) is scored by an optional
+LLM-as-judge pass, `evals/judge.py` (MET-571): it grades each run's twin work
+products against the scenario's `definition_of_done` and attaches advisory
+`judge` blocks to the report. Deterministic rubric checks remain authoritative
+for pass/fail.
+
 ## How a run flows
 
 ```
@@ -190,3 +208,4 @@ and a dedicated `forge design` CLI wrapper.
 | `api_gateway/runs/gate_eval.py` | `ProjectGateEvaluator` — deliverable enforcement (loadable `cad_model`) |
 | `api_gateway/runs/routes.py` | Per-flow handler routing; launches the executor on a design-flow `POST /v1/runs` |
 | `evals/run_scenarios.py`, `evals/*_rubric.py` | Eval flywheel: scenario runner + correctness rubrics |
+| `evals/run_chat_scenarios.py`, `evals/chat_*_rubric.py` | Chat context-engineering evals: multi-turn scenarios + trajectory rubrics (MET-570) |

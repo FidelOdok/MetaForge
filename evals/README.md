@@ -10,9 +10,9 @@ happened, and let the gaps prioritise development.
       └──────────────────────────────────────────────────────────┘
 ```
 
-This directory is **step 1–2** (scenarios + experimentation → structured data).
-Rubric/quality scoring (step 3) consumes the `definition_of_done` carried in the
-report.
+This directory is **step 1–2** (scenarios + experimentation → structured data)
+plus the first slice of step 3: `judge.py` scores work-product *quality*
+against each scenario's `definition_of_done` (see below).
 
 ## Scenarios (`scenarios/*.json`)
 
@@ -69,3 +69,132 @@ Plus a per-scenario `summary` (completed-rate, avg completeness, avg duration).
 The top recurring gaps become the next development: deliverable creation tools
 for the missing types, constraint-as-gate-criteria, skill depth, adapter
 reliability.
+
+## Chat context-engineering suite (MET-570)
+
+A second, independent suite: multi-turn conversation evals for the
+harness-backed chat surface (`/v1/chat`), scoring the context engineering the
+runs suite never touches — needle recall across turns, project-brief
+adherence, window/trim telemetry, and tool-call trajectory quality.
+
+```bash
+# All chat scenarios, against a live gateway (METAFORGE_CHAT_HARNESS=1)
+python3 evals/run_chat_scenarios.py --gateway http://fidel-dev:8000
+
+# One scenario / one variant, threshold-gated
+python3 evals/run_chat_scenarios.py --scenario chat_mem_needle --variant native --strict
+```
+
+### Scenarios (`chat_scenarios/*.json`)
+
+Pure data: ordered `turns` (with `repeat` blocks for long-conversation
+filler), declarative per-turn `checks` (`reply_contains`, `tool_called`,
+`tool_arg_equals`, `no_duplicate_tool_calls`, ...), a provider `variants`
+matrix (native tool-calling vs the text ReAct path), and `expected_today` —
+checks **known** to fail on the current harness. Those score `xfail`
+(confirmed baseline) instead of failing the run, and flip to `xpass` when the
+fix ships, so re-running the identical command after MET-566/MET-568 measures
+the improvement directly.
+
+| Fixture | Scope | Exercises |
+|---|---|---|
+| `chat_mem_needle` | assistant | Fact recall a few turns later, both paths (MET-565 amnesia class) |
+| `chat_mem_long_window` | assistant | Recall past the 20-turn history slice (xfail until MET-568) |
+| `chat_brief_project` | project | Brief adherence: project known, twin writes carry `project_id` |
+| `chat_brief_long_session` | project | Brief survives a long session (re-prepended every turn) |
+| `chat_tool_bigobs` | assistant | Huge tool observations: 8KB native cap vs uncapped ReAct trace |
+| `chat_tool_dedupe` | assistant | Multi-tool turn without duplicate identical calls |
+
+### Rubrics
+
+`chat_memory`, `chat_brief`, `chat_window`, `chat_tooluse` — each a pure
+`evaluate_*` (unit-tested in CI, no gateway) plus a `score_*` the runner
+dispatches. `agent.step` and `context.stats` are SSE-only, so the runner holds
+a background subscription to each thread's `/stream` and slices events per
+turn; replies come from refetching the thread (the agent turn completes inside
+the message POST).
+
+The wiring guard (`tests/unit/test_chat_eval_wiring.py`) fails CI when a
+scenario's rubric isn't dispatched, a check id is unknown to `expected_today`,
+or a check type isn't supported — the chat-suite sibling of
+`test_eval_wiring.py`.
+
+## Work-product quality judge (`judge.py`, MET-571)
+
+The deterministic rubrics catch structural hollowness but can't grade
+substance — a `design_decision` with a thin rationale passes them. `judge.py`
+is an optional post-processing pass over **either suite's report**: for each
+run that created a project, it fetches the work products that landed in the
+twin and has a judge model (default `claude-opus-5`, override with
+`METAFORGE_JUDGE_MODEL` or `--model`) score them against the scenario's
+`definition_of_done`, attaching an advisory `judge` block per run plus a
+report-level summary. Deterministic checks stay authoritative for pass/fail;
+judge scores are quality signal for trend diffs.
+
+```bash
+# Judge a runs-suite report (SDK backend: uses ANTHROPIC_API_KEY / ant auth profile)
+python3 evals/judge.py --report evals/report.json --gateway http://fidel-dev:8000
+
+# Judge chat-suite work products (chat_brief_* scenarios carry a definition_of_done)
+python3 evals/judge.py --report evals/chat_report.json --only chat_brief_project
+
+# Judge via the Claude Code CLI as a headless subagent (`claude -p`) — runs on
+# the CLI's own login/subscription, no API key needed
+python3 evals/judge.py --report evals/chat_report.json --backend claude-cli
+```
+
+Verdicts are structured-output JSON (per-phase `score`/`verdict`/`missing` +
+`overall_score`), the judge model, backend, and `prompt_version` are pinned in
+the report for comparability, and the SDK backend opts into server-side
+refusal fallbacks so a safety decline re-runs on Anthropic's recommended
+fallback model instead of losing the verdict. Runs without a
+`definition_of_done` or a `project_id` are skipped, never failed.
+
+## Online evals over production traces (`score_sessions.py`, MET-572)
+
+Session capture records every MCP tool call into `/v1/sessions`, but the
+corpus was write-only. `score_sessions.py` replays the `chat_tooluse`
+trajectory rubric over those captured sessions — duplicate identical calls,
+identical retries of failing calls, error-rate bounds — so production
+behavior gets the same discipline checks as scripted scenarios:
+
+```bash
+python3 evals/score_sessions.py --gateway http://fidel-dev:8000
+python3 evals/score_sessions.py --project <id> --since 2026-08-01 --strict
+```
+
+Each session's `action` events become one scored trajectory; sessions without
+actions are skipped. Output is per-session checks + an aggregate
+(`avg_score`, `sessions_with_failing_checks`); `--strict` exits 1 when any
+session fails a check. Dataset promotion (captured failures → eval fixtures)
+and per-model trends remain on MET-572.
+
+## Trends, regressions, and scheduled runs (`trend.py` + `nightly.sh`, MET-574)
+
+Reports were write-only — nothing compared two runs. `trend.py` closes that:
+
+```bash
+# Diff two reports of the same suite; --strict exits 1 on any regression
+python3 evals/trend.py diff --before evals/reports/A/report_chat.json \
+                            --after  evals/reports/B/report_chat.json --strict
+
+# One headline row per persisted report, oldest first
+python3 evals/trend.py history --dir evals/reports
+```
+
+Regression rules are deterministic and small: for the chat suite, a
+`failed_unexpected` increase or an xpass→xfail reversion; for the runs suite,
+a `completed_rate` or `avg_completeness` drop; for judge scores, a fall of
+more than 0.05 (advisory scores get an epsilon). xfail→xpass flips and
+completeness gains print as improvements — the "fix landed" signal.
+
+`nightly.sh` is the on-box scheduler half (GitHub-hosted runners can't reach
+fidel-dev): it runs both suites into a timestamped `evals/reports/<ts>/`
+directory (gitignored), judges work products best-effort (`JUDGE_BACKEND=claude-cli`
+to use the Claude Code CLI login), then trend-diffs against the previous
+nightly with `--strict`. Non-zero exit on suite failure or regression is the
+alerting hook — wire it to cron on a box that can reach the gateway:
+
+```
+0 2 * * *  cd /home/claude/MetaForge && evals/nightly.sh >> ~/eval-nightly.log 2>&1
+```
