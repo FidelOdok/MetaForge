@@ -75,6 +75,41 @@ If the embedding worker is the culprit, the gateway logs a matching
 error around the ingest — filter Loki on
 `scope_name = "digital_twin.knowledge.lightrag_service"`.
 
+## Every `knowledge.search` fails with `invalid input syntax for type json`
+
+**Symptom:** all knowledge searches in a workspace error out with a
+Postgres message like `invalid input syntax for type json … Token "…" is
+invalid`, regardless of query or filters.
+
+**Cause:** a row in `lightrag_vdb_chunks` whose `file_path` is not the
+encoded-JSON metadata blob the read paths parse. The known writer of
+such rows is **lightrag-hku 1.5.x**, which basenames `file_path` on
+write (keeps only the part after the last `/`) — `pyproject.toml` pins
+`lightrag-hku>=1.4,<1.5` for exactly this reason (MET-577). One bad row
+used to make every `file_path::jsonb` cast in the workspace fatal.
+
+**Behaviour now:** the casting queries prefilter to JSON-shaped rows
+(`_JSON_FILE_PATH_GUARD` in `lightrag_service.py`), so garbage rows are
+invisible rather than fatal, and the post-ingest persistence read-back
+matches on chunk **id** without casting at all.
+
+**Diagnosis / cleanup:** find (and, after inspection, remove) mangled
+rows:
+
+```sql
+SELECT id, left(file_path, 80) FROM lightrag_vdb_chunks
+WHERE file_path !~ '^\s*[\[{"]';
+```
+
+Also verify the installed LightRAG version matches the pin in **every**
+container that ingests (gateway *and* `mcp-http` sidecar — they build
+from the same Dockerfile but may have been built at different times):
+
+```bash
+docker exec metaforge-gateway-1 pip show lightrag-hku | grep Version
+docker exec metaforge-mcp-http-1 pip show lightrag-hku | grep Version
+```
+
 ## `.mcp.json` drift breaks `test_mcp_json_config`
 
 **Symptom:** `pytest tests/unit/test_mcp_json_config.py` fails with:
