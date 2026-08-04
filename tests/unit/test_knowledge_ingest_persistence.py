@@ -106,14 +106,11 @@ async def test_count_persisted_chunks_unverifiable_returns_none() -> None:
     assert await svc._count_persisted_chunks(["some-chunk-id"], _SOURCE) is None
 
 
-async def test_read_back_is_id_based_and_immune_to_mangled_rows() -> None:
-    """MET-577: the read-back matches on chunk id, never file_path.
-
-    lightrag-hku 1.5.x basenames ``file_path`` on write, destroying the
-    encoded metadata. An id-based read-back still counts such rows as
-    persisted (they DID land), and garbage rows from other writers can
-    neither error the check nor inflate the count.
-    """
+async def test_read_back_id_step_is_immune_to_mangled_rows() -> None:
+    """MET-577: when a build stores our ids verbatim, the id step counts
+    rows even if 1.5.x basenaming destroyed their ``file_path`` encoding,
+    and garbage rows from other writers can neither error the check nor
+    inflate the count."""
     rag = _RecordingRag(persist=True)
     svc = _service(rag)
     result = await svc.ingest(
@@ -131,15 +128,50 @@ async def test_read_back_is_id_based_and_immune_to_mangled_rows() -> None:
     assert await svc._count_persisted_chunks(ids, _SOURCE) == result.chunks_indexed
 
 
-async def test_read_back_counts_only_this_ingests_ids() -> None:
-    """Stale rows at the same source can't mask a failed write (exactness)."""
+async def test_derived_id_builds_fall_back_to_source_count() -> None:
+    """MET-577 live-caught: current 1.4.16 derives its own ``chunk-<hash>``
+    ids (ours become document ids), so the id match finds nothing for a
+    perfectly good write. The read-back must fall back to counting rows at
+    (src, project) via the encoded file_path instead of false-failing."""
+    from digital_twin.knowledge.lightrag_service import _encode_meta
+
     rag = _RecordingRag(persist=True)
     svc = _service(rag)
-    # A previous ingest left rows at the same source…
-    rag.chunks_vdb.client_storage["data"].append(
-        {"id": "stale-chunk-000", "content": "old", "file_path": "{}"}
+    encoded = _encode_meta(
+        source_path=_SOURCE,
+        chunk_index=0,
+        total_chunks=1,
+        heading=None,
+        knowledge_type=KnowledgeType.DESIGN_DECISION,
+        source_work_product_id=None,
+        extra={},
     )
-    # …but THIS write's ids are what the read-back must confirm.
+    # LightRAG stored the chunk under ITS OWN id, keeping our encoding.
+    rag.chunks_vdb.client_storage["data"].append(
+        {"id": "chunk-84d8aadb428dbeb653022de8374a7596", "content": "x", "file_path": encoded}
+    )
+    assert await svc._count_persisted_chunks(["our-stable-id-chunk-000"], _SOURCE) == 1
+
+
+async def test_fallback_scopes_by_project_and_source() -> None:
+    """The source-count fallback must not count other projects/sources."""
+    from digital_twin.knowledge.lightrag_service import _encode_meta
+
+    rag = _RecordingRag(persist=True)
+    svc = _service(rag)
+    other = _encode_meta(
+        source_path="project://other/doc",
+        chunk_index=0,
+        total_chunks=1,
+        heading=None,
+        knowledge_type=KnowledgeType.DESIGN_DECISION,
+        source_work_product_id=None,
+        extra={},
+    )
+    rag.chunks_vdb.client_storage["data"].append(
+        {"id": "chunk-deadbeef", "content": "x", "file_path": other}
+    )
+    # Nothing at _SOURCE → a genuinely failed write still reads 0.
     assert await svc._count_persisted_chunks(["fresh-chunk-000"], _SOURCE) == 0
 
 
@@ -160,13 +192,15 @@ def test_every_jsonb_cast_query_carries_the_guard() -> None:
     from digital_twin.knowledge import lightrag_service as mod
 
     src = inspect.getsource(mod)
-    for name in ("_search_pg", "_list_sources_pg", "_existing_content_sha256"):
+    for name in (
+        "_search_pg",
+        "_list_sources_pg",
+        "_existing_content_sha256",
+        "_count_persisted_chunks",
+    ):
         fn_src = inspect.getsource(getattr(LightRAGKnowledgeService, name))
         if "::jsonb" in fn_src:
             assert "_JSON_FILE_PATH_GUARD" in fn_src, (
                 f"{name} casts file_path::jsonb without the non-JSON row guard"
             )
-    # The read-back must stay cast-free entirely (id-based).
-    readback_src = inspect.getsource(LightRAGKnowledgeService._count_persisted_chunks)
-    assert "::jsonb" not in readback_src
     assert "_JSON_FILE_PATH_GUARD" in src
