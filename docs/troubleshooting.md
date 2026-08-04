@@ -38,6 +38,43 @@ If you need fallback to fail loudly instead of silently, set
 in the gateway environment — the server then refuses to start
 without them.
 
+## `knowledge.ingest` reports success but `knowledge.search` finds nothing
+
+**Symptom:** An ingest returns `chunks_indexed = N` (N > 0), yet a
+follow-up `knowledge.search` for the same content returns zero hits.
+
+**Cause:** LightRAG's `ainsert` can fail to persist the chunk vectors
+*without raising* — an embedding or KG-extraction error inside its
+pipeline is swallowed and the call still returns normally. `ingest`
+used to report `chunks_indexed` straight from the submitted chunk list,
+so a silent write failure was indistinguishable from success.
+
+**Behaviour now:** `LightRAGKnowledgeService.ingest` reads the store
+back after `ainsert` (`_count_persisted_chunks`) and confirms the
+chunks actually landed:
+
+- **0 persisted** while chunks were produced → ingest raises and logs
+  `lightrag_ingest_not_persisted` (with `expected_chunks` /
+  `persisted_chunks`), so the tool surfaces an error envelope instead of
+  a phantom success. Retry, or check why the write failed.
+- **Fewer persisted than produced** → ingest still succeeds but logs
+  `lightrag_ingest_partial_persist` for observability.
+
+**Diagnosis:** query the store directly and check LightRAG's doc status:
+
+```sql
+SELECT count(*) FROM lightrag_vdb_chunks
+WHERE workspace = 'lightrag'
+  AND file_path::jsonb->>'src' = '<your source_path>';
+
+SELECT id, status, error_msg FROM lightrag_doc_status
+WHERE workspace = 'lightrag' ORDER BY updated_at DESC LIMIT 10;
+```
+
+If the embedding worker is the culprit, the gateway logs a matching
+error around the ingest — filter Loki on
+`scope_name = "digital_twin.knowledge.lightrag_service"`.
+
 ## `.mcp.json` drift breaks `test_mcp_json_config`
 
 **Symptom:** `pytest tests/unit/test_mcp_json_config.py` fails with:
