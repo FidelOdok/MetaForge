@@ -97,7 +97,12 @@ knowledge = [
     # backend behind the ``KnowledgeService`` Protocol; ``raganything``
     # supplies the multimodal ingest path (PDF, images) parked behind
     # P1.13.
-    "lightrag-hku>=1.4",
+    # MET-577: <1.5 — lightrag-hku 1.5.x basenames ``file_path`` on
+    # write, destroying the encoded chunk metadata every read path
+    # parses (an unpinned image rebuild shipped 1.5.2 to the sidecar
+    # and corrupted rows). Lift only after the encoding is /-free or
+    # the read paths handle both formats.
+    "lightrag-hku>=1.4,<1.5",
     "raganything>=1.2",
     # Used by digital_twin.context.models for token-budget enforcement
     # (MET-317). Already a transitive of lightrag-hku — hoisted explicit
@@ -125,7 +130,9 @@ gateway = [
     "neo4j>=5.0",
     "pgvector>=0.2",
     "sentence-transformers>=2.0",
-    "lightrag-hku>=1.4",
+    # MET-577: keep in lockstep with the [knowledge] pin — 1.5.x mangles
+    # the encoded file_path metadata.
+    "lightrag-hku>=1.4,<1.5",
     "raganything>=1.2",
     # MET-483: the gateway is the MinIO source-of-truth for work-product
     # blobs (Planner data-modalities.md), so it needs the client. Was
