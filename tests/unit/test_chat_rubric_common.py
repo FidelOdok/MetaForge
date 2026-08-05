@@ -217,3 +217,28 @@ def test_expected_for_variant_flat_and_per_variant() -> None:
     assert expected_for_variant(expected, "react") == {"a": "fail", "b": "fail"}
     assert expected_for_variant(expected, "native") == {"a": "fail"}
     assert expected_for_variant(None, "native") == {}
+
+
+# --- gateway_action support (MET-587 end-to-end approval turn) ---------------------
+def test_action_succeeded_check_reads_action_ok() -> None:
+    from chat_rubric_common import run_check
+
+    check = {"id": "x", "type": "action_succeeded"}
+    assert run_check(check, {"action_ok": True})
+    assert not run_check(check, {"action_ok": False})
+    assert not run_check(check, {})  # non-action turn -> False, never raises
+
+
+def test_expand_turns_passes_gateway_action_through() -> None:
+    from chat_rubric_common import expand_turns
+
+    turns = expand_turns([{"gateway_action": "approve_run", "checks": []}, {"say": "hi"}])
+    assert turns[0]["gateway_action"] == "approve_run"
+    assert turns[1]["say"] == "hi"
+
+
+def test_substitute_tolerates_sayless_action_turns() -> None:
+    from chat_rubric_common import substitute
+
+    out = substitute([{"gateway_action": "approve_run"}], {"$PROJECT_ID": "p"})
+    assert out == [{"gateway_action": "approve_run"}]

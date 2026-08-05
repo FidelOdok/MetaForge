@@ -39,6 +39,9 @@ SUPPORTED_CHECK_TYPES = (
     "tool_arg_equals",
     "no_duplicate_tool_calls",
     "reply_is_not_fallback",
+    # For gateway_action turns (runner-performed HTTP steps, e.g. approving a
+    # gate between agent turns): did the action complete?
+    "action_succeeded",
 )
 
 
@@ -222,6 +225,8 @@ def run_check(check: dict[str, Any], turn: dict[str, Any]) -> bool:
         return True
     if ctype == "reply_is_not_fallback":
         return turn_replied(turn)
+    if ctype == "action_succeeded":
+        return bool(turn.get("action_ok"))
     raise ValueError(f"unsupported check type: {ctype!r}")
 
 

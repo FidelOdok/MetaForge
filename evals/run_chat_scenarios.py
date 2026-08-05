@@ -28,6 +28,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -128,6 +129,63 @@ class StreamListener:
         return list(self.events[start_idx:])
 
 
+_RUN_ID_RE = re.compile(r"run_[0-9a-f]{8,}")
+
+
+def find_run_id(turns: list[dict[str, Any]]) -> str | None:
+    """The most recent design-flow run id mentioned in prior turns.
+
+    Scans tool observations first (authoritative — the launch tool's result
+    carries it), then replies, newest turn first.
+    """
+    for turn in reversed(turns):
+        for source in (
+            *[str(s.get("observation") or "") for s in reversed(turn.get("steps") or [])],
+            str(turn.get("reply") or ""),
+        ):
+            m = _RUN_ID_RE.search(source)
+            if m:
+                return m.group(0)
+    return None
+
+
+def approve_run_action(base: str, turns: list[dict[str, Any]], timeout_s: float) -> dict[str, Any]:
+    """Runner-performed gate approval (the ``approve_run`` gateway action).
+
+    Finds the run the agent launched earlier in the conversation, waits for it
+    to pause at its gate, approves, and confirms the run resumed — so a later
+    agent turn can report the post-approval state. Every step is recorded;
+    failure never raises (the ``action_succeeded`` check surfaces it).
+    """
+    record: dict[str, Any] = {"action": "approve_run", "action_ok": False}
+    run_id = find_run_id(turns)
+    if not run_id:
+        record["action_detail"] = "no run id found in prior turns"
+        return record
+    record["run_id"] = run_id
+    try:
+        deadline = time.time() + timeout_s
+        status = None
+        while time.time() < deadline:
+            status = api(base, "GET", f"/v1/runs/{run_id}").get("status")
+            if status in ("awaiting_approval", "completed", "failed", "rejected"):
+                break
+            time.sleep(3)
+        record["status_before"] = status
+        if status != "awaiting_approval":
+            record["action_detail"] = f"run never paused at a gate (status={status})"
+            return record
+        api(base, "POST", f"/v1/runs/{run_id}/approval", {"decision": "approve"})
+        # Approval flips the run back to running immediately.
+        record["status_after"] = api(base, "GET", f"/v1/runs/{run_id}").get("status")
+        record["action_ok"] = record["status_after"] != "awaiting_approval"
+        if not record["action_ok"]:
+            record["action_detail"] = "run still awaiting approval after approve"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        record["action_detail"] = f"approval failed: {exc}"[:300]
+    return record
+
+
 def path_mechanism(variant: dict, force_label: str | None) -> str:
     if force_label:
         return "gateway_env"
@@ -208,6 +266,33 @@ def run_conversation(
     turns = substitute(expand_turns(scenario["turns"]), subs)
     for t_idx, turn in enumerate(turns):
         turn_started = time.time()
+
+        # Runner-performed HTTP step between agent turns (no message posted).
+        # Currently: "approve_run" — approve the gate a launched flow paused
+        # at, so the next agent turn can report the post-approval state.
+        if turn.get("gateway_action"):
+            action_record: dict[str, Any] = {
+                "index": t_idx,
+                "say": f"[gateway action: {turn['gateway_action']}]",
+                "tag": turn.get("tag"),
+                "checks": turn.get("checks") or [],
+                "reply": "",
+                "reply_error": False,
+                "steps": [],
+                "context_stats": None,
+                "sse": sse_up,
+            }
+            if turn["gateway_action"] == "approve_run":
+                action_record.update(approve_run_action(base, rec["turns"], max_turn_s))
+            else:
+                action_record["action_ok"] = False
+                action_record["action_detail"] = (
+                    f"unknown gateway_action {turn['gateway_action']!r}"
+                )
+            action_record["duration_s"] = round(time.time() - turn_started, 1)
+            rec["turns"].append(action_record)
+            continue
+
         record: dict[str, Any] = {
             "index": t_idx,
             "say": turn["say"],

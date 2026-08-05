@@ -106,7 +106,15 @@ def test_turns_and_checks_well_formed(path: str) -> None:
             assert isinstance(rep["template"], str) and rep["template"]
             assert "checks" not in turn, f"{path}: repeat blocks cannot carry checks"
             continue
-        assert isinstance(turn.get("say"), str) and turn["say"], f"{path}: turn without say"
+        if turn.get("gateway_action") is not None:
+            # Runner-performed HTTP step (no message posted); may carry checks
+            # (typically action_succeeded) but never a say.
+            assert turn["gateway_action"] in {"approve_run"}, (
+                f"{path}: unknown gateway_action {turn['gateway_action']!r}"
+            )
+            assert "say" not in turn, f"{path}: gateway_action turns cannot carry say"
+        else:
+            assert isinstance(turn.get("say"), str) and turn["say"], f"{path}: turn without say"
         for check in turn.get("checks") or []:
             cid = check.get("id")
             assert cid and cid not in seen_ids, f"{path}: duplicate/missing check id {cid!r}"

@@ -104,6 +104,14 @@ the improvement directly.
 | `chat_brief_long_session` | project | Brief survives a long session (re-prepended every turn) |
 | `chat_tool_bigobs` | assistant | Huge tool observations: 8KB native cap vs uncapped ReAct trace |
 | `chat_tool_dedupe` | assistant | Multi-tool turn without duplicate identical calls |
+| `chat_design_launch` | project | End-to-end chat-triggered flow (MET-587): launch `hardware_v1`, runner approves gate 1 (`gateway_action`), agent reports post-approval state |
+
+Turns may also be **`gateway_action`** steps the runner performs itself
+between agent turns (no message posted) — currently `approve_run`, which
+finds the run the agent launched, waits for it to pause at its gate, approves
+it, and records `action_ok` for the `action_succeeded` check. This is how a
+scenario covers the joined human-in-the-loop path without leaving approval to
+the model.
 
 ### Rubrics
 
