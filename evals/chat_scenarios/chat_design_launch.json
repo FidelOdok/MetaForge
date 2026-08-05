@@ -2,8 +2,16 @@
   "id": "chat_design_launch",
   "title": "Chat-triggered design flow: agent starts hardware_v1 scoped to the project (leaves a paused run)",
   "scope": "project",
-  "rubric": ["chat_tooluse"],
-  "variants": [{ "name": "native", "provider": null, "model": null }],
+  "rubric": [
+    "chat_tooluse"
+  ],
+  "variants": [
+    {
+      "name": "native",
+      "provider": null,
+      "model": null
+    }
+  ],
   "max_turn_seconds": 420,
   "turns": [
     {
@@ -41,5 +49,6 @@
         }
       ]
     }
-  ]
+  ],
+  "project_description": "Pocket-size USB-C soldering-iron controller with OLED readout"
 }

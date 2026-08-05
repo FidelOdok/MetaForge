@@ -136,6 +136,8 @@ def main() -> int:
     summary = summarize_sessions(rows)
 
     report = {"gateway": args.gateway, "summary": summary, "sessions": rows}
+    if os.path.dirname(args.out):
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
 

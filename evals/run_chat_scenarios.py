@@ -155,15 +155,12 @@ def run_conversation(
     try:
         if scenario.get("scope") == "project":
             project_name = f"eval-{scenario['id']}-{vname}-{idx}-{int(started)}"
-            proj = api(
-                base,
-                "POST",
-                "/v1/projects",
-                {
-                    "name": project_name,
-                    "description": scenario.get("project_description"),
-                },
-            )
+            body: dict[str, Any] = {"name": project_name}
+            # The API rejects an explicit null description (422) — only send
+            # the field when the scenario declares one.
+            if scenario.get("project_description"):
+                body["description"] = scenario["project_description"]
+            proj = api(base, "POST", "/v1/projects", body)
             project_id = proj["id"]
             rec["project_id"] = project_id
             rec["project_name"] = project_name
@@ -412,6 +409,8 @@ def main() -> int:
             s["id"]: s["definition_of_done"] for s in scenarios if s.get("definition_of_done")
         },
     }
+    if os.path.dirname(args.out):
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
     print(f"\n=== summary ===\n{json.dumps(report['summary'], indent=2)}", file=sys.stderr)
