@@ -83,6 +83,35 @@ def headline(report: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def variant_headlines(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Chat-suite aggregates grouped by variant (MET-572 per-model trend lines).
+
+    Variants map 1:1 to a provider/model lane (``native`` = the gateway
+    default, ``react`` = the forced JSON-text path, etc.), so grouping rows
+    by the variant half of the ``scenario::variant`` key gives per-model
+    trend rows a directory-wide history can chart lane by lane.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    if suite_of(report) != "chat":
+        return out
+    for key, row in extract_rows(report).items():
+        _, _, vname = key.partition("::")
+        agg = out.setdefault(
+            vname or "(default)",
+            {
+                "scenarios": 0,
+                "passed": 0,
+                "failed_unexpected": 0,
+                "xfail_confirmed": 0,
+                "xpass_improved": 0,
+            },
+        )
+        agg["scenarios"] += 1
+        for metric in ("passed", "failed_unexpected", "xfail_confirmed", "xpass_improved"):
+            agg[metric] += int(row.get(metric, 0))
+    return out
+
+
 def compare(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     """Diff two reports of the same suite into improvements and regressions.
 
@@ -186,6 +215,9 @@ def cmd_history(args: argparse.Namespace) -> int:
             continue  # not an eval report (e.g. a judge-only artifact)
         rel = os.path.relpath(path, args.dir)
         print(f"{rel}: {_fmt_headline(headline(report))}")
+        if args.by_variant:
+            for vname, agg in sorted(variant_headlines(report).items()):
+                print(f"  [{vname}] {_fmt_headline(agg)}")
     return 0
 
 
@@ -202,6 +234,11 @@ def main() -> int:
     h = sub.add_parser("history", help="headline rows for every report under a directory")
     h.add_argument(
         "--dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    )
+    h.add_argument(
+        "--by-variant",
+        action="store_true",
+        help="chat reports: add per-variant (provider/model lane) sub-rows",
     )
     h.set_defaults(fn=cmd_history)
 
