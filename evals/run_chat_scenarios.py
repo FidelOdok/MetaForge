@@ -46,6 +46,7 @@ from chat_rubric_common import (  # noqa: E402
     expected_for_variant,
     interpolate_checks,
     resolve_outcomes,
+    step_payload,
     unwrap_sse_data,
 )
 
@@ -233,7 +234,9 @@ def run_conversation(
                 timeout=max_turn_s,
             )
             events = listener.wait_turn_events(mark) if sse_up else []
-            record["steps"] = [e["data"] for e in events if e.get("event") == "agent.step"]
+            record["steps"] = [
+                step_payload(e["data"]) for e in events if e.get("event") == "agent.step"
+            ]
             stats = [e["data"] for e in events if e.get("event") == "context.stats"]
             record["context_stats"] = stats[0] if stats else None
 
