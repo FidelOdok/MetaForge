@@ -19,6 +19,28 @@ OUT="$ROOT/reports/$TS"
 mkdir -p "$OUT"
 status=0
 
+# MET-574: route the nightly outcome into the observability stack. When
+# LOKI_PUSH_URL is set (e.g. http://<loki-host>:3100/loki/api/v1/push), push
+# one structured log line per run under service_name="metaforge-evals";
+# level="error" on regression/failure feeds the version-controlled
+# NightlyEvalRegression rule in observability/alerting/loki-rules.yaml.
+# Best-effort by design — alerting must never change the nightly's exit code.
+notify_loki() { # notify_loki <level> <message>
+  [ -z "${LOKI_PUSH_URL:-}" ] && return 0
+  local payload
+  payload="$(python3 - "$1" "$2" <<'PY'
+import json, sys, time
+level, message = sys.argv[1], sys.argv[2]
+print(json.dumps({"streams": [{
+    "stream": {"service_name": "metaforge-evals", "job": "nightly", "level": level},
+    "values": [[str(time.time_ns()), message]],
+}]}))
+PY
+)" || return 0
+  curl -s -m 10 -H 'Content-Type: application/json' \
+    -X POST "$LOKI_PUSH_URL" -d "$payload" >/dev/null || true
+}
+
 echo "=== nightly evals $TS → $OUT (gateway: $GATEWAY) ==="
 
 python3 "$ROOT/run_scenarios.py" --gateway "$GATEWAY" \
@@ -45,4 +67,9 @@ if [ -n "$PREV" ] && [ "${PREV%/}" != "$OUT" ]; then
 fi
 
 echo "=== nightly evals done (status=$status) ==="
+if [ "$status" -ne 0 ]; then
+  notify_loki error "nightly evals FAILED (regression or suite failure) ts=$TS reports=$OUT gateway=$GATEWAY"
+else
+  notify_loki info "nightly evals passed ts=$TS reports=$OUT gateway=$GATEWAY"
+fi
 exit $status

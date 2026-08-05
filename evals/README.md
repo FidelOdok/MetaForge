@@ -245,3 +245,16 @@ alerting hook — wire it to cron on a box that can reach the gateway:
 ```
 0 2 * * *  cd /home/claude/MetaForge && evals/nightly.sh >> ~/eval-nightly.log 2>&1
 ```
+
+### Alert routing (Loki)
+
+With `LOKI_PUSH_URL` set in the cron environment (e.g.
+`http://<loki-host>:3100/loki/api/v1/push`), `nightly.sh` pushes one
+structured outcome line per run under `service_name="metaforge-evals"` —
+`level="error"` when a suite failed or `trend.py --strict` found a
+regression, `level="info"` otherwise. The version-controlled
+`observability/alerting/loki-rules.yaml` carries the matching
+`NightlyEvalRegression` rule (fires on any error line in the trailing 25h).
+The push is best-effort and env-gated: without `LOKI_PUSH_URL` (or with the
+observability stack down) the nightly behaves exactly as before, and the
+cron log stays the fallback signal.
