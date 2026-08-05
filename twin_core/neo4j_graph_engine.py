@@ -591,9 +591,13 @@ class Neo4jGraphEngine(GraphEngine):
                 async with self._driver.session(database=self._database) as session:
                     for query in queries:
                         result = await session.run(query, **params)
-                        records = await result.data()
-                        for rec in records:
-                            edges.append(self._props_to_edge(dict(rec["r"])))
+                        # MET-586: do NOT use result.data() here — it transforms
+                        # a relationship into a (start_props, type, end_props)
+                        # tuple, and dict() over that tuple explodes whenever the
+                        # start node has no properties. Raw records keep r as a
+                        # neo4j Relationship whose properties dict() reads.
+                        async for record in result:
+                            edges.append(self._props_to_edge(dict(record["r"])))
 
                 span.set_attribute("neo4j.result_count", len(edges))
                 return edges
