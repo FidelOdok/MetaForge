@@ -227,3 +227,30 @@ Mirrors Hermes's auth surface:
 - `store_backed_invoke(base, store, provider, session_id)` is the glue: builds the rotor from the store's healthy credentials and, on a **terminal** 401/403, writes the credential back to the store as dead (a transient 429 rotates but is **not** blacklisted).
 
 **Remote/headless auth (fidel-dev):** the harness runs where the gateway runs. Do the one-time `codex login --device-auth` on that host (or SSH-forward `:1455`, or copy `~/.codex/auth.json`); token refresh thereafter is pure HTTPS (no browser). `chmod 600` the auth file on shared boxes.
+
+## Context compaction (MET-568)
+
+The live loop manages its context window deterministically, in four layers:
+
+- **Token-budgeted history** — prior chat turns are budgeted by tokens
+  (`METAFORGE_HISTORY_TOKENS`, default 12k), newest kept whole; turns that no
+  longer fit fold into a deterministic, content-preserving summary prepended
+  as a leading context exchange (`summarize_turns`). Facts stated early in a
+  long conversation survive as summary lines. The full history stays in the
+  chat store, so the summary is recomputed per turn rather than persisted.
+- **Within-turn folding** — a native tool-calling turn grows by an assistant
+  `tool_calls` message plus tool results per iteration; past ~60% of the
+  model's context window (`trace_token_budget`) older exchanges fold into one
+  synopsis message (`compact_native_messages`). The ReAct path applies the
+  same idea through `compress_trace` on its rendered trace.
+- **Loud truncation** — oversized tool observations are capped with an
+  explicit `…[truncated N chars]` marker (`truncate_observation`), never a
+  silent slice, on both paths.
+- **Post-turn telemetry** — `context.stats` is re-emitted after the loop with
+  `phase: "final"` and a `trace_tokens` estimate, so the meter reflects what
+  the turn actually consumed, not just the pre-loop snapshot.
+
+All folding is deterministic (no model calls): free, instant, reproducible.
+**Deferred by design** (documented here, not built): Letta-style context
+paging, Zep-style temporal knowledge-graph queries in chat, and auto-memory
+files — revisit when the deterministic layers prove insufficient in evals.

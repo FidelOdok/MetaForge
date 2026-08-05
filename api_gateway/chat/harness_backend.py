@@ -143,6 +143,16 @@ def chat_harness_enabled() -> bool:
 _DEFAULT_CHAT_MAX_STEPS = 24
 
 
+def trace_token_budget(provider: str | None, model: str | None) -> int:
+    """Within-turn context budget for the tool loop (MET-568).
+
+    ~60% of the model's context window, reserving the rest for system prompt,
+    tool schemas, history, and the answer. Clamped to a sane floor so tiny or
+    unknown windows still leave the loop room to work.
+    """
+    return max(8_000, int(context_window_for(provider, model) * 0.6))
+
+
 def chat_max_steps() -> int:
     """Tool-call budget for a chat turn (``METAFORGE_CHAT_MAX_STEPS``, default 24).
 
@@ -324,9 +334,18 @@ async def run_chat_turn(
             invoke=invoke,
             max_steps=steps,
             history=history,
+            # MET-568: bound within-turn growth; older tool exchanges fold
+            # into a synopsis once the estimate crosses the budget.
+            max_context_tokens=trace_token_budget(provider, model),
         )
     else:
-        policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke, history=history)
+        policy = ModelPolicy(
+            ctx.runtime,
+            role="generator",
+            invoke=invoke,
+            history=history,
+            trace_token_budget=trace_token_budget(provider, model),
+        )
         result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
     logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
     if result.status == "completed":
@@ -574,9 +593,9 @@ async def run_chat_turn_streaming(
     # Emit a context-window snapshot for this turn before the loop runs, so a
     # client can show what's going into the model vs. what's available. Best-effort:
     # a bad stats computation must never break the turn.
+    tools_available = len(ctx.runtime.tools.all_tools())
     if on_context is not None:
         try:
-            tools_available = len(ctx.runtime.tools.all_tools())
             if mcp_bridge is not None:
                 tools_available = len(await mcp_bridge.list_tools())
             stats = compute_context_stats(
@@ -603,11 +622,49 @@ async def run_chat_turn_streaming(
             invoke=invoke,
             max_steps=steps,
             history=history,
+            # MET-568: bound within-turn growth; older tool exchanges fold
+            # into a synopsis once the estimate crosses the budget.
+            max_context_tokens=trace_token_budget(provider, model),
         )
     else:
-        policy = ModelPolicy(ctx.runtime, role="generator", invoke=invoke, history=history)
+        policy = ModelPolicy(
+            ctx.runtime,
+            role="generator",
+            invoke=invoke,
+            history=history,
+            trace_token_budget=trace_token_budget(provider, model),
+        )
         result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
+
+    # MET-568: re-emit context stats AFTER the loop so the meter reflects what
+    # the turn actually consumed (the pre-loop snapshot can't see tool-result
+    # growth). Same shape plus phase="final" and a trace-tokens estimate.
+    if on_context is not None:
+        try:
+            trace_tokens = sum(
+                default_token_count(str(st.observation or st.error or "") + str(st.thought or ""))
+                for st in result.steps
+            )
+            final_stats = compute_context_stats(
+                runtime=ctx.runtime,
+                system=NATIVE_SYSTEM,
+                history=history,
+                user_content=user_content,
+                provider=provider,
+                model=model,
+                tools_available=tools_available,
+                availability=availability,
+            )
+            final_stats["phase"] = "final"
+            final_stats["trace_tokens"] = trace_tokens
+            final_stats["used"] = int(final_stats.get("used", 0)) + trace_tokens
+            final_stats["available"] = max(
+                0, int(final_stats.get("window", 0)) - int(final_stats["used"])
+            )
+            await on_context(final_stats)
+        except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
+            logger.warning("chat_context_stats_final_failed", error=str(exc))
 
     # Surface the agent's trace (tool calls, observations, reasoning) so the UI
     # can render a legible timeline instead of only the final text. Best-effort:

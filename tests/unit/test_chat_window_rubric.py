@@ -53,14 +53,14 @@ def test_usage_at_or_over_window_fails() -> None:
 
 
 def test_untrimmed_over_limit_history_means_lying_meter() -> None:
-    # 30 turns exist and the meter claims all 30 went in: with the 20-turn
-    # slice that telemetry would be false.
-    turns = [_turn(stats=_stats(included=30, available=30))]
+    # 120 turns exist and the meter claims all 120 went in: past the safety
+    # ceiling that telemetry would be false (MET-568: ceiling is now 100).
+    turns = [_turn(stats=_stats(included=120, available=120))]
     assert not evaluate_chat_window(turns)["history_trim_reported"]
 
 
 def test_trimmed_over_limit_history_is_honest() -> None:
-    turns = [_turn(stats=_stats(included=20, available=30))]
+    turns = [_turn(stats=_stats(included=100, available=120))]
     assert evaluate_chat_window(turns)["history_trim_reported"]
 
 

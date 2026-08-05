@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TypeVar
@@ -67,6 +68,7 @@ from domain_agents.mechanical.pydantic_ai_agent import (
     run_agent,
 )
 from observability.tracing import get_tracer
+from orchestrator.harness.compression import budget_history, summarize_turns
 from skill_registry.mcp_bridge import InMemoryMcpBridge, McpBridge
 from twin_core.api import InMemoryTwinAPI
 
@@ -185,7 +187,19 @@ def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
 # actor_kind (as stored) -> LLM chat role. Only these two carry into context;
 # system/error messages are left out.
 _HISTORY_ROLE = {"user": "user", "agent": "assistant"}
-_HISTORY_LIMIT = 20  # most-recent turns fed back as context
+# MET-568: history is token-budgeted, not turn-sliced. The old hard 20-turn
+# slice dropped short early turns that would have fit (losing facts the user
+# stated at the start) while happily keeping huge recent turns. _HISTORY_LIMIT
+# survives only as a generous safety ceiling on turn count.
+_HISTORY_LIMIT = 100
+
+
+def _history_token_budget() -> int:
+    """Token budget for prior-conversation context (``METAFORGE_HISTORY_TOKENS``)."""
+    raw = (os.environ.get("METAFORGE_HISTORY_TOKENS") or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return 12_000
 
 
 _PROJECT_WP_LIMIT = 30  # most work products listed in the project brief
@@ -266,7 +280,14 @@ async def _thread_history(thread_id: str) -> list[dict[str, str]]:
 
     The current user turn has already been persisted by the caller, so the last
     stored message is dropped — it is passed to the harness separately as the
-    goal. Capped to the most recent ``_HISTORY_LIMIT`` turns.
+    goal.
+
+    MET-568: turns are TOKEN-budgeted (newest kept whole, oldest dropped), and
+    dropped turns are folded into a deterministic content-preserving summary
+    prepended as a leading context exchange — facts stated early in a long
+    conversation survive as summary lines instead of vanishing. The full
+    history stays in the chat store, so the summary is recomputed per turn
+    rather than persisted (nothing to migrate, nothing to drift).
     """
     msgs = await _backend.get_messages(thread_id)
     prior = msgs[:-1] if msgs else []
@@ -275,7 +296,20 @@ async def _thread_history(thread_id: str) -> list[dict[str, str]]:
         role = _HISTORY_ROLE.get(m.actor_kind)
         if role and m.content and (m.status or "ok") != "error":
             out.append({"role": role, "content": m.content})
-    return out[-_HISTORY_LIMIT:]
+    out = out[-_HISTORY_LIMIT:]
+
+    kept, dropped = budget_history(out, max_tokens=_history_token_budget())
+    if not dropped:
+        return kept
+    summary = summarize_turns(dropped)
+    return [
+        {"role": "user", "content": f"[conversation summary]\n{summary}"},
+        {
+            "role": "assistant",
+            "content": "Understood — I'll treat that summary as our earlier conversation.",
+        },
+        *kept,
+    ]
 
 
 async def _invoke_agent(
