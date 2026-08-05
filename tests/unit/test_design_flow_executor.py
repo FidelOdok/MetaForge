@@ -245,3 +245,138 @@ async def test_missing_deliverable_not_enforced_still_pauses() -> None:
     store.submit_approval(run.id, ApprovalDecision.REJECT)
     await asyncio.wait_for(task, timeout=2.0)
     assert store.get(run.id).status is RunStatus.REJECTED
+
+
+# --------------------------------------------------------------------------
+# Constraint-as-gate-criteria (MET-583)
+# --------------------------------------------------------------------------
+
+from orchestrator.design_flow.executor import ConstraintReport  # noqa: E402
+
+
+class FakeConstraintChecker:
+    """A `ConstraintChecker` double returning a fixed report (or raising)."""
+
+    def __init__(self, report: ConstraintReport | None = None, boom: bool = False) -> None:
+        self._report = report or ConstraintReport(checked=True, passed=True, evaluated_count=2)
+        self._boom = boom
+
+    async def check(self, project_id: str | None) -> ConstraintReport:
+        if self._boom:
+            raise RuntimeError("constraint engine down")
+        return self._report
+
+
+def _register_constraint_flow(flow_id: str, *, enforce: bool) -> str:
+    FLOWS[flow_id] = FlowDefinition(
+        id=flow_id,
+        name=flow_id,
+        phases=(
+            Phase(
+                id="requirements",
+                title="Requirements",
+                objective="x",
+                gate=Gate(name="g1", enforce_constraints=enforce),
+            ),
+        ),
+    )
+    return flow_id
+
+
+@pytest.mark.asyncio
+async def test_constraint_violations_surface_in_gate_reason() -> None:
+    """Unenforced gates still SHOW real constraint state to the approver."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_constraint_flow("test_c_surface", enforce=False)
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    checker = FakeConstraintChecker(
+        ConstraintReport(
+            checked=True,
+            passed=False,
+            evaluated_count=3,
+            violations=["mass_budget: total mass 412g exceeds 400g limit"],
+            warnings=["cost_target: within 5% of ceiling"],
+        )
+    )
+    executor = DesignFlowExecutor(
+        store=store, brain=ScriptedBrain(), coordinator=coord, constraint_checker=checker
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    reason = store.get(run.id).approval_reason or ""
+    assert "1 violation(s)" in reason and "mass_budget" in reason
+    assert "1 warning(s)" in reason
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_enforced_gate_fails_on_error_violation() -> None:
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_constraint_flow("test_c_enforce", enforce=True)
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    checker = FakeConstraintChecker(
+        ConstraintReport(
+            checked=True, passed=False, violations=["sf_min: safety factor 1.2 < required 2.0"]
+        )
+    )
+    executor = DesignFlowExecutor(
+        store=store, brain=ScriptedBrain(), coordinator=coord, constraint_checker=checker
+    )
+    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
+
+    run_ = store.get(run.id)
+    assert run_.status is RunStatus.FAILED
+    assert "sf_min" in (run_.error or "")
+
+
+@pytest.mark.asyncio
+async def test_enforced_gate_passes_when_constraints_ok() -> None:
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_constraint_flow("test_c_ok", enforce=True)
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=ScriptedBrain(),
+        coordinator=coord,
+        constraint_checker=FakeConstraintChecker(),  # passed, 2 evaluated
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "Constraints: OK (2 evaluated)" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_constraint_checker_failure_is_best_effort() -> None:
+    """A broken constraint engine must not fail or block the run — even at an
+    ENFORCING gate the report reads unchecked and the gate pauses normally."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_constraint_flow("test_c_boom", enforce=True)
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=ScriptedBrain(),
+        coordinator=coord,
+        constraint_checker=FakeConstraintChecker(boom=True),
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "Constraints:" not in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
