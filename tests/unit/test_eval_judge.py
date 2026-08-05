@@ -325,3 +325,105 @@ def test_summarize_judgements() -> None:
 
 def test_summarize_judgements_empty() -> None:
     assert summarize_judgements([])["avg_overall_score"] is None
+
+
+# --- transcript mode (MET-571 remainder) --------------------------------------------
+def _chat_turn(say: str, reply: str, steps: list | None = None) -> dict:
+    return {"say": say, "reply": reply, "steps": steps or []}
+
+
+def test_render_transcript_annotates_tools_and_errors() -> None:
+    from judge import render_transcript
+
+    turns = [
+        _chat_turn(
+            "record the alloy decision",
+            "Recorded it.",
+            steps=[
+                {"tool": "mcp_twin_record_decision", "error": None},
+                {"tool": "mcp_twin_query_cypher", "error": "boom"},
+            ],
+        ),
+        _chat_turn("thanks", "You're welcome."),
+    ]
+    text = render_transcript(turns)
+    assert "USER: record the alloy decision" in text
+    assert "ASSISTANT: Recorded it." in text
+    assert "mcp_twin_record_decision" in text
+    assert "mcp_twin_query_cypher (ERRORED)" in text
+    assert "[tools called:" not in text.split("USER: thanks")[1]  # no tools, no note
+
+
+def test_render_transcript_truncates_at_cap() -> None:
+    from judge import render_transcript
+
+    turns = [_chat_turn(f"q{i}", "a" * 500) for i in range(100)]
+    text = render_transcript(turns, max_chars=2000)
+    assert "transcript truncated" in text
+    assert len(text) < 3000
+
+
+def test_transcript_prompt_names_all_three_dimensions() -> None:
+    from judge import TRANSCRIPT_DIMENSIONS, build_transcript_prompt
+
+    prompt = build_transcript_prompt("USER: hi\nASSISTANT: hello", "Needle recall")
+    assert "Needle recall" in prompt
+    for dim in TRANSCRIPT_DIMENSIONS:
+        assert dim in prompt
+    assert '"overall_score"' in prompt  # exact JSON shape spelled out
+
+
+def test_judge_transcript_skips_runs_without_turns() -> None:
+    from judge import judge_transcript
+
+    out = judge_transcript(lambda p: ("{}", "m"), {"scenario": "x"}, "t")
+    assert "skipped" in out
+
+
+def test_judge_transcript_happy_path() -> None:
+    from judge import judge_transcript
+
+    verdict = {
+        "phases": [
+            {"phase": d, "score": 0.9, "verdict": "met", "missing": [], "rationale": "ok"}
+            for d in ("coherence", "adherence", "grounding")
+        ],
+        "overall_score": 0.9,
+        "summary": "Solid.",
+    }
+    rec = {"turns": [_chat_turn("hi", "hello")]}
+    out = judge_transcript(lambda p: (json.dumps(verdict), "judge-model"), rec, "t")
+    assert out["overall_score"] == 0.9
+    assert out["model"] == "judge-model"
+    assert {p["phase"] for p in out["phases"]} == {"coherence", "adherence", "grounding"}
+
+
+def test_judge_transcript_records_errors() -> None:
+    from judge import judge_transcript
+
+    def boom(prompt: str) -> tuple[str, str]:
+        raise RuntimeError("api down")
+
+    out = judge_transcript(boom, {"turns": [_chat_turn("hi", "x")]}, "t")
+    assert "api down" in out["error"]
+    assert out["prompt_version"] == PROMPT_VERSION
+
+
+def test_summarize_judgements_supports_transcript_key() -> None:
+    records = [
+        {"judge_transcript": {"overall_score": 0.8}},
+        {"judge_transcript": {"error": "x"}},
+        {"judge": {"overall_score": 0.1}},  # other mode's block must not leak in
+    ]
+    out = summarize_judgements(records, key="judge_transcript")
+    assert out["runs_judged"] == 1
+    assert out["avg_overall_score"] == 0.8
+    assert out["runs_errored"] == 1
+
+
+def test_cli_cmd_carries_transcript_system_prompt() -> None:
+    from judge import _TRANSCRIPT_SYSTEM
+
+    cmd = cli_judge_cmd("opus", system=_TRANSCRIPT_SYSTEM)
+    assert cmd[cmd.index("--append-system-prompt") + 1] == _TRANSCRIPT_SYSTEM
+    assert "grounding" in _TRANSCRIPT_SYSTEM

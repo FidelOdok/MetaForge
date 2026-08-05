@@ -91,6 +91,27 @@ _SYSTEM = (
     "missing, and keep rationales to one or two sentences."
 )
 
+# MET-571 transcript mode: the deterministic rubrics check facts (a string
+# recalled, a tool called) but not conversational quality — an answer can pass
+# every check while being incoherent, ignoring an instruction, or claiming an
+# action its tool trace never performed. These are the three dimensions.
+_TRANSCRIPT_SYSTEM = (
+    "You are an exacting reviewer grading a multi-turn conversation between an "
+    "engineer and an AI hardware-design assistant. You also see, per assistant "
+    "turn, which tools it actually called and whether they errored. Score three "
+    "dimensions from 0.0 to 1.0: `coherence` (each reply is consistent with the "
+    "conversation so far — no contradictions, no lost thread, no non-sequiturs), "
+    "`adherence` (each reply does what that turn's user message asked — answers "
+    "the question asked, follows format/brevity instructions, stays on task), "
+    "and `grounding` (claims of actions or data match the tool trace — an "
+    "assistant that says it recorded/created/fetched something with no "
+    "corresponding successful tool call scores low; hedged answers after tool "
+    "failures score high). Judge substance, not politeness; keep rationales to "
+    "one or two sentences."
+)
+
+TRANSCRIPT_DIMENSIONS = ("coherence", "adherence", "grounding")
+
 
 # --- pure helpers (unit-tested without network) --------------------------------
 def build_judge_prompt(dod: Any, deliverables: str, goal: str) -> str:
@@ -111,6 +132,53 @@ def build_judge_prompt(dod: Any, deliverables: str, goal: str) -> str:
         '"met"|"partial"|"unmet", "missing": [str], "rationale": str}], '
         '"overall_score": 0.0-1.0, "summary": str} — all three top-level keys '
         "are required."
+    )
+    return "\n\n".join(parts)
+
+
+def render_transcript(turns: list[dict[str, Any]], max_chars: int = _MAX_DELIVERABLE_CHARS) -> str:
+    """Render a chat run's turns as an annotated transcript for the judge.
+
+    Each assistant turn is annotated with the tools it actually called (and
+    their error state) so the grounding dimension has the trace to check
+    claims against. Bounded so one bloated observation can't eat the prompt.
+    """
+    lines: list[str] = []
+    total = 0
+    for t in turns:
+        chunk: list[str] = [f"USER: {t.get('say', '')}"]
+        tool_notes = []
+        for s in t.get("steps") or []:
+            tool = s.get("tool")
+            if not tool:
+                continue
+            tool_notes.append(f"{tool}{' (ERRORED)' if s.get('error') else ''}")
+        if tool_notes:
+            chunk.append(f"[tools called: {', '.join(tool_notes)}]")
+        reply = str(t.get("reply") or "(no reply)")
+        chunk.append(f"ASSISTANT: {reply}")
+        block = "\n".join(chunk)
+        if total + len(block) > max_chars:
+            lines.append(f"… transcript truncated at {max_chars} chars …")
+            break
+        lines.append(block)
+        total += len(block)
+    return "\n\n".join(lines)
+
+
+def build_transcript_prompt(transcript: str, title: str) -> str:
+    """Render the user message for a transcript-quality judgement (MET-571)."""
+    parts = []
+    if title:
+        parts.append(f"## Scenario\n{title}")
+    parts.append(f"## Conversation transcript\n{transcript or '(empty transcript)'}")
+    parts.append(
+        "Score the three dimensions as `phases` entries named exactly "
+        f"{', '.join(TRANSCRIPT_DIMENSIONS)}. Reply with ONLY a JSON object of "
+        'exactly this shape: {"phases": [{"phase": str, "score": 0.0-1.0, '
+        '"verdict": "met"|"partial"|"unmet", "missing": [str], "rationale": '
+        'str}], "overall_score": 0.0-1.0, "summary": str} — all three '
+        "top-level keys are required."
     )
     return "\n\n".join(parts)
 
@@ -172,9 +240,9 @@ def render_deliverables(
     return "\n".join(lines)
 
 
-def summarize_judgements(records: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_judgements(records: list[dict[str, Any]], key: str = "judge") -> dict[str, Any]:
     """Aggregate the per-run judge blocks for the report header."""
-    judged = [r["judge"] for r in records if isinstance(r.get("judge"), dict)]
+    judged = [r[key] for r in records if isinstance(r.get(key), dict)]
     scored = [j for j in judged if "overall_score" in j]
     errors = [j for j in judged if j.get("error")]
     return {
@@ -226,12 +294,14 @@ class JudgeRefusal(Exception):
 Complete = Callable[[str], tuple[str, str]]
 
 
-def judge_request(dod: Any, deliverables: str, goal: str, model: str) -> dict[str, Any]:
+def judge_request(
+    dod: Any, deliverables: str, goal: str, model: str, system: str = _SYSTEM
+) -> dict[str, Any]:
     """The messages.create kwargs for one judgement (kept pure for tests)."""
     return {
         "model": model,
         "max_tokens": 4096,
-        "system": _SYSTEM,
+        "system": system,
         "messages": [{"role": "user", "content": build_judge_prompt(dod, deliverables, goal)}],
         "output_config": {"format": {"type": "json_schema", "schema": VERDICT_SCHEMA}},
         # Opt into server-side refusal fallbacks: a safety decline re-runs on
@@ -241,11 +311,11 @@ def judge_request(dod: Any, deliverables: str, goal: str, model: str) -> dict[st
     }
 
 
-def sdk_complete(client: Any, model: str) -> Complete:
+def sdk_complete(client: Any, model: str, system: str = _SYSTEM) -> Complete:
     """Judge through the Anthropic SDK (structured outputs + refusal fallbacks)."""
 
     def complete(prompt: str) -> tuple[str, str]:
-        request = judge_request({}, "", "", model)
+        request = judge_request({}, "", "", model, system=system)
         request["messages"] = [{"role": "user", "content": prompt}]
         response = client.beta.messages.create(**request)
         if response.stop_reason == "refusal":
@@ -256,7 +326,7 @@ def sdk_complete(client: Any, model: str) -> Complete:
     return complete
 
 
-def cli_judge_cmd(model: str) -> list[str]:
+def cli_judge_cmd(model: str, system: str = _SYSTEM) -> list[str]:
     """The Claude Code CLI invocation for one headless judge call."""
     return [
         "claude",
@@ -266,7 +336,7 @@ def cli_judge_cmd(model: str) -> list[str]:
         "--model",
         model,
         "--append-system-prompt",
-        _SYSTEM,
+        system,
     ]
 
 
@@ -278,7 +348,9 @@ def parse_cli_envelope(stdout: str) -> str:
     return str(envelope.get("result", ""))
 
 
-def cli_complete(model: str, runner: Callable[..., Any] | None = None) -> Complete:
+def cli_complete(
+    model: str, runner: Callable[..., Any] | None = None, system: str = _SYSTEM
+) -> Complete:
     """Judge through the Claude Code CLI (`claude -p`) as a headless subagent.
 
     Uses the CLI's own login (a Claude subscription or `claude setup-token`),
@@ -296,7 +368,7 @@ def cli_complete(model: str, runner: Callable[..., Any] | None = None) -> Comple
     run = runner or _run
 
     def complete(prompt: str) -> tuple[str, str]:
-        proc = run(cli_judge_cmd(model), prompt)
+        proc = run(cli_judge_cmd(model, system=system), prompt)
         if proc.returncode != 0:
             raise RuntimeError(f"claude CLI exited {proc.returncode}: {proc.stderr[:200]}")
         return parse_cli_envelope(proc.stdout), f"claude-cli/{model}"
@@ -363,6 +435,43 @@ def judge_run(
     return block
 
 
+def judge_transcript(complete: Complete, rec: dict, title: str, votes: int = 1) -> dict:
+    """Judge one chat run's conversation transcript (MET-571 transcript mode).
+
+    Grades coherence / adherence / grounding over the run's ``turns`` records
+    (which carry the reply AND the tool trace per turn). Advisory, like the
+    work-product judge: deterministic checks stay authoritative for pass/fail.
+    """
+    turns = rec.get("turns") or []
+    if not turns:
+        return {"skipped": "run has no turns (not a chat run)"}
+    prompt = build_transcript_prompt(render_transcript(turns), title)
+    verdicts: list[dict[str, Any]] = []
+    model_used = ""
+    last_error = ""
+    for _ in range(max(1, votes)):
+        try:
+            text, model_used = complete(prompt)
+            verdicts.append(parse_judge_reply(text))
+        except JudgeRefusal:
+            return {"error": "judge model refused", "prompt_version": PROMPT_VERSION}
+        except Exception as exc:  # noqa: BLE001 - eval tooling, record not raise
+            last_error = f"judge failed: {exc}"[:300]
+    if not verdicts:
+        return {"error": last_error, "prompt_version": PROMPT_VERSION}
+    verdict = aggregate_votes(verdicts)
+    block = {
+        "model": model_used,
+        "prompt_version": PROMPT_VERSION,
+        "overall_score": verdict["overall_score"],
+        "phases": verdict.get("phases", []),
+        "summary": str(verdict.get("summary", ""))[:1000],
+    }
+    if len(verdicts) > 1:
+        block["votes"] = verdict["votes"]
+    return block
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="LLM-as-judge work-product quality scorer")
     ap.add_argument("--report", required=True, help="report JSON from either eval runner")
@@ -385,12 +494,21 @@ def main() -> int:
         default=1,
         help="judge each run N times and take the median verdict (majority vote)",
     )
+    ap.add_argument(
+        "--mode",
+        choices=["wp", "transcript"],
+        default="wp",
+        help="wp = work-product quality vs definition_of_done (default); "
+        "transcript = chat conversation quality (coherence/adherence/grounding "
+        "over each run's turns + tool trace) — attaches judge_transcript blocks",
+    )
     args = ap.parse_args()
+    system = _SYSTEM if args.mode == "wp" else _TRANSCRIPT_SYSTEM
 
     if args.backend == "claude-cli":
         # The CLI resolves its own credentials; model aliases like `opus` are fine.
         model = args.model or "opus"
-        complete = cli_complete(model)
+        complete = cli_complete(model, system=system)
     else:
         try:
             from anthropic import Anthropic
@@ -403,46 +521,54 @@ def main() -> int:
             return 2
         model = args.model or DEFAULT_JUDGE_MODEL
         # Client resolves ANTHROPIC_API_KEY / auth profile from env.
-        complete = sdk_complete(Anthropic(), model)
+        complete = sdk_complete(Anthropic(), model, system=system)
 
     with open(args.report, encoding="utf-8") as fh:
         report = json.load(fh)
     scenarios = load_scenario_index()
     dods: dict[str, Any] = report.get("definitions_of_done") or {}
 
+    key = "judge" if args.mode == "wp" else "judge_transcript"
     judged = 0
     for rec in report.get("runs", []):
         sid = rec.get("scenario", "")
         if args.only and sid != args.only:
             continue
-        scenario = scenarios.get(sid, {})
-        dod = dods.get(sid) or scenario.get("definition_of_done")
-        if not dod:
-            continue
-        print(f"  ⚖ judging {sid} run {rec.get('run')} …", file=sys.stderr)
-        rec["judge"] = judge_run(
-            complete, rec, dod, scenario.get("goal", ""), args.gateway, votes=args.votes
-        )
-        judged += 1
-        if "overall_score" in rec["judge"]:
-            print(f"    overall={rec['judge']['overall_score']}", file=sys.stderr)
+        if args.mode == "transcript":
+            if not rec.get("turns"):
+                continue
+            title = str(scenarios.get(sid, {}).get("title", sid))
+            print(f"  ⚖ judging transcript {sid} run {rec.get('run')} …", file=sys.stderr)
+            rec[key] = judge_transcript(complete, rec, title, votes=args.votes)
         else:
-            print(f"    {rec['judge']}", file=sys.stderr)
+            scenario = scenarios.get(sid, {})
+            dod = dods.get(sid) or scenario.get("definition_of_done")
+            if not dod:
+                continue
+            print(f"  ⚖ judging {sid} run {rec.get('run')} …", file=sys.stderr)
+            rec[key] = judge_run(
+                complete, rec, dod, scenario.get("goal", ""), args.gateway, votes=args.votes
+            )
+        judged += 1
+        if "overall_score" in rec[key]:
+            print(f"    overall={rec[key]['overall_score']}", file=sys.stderr)
+        else:
+            print(f"    {rec[key]}", file=sys.stderr)
 
     if not judged:
-        print("judge: no runs with a definition_of_done to judge", file=sys.stderr)
+        print(f"judge: no runs to judge in mode={args.mode}", file=sys.stderr)
         return 0
 
-    report["judge"] = {
+    report[key] = {
         "model": model,
         "backend": args.backend,
         "prompt_version": PROMPT_VERSION,
-        **summarize_judgements(report.get("runs", [])),
+        **summarize_judgements(report.get("runs", []), key=key),
     }
     out = args.out or args.report
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
-    print(f"judge summary: {json.dumps(report['judge'])}\nreport → {out}", file=sys.stderr)
+    print(f"judge summary: {json.dumps(report[key])}\nreport → {out}", file=sys.stderr)
     return 0
 
 
