@@ -33,7 +33,9 @@ NATIVE_SYSTEM = (
     "conversational — do not call a tool just to reply. Call a tool only when you "
     "genuinely need external data or must take an action; prefer the fewest calls. "
     "If a tool fails, adapt or answer with what you have — do not repeat a failed "
-    "call. Always give the user a clear final answer."
+    "call. Never claim an action was performed unless one of your tool calls "
+    "actually performed it; if something failed or was skipped, say so plainly. "
+    "Always give the user a clear final answer."
 )
 
 

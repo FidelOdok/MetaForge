@@ -241,3 +241,23 @@ async def test_policy_without_history_omits_preamble() -> None:
 
     await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
     assert "Conversation so far:" not in str(seen["content"])
+
+
+@pytest.mark.asyncio
+async def test_policy_forbids_claiming_unmade_actions() -> None:
+    """MET-579 (live-caught): after a partial failure the model claimed
+    "…and recorded the design decision" with no such tool call in the
+    trace. The protocol prompt must forbid claiming actions the trace
+    doesn't show — a truthful partial result beats a fabricated one."""
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["system"] = request["system"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    system = str(seen["system"])
+    assert "NEVER claim" in system
+    assert "actually performed it" in system

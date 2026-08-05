@@ -118,3 +118,10 @@ def test_tool_schemas_shape() -> None:
     fn = schemas[0]["function"]
     assert fn["name"] == "double"
     assert fn["parameters"]["type"] == "object"
+
+
+def test_native_system_forbids_claiming_unmade_actions() -> None:
+    """MET-579: same no-false-claims rule on the native-tools prompt."""
+    from orchestrator.harness.native_tools import NATIVE_SYSTEM
+
+    assert "Never claim an action was performed" in NATIVE_SYSTEM

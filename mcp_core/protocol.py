@@ -36,12 +36,20 @@ class McpError(Exception):
 
 
 class ToolExecutionError(McpError):
-    """Tool ran but produced an error."""
+    """Tool ran but produced an error.
+
+    MET-579: ``details`` must be part of the exception *message*, not only
+    ``.data``. Every layer above (RegistryMcpBridge, the harness tool loop,
+    the agent's observation, the eval step trace) surfaces ``str(exc)`` —
+    with a bare "Tool execution failed" the model couldn't see WHY a call
+    failed (e.g. "project already exists") and diagnosis took log
+    archaeology instead of one glance at the step trace.
+    """
 
     def __init__(self, tool_id: str, details: str, duration_ms: float = 0) -> None:
         super().__init__(
             code=TOOL_EXECUTION_ERROR,
-            message="Tool execution failed",
+            message=f"Tool execution failed: {details}" if details else "Tool execution failed",
             data=McpErrorData(
                 error_type="TOOL_EXECUTION_ERROR",
                 tool_id=tool_id,
