@@ -11,6 +11,9 @@ function fakeClient(): GatewayClient {
   return { baseUrl: () => "http://localhost:8000" } as unknown as GatewayClient;
 }
 
+/** Let Ink apply the keystrokes it just received and repaint. */
+const tick = (ms = 50) => new Promise((r) => setTimeout(r, ms));
+
 /** Chat is presentational now — App owns the thread and passes it in. This
  *  builds a UseChat snapshot for a given status / transcript. */
 function chatState(overrides: Partial<UseChat> = {}): UseChat {
@@ -20,6 +23,7 @@ function chatState(overrides: Partial<UseChat> = {}): UseChat {
     messages: [],
     pending: null,
     contextStats: null,
+    threadScope: null,
     send: () => {},
     ...overrides,
   };
@@ -66,5 +70,63 @@ test("transcript layout renders finalized turns once a session has started", () 
   assert.ok(frame.includes("hello there"), `user turn missing:\n${frame}`);
   assert.ok(frame.includes("hi — how can I help?"), `assistant turn missing:\n${frame}`);
   assert.ok(frame.includes("message  (/model"), `input prompt missing:\n${frame}`);
+  unmount();
+});
+
+test("a system notice renders as a dim line, not an assistant turn", () => {
+  const messages: ChatMessage[] = [
+    { role: "system", text: "— project → Monitor Build Demo · new thread —" },
+  ];
+  const { lastFrame, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({ status: "idle", messages }),
+    }),
+  );
+  const frame = lastFrame() ?? "";
+  assert.ok(frame.includes("project → Monitor Build Demo"), `notice missing:\n${frame}`);
+  assert.ok(!frame.includes("◆ assistant"), `notice attributed to the agent:\n${frame}`);
+  unmount();
+});
+
+test("/project hands the argument to the resolver and shows its answer", async () => {
+  const seen: string[] = [];
+  const { lastFrame, stdin, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({ status: "idle" }),
+      onProjectChange: async (arg: string) => {
+        seen.push(arg);
+        return "project → Monitor Build Demo — starting a new thread in it";
+      },
+    }),
+  );
+  stdin.write("/project monitor");
+  await tick();
+  stdin.write("\r");
+  // Resolution is async (it hits the gateway), so the notice lands a tick later.
+  await tick();
+  assert.deepEqual(seen, ["monitor"]);
+  assert.ok(
+    (lastFrame() ?? "").includes("project → Monitor Build Demo"),
+    `notice missing:\n${lastFrame()}`,
+  );
+  unmount();
+});
+
+test("/project is not sent to the agent as a message", async () => {
+  const sent: string[] = [];
+  const { stdin, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({ status: "idle", send: (c: string) => sent.push(c) }),
+      onProjectChange: async () => "project: none",
+    }),
+  );
+  stdin.write("/project");
+  await tick();
+  stdin.write("\r");
+  await tick();
+  assert.deepEqual(sent, []);
   unmount();
 });

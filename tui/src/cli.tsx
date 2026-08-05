@@ -2,29 +2,27 @@
 import { render } from "ink";
 import { App } from "./App.js";
 import { runCommand } from "./commands.js";
+import { decideInvocation } from "./lib/invocation.js";
 
 /**
- * Unified `forge` entrypoint. Mode is chosen by invocation:
- *   - bare + a TTY            → launch the interactive Ink TUI
- *   - a subcommand / --help   → run it non-interactively (print + exit)
- *   - bare + piped (no TTY)   → print a hint (can't render a UI without a TTY)
+ * Unified `forge` entrypoint. Mode is chosen by invocation (see
+ * lib/invocation.ts):
+ *   - bare (or `ui`), optionally with --project/--debug + a TTY → the Ink TUI
+ *   - a subcommand / --help / any other flag → run it non-interactively
+ *   - bare + piped (no TTY) → print a hint (can't render a UI without a TTY)
  */
-// `--debug` (verbose file logging) is a global flag, not a subcommand — pull it
-// out before mode detection so `forge --debug` still launches the TUI. log.ts
-// reads it straight off argv, so no wiring beyond keeping it out of the way.
 const rawArgv = process.argv.slice(2);
-if (rawArgv.includes("--debug")) process.env.FORGE_LOG ??= "1";
+const { mode, initialProject, debug } = decideInvocation(rawArgv);
+// `--debug` is a global flag, not a subcommand; log.ts reads it straight off
+// argv, so all that's needed here is the env default.
+if (debug) process.env.FORGE_LOG ??= "1";
 const argv = rawArgv.filter((a) => a !== "--debug");
-const first = argv[0];
 
-const wantsTui = first === undefined || first === "ui";
-const wantsVersion = first === "--version" || first === "-v";
-
-if (wantsVersion) {
+if (mode === "version") {
   void runCommand(["version"]).then((code) => process.exit(code));
-} else if (wantsTui) {
+} else if (mode === "tui") {
   if (process.stdout.isTTY && process.stdin.isTTY) {
-    render(<App />);
+    render(<App initialProject={initialProject} />);
   } else {
     process.stderr.write("forge: no TTY — the interactive UI needs a terminal.\n");
     process.stderr.write("Use a command instead, e.g. `forge runs list` or `forge --help`.\n");

@@ -42,13 +42,21 @@ SESSION = "forge-qa"
 class Tmux:
     """A forge TUI running inside a real tmux session."""
 
-    def __init__(self, binary: str, env_extra: dict[str, str], cols: int, rows: int, watch: bool):
+    def __init__(
+        self,
+        binary: str,
+        env_extra: dict[str, str],
+        cols: int,
+        rows: int,
+        watch: bool,
+        args: list[str] | None = None,
+    ):
         self.watch = watch
         subprocess.run(["tmux", "kill-session", "-t", SESSION], capture_output=True)
         cmd = ["tmux", "new-session", "-d", "-s", SESSION, "-x", str(cols), "-y", str(rows)]
         for k, v in env_extra.items():
             cmd += ["-e", f"{k}={v}"]
-        cmd += [binary]
+        cmd += [binary, *(args or [])]
         subprocess.run(cmd, check=True)
 
     def type(self, text: str) -> None:
@@ -156,6 +164,18 @@ class Report:
         return sum(1 for _, ok, _ in self.results if not ok)
 
 
+def stub_threads(gateway: str) -> list[dict]:
+    """Threads the client actually created, straight from the stub.
+
+    The UI's claim about scope is exactly what regressed once (the footer showed
+    a project the thread wasn't in), so QA asserts the *wire* scope too.
+    """
+    import urllib.request
+
+    with urllib.request.urlopen(f"{gateway}/__threads", timeout=5) as r:
+        return json.loads(r.read()).get("threads", [])
+
+
 def _fmt(turn: dict | None) -> str:
     if not turn:
         return "none (no turn_done logged)"
@@ -193,7 +213,7 @@ def input_row_fraction(pane: str) -> float | None:
 # --- scenarios -------------------------------------------------------------
 
 
-def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
+def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool, gateway: str) -> None:
     # 1. Launch + gateway health render in the status bar.
     healthy = tui.wait_for("healthy", timeout=30)
     scr = tui.capture()
@@ -329,6 +349,66 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
             f"turn={_fmt(turn)}, not_thinking={recovered}, reply_shown={shows_reply}",
         )
 
+    # 4c. Project scope: the footer must report the *thread's* scope, and
+    #     `/project` must actually re-scope the thread server-side. Guards the
+    #     bug where the footer showed whichever project the API listed first, so
+    #     an unscoped session looked project-scoped (MET-578).
+    if stub:
+        unscoped = "no project" in tui.capture()
+        before = len(stub_threads(gateway))
+
+        tui.type("/project gimbal")  # unique substring of "QA Gimbal"
+        tui.key("Enter")
+        switched = tui.wait_for("QA Gimbal", timeout=15)
+        time.sleep(0.8)
+        threads = stub_threads(gateway)
+        last = threads[-1] if threads else {}
+        wire_ok = (
+            len(threads) == before + 1
+            and last.get("scope_kind") == "project"
+            and last.get("scope_entity_id") == "p2"
+        )
+        tui.snap("after /project gimbal")
+        rep.add(
+            "project_scope_switch",
+            unscoped and switched and wire_ok,
+            f"launched_unscoped={unscoped}, footer_shows_project={switched}, "
+            f"thread_scope={last.get('scope_kind')}/{last.get('scope_entity_id')} "
+            f"(want project/p2)",
+        )
+
+        # An ambiguous name must be refused, not guessed — and must not spend a
+        # thread doing it.
+        before = len(stub_threads(gateway))
+        tui.type("/project qa")  # substring of BOTH stub projects
+        tui.key("Enter")
+        refused = tui.wait_for("matches 2 projects", timeout=10)
+        time.sleep(0.5)
+        no_new_thread = len(stub_threads(gateway)) == before
+        still_scoped = "QA Gimbal" in tui.capture()
+        tui.snap("after ambiguous /project")
+        rep.add(
+            "project_ambiguous_refused",
+            refused and no_new_thread and still_scoped,
+            f"refused={refused}, thread_unchanged={no_new_thread}, scope_kept={still_scoped}",
+        )
+
+        # `/project none` detaches: back to an assistant-scoped thread.
+        before = len(stub_threads(gateway))
+        tui.type("/project none")
+        tui.key("Enter")
+        detached = tui.wait_for("no project", timeout=15)
+        time.sleep(0.8)
+        threads = stub_threads(gateway)
+        last = threads[-1] if threads else {}
+        wire_ok = len(threads) == before + 1 and last.get("scope_kind") == "assistant"
+        tui.snap("after /project none")
+        rep.add(
+            "project_scope_detach",
+            detached and wire_ok,
+            f"footer_no_project={detached}, thread_scope={last.get('scope_kind')} (want assistant)",
+        )
+
     # 5. Pane navigation: chat → runs (C-r) → twin (C-b) → chat (C-t).
     tui.key("C-r")
     time.sleep(0.8)
@@ -353,6 +433,54 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool) -> None:
     while tui.alive() and time.time() < end:
         time.sleep(0.5)
     rep.add("quit_on_esc", not tui.alive(), f"session ended={not tui.alive()}")
+
+
+def run_launch_scoped(
+    binary: str,
+    env_extra: dict[str, str],
+    cols: int,
+    rows: int,
+    watch: bool,
+    gateway: str,
+    rep: Report,
+) -> None:
+    """`forge --project <name>` starts already scoped — a second session, since
+    the flag is only read at launch."""
+    before = len(stub_threads(gateway))
+    tui = Tmux(binary, env_extra, cols, rows, watch, args=["--project", "QA Gimbal"])
+    try:
+        shown = tui.wait_for("QA Gimbal", timeout=25)
+        threads = stub_threads(gateway)
+        last = threads[-1] if threads else {}
+        wire_ok = (
+            len(threads) == before + 1
+            and last.get("scope_kind") == "project"
+            and last.get("scope_entity_id") == "p2"
+        )
+        # Only one thread: the flag must be resolved *before* the thread is
+        # created, not after a throwaway unscoped one.
+        tui.snap("launched with --project")
+        rep.add(
+            "launch_with_project_flag",
+            shown and wire_ok,
+            f"footer_shows_project={shown}, threads_created={len(threads) - before} (want 1), "
+            f"thread_scope={last.get('scope_kind')}/{last.get('scope_entity_id')}",
+        )
+
+        # An unknown name is reported, and the session continues unscoped rather
+        # than pretending it worked.
+        tui.kill()
+        tui = Tmux(binary, env_extra, cols, rows, watch, args=["--project", "nope"])
+        reported = tui.wait_for("no project matches", timeout=25)
+        unscoped = tui.wait_for("no project", timeout=10)
+        tui.snap("launched with a bad --project")
+        rep.add(
+            "launch_with_bad_project_flag",
+            reported and unscoped,
+            f"error_shown={reported}, footer_no_project={unscoped}",
+        )
+    finally:
+        tui.kill()
 
 
 def main() -> int:
@@ -420,7 +548,11 @@ def main() -> int:
     rep = Report()
     tui = Tmux(binary, env_extra, args.cols, args.rows, args.watch)
     try:
-        run_scenarios(tui, log_path, rep, args.stub)
+        run_scenarios(tui, log_path, rep, args.stub, gateway)
+        if args.stub and not args.keep:
+            # Needs its own session (the flag is launch-time), so run it after the
+            # main session has quit on Esc.
+            run_launch_scoped(binary, env_extra, args.cols, args.rows, args.watch, gateway, rep)
     finally:
         if args.keep:
             print(
