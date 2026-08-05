@@ -163,6 +163,32 @@ python3 evals/score_sessions.py --gateway http://fidel-dev:8000
 python3 evals/score_sessions.py --project <id> --since 2026-08-01 --strict
 ```
 
+### Dataset promotion (`promote_sessions.py`)
+
+Findings from production traces were ephemeral — a flagged trajectory
+vanished when the session store was cleaned. `promote_sessions.py` freezes
+interesting sessions (failing a trajectory check, containing errored actions,
+or ≥15 actions long) as self-contained fixtures under `fixtures/sessions/`,
+each carrying the rubric turn record plus the verdict at promotion time:
+
+```bash
+python3 evals/promote_sessions.py --dry-run   # select and report only
+python3 evals/promote_sessions.py             # write fixtures (idempotent by session id)
+```
+
+The checked-in fixtures are a **rubric regression corpus**:
+`tests/unit/test_session_fixtures` (in `test_session_promotion.py`) replays
+every fixture through the current `chat_tooluse` evaluator in CI and fails
+when an evaluator change silently flips a real production trajectory's
+verdict.
+
+### Per-model trend lines (`trend.py history --by-variant`)
+
+Chat-suite rows are keyed `scenario::variant`, and variants map 1:1 to a
+provider/model lane. `--by-variant` adds per-lane sub-rows to each history
+line so regressions can be attributed to a lane (e.g. the ReAct path
+regressing while native holds) instead of hiding in the suite aggregate.
+
 Each session's `action` events become one scored trajectory; sessions without
 actions are skipped. Output is per-session checks + an aggregate
 (`avg_score`, `sessions_with_failing_checks`); `--strict` exits 1 when any
