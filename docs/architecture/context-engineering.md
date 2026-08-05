@@ -1,6 +1,8 @@
 # Context Engineering — Specification
 
 > **Status:** P1.13 foundation shipped (MET-315 / 316 / 317 / 322 / 323).
+> Wired into the live chat path per turn since MET-566 — see
+> [Live chat wiring](#live-chat-wiring-met-566) below.
 > Keep this doc as the canonical reference; update inline rather than
 > forking when extending the protocol.
 
@@ -210,6 +212,42 @@ Per-skill expectations live next to the agent definition:
 Each per-agent spec lists the Twin nodes, knowledge types, prior tool
 results, and constraints required for every skill. They are the
 canonical input for `RoleScope` map updates.
+
+## Live chat wiring (MET-566)
+
+The assembler runs on every harness chat turn via the layer-4 adapter
+`api_gateway/chat/context_adapter.py`:
+
+- **Wiring** — `init_context_assembler(twin, knowledge_service,
+  collector)` is called from the gateway lifespan (mirroring
+  `init_twin` / `init_mcp_bridge`). When LightRAG isn't configured the
+  adapter is a no-op and chat behaves exactly as before.
+- **Per turn** — `assemble_chat_context(query=user_message,
+  window=context_window_for(provider, model))` runs a
+  `KNOWLEDGE`-scoped request with a window-scaled fragment budget
+  (`window // 20`, clamped to 1k–6k tokens). Best-effort: any failure
+  logs `chat_context_assembly_failed` and the turn proceeds without
+  retrieved context.
+- **Rendering** — `render_context_block()` emits one line per fragment
+  with its bracketed `source_id`, plus an explicit `WARNING` line when
+  `has_blocking_conflict` is set and a truncation note when fragments
+  were dropped (which also increments
+  `metaforge_context_truncated_total` via the collector).
+- **Placement** (`harness_backend._apply_turn_context`) — the
+  *project brief* joins the layered system prompt on the native path
+  (stable per thread, so provider prompt caches hit) and stays a
+  leading `[project context]` history pair on the ReAct path; the
+  *retrieved context block* is volatile per turn and is therefore a
+  trailing `[retrieved context]` history pair on both paths, just
+  before the user's message.
+- **Telemetry** — `context.stats` gains a `retrieved_context`
+  component; the `project_brief` component is now computed from the
+  explicit brief text rather than sniffing the history pair.
+
+The layered system prompt (native path) composes: identity/rules →
+current date → tool-family capability summary (from the runtime's
+registry) → project brief → response guidance (cite bracketed source
+ids).
 
 ## Observability hooks
 

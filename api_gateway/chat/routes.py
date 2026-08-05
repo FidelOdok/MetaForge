@@ -27,8 +27,13 @@ from fastapi.responses import StreamingResponse
 
 from api_gateway.chat.agent_router import default_router
 from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
+from api_gateway.chat.context_adapter import (
+    assemble_chat_context,
+    render_context_block,
+)
 from api_gateway.chat.harness_backend import (
     chat_harness_enabled,
+    context_window_for,
     run_chat_turn_streaming,
 )
 from api_gateway.chat.models import (
@@ -205,21 +210,21 @@ def _history_token_budget() -> int:
 _PROJECT_WP_LIMIT = 30  # most work products listed in the project brief
 
 
-async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
-    """A leading context turn describing the thread's project (empty if none).
+async def _project_brief(thread: ChatThreadRecord) -> str | None:
+    """The thread's project brief as text (``None`` when not project-scoped).
 
     When a thread is scoped to a project (``scope_kind == "project"``), the agent
     should reason over the project's digital thread — its existing work products —
-    and persist new CAD/decisions back into it. The agent loop can't be handed the
-    project object, so we frame it as the earliest ``history`` exchange: a synthetic
-    user turn stating the project context, plus an assistant acknowledgement. This
-    reaches both the native-tool and ReAct loops without touching harness core.
+    and persist new CAD/decisions back into it. Placement is path-dependent
+    (MET-566, decided in ``harness_backend._apply_turn_context``): the native
+    path folds this into the layered system prompt; the ReAct path keeps the
+    legacy synthetic ``[project context]`` history pair.
     """
     if thread.scope_kind != "project" or not thread.scope_entity_id:
-        return []
+        return None
     project = await get_project_backend().get_project(thread.scope_entity_id)
     if project is None:
-        return []
+        return None
 
     lines = [
         f"You are working inside the MetaForge project **{project.name}** "
@@ -243,17 +248,7 @@ async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
         f'`project_id="{project.id}"` when you call `twin.commit_geometry` or '
         f"`twin.record_decision`. Ground your answers in the work products above."
     )
-    brief = "\n".join(lines)
-    return [
-        {"role": "user", "content": f"[project context]\n{brief}"},
-        {
-            "role": "assistant",
-            "content": (
-                f"Understood — I'm working within project {project.name} "
-                f"({project.id}) and will scope new work products to it."
-            ),
-        },
-    ]
+    return "\n".join(lines)
 
 
 async def _context_availability(thread: ChatThreadRecord) -> dict[str, int]:
@@ -349,10 +344,24 @@ async def _invoke_agent(
                     await notify_context_stats(thread.id, stats)
 
                 await notify_agent_typing(thread.id, "harness-agent")
-                # Project-scoped threads lead with a project brief so the agent
-                # reasons over the digital thread and scopes new work to it.
-                history = await _project_brief(thread) + await _thread_history(thread.id)
+                # Project-scoped threads carry a project brief so the agent
+                # reasons over the digital thread and scopes new work to it;
+                # placement (system prompt vs. history pair) is path-dependent
+                # and decided in harness_backend (MET-566).
+                brief = await _project_brief(thread)
+                history = await _thread_history(thread.id)
                 availability = await _context_availability(thread)
+                # MET-566: assemble retrieved knowledge for this message via
+                # the ContextAssembler (role scoping, staleness, conflicts,
+                # budget + truncation metric). Best-effort — None when the
+                # knowledge service isn't wired or assembly fails.
+                ctx_response = await assemble_chat_context(
+                    user_content,
+                    window=context_window_for(provider, model),
+                )
+                context_block = (
+                    render_context_block(ctx_response) if ctx_response is not None else None
+                )
                 text = await run_chat_turn_streaming(
                     user_content,
                     on_delta=_on_delta,
@@ -365,6 +374,8 @@ async def _invoke_agent(
                     enabled_tools=tools,
                     history=history,
                     availability=availability,
+                    project_brief=brief,
+                    context_block=context_block,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 return ChatMessageRecord(
