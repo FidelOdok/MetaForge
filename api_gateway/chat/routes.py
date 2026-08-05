@@ -53,7 +53,14 @@ from api_gateway.chat.streaming import (
     stream_manager,
     stream_thread,
 )
-from api_gateway.projects.routes import _backend as _project_backend
+
+# MET-575: import the ACCESSOR, never the module attribute. A
+# ``from ... import _backend as _project_backend`` binds the in-memory
+# instance that exists at import time; when server startup swaps the real
+# (Postgres) backend in via ``init_project_backend``, the alias silently
+# keeps pointing at the empty in-memory store — so every project-scoped
+# chat lost its brief (get_project always missed) on any real deployment.
+from api_gateway.projects.routes import get_project_backend
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
@@ -196,7 +203,7 @@ async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
     """
     if thread.scope_kind != "project" or not thread.scope_entity_id:
         return []
-    project = await _project_backend.get_project(thread.scope_entity_id)
+    project = await get_project_backend().get_project(thread.scope_entity_id)
     if project is None:
         return []
 
@@ -244,7 +251,7 @@ async def _context_availability(thread: ChatThreadRecord) -> dict[str, int]:
     """
     avail: dict[str, int] = {}
     if thread.scope_kind == "project" and thread.scope_entity_id:
-        project = await _project_backend.get_project(thread.scope_entity_id)
+        project = await get_project_backend().get_project(thread.scope_entity_id)
         if project is not None:
             total = len(project.work_products)
             avail["work_products_total"] = total
@@ -376,7 +383,7 @@ async def _invoke_agent(
             project_id = ""
             work_product_id = ""
             if thread.scope_kind == "project" and thread.scope_entity_id:
-                project = await _project_backend.get_project(thread.scope_entity_id)
+                project = await get_project_backend().get_project(thread.scope_entity_id)
                 if project and project.work_products:
                     project_id = thread.scope_entity_id
                     work_product_id = project.work_products[0].id

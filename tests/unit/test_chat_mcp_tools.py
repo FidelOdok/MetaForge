@@ -61,7 +61,13 @@ async def test_mcp_tools_from_bridge_falls_back_when_no_schema() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_harness_invokes_mcp_tool(tmp_path: Path) -> None:
+async def test_chat_harness_invokes_mcp_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This test scripts ReAct-protocol replies — pin the ReAct path
+    # explicitly (MET-575: the path now follows the resolved provider,
+    # and the all-defaults resolution is anthropic → native).
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")
     bridge = InMemoryMcpBridge()
     bridge.register_tool("twin.query_node", capability="twin", name="Query Node")
     bridge.register_tool_response("twin.query_node", {"node": "N1", "mass_g": 42})

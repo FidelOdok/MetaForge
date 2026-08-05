@@ -166,6 +166,30 @@ def rotation_strategy_from_env() -> RotationStrategy:
         return RotationStrategy.ROUND_ROBIN
 
 
+def resolve_active_provider(provider: str | None = None) -> str:
+    """The provider a turn will actually run on, after full precedence.
+
+    Per-turn arg → auth-store durable ``selection`` → ``METAFORGE_LLM_PROVIDER``
+    → ``"anthropic"``. This is the single source of truth shared by
+    ``provider_config_from_env`` (which builds the invoke chain from it) and
+    the native-vs-ReAct path decision.
+
+    MET-575 (live-caught): the path decision used to consult only the per-turn
+    arg and the env var. On a gateway whose auth store selected ``openai-codex``
+    while env said ``openrouter``, every turn picked the NATIVE tool path (env
+    provider is OpenAI-family) but was SERVED by ``codex_invoke`` (selection
+    wins in the config), which cannot forward native tool schemas — so the
+    model saw zero tools while the context meter honestly counted 87
+    registered, and twin writes were fabricated or refused. Resolving the same
+    provider for both decisions keeps the path and the adapter in agreement.
+    """
+    store = AuthStore()
+    selection = store.get_selection()
+    sel_provider = selection.provider.strip().lower() if selection else ""
+    env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+    return ((provider or "").strip().lower()) or sel_provider or env_provider or "anthropic"
+
+
 def provider_config_from_env(
     *, provider: str | None = None, model: str | None = None
 ) -> HarnessProviderConfig:
@@ -191,7 +215,7 @@ def provider_config_from_env(
     selection = store.get_selection()
     env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
     sel_provider = selection.provider.strip().lower() if selection else ""
-    prov = (provider or sel_provider or env_provider or "anthropic").strip().lower()
+    prov = resolve_active_provider(provider)
     # Only take the selection's model when it belongs to the active provider.
     sel_model = selection.model if (selection and sel_provider == prov) else None
     default_model = (os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
@@ -290,7 +314,9 @@ async def run_chat_turn(
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
     )
-    if native_tools_enabled(provider):
+    # MET-575: decide the path from the RESOLVED provider (arg → auth-store
+    # selection → env), not the raw arg — see resolve_active_provider.
+    if native_tools_enabled(resolve_active_provider(provider)):
         result = await run_native_tools(
             ctx.runtime,
             user_content,
@@ -567,7 +593,9 @@ async def run_chat_turn_streaming(
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_failed", error=str(exc))
 
-    if native_tools_enabled(provider):
+    # MET-575: decide the path from the RESOLVED provider (arg → auth-store
+    # selection → env), not the raw arg — see resolve_active_provider.
+    if native_tools_enabled(resolve_active_provider(provider)):
         result = await run_native_tools(
             ctx.runtime,
             user_content,

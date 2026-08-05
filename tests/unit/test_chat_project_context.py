@@ -51,10 +51,42 @@ def _wp(name: str, wp_type: str) -> ProjectWorkProductResponse:
 
 
 async def _brief(monkeypatch: pytest.MonkeyPatch, thread: ChatThreadRecord, project: Any) -> list:
+    # MET-575: chat resolves the projects backend through the accessor at
+    # call time (the import-time alias silently pinned the empty in-memory
+    # store after startup swapped in Postgres) — so tests patch the projects
+    # module's backend, exactly like ``init_project_backend`` does.
     import api_gateway.chat.routes as routes
+    import api_gateway.projects.routes as projects_routes
 
-    monkeypatch.setattr(routes, "_project_backend", _FakeProjectBackend(project))
+    monkeypatch.setattr(projects_routes, "_backend", _FakeProjectBackend(project))
     return await routes._project_brief(thread)
+
+
+@pytest.mark.asyncio
+async def test_brief_sees_backend_swapped_after_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MET-575 regression: the brief must consult the CURRENT projects
+    backend, not whichever instance existed when chat.routes was imported.
+    The old ``from ... import _backend as _project_backend`` alias made every
+    project-scoped chat lose its brief on any deployment that swaps the
+    backend at startup."""
+    from api_gateway.projects.routes import init_project_backend
+
+    project = _project([_wp("Bracket", "cad_model")])
+    swapped = _FakeProjectBackend(project)
+    import api_gateway.projects.routes as projects_routes
+
+    original = projects_routes._backend
+    try:
+        init_project_backend(swapped)  # the real startup swap, after import
+        import api_gateway.chat.routes as routes
+
+        out = await routes._project_brief(_thread("project", "p-123"))
+        assert out, "brief must be built from the swapped-in backend"
+        assert "p-123" in out[0]["content"]
+    finally:
+        init_project_backend(original)
 
 
 @pytest.mark.asyncio
