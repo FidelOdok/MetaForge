@@ -720,6 +720,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # project MCP adapter can pick it up.
     from api_gateway.bom.routes import init_twin as init_bom_twin
     from api_gateway.chat.backend import create_backend
+    from api_gateway.chat.context_adapter import init_context_assembler
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
@@ -743,6 +744,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Wire the active bridge and twin into chat routes and projects routes
     init_mcp_bridge(active_bridge)
     init_twin(twin)
+    # MET-566: chat-turn context assembly (knowledge fragments with
+    # attribution/staleness/conflicts). No-op when LightRAG isn't configured.
+    init_context_assembler(
+        twin,
+        getattr(app.state, "knowledge_service", None),
+        collector=_collector,
+    )
     init_projects_twin(twin)
     init_twin_viewer(twin)
     init_bom_twin(twin)

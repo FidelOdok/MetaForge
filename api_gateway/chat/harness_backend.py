@@ -17,6 +17,7 @@ import os
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -272,6 +273,97 @@ def provider_config_from_env(
     )
 
 
+def _tool_families(runtime: Any) -> list[str]:
+    """Distinct tool families registered on the runtime (``mcp_twin_*`` -> ``twin``)."""
+    families: set[str] = set()
+    for t in runtime.tools.all_tools():
+        name = str(t.name)
+        if name.startswith("mcp_"):
+            parts = name.split("_")
+            families.add(parts[1] if len(parts) > 1 else name)
+        else:
+            families.add(name)
+    return sorted(families)
+
+
+def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> str:
+    """Layered system prompt for the native path (MET-566).
+
+    Sections: identity/rules -> current date -> capability summary (tool
+    families from the registry) -> project brief -> response guidance. The
+    project brief moves here from the fake ``[project context]`` user/assistant
+    history pair (the ReAct path keeps that pair as its fallback). Everything
+    here is stable per thread (date at day granularity, brief per project) so
+    provider prompt caches hit across turns; per-turn volatile content — the
+    retrieved-context block — stays in the message stream instead.
+    """
+    sections = [NATIVE_SYSTEM, f"Current date: {datetime.now(UTC).date().isoformat()}."]
+    families = _tool_families(runtime)
+    if families:
+        sections.append(
+            "You have tools from these families available: " + ", ".join(families) + "."
+        )
+    if project_brief:
+        sections.append(f"[project context]\n{project_brief}")
+    sections.append(
+        "Ground your answers in the project context and any retrieved knowledge "
+        "provided in the conversation; when you rely on a retrieved fragment, "
+        "cite its bracketed source id."
+    )
+    return "\n\n".join(sections)
+
+
+def _brief_pair(project_brief: str) -> list[dict[str, Any]]:
+    """ReAct fallback: the project brief as a leading history exchange."""
+    return [
+        {"role": "user", "content": f"{_BRIEF_MARKER}\n{project_brief}"},
+        {
+            "role": "assistant",
+            "content": "Understood — I'll work within that project and scope new work to it.",
+        },
+    ]
+
+
+def _context_pair(context_block: str) -> list[dict[str, Any]]:
+    """Retrieved context as a trailing history exchange, just before the goal.
+
+    Volatile per-turn content (it depends on the current message) — kept in
+    the message stream, not the system prompt, so the system prompt stays
+    cache-stable across turns (MET-566).
+    """
+    return [
+        {"role": "user", "content": f"{_CONTEXT_MARKER}\n{context_block}"},
+        {
+            "role": "assistant",
+            "content": "Noted — I'll ground my answer in that retrieved context where relevant.",
+        },
+    ]
+
+
+def _apply_turn_context(
+    *,
+    runtime: Any,
+    native: bool,
+    history: list[dict[str, Any]] | None,
+    project_brief: str | None,
+    context_block: str | None,
+) -> tuple[str, list[dict[str, Any]] | None]:
+    """Place the brief + retrieved context per path -> (system, history).
+
+    Native: brief lives in the layered system prompt. ReAct: brief stays a
+    leading history pair (the harness-core ReAct system prompt is not ours to
+    extend). Retrieved context is a trailing pair on both paths.
+    """
+    system = build_system_prompt(runtime, project_brief=project_brief if native else None)
+    parts: list[dict[str, Any]] = []
+    if not native and project_brief:
+        parts.extend(_brief_pair(project_brief))
+    parts.extend(history or [])
+    if context_block:
+        parts.extend(_context_pair(context_block))
+    return system, (parts or None)
+
+
 async def _build_context(
     session_id: str,
     store: CredentialStore,
@@ -309,6 +401,8 @@ async def run_chat_turn(
     model: str | None = None,
     enabled_tools: list[str] | None = None,
     history: list[dict[str, Any]] | None = None,
+    project_brief: str | None = None,
+    context_block: str | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -318,6 +412,8 @@ async def run_chat_turn(
     ``mcp_bridge`` is given, its tools are registered so the loop can call them.
     ``provider``/``model``/``enabled_tools`` are the chat UI's per-turn selection.
     ``history`` is the prior conversation so multi-turn chats keep context.
+    ``project_brief`` / ``context_block`` are placed per path (MET-566) — see
+    ``_apply_turn_context``.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -326,14 +422,23 @@ async def run_chat_turn(
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
-    if native_tools_enabled(resolve_active_provider(provider)):
+    native = native_tools_enabled(resolve_active_provider(provider))
+    system, full_history = _apply_turn_context(
+        runtime=ctx.runtime,
+        native=native,
+        history=history,
+        project_brief=project_brief,
+        context_block=context_block,
+    )
+    if native:
         result = await run_native_tools(
             ctx.runtime,
             user_content,
             role="generator",
             invoke=invoke,
             max_steps=steps,
-            history=history,
+            system=system,
+            history=full_history,
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
@@ -343,7 +448,7 @@ async def run_chat_turn(
             ctx.runtime,
             role="generator",
             invoke=invoke,
-            history=history,
+            history=full_history,
             trace_token_budget=trace_token_budget(provider, model),
         )
         result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
@@ -439,6 +544,7 @@ _MODEL_WINDOWS: tuple[tuple[str, int], ...] = (
 )
 _DEFAULT_WINDOW = 128_000
 _BRIEF_MARKER = "[project context]"
+_CONTEXT_MARKER = "[retrieved context]"
 
 
 def context_window_for(provider: str | None, model: str | None) -> int:
@@ -478,12 +584,17 @@ def compute_context_stats(
     model: str | None,
     tools_available: int,
     availability: dict[str, int] | None = None,
+    project_brief: str | None = None,
+    context_block: str | None = None,
 ) -> dict[str, Any]:
     """Snapshot of what goes into this turn's context window vs. what's available.
 
     Token counts are heuristic (~4 chars/token; ``estimated=True``) until tiktoken
-    lands. The leading project-brief history pair (a synthetic ``[project context]``
-    turn + ack) is bucketed separately from real conversation. Each bucket reports
+    lands. The project brief is bucketed separately from real conversation —
+    either from the explicit ``project_brief`` arg (MET-566: brief lives in the
+    system prompt / a path-injected pair, no longer in the caller's history) or
+    by sniffing a legacy leading ``[project context]`` pair. ``context_block``
+    (retrieved knowledge fragments) gets its own bucket. Each bucket reports
     tokens, and where meaningful ``items_included`` vs ``items_available`` (work
     products, history turns, tools) — i.e. what's shown vs. what exists.
     """
@@ -498,17 +609,23 @@ def compute_context_stats(
         return default_token_count("\n".join(str(m.get("content", "")) for m in msgs))
 
     sys_tok = default_token_count(system or "")
-    brief_tok = _tok(brief_msgs)
+    if project_brief:
+        brief_tok = default_token_count(project_brief)
+    elif brief_msgs:
+        brief_tok = _tok(brief_msgs)
+    else:
+        brief_tok = 0
+    context_tok = default_token_count(context_block) if context_block else 0
     convo_tok = _tok(convo_msgs)
     n_tools, tools_tok = _tools_payload(runtime)
     msg_tok = default_token_count(user_content or "")
-    used = sys_tok + brief_tok + convo_tok + tools_tok + msg_tok
+    used = sys_tok + brief_tok + context_tok + convo_tok + tools_tok + msg_tok
     window = context_window_for(provider, model)
 
     components: list[dict[str, Any]] = [
         {"key": "system", "label": "System prompt", "tokens": sys_tok},
     ]
-    if brief_msgs or avail.get("work_products_total"):
+    if project_brief or brief_msgs or avail.get("work_products_total"):
         brief_comp: dict[str, Any] = {
             "key": "project_brief",
             "label": "Project brief",
@@ -519,6 +636,14 @@ def compute_context_stats(
             brief_comp["items_available"] = avail["work_products_total"]
             brief_comp["items_label"] = "work products"
         components.append(brief_comp)
+    if context_block:
+        components.append(
+            {
+                "key": "retrieved_context",
+                "label": "Retrieved knowledge",
+                "tokens": context_tok,
+            }
+        )
     history_comp: dict[str, Any] = {
         "key": "history",
         "label": "Conversation history",
@@ -570,6 +695,8 @@ async def run_chat_turn_streaming(
     enabled_tools: list[str] | None = None,
     history: list[dict[str, Any]] | None = None,
     availability: dict[str, int] | None = None,
+    project_brief: str | None = None,
+    context_block: str | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -582,12 +709,26 @@ async def run_chat_turn_streaming(
     is retained for signature compatibility but no longer used. When an
     ``mcp_bridge`` is given, its tools are registered so the loop can call
     them. ``history`` is the prior conversation so multi-turn chats keep
-    context.
+    context. ``project_brief`` / ``context_block`` (MET-566) are placed per
+    path by ``_apply_turn_context``: the brief joins the layered system prompt
+    on the native path (history-pair fallback on ReAct); retrieved context is
+    a trailing history pair on both.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
         session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
+    )
+
+    # MET-575: decide the path from the RESOLVED provider (arg → auth-store
+    # selection → env), not the raw arg — see resolve_active_provider.
+    native = native_tools_enabled(resolve_active_provider(provider))
+    system, full_history = _apply_turn_context(
+        runtime=ctx.runtime,
+        native=native,
+        history=history,
+        project_brief=project_brief,
+        context_block=context_block,
     )
 
     # Emit a context-window snapshot for this turn before the loop runs, so a
@@ -607,21 +748,22 @@ async def run_chat_turn_streaming(
                 model=model,
                 tools_available=tools_available,
                 availability=availability,
+                project_brief=project_brief,
+                context_block=context_block,
             )
             await on_context(stats)
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_failed", error=str(exc))
 
-    # MET-575: decide the path from the RESOLVED provider (arg → auth-store
-    # selection → env), not the raw arg — see resolve_active_provider.
-    if native_tools_enabled(resolve_active_provider(provider)):
+    if native:
         result = await run_native_tools(
             ctx.runtime,
             user_content,
             role="generator",
             invoke=invoke,
             max_steps=steps,
-            history=history,
+            system=system,
+            history=full_history,
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
@@ -631,7 +773,7 @@ async def run_chat_turn_streaming(
             ctx.runtime,
             role="generator",
             invoke=invoke,
-            history=history,
+            history=full_history,
             trace_token_budget=trace_token_budget(provider, model),
         )
         result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
@@ -655,6 +797,8 @@ async def run_chat_turn_streaming(
                 model=model,
                 tools_available=tools_available,
                 availability=availability,
+                project_brief=project_brief,
+                context_block=context_block,
             )
             final_stats["phase"] = "final"
             final_stats["trace_tokens"] = trace_tokens
