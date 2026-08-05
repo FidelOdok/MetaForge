@@ -1,6 +1,6 @@
 {
   "id": "chat_design_launch",
-  "title": "Chat-triggered design flow: agent starts hardware_v1 scoped to the project (leaves a paused run)",
+  "title": "Chat-triggered design flow end-to-end: launch, gate approval, post-approval status",
   "scope": "project",
   "rubric": [
     "chat_tooluse"
@@ -45,6 +45,29 @@
         },
         {
           "id": "status_replied",
+          "type": "reply_is_not_fallback"
+        }
+      ]
+    },
+    {
+      "gateway_action": "approve_run",
+      "checks": [
+        {
+          "id": "gate1_approved",
+          "type": "action_succeeded"
+        }
+      ]
+    },
+    {
+      "say": "The first gate was just approved by the reviewer. What phase is the run in now?",
+      "checks": [
+        {
+          "id": "post_approval_status_tool",
+          "type": "tool_called",
+          "tool": "mcp_run_get_status"
+        },
+        {
+          "id": "post_approval_replied",
           "type": "reply_is_not_fallback"
         }
       ]
