@@ -43,6 +43,7 @@ class TwinServer(McpToolServer):
         decision_recorder: Any = None,
         geometry_recorder: Any = None,
         proposal_recorder: Any = None,
+        constraint_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -65,6 +66,11 @@ class TwinServer(McpToolServer):
         # Built in api_gateway over the ApprovalWorkflow; None keeps
         # tool_registry free of api_gateway imports.
         self._proposal_recorder = proposal_recorder
+        # MET-582: an injected async ``record(...)`` that persists a batch of
+        # structured, evaluable constraints + a constraint_set work product.
+        # Same injection seam as decision_recorder; None keeps tool_registry
+        # free of api_gateway imports.
+        self._constraint_recorder = constraint_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -72,6 +78,8 @@ class TwinServer(McpToolServer):
             self._register_commit_geometry()
         if proposal_recorder is not None:
             self._register_propose_change()
+        if constraint_recorder is not None:
+            self._register_record_constraint_set()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -554,6 +562,111 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
             supersedes=supersedes if isinstance(supersedes, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_constraint_set (MET-582)
+    # ------------------------------------------------------------------
+
+    def _register_record_constraint_set(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_constraint_set",
+                adapter_id="twin",
+                name="Record Constraint Set",
+                description=(
+                    "Persist a project's structured requirements as EVALUABLE "
+                    "constraints: each entry becomes a Constraint node the "
+                    "constraint engine checks at design-flow gates, plus one "
+                    "constraint_set work product summarising the set. Use "
+                    "during requirements capture so quantified limits (mass, "
+                    "power, cost, safety factor, ...) become machine-checked "
+                    "gate criteria instead of prose."
+                ),
+                capability="twin_constraint_set",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Constraint-set title (e.g. 'Gimbal v1 requirements').",
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "minItems": 1,
+                            "description": "Structured constraints to record.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Short unique name (e.g. mass_budget).",
+                                    },
+                                    "expression": {
+                                        "type": "string",
+                                        "description": (
+                                            "Python expression over `ctx` the engine "
+                                            'evaluates (e.g. "all(float(wp.metadata.get('
+                                            "'mass_g', 0)) <= 60 for wp in "
+                                            "ctx.work_products(type='cad_model'))\"). "
+                                            "Must compile; validated at record time."
+                                        ),
+                                    },
+                                    "severity": {
+                                        "type": "string",
+                                        "enum": ["error", "warning", "info"],
+                                        "description": "error violations fail enforcing gates.",
+                                    },
+                                    "message": {
+                                        "type": "string",
+                                        "description": "Human explanation of the limit.",
+                                    },
+                                    "domain": {
+                                        "type": "string",
+                                        "description": "Discipline (default: systems).",
+                                    },
+                                },
+                                "required": ["name", "expression"],
+                            },
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["title", "constraints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "constraint_ids": {"type": "array", "items": {"type": "string"}},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_constraint_set,
+        )
+
+    async def record_constraint_set(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        title = arguments.get("title")
+        constraints = arguments.get("constraints")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.record_constraint_set: 'title' is required (non-empty string)")
+        if not isinstance(constraints, list) or not constraints:
+            raise ValueError(
+                "twin.record_constraint_set: 'constraints' is required (non-empty array)"
+            )
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._constraint_recorder(
+            title=title,
+            constraints=constraints,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
         )
 
     # ------------------------------------------------------------------
