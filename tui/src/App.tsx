@@ -10,6 +10,13 @@ import { IntentForm } from "./components/IntentForm.js";
 import { TwinView } from "./components/TwinView.js";
 import { useRunAlerts } from "./hooks/useRunAlerts.js";
 import { useTerminalSize } from "./hooks/useTerminalSize.js";
+import {
+  assistantScope,
+  isDetachQuery,
+  resolveProject,
+  scopeLabel,
+  type ChatScope,
+} from "./lib/project.js";
 
 type View = "chat" | "runs" | "new" | "twin";
 
@@ -18,22 +25,31 @@ const ALERT_COLOR = { gate: "yellow", done: "green", failed: "red" } as const;
 /**
  * Root TUI: header + status bar + a switchable view. Ctrl+T = chat (streaming
  * assistant), Ctrl+R = runs (gated design-flow timeline + approvals).
+ *
+ * `initialProject` is `forge --project <id|name>`: it is resolved against the
+ * gateway's project list before the chat thread is created, so the session
+ * starts already scoped to that project.
  */
-export function App() {
+export function App({ initialProject }: { initialProject?: string } = {}) {
   const { exit } = useApp();
   const cfg = loadConfig();
   const [client] = useState(() => new GatewayClient(cfg));
   const [health, setHealth] = useState("checking…");
-  const [project, setProject] = useState<string | undefined>(undefined);
   const [view, setView] = useState<View>("chat");
   const [model, setModel] = useState<string | undefined>(cfg.model);
   const [provider, setProvider] = useState<string | undefined>(cfg.provider);
+  // Requested chat scope. `null` while `--project` is being resolved, so useChat
+  // holds off instead of creating a throwaway assistant thread first.
+  const [scope, setScope] = useState<ChatScope | null>(() =>
+    initialProject ? null : assistantScope(),
+  );
+  const [scopeError, setScopeError] = useState<string | null>(null);
   const { awaiting, alert } = useRunAlerts(client);
   const { rows } = useTerminalSize();
 
   // Own the chat thread here (not inside <Chat>) so it survives view switches —
   // ^R/^B/^N no longer tear down the SSE stream and drop the conversation.
-  const chat = useChat(client, model, provider);
+  const chat = useChat(client, model, provider, scope);
 
   // Change the session model/provider live and persist it (mirrors `forge
   // config set`), so /model in chat sticks across launches too.
@@ -72,8 +88,6 @@ export function App() {
       try {
         const h = await client.health();
         if (alive) setHealth(h.status);
-        const projects = await client.listProjects();
-        if (alive) setProject(projects[0]?.name);
       } catch {
         if (alive) setHealth("unreachable");
       }
@@ -82,6 +96,62 @@ export function App() {
       alive = false;
     };
   }, [client]);
+
+  // Resolve `--project` once, then release the chat thread. A name that doesn't
+  // resolve is reported and the session continues unscoped — the footer will say
+  // "no project", so the failure is visible rather than assumed away.
+  useEffect(() => {
+    if (!initialProject) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const r = resolveProject(await client.listProjects(), initialProject);
+        if (!alive) return;
+        if (r.ok) setScope(r.scope);
+        else {
+          setScopeError(`--project ${initialProject}: ${r.error}`);
+          setScope(assistantScope());
+        }
+      } catch (e) {
+        if (!alive) return;
+        setScopeError(`--project ${initialProject}: ${(e as Error).message}`);
+        setScope(assistantScope());
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [client, initialProject]);
+
+  /**
+   * `/project [id|name|none]`. Returns the line to show the user; resolution
+   * happens here (App owns the client and the scope) while <Chat> just renders
+   * the result.
+   */
+  const changeProject = async (arg: string): Promise<string> => {
+    const q = arg.trim();
+    // Report the live thread's scope, but decide against the *requested* one —
+    // during a switch the new thread may not exist yet, and asking twice for the
+    // same project shouldn't recreate it.
+    const live = chat.threadScope;
+    if (!q) {
+      return live?.kind === "project"
+        ? `project: ${live.name} (${live.id})`
+        : "project: none — /project <id|name> to scope this chat";
+    }
+    if (isDetachQuery(q)) {
+      if (scope?.kind !== "project") return "project: none already";
+      setScopeError(null);
+      setScope(assistantScope());
+      return "leaving the project — starting a new, unscoped thread";
+    }
+    const r = resolveProject(await client.listProjects(), q);
+    if (!r.ok) return r.error;
+    if (scope?.kind === "project" && scope.id === r.scope.id) return `already in ${r.scope.name}`;
+    setScopeError(null);
+    setScope(r.scope);
+    return `project → ${r.scope.name} — starting a new thread in it`;
+  };
 
   const healthColor = health === "healthy" ? "green" : health === "checking…" ? "yellow" : "red";
   const gateway = cfg.gateway_url.replace(/^https?:\/\//, "");
@@ -107,6 +177,14 @@ export function App() {
         </Box>
       )}
 
+      {/* A `--project` that didn't resolve. Stays put for the session: the chat
+          is running unscoped and the user should know why. */}
+      {scopeError && (
+        <Box paddingX={1}>
+          <Text color="red">✗ {scopeError}</Text>
+        </Box>
+      )}
+
       {/* The view fills all remaining height; the chat input and this footer are
           the last rows, so the input is pinned to the bottom of the terminal. */}
       <Box flexGrow={1} flexDirection="column" {...(fill ? { overflow: "hidden" as const } : {})}>
@@ -117,6 +195,7 @@ export function App() {
             provider={provider}
             onModelChange={changeModel}
             onProviderChange={changeProvider}
+            onProjectChange={changeProject}
             chat={chat}
           />
         )}
@@ -136,11 +215,14 @@ export function App() {
       {isChat && chat.contextStats ? <ContextMeter stats={chat.contextStats} /> : null}
 
       {/* Two stacked, truncating lines so a long project/model name never
-          collides the way a single space-between row did. */}
+          collides the way a single space-between row did. The project segment is
+          the *live thread's* scope (useChat reports it after the gateway creates
+          the thread) — never "whichever project the API listed first", which is
+          what used to make an unscoped session look project-scoped. */}
       <Box flexDirection="column" paddingX={1}>
         <Text dimColor wrap="truncate">
-          <Text color={healthColor}>● {health}</Text> · {gateway} · {project ?? "no project"} ·{" "}
-          {model ?? "default"} · {cfg.mode}
+          <Text color={healthColor}>● {health}</Text> · {gateway} ·{" "}
+          {scopeLabel(chat.threadScope)} · {model ?? "default"} · {cfg.mode}
         </Text>
         <Text dimColor wrap="truncate">
           {awaiting > 0 ? (

@@ -84,6 +84,66 @@ subcommand name:
 python -m cli.forge_cli --format json --gateway-url http://gateway.local:8000 proposals
 ```
 
+## Interactive workspace (bare `forge`)
+
+Running the [standalone binary](#standalone-binary-no-python-required) with no
+subcommand in a terminal opens the **interactive workspace**: streaming chat plus
+panes for runs, the twin, and a new run. It talks to the same gateway as the
+Python CLI, but it is a separate front-end — the slash commands below are *its*
+commands, not [`chat`](#chat-interactive-assistant-repl)'s.
+
+```bash
+forge                                   # open the workspace
+forge --project "Monitor Build Demo"    # …already scoped to a project
+forge ui --debug                        # verbose logging (see below)
+```
+
+| Flag | Purpose |
+|---|---|
+| `--project <id\|name>` | Start the chat scoped to a project. Takes an id, an exact name, or a unique substring (`--project gimbal`). An ambiguous or unknown name is reported on screen and the session starts unscoped |
+| `--debug` | Verbose logging, including raw SSE frames (see [Logs & debugging](#logs-debugging-the-interactive-tui)) |
+
+Any other flag (`--help`, `--version`, `--gateway <url>`) runs the scriptable
+command layer instead of opening the UI. `--project` works there too, on the
+one-shot turn:
+
+```bash
+forge chat -m "what's in this project?" --project "Monitor Build Demo"
+```
+
+| Key / command | Effect |
+|---|---|
+| `^T` `^R` `^B` `^N` | chat · runs · twin · new run |
+| `PageUp` / `PageDn` | Scroll the transcript |
+| `/project [id\|name]` | Show the current project, or switch to one. Switching starts a **new thread** — see below. `/project none` leaves the project |
+| `/model <slug>` | Change the model for this session (persisted to `~/.forge/config.json`) |
+| `/provider <id>` | Change the provider for this session |
+| `/help` | List the slash commands |
+| `Esc` | Quit |
+
+### What "project" in the status line means
+
+The project segment of the status footer is the **scope of the live chat thread**
+(`no project` when there isn't one) — not a UI preference. Scope is fixed when
+the gateway creates the thread (`scope_kind` / `scope_entity_id`), and a
+project-scoped thread is the one that gets the
+[project brief](#project-scoped-chat) prepended to every turn: the project's
+intent, its work products, and the instruction to pass `project_id` when
+committing CAD or recording a decision. So scope decides whether new deliverables
+land in the project — an unscoped chat can still discuss it, but nothing it
+produces is filed there.
+
+Two consequences worth knowing:
+
+- **`/project` starts a new thread.** A thread's scope is immutable server-side,
+  so switching projects means a fresh conversation; the workspace says so in the
+  transcript rather than letting you discover it when the agent has forgotten
+  what you were discussing.
+- **Asking the agent in prose does nothing.** "Let's work in project X" is a
+  message to the model, not a command — it may agree, but the thread's scope,
+  the injected brief, and where new work products land are all unchanged. Use
+  `/project` (or `--project`) instead.
+
 ## Commands
 
 ### `config` — configure the CLI (wizard)

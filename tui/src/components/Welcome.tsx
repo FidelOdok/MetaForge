@@ -13,7 +13,7 @@ export function welcomeHeight(cols: number, gatewayUrl?: string): number {
   const wordmark = cols >= 46 ? WORDMARK.length : 1;
   const tagline = wrap(TAGLINE);
   const mission = MISSION.reduce((n, l) => n + wrap(l), 0);
-  const hints = TUI_HINTS.reduce((n, [k, d]) => n + wrap(k.padEnd(18) + d), 0);
+  const hints = TUI_HINTS.reduce((n, [k, d]) => n + wrap(k.padEnd(20) + d), 0);
   const gateway = gatewayUrl ? 1 + wrap(`gateway ${gatewayUrl}`) : 0;
   // + marginTop before mission (1) and before hints (1) + marginBottom (1).
   return wordmark + tagline + 1 + mission + 1 + hints + gateway + 1;
@@ -54,7 +54,7 @@ export function Welcome({ gatewayUrl }: { gatewayUrl?: string }) {
       <Box flexDirection="column" marginTop={1}>
         {TUI_HINTS.map(([key, desc], i) => (
           <Text key={i}>
-            <Text color="green">{key.padEnd(18)}</Text>
+            <Text color="green">{key.padEnd(20)}</Text>
             <Text dimColor>{desc}</Text>
           </Text>
         ))}

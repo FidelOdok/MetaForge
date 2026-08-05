@@ -11,6 +11,15 @@ import { Welcome, welcomeHeight } from "./Welcome.js";
 
 /** A completed conversation turn, rendered once into <Static> and never again. */
 function Turn({ m }: { m: ChatMessage }) {
+  // A local notice (project switch, degraded scope) — not part of the
+  // conversation the agent sees, so it renders dim and unattributed.
+  if (m.role === "system") {
+    return (
+      <Box paddingX={1} marginTop={1}>
+        <Text dimColor>{m.text}</Text>
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column" paddingX={1} marginTop={1}>
       {m.role === "user" ? (
@@ -52,6 +61,7 @@ export function Chat({
   provider,
   onModelChange,
   onProviderChange,
+  onProjectChange,
   chat,
 }: {
   client: GatewayClient;
@@ -59,6 +69,8 @@ export function Chat({
   provider?: string;
   onModelChange?: (model: string) => void;
   onProviderChange?: (provider: string) => void;
+  /** `/project [id|name|none]` — resolves in App; resolves to the notice to show. */
+  onProjectChange?: (arg: string) => Promise<string>;
   /** Chat thread state, owned by App so it survives view switches and so App's
    *  height policy and this component's layout branch flip in the SAME render
    *  (a callback would lag one render behind and strand transition frames). */
@@ -136,8 +148,19 @@ export function Chat({
           setNotice(`provider: ${provider ?? "default"}`);
         }
         return true;
+      case "project":
+        if (!onProjectChange) {
+          setNotice("/project is unavailable here");
+          return true;
+        }
+        // Resolution needs the gateway (name → id), so the notice lands async.
+        if (arg) setNotice(`resolving project "${arg}"…`);
+        void onProjectChange(arg).then(setNotice, (e: Error) =>
+          setNotice(`/project failed: ${e.message}`),
+        );
+        return true;
       case "help":
-        setNotice("/model <slug> · /provider <id> · /help · Esc quit");
+        setNotice("/project <id|name> · /model <slug> · /provider <id> · /help · Esc quit");
         return true;
       default:
         setNotice(`unknown command: /${cmd} (try /help)`);

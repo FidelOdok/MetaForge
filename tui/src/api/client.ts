@@ -6,6 +6,9 @@
  */
 import { Agent } from "undici";
 import type { ForgeConfig } from "../config.js";
+// Type-only (erased at compile), so this stays a one-way runtime dependency:
+// lib/project.ts is what owns the scope model.
+import type { ChatScope } from "../lib/project.js";
 
 /**
  * A chat turn's POST sends no response headers until the whole handler
@@ -274,11 +277,19 @@ export class GatewayClient {
     return this.post<Run>(`/v1/runs/${id}/approval`, { decision });
   }
 
-  /** Create an assistant-scoped chat thread. */
-  async createThread(scopeEntityId: string, title?: string): Promise<{ id: string }> {
+  /**
+   * Create a chat thread in the given scope.
+   *
+   * A `project` scope is what makes the gateway lead every turn with the
+   * project brief (its work products, and the instruction to persist new CAD /
+   * decisions into that project), so the scope has to be chosen here rather
+   * than hardcoded — it used to always be `assistant`, which made a
+   * project-scoped conversation impossible from this client.
+   */
+  async createThread(scope: ChatScope, title?: string): Promise<{ id: string }> {
     return this.post<{ id: string }>("/v1/chat/threads", {
-      scope_kind: "assistant",
-      scope_entity_id: scopeEntityId,
+      scope_kind: scope.kind,
+      scope_entity_id: scope.kind === "project" ? scope.id : scope.entityId,
       title,
     });
   }

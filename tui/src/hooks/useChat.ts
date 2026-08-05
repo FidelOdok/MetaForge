@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { randomUUID } from "node:crypto";
-import type { GatewayClient } from "../api/client.js";
+import { GatewayError, type GatewayClient } from "../api/client.js";
 import { streamThread, type AgentStep, type ContextStats } from "../api/chat.js";
 import { describeEmptyTurn, newTurnStats, type TurnStats } from "../chat-diagnostics.js";
+import { assistantScope, scopeKey, type ChatScope } from "../lib/project.js";
 import { log } from "../log.js";
 
 export interface ChatMessage {
-  role: "user" | "assistant";
+  /** `system` = a local notice in the transcript (scope change, degraded scope). */
+  role: "user" | "assistant" | "system";
   text: string;
   steps?: AgentStep[];
   /** Cause of an empty turn (set only when `text` is empty). */
@@ -23,6 +24,12 @@ export interface UseChat {
   pending: { text: string; steps: AgentStep[] } | null;
   /** Most recent per-turn context-window snapshot, or null before the first turn. */
   contextStats: ContextStats | null;
+  /**
+   * Scope of the thread that actually exists server-side — null until one does.
+   * The status line renders this (not the requested scope) so it can never claim
+   * a project the agent isn't working in.
+   */
+  threadScope: ChatScope | null;
   send: (content: string) => void;
 }
 
@@ -30,15 +37,31 @@ export interface UseChat {
  * Owns a chat thread: creates it, opens the SSE stream once, and folds
  * message.delta / agent.step / agent.done into message state. Accumulation
  * uses a ref so the long-lived stream loop never reads stale React state.
+ *
+ * `scope` decides which thread gets created. Changing it (e.g. `/project`)
+ * starts a **new** thread in the new scope — a thread's scope is immutable
+ * server-side, so switching projects necessarily means leaving the old
+ * conversation's context behind. Pass `null` to hold off until the caller has
+ * resolved the scope (e.g. while looking up a `--project` name), so a throwaway
+ * assistant thread isn't created first.
  */
-export function useChat(client: GatewayClient, model?: string, provider?: string): UseChat {
+export function useChat(
+  client: GatewayClient,
+  model?: string,
+  provider?: string,
+  scope: ChatScope | null = assistantScope(),
+): UseChat {
   const [status, setStatus] = useState<ChatStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<{ text: string; steps: AgentStep[] } | null>(null);
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
+  const [threadScope, setThreadScope] = useState<ChatScope | null>(null);
 
   const threadRef = useRef<string | null>(null);
+  // Scope of the previous thread, so a *change* can be announced in the
+  // transcript while the first thread of a session stays quiet.
+  const priorScope = useRef<ChatScope | null>(null);
   const bufRef = useRef<{ text: string; steps: AgentStep[] }>({ text: "", steps: [] });
   const statsRef = useRef<TurnStats>(newTurnStats());
   const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
@@ -112,25 +135,56 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
     setStatus("idle");
   };
 
+  const key = scopeKey(scope);
   useEffect(() => {
+    if (scope === null) return; // caller is still resolving the scope
     const controller = new AbortController();
     let alive = true;
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
     const backoff = (ms: number) => Math.min(ms * 2, 8000);
+    const note = (text: string) => setMessages((m) => [...m, { role: "system", text }]);
+
+    // Nothing about the previous thread survives a scope change except the
+    // transcript already committed to the terminal's scrollback (clearing
+    // `messages` would fight Ink's <Static>, which only ever appends). Drop the
+    // thread handle first so an in-flight send can't be routed to the old thread.
+    threadRef.current = null;
+    setThreadScope(null);
+    setContextStats(null);
+    setPending(null);
+    thinkingRef.current = false;
+    setStatus("connecting");
 
     void (async () => {
       // 1. Create the thread, retrying while the gateway is unreachable rather
       //    than giving up — a cold gateway at launch shouldn't be a dead end.
+      //    A 4xx on a project scope is different: the gateway has answered and
+      //    won't change its mind (e.g. no channel seeded for `scope_kind=project`),
+      //    so retrying is pointless. Say so and continue unscoped rather than
+      //    wedging the chat or — worse — leaving the UI showing a project scope
+      //    the thread doesn't have.
       let threadId = "";
       let wait = 500;
+      let effective = scope;
       while (alive && !threadId) {
         try {
-          const t = await client.createThread(`tui-${randomUUID().slice(0, 8)}`, "TUI session");
+          const t = await client.createThread(effective, "TUI session");
           threadId = t.id;
           threadRef.current = threadId;
-          log.info("chat.thread_created", { threadId });
+          log.info("chat.thread_created", { threadId, scope: scopeKey(effective) });
         } catch (e) {
           if (!alive) return;
+          if (
+            effective.kind === "project" &&
+            e instanceof GatewayError &&
+            e.status !== undefined &&
+            e.status < 500
+          ) {
+            log.error("chat.project_scope_rejected", { error: e.message, status: e.status });
+            note(`project scope unavailable (${e.message}) — continuing with no project`);
+            effective = assistantScope();
+            continue;
+          }
           setStatus("reconnecting");
           setError(null);
           log.warn("chat.thread_create_retry", { error: (e as Error).message, wait });
@@ -139,6 +193,18 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
         }
       }
       if (!alive) return;
+      setThreadScope(effective);
+      // Announce a switch (not the first thread of the session): the new thread
+      // starts empty server-side, and pretending otherwise would be a lie the
+      // user only discovers when the agent forgets the conversation.
+      if (priorScope.current !== null && scopeKey(priorScope.current) !== scopeKey(effective)) {
+        note(
+          effective.kind === "project"
+            ? `— project → ${effective.name} · new thread, earlier context not carried over —`
+            : "— left the project · new thread, earlier context not carried over —",
+        );
+      }
+      priorScope.current = effective;
 
       // 2. Stream, reconnecting on drop. The thread lives server-side, so on a
       //    network blip we just reattach to its stream.
@@ -207,7 +273,10 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
       if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
       controller.abort();
     };
-  }, [client]);
+    // `key` (not `scope`) is the dependency: an assistant scope carries a random
+    // entity id, so comparing the object itself would recreate the thread every
+    // render.
+  }, [client, key]);
 
   const send = useCallback(
     (content: string) => {
@@ -249,5 +318,5 @@ export function useChat(client: GatewayClient, model?: string, provider?: string
     [client, model, provider],
   );
 
-  return { status, error, messages, pending, contextStats, send };
+  return { status, error, messages, pending, contextStats, threadScope, send };
 }

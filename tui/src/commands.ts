@@ -5,7 +5,6 @@
  * with a TTY launches the Ink TUI (see cli.tsx). Both share the same typed
  * gateway client, so there's one implementation, two modes.
  */
-import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { GatewayClient, GatewayError } from "./api/client.js";
 import { isTerminal, streamRunStatus } from "./api/runs.js";
@@ -13,6 +12,7 @@ import { loginChatGPT } from "./auth/oauth.js";
 import { CLI_QUICKSTART, MISSION, plainBanner } from "./banner.js";
 import { BUILD } from "./build-info.js";
 import { configPath, loadConfig, setConfigValue } from "./config.js";
+import { assistantScope, resolveProject, type ChatScope } from "./lib/project.js";
 
 interface Parsed {
   _: string[];
@@ -27,6 +27,13 @@ export function parseArgs(argv: string[]): Parsed {
     let key: string | null = null;
     if (a.startsWith("--")) key = a.slice(2);
     else if (a.startsWith("-") && a.length > 1) key = a.slice(1);
+    // `--flag=value` — the separate-word form below can't express a value that
+    // starts with `-`, and it's the form people reach for with quoted names.
+    if (key !== null && key.includes("=")) {
+      const eq = key.indexOf("=");
+      flags[key.slice(0, eq)] = key.slice(eq + 1);
+      continue;
+    }
     if (key !== null) {
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith("-")) {
@@ -71,11 +78,13 @@ function printHelp(): void {
       "",
       "Interactive workspace (bare `forge` in a terminal)",
       "  type to chat · ^R runs · ^B twin · ^N new run · ^T chat · Esc quit",
-      "  /model <slug>  switch model",
+      "  forge --project <id|name>     start scoped to a project",
+      "  /project <id|name>            switch project (new thread) · /project none to leave",
+      "  /model <slug>                 switch model",
       "",
       "All commands (scriptable; add --json for machine output)",
       "  forge runs list|get <id>|create|approve <id>|reject <id>|watch <id>",
-      '  forge chat -m "message"        one-shot assistant turn',
+      '  forge chat -m "message" [--project <id|name>]   one-shot assistant turn',
       "  forge projects                list projects",
       "  forge twin list               list twin nodes",
       "  forge sources                 list ingested knowledge sources",
@@ -85,7 +94,7 @@ function printHelp(): void {
       "  forge config show|path|set <key> <value>",
       "  forge --version | --help",
       "",
-      "Flags: --json  --gateway <url>  --debug  (chat: --model --provider)",
+      "Flags: --json  --gateway <url>  --debug  (chat: --model --provider --project)",
       "Config: ~/.forge/config.json (gateway_url, provider, model, mode)",
       "Logs:   ~/.forge/logs/session.log  (--debug or FORGE_LOG=1 adds raw SSE)",
     ].join("\n"),
@@ -169,7 +178,17 @@ async function chatCmd(
   const model = typeof flags.model === "string" ? flags.model : cfg.model;
   const provider = typeof flags.provider === "string" ? flags.provider : cfg.provider;
 
-  const thread = await client.createThread(`cli-${randomUUID().slice(0, 8)}`);
+  // `--project <id|name>` scopes the one-shot the same way it scopes the
+  // workspace: the gateway leads the turn with the project brief, so the answer
+  // is grounded in that project's work products.
+  let scope: ChatScope = assistantScope("cli");
+  if (typeof flags.project === "string") {
+    const r = resolveProject(await client.listProjects(), flags.project);
+    if (!r.ok) return usage(`--project ${flags.project}: ${r.error}`);
+    scope = r.scope;
+  }
+
+  const thread = await client.createThread(scope);
   await client.sendMessage(thread.id, message, { model, provider });
   const t = await client.getThread(thread.id);
   const msgs = t.messages ?? [];

@@ -23,6 +23,14 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MALFORMED = "__malformed__"
+# Projects the stub serves, so QA can drive `/project` / `--project` by name.
+PROJECTS = [
+    {"id": "p1", "name": "QA Project", "status": "active"},
+    {"id": "p2", "name": "QA Gimbal", "status": "active"},
+]
+# Every thread the client created, in order — QA reads this back from
+# `GET /__threads` to assert the *wire* scope, not just what the UI claims.
+_threads: list[dict[str, object]] = []
 # Stream the reply but deliberately omit `agent.done`, reproducing a completion
 # event lost on an SSE reconnect. A correct client finalizes the turn anyway
 # (POST-resolve fallback) instead of hanging on "thinking" forever.
@@ -57,7 +65,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/health":
             return self._json(200, {"status": "healthy", "version": "qa-stub"})
         if p == "/v1/projects":
-            return self._json(200, {"projects": [{"id": "p1", "name": "QA Project"}]})
+            return self._json(200, {"projects": PROJECTS})
+        if p == "/__threads":  # QA introspection, not a gateway route
+            return self._json(200, {"threads": _threads})
         if p == "/v1/runs":
             return self._json(200, {"runs": []})
         if p == "/v1/twin/nodes":
@@ -77,7 +87,17 @@ class Handler(BaseHTTPRequestHandler):
             data = {}
         p = self.path
         if p == "/v1/chat/threads":
-            return self._json(201, {"id": "qa-thread"})
+            # A distinct id per thread: switching project creates a *new* thread,
+            # and reusing one id would let the old stream serve the new one.
+            tid = f"qa-thread-{len(_threads) + 1}"
+            _threads.append(
+                {
+                    "id": tid,
+                    "scope_kind": data.get("scope_kind"),
+                    "scope_entity_id": data.get("scope_entity_id"),
+                }
+            )
+            return self._json(201, {"id": tid})
         if p.endswith("/messages"):
             tid = p.split("/threads/")[1].split("/")[0]
             _q(tid).put(str(data.get("content", "")))

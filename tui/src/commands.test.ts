@@ -25,6 +25,13 @@ test("boolean flag when no value follows", () => {
   assert.equal(p.flags.json, true);
 });
 
+test("--flag=value form", () => {
+  const p = parseArgs(["chat", "--project=Monitor Build Demo", "--json"]);
+  assert.deepEqual(p._, ["chat"]);
+  assert.equal(p.flags.project, "Monitor Build Demo");
+  assert.equal(p.flags.json, true);
+});
+
 test("request-json value is kept intact", () => {
   const p = parseArgs(["runs", "create", "--request-json", '{"goal":"x","flow":"design_v1"}']);
   assert.equal(p.flags["request-json"], '{"goal":"x","flow":"design_v1"}');
