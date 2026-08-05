@@ -163,6 +163,23 @@ python -m cli.forge_cli runs reject <run_id>
 A run is treated as a design flow only when it opts in with a `flow` id (or
 `kind: "design_flow"`); a bare `{goal}` keeps the plain run semantics.
 
+## Driving it from chat (MET-587)
+
+The chat agent can start a flow itself via the `runs` MCP adapter:
+
+- **`run.start_design_flow`** — goal + flow id (validated against the
+  registry, default `hardware_v1`) + `project_id`; drives the same
+  in-process path as `POST /v1/runs` and returns the run id + phase list.
+- **`run.get_status`** — run id → lifecycle state, the gate reason it is
+  paused on, error/result — so the agent can report progress in
+  conversation.
+
+Launching is deliberately **not** pre-gated: the flow pauses at every phase
+boundary for human approval, so the gates themselves are the HITL
+mechanism — the tool only queues work a human must repeatedly sign off.
+Approvals stay where they always were (`POST /v1/runs/{id}/approval`, the
+dashboard, or `forge runs approve`).
+
 ## Deliverable enforcement ("no work product silently missing")
 
 Each phase declares `required_deliverables` — the work-product *types* it must

@@ -1,0 +1,45 @@
+{
+  "id": "chat_design_launch",
+  "title": "Chat-triggered design flow: agent starts hardware_v1 scoped to the project (leaves a paused run)",
+  "scope": "project",
+  "rubric": ["chat_tooluse"],
+  "variants": [{ "name": "native", "provider": null, "model": null }],
+  "max_turn_seconds": 420,
+  "turns": [
+    {
+      "say": "Kick off the full hardware design lifecycle for this project now: a pocket-size USB-C powered soldering-iron controller with an OLED readout. Start the run and tell me the run id.",
+      "checks": [
+        {
+          "id": "launch_tool_called",
+          "type": "tool_called",
+          "tool": "mcp_run_start_design_flow"
+        },
+        {
+          "id": "launch_scoped_to_project",
+          "type": "tool_arg_equals",
+          "tool": "mcp_run_start_design_flow",
+          "arg": "project_id",
+          "value": "$PROJECT_ID"
+        },
+        {
+          "id": "launch_replied",
+          "type": "reply_is_not_fallback"
+        }
+      ]
+    },
+    {
+      "say": "What's the status of that run right now?",
+      "checks": [
+        {
+          "id": "status_tool_called",
+          "type": "tool_called",
+          "tool": "mcp_run_get_status"
+        },
+        {
+          "id": "status_replied",
+          "type": "reply_is_not_fallback"
+        }
+      ]
+    }
+  ]
+}

@@ -674,6 +674,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.apply import make_apply_executor
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
+    from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
@@ -693,6 +694,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).
         constraint_recorder=make_constraint_recorder(twin, project_backend),
+        # MET-587: chat-triggered design flows (run.start_design_flow) — the
+        # flow's own phase gates are the HITL approval mechanism.
+        run_launcher=make_run_launcher(),
     )
     # Apply-on-approve executor (MET-548): runs an approved proposal's diff.
     app.state.proposal_apply = make_apply_executor(decision_recorder)

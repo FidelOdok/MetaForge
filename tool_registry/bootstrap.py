@@ -191,6 +191,7 @@ async def bootstrap_tool_registry(
     geometry_recorder: Any = None,
     proposal_recorder: Any = None,
     constraint_recorder: Any = None,
+    run_launcher: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -411,6 +412,29 @@ async def bootstrap_tool_registry(
                     if project_backend is None
                     else "disabled via config"
                 ),
+            )
+
+        # ----- Runs MCP adapter (MET-587) -----
+        # Runtime-injected launcher (built in api_gateway over the run store +
+        # flow executor) so the chat agent can start gated design flows. The
+        # flow's own phase gates are the HITL approval mechanism.
+        if run_launcher is not None and _is_adapter_enabled("run"):
+            try:
+                from tool_registry.tools.runs.adapter import RunsServer
+
+                server = RunsServer(launcher=run_launcher)
+                await registry.register_adapter(server)
+                registered.append("run")
+                logger.info("runs_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("runs_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("run")
+        else:
+            skipped.append("run")
+            logger.info(
+                "runs_mcp_adapter_skipped",
+                reason=("no run_launcher supplied" if run_launcher is None else "disabled"),
             )
 
         # ----- Session MCP adapter (MET-494) -----
