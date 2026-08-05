@@ -80,6 +80,25 @@ def test_expand_turns_expands_repeat_blocks() -> None:
     assert [t["say"] for t in turns] == ["start", "point 1", "point 2", "point 3", "end"]
 
 
+def test_substitute_covers_say_and_checks_with_run_tag() -> None:
+    """MET-579: hardcoded artifact names collide with a previous run's
+    artifacts ("project already exists"), so $RUN_TAG must uniquify names
+    inside the turn text itself, not just check patterns."""
+    from chat_rubric_common import substitute
+
+    turns: list[dict] = [
+        {
+            "say": "Create a project called 'Probe $RUN_TAG' in $PROJECT_ID",
+            "checks": [{"id": "a", "type": "reply_contains", "pattern": "Probe $RUN_TAG"}],
+        }
+    ]
+    out = substitute(turns, {"$RUN_TAG": "1755", "$PROJECT_ID": "p-9"})
+    assert out[0]["say"] == "Create a project called 'Probe 1755' in p-9"
+    assert out[0]["checks"][0]["pattern"] == "Probe 1755"
+    # Source fixture untouched.
+    assert "$RUN_TAG" in turns[0]["say"]
+
+
 def test_interpolate_checks_substitutes_project_id() -> None:
     turns: list[dict] = [
         {

@@ -44,9 +44,9 @@ from chat_rubric_common import (  # noqa: E402
     evaluate_declared,
     expand_turns,
     expected_for_variant,
-    interpolate_checks,
     resolve_outcomes,
     step_payload,
+    substitute,
     unwrap_sse_data,
 )
 
@@ -203,7 +203,12 @@ def run_conversation(
     ).start()
     sse_up = listener.connected.wait(timeout=10.0)
 
-    turns = interpolate_checks(expand_turns(scenario["turns"]), project_id)
+    # $RUN_TAG uniquifies artifact names the agent is asked to create, so
+    # re-runs don't collide with a previous run's artifacts (MET-579).
+    subs = {"$RUN_TAG": str(int(started))}
+    if project_id:
+        subs["$PROJECT_ID"] = project_id
+    turns = substitute(expand_turns(scenario["turns"]), subs)
     for t_idx, turn in enumerate(turns):
         turn_started = time.time()
         record: dict[str, Any] = {

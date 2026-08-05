@@ -127,24 +127,45 @@ def expand_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def interpolate_checks(turns: list[dict[str, Any]], project_id: str | None) -> list[dict[str, Any]]:
-    """Substitute ``$PROJECT_ID`` in declared check ``pattern``/``value`` fields."""
-    if not project_id:
+def substitute(turns: list[dict[str, Any]], subs: dict[str, str]) -> list[dict[str, Any]]:
+    """Substitute placeholders in turn ``say`` texts and check ``pattern``/``value``.
+
+    ``$PROJECT_ID`` carries the runner-created project id into checks;
+    ``$RUN_TAG`` (MET-579) uniquifies names a scenario asks the agent to
+    create — a hardcoded name like "Eval Dedupe Probe" collides with the
+    previous run's artifact ("A project named X already exists"), so from
+    the second run onward the scenario measured name-conflict handling
+    instead of tool discipline.
+    """
+    if not subs:
         return turns
     out = []
     for t in turns:
         t = dict(t)
+        say = t.get("say")
+        if isinstance(say, str):
+            for placeholder, value in subs.items():
+                say = say.replace(placeholder, value)
+            t["say"] = say
         checks = []
         for c in t.get("checks") or []:
             c = dict(c)
             for key in ("pattern", "value"):
                 if isinstance(c.get(key), str):
-                    c[key] = c[key].replace("$PROJECT_ID", project_id)
+                    for placeholder, value in subs.items():
+                        c[key] = c[key].replace(placeholder, value)
             checks.append(c)
         if checks:
             t["checks"] = checks
         out.append(t)
     return out
+
+
+def interpolate_checks(turns: list[dict[str, Any]], project_id: str | None) -> list[dict[str, Any]]:
+    """Back-compat wrapper: substitute ``$PROJECT_ID`` only."""
+    if not project_id:
+        return turns
+    return substitute(turns, {"$PROJECT_ID": project_id})
 
 
 # --- check engine --------------------------------------------------------------

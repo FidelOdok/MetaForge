@@ -8,7 +8,7 @@
   ],
   "turns": [
     {
-      "say": "Create a new project called 'Eval Dedupe Probe' using your project tools, then record one design decision in that new project titled 'MCU: ESP32-S3' with rationale 'integrated wifi and vendor support'. Do both, then confirm what you did.",
+      "say": "Create a new project called 'Eval Dedupe Probe $RUN_TAG' using your project tools, then record one design decision in that new project titled 'MCU: ESP32-S3' with rationale 'integrated wifi and vendor support'. Do both, then confirm what you did.",
       "checks": [
         { "id": "project_created", "type": "tool_called", "tool": "mcp_project_create" },
         { "id": "decision_recorded", "type": "tool_called", "tool": "mcp_twin_record_decision" },
