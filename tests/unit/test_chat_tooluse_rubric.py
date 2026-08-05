@@ -58,6 +58,22 @@ def test_no_tool_calls_is_bounded() -> None:
     assert evaluate_chat_tooluse([_turn()])["tool_errors_bounded"]
 
 
+def test_invalid_reply_recovery_is_not_a_tool_error() -> None:
+    """A ReAct parse-recovery pseudo-step ("(invalid_reply)") is protocol
+    noise, not tool indiscipline — it must not trip the error-rate bound
+    (live-caught: one self-corrected hiccup failed an otherwise-perfect run)."""
+    turns = [
+        _turn(
+            steps=[
+                _step(tool="(invalid_reply)", error="malformed reply"),
+                _step(tool="mcp_twin_query_cypher", args={"q": "MATCH ..."}),
+                _step(tool="mcp_twin_record_decision", args={"t": "x"}),
+            ]
+        )
+    ]
+    assert evaluate_chat_tooluse(turns)["tool_errors_bounded"]
+
+
 def test_bigobs_turn_with_fallback_reply_fails() -> None:
     turns = [_turn(reply=FALLBACK_ANSWER, tag="bigobs")]
     assert not evaluate_chat_tooluse(turns)["big_observation_survived"]

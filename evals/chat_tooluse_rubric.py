@@ -37,7 +37,11 @@ def evaluate_chat_tooluse(turns: list[dict[str, Any]]) -> dict[str, bool]:
     for t in turns:
         seen: set[tuple[Any, str]] = set()
         failed: set[tuple[Any, str]] = set()
-        for s in tool_steps(t):
+        # "(invalid_reply)" is the ReAct loop's synthetic recovery step for a
+        # malformed model reply — protocol noise, not a tool error. Counting
+        # it made a single self-corrected parse hiccup trip the error-rate
+        # bound at small n (live-caught in the MET-568 acceptance run).
+        for s in (x for x in tool_steps(t) if x.get("tool") != "(invalid_reply)"):
             total += 1
             key = (s.get("tool"), canon_args(s.get("arguments")))
             if key in seen:
