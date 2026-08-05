@@ -1,5 +1,13 @@
 """Tool registry — MCP-based tool access layer for containerized adapters."""
 
+from tool_registry.compute_providers import (
+    ComputeProviderProfile,
+    RunPodRuntime,
+    UnknownComputeProviderError,
+    VastAIRuntime,
+    available_providers,
+    resolve_runtime,
+)
 from tool_registry.container_runtime import (
     ContainerConfig,
     ContainerExecutionEngine,
@@ -15,6 +23,7 @@ from tool_registry.tool_metadata import AdapterInfo, AdapterStatus, ToolCapabili
 __all__ = [
     "AdapterInfo",
     "AdapterStatus",
+    "ComputeProviderProfile",
     "ContainerConfig",
     "ContainerExecutionEngine",
     "ContainerRuntime",
@@ -22,6 +31,11 @@ __all__ = [
     "ExecutionEngine",
     "ExecutionResult",
     "InMemoryRuntime",
+    "RunPodRuntime",
     "ToolCapability",
     "ToolRegistry",
+    "UnknownComputeProviderError",
+    "VastAIRuntime",
+    "available_providers",
+    "resolve_runtime",
 ]
