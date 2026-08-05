@@ -69,6 +69,22 @@ def parse_sse_lines(lines: list[str]) -> list[dict[str, Any]]:
     return out
 
 
+def step_payload(data: Any) -> dict[str, Any]:
+    """Unwrap an ``agent.step`` event's payload to the step dict itself.
+
+    The gateway nests the step under a ``step`` key
+    (``{"step": {...}, "agent_id": ...}``, see ``notify_agent_step``).
+    Live-caught during the MET-575 acceptance run: the runner captured the
+    wrapper, so every step-based check (tool_called, tool_arg_equals,
+    dedupe) evaluated empty dicts — tools were being called and landing
+    work products while the checks reported no calls at all. Tolerates a
+    bare step dict for forward/backward compatibility.
+    """
+    if isinstance(data, dict) and isinstance(data.get("step"), dict):
+        return dict(data["step"])
+    return dict(data) if isinstance(data, dict) else {}
+
+
 # --- reply extraction ---------------------------------------------------------
 def agent_replies_after(messages: list[dict[str, Any]], user_msg_id: str) -> list[dict[str, Any]]:
     """Agent messages that appear after the just-sent user message.

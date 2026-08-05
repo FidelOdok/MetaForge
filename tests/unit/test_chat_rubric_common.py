@@ -44,6 +44,19 @@ def test_parse_sse_handles_unenveloped_payload() -> None:
     assert events[0]["data"] == {"tool": "x"}
 
 
+def test_step_payload_unwraps_gateway_nesting() -> None:
+    # notify_agent_step nests the step: {"step": {...}, "agent_id": ...}.
+    # Live-caught: capturing the wrapper made every step-based check
+    # evaluate empty dicts while tools were really being called.
+    from chat_rubric_common import step_payload
+
+    wrapped = {"step": {"tool": "mcp_twin_record_decision", "arguments": {"a": 1}}, "agent_id": "h"}
+    assert step_payload(wrapped)["tool"] == "mcp_twin_record_decision"
+    # Bare step dicts pass through; garbage becomes an empty step.
+    assert step_payload({"tool": "x"}) == {"tool": "x"}
+    assert step_payload("not a dict") == {}
+
+
 # --- reply extraction ---------------------------------------------------------
 def _msg(mid: str, kind: str, content: str) -> dict:
     return {"id": mid, "actor_kind": kind, "content": content}
