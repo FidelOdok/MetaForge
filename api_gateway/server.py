@@ -677,6 +677,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
+    from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
 
     decision_recorder = make_decision_recorder(twin, project_backend)
@@ -697,6 +698,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # MET-587: chat-triggered design flows (run.start_design_flow) — the
         # flow's own phase gates are the HITL approval mechanism.
         run_launcher=make_run_launcher(),
+        # MET-588: chat had no direct way to save a document (requirements,
+        # notes) — it fell back to twin.propose_change, whose apply-on-approve
+        # executor only implements a `record_decision` action, so anything
+        # else silently no-ops even after a human approves it.
+        document_recorder=make_document_recorder(twin, project_backend),
     )
     # Apply-on-approve executor (MET-548): runs an approved proposal's diff.
     app.state.proposal_apply = make_apply_executor(decision_recorder)

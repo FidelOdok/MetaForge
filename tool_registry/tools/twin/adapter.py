@@ -44,6 +44,7 @@ class TwinServer(McpToolServer):
         geometry_recorder: Any = None,
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
+        document_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -71,6 +72,17 @@ class TwinServer(McpToolServer):
         # Same injection seam as decision_recorder; None keeps tool_registry
         # free of api_gateway imports.
         self._constraint_recorder = constraint_recorder
+        # MET-588: an injected async ``record(...)`` (make_document_recorder)
+        # that persists an arbitrary text/markdown artifact as a PRD/
+        # DOCUMENTATION work product — MinIO blob + twin node + project link.
+        # Fixes the gap where the chat agent had no direct way to save a
+        # requirements/notes document and fell back to twin.propose_change,
+        # whose apply-on-approve executor only implements a `record_decision`
+        # action — every other diff shape (including one the model invents,
+        # e.g. `create_work_product`) silently no-ops even after approval.
+        # Same injection seam as decision_recorder; None keeps tool_registry
+        # free of api_gateway imports.
+        self._document_recorder = document_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -80,6 +92,8 @@ class TwinServer(McpToolServer):
             self._register_propose_change()
         if constraint_recorder is not None:
             self._register_record_constraint_set()
+        if document_recorder is not None:
+            self._register_record_document()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -667,6 +681,99 @@ class TwinServer(McpToolServer):
             constraints=constraints,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_document (MET-588)
+    # ------------------------------------------------------------------
+
+    _DOCUMENT_TYPES = ("prd", "documentation")
+
+    def _register_record_document(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_document",
+                adapter_id="twin",
+                name="Record Document",
+                description=(
+                    "Persist a text/markdown artifact (requirements, notes, a "
+                    "spec) as a first-class PRD or DOCUMENTATION work product: "
+                    "stores it in MinIO and links it to a project so it shows on "
+                    "the project's work-product list. Writes immediately — no "
+                    "approval gate, same as twin.record_decision. Use this "
+                    "instead of twin.propose_change for saving a document; "
+                    "propose_change's apply-on-approve step only implements a "
+                    "'record_decision' action, so any other diff (including a "
+                    "document) silently does nothing even after a human approves it."
+                ),
+                capability="twin_decision",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Document title / work-product name.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The document body, as markdown.",
+                        },
+                        "document_type": {
+                            "type": "string",
+                            "enum": list(self._DOCUMENT_TYPES),
+                            "description": (
+                                "'prd' for a requirements/product doc, "
+                                "'documentation' for general notes/specs. "
+                                "Defaults to 'documentation'."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["name", "content"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_document,
+        )
+
+    async def record_document(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        content = arguments.get("content")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.record_document: 'name' is required (non-empty string)")
+        if not content or not isinstance(content, str):
+            raise ValueError("twin.record_document: 'content' is required (non-empty string)")
+        document_type = arguments.get("document_type") or "documentation"
+        if document_type not in self._DOCUMENT_TYPES:
+            raise ValueError(
+                f"twin.record_document: 'document_type' must be one of {self._DOCUMENT_TYPES}"
+            )
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._document_recorder(
+            content=content,
+            name=name,
+            wp_type=document_type,
+            domain="requirements" if document_type == "prd" else "documentation",
+            fmt="md",
+            link_type=document_type,
+            source_tool="twin.record_document",
+            session_id=session_id if isinstance(session_id, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
         )
 
     # ------------------------------------------------------------------
