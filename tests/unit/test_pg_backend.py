@@ -322,3 +322,66 @@ async def test_update_thread_timestamp(repo: PgChatRepository, session: AsyncSes
     thread = await repo.get_thread(session, thread_id)
     assert thread is not None
     assert thread.last_message_at.year == 2099
+
+
+# ---------------------------------------------------------------------------
+# 11. Update thread scope (MET-580)
+# ---------------------------------------------------------------------------
+
+
+async def test_update_thread_scope_rescopes_in_place(
+    repo: PgChatRepository, session: AsyncSession
+) -> None:
+    """update_thread_scope should change scope_kind/scope_entity_id/channel_id
+    on the SAME row — the thread id, and everything else about it, is untouched."""
+    await repo.seed_default_channels(session)
+    await session.commit()
+
+    channels = {ch.scope_kind: ch for ch in await repo.list_channels(session)}
+    thread_id = str(uuid4())
+    await repo.create_thread(
+        session,
+        thread_id=thread_id,
+        channel_id=channels["assistant"].id,
+        scope_kind="assistant",
+        scope_entity_id="a1",
+        title="Rescope thread",
+    )
+    await session.commit()
+
+    updated = await repo.update_thread_scope(
+        session,
+        thread_id,
+        channel_id=channels["project"].id,
+        scope_kind="project",
+        scope_entity_id="p-123",
+    )
+    await session.commit()
+
+    assert updated is not None
+    assert updated.id == thread_id
+    assert updated.scope_kind == "project"
+    assert updated.scope_entity_id == "p-123"
+    assert updated.channel_id == channels["project"].id
+    assert updated.title == "Rescope thread"  # everything else is untouched
+
+    reread = await repo.get_thread(session, thread_id)
+    assert reread is not None
+    assert reread.scope_kind == "project"
+
+
+async def test_update_thread_scope_missing_thread_returns_none(
+    repo: PgChatRepository, session: AsyncSession
+) -> None:
+    await repo.seed_default_channels(session)
+    await session.commit()
+    channels = await repo.list_channels(session)
+
+    result = await repo.update_thread_scope(
+        session,
+        str(uuid4()),
+        channel_id=channels[0].id,
+        scope_kind=channels[0].scope_kind,
+        scope_entity_id="x",
+    )
+    assert result is None

@@ -56,6 +56,28 @@ test("unwraps the gateway's data envelope for message.delta", () => {
   assert.deepEqual(parseEvent(raw), { type: "message.delta", delta: "Hello" });
 });
 
+test("parses scope.changed for a project switch (MET-580, agent-triggered)", () => {
+  const raw =
+    'event: scope.changed\ndata: {"data":{"scope_kind":"project","scope_entity_id":"p1",' +
+    '"project_name":"Monitor Build Demo"},"thread_id":"t"}';
+  const ev = parseEvent(raw);
+  assert.deepEqual(ev, {
+    type: "scope.changed",
+    scope: { scope_kind: "project", scope_entity_id: "p1", project_name: "Monitor Build Demo" },
+  });
+});
+
+test("parses scope.changed for a detach (project_name null)", () => {
+  const raw =
+    'event: scope.changed\ndata: {"scope_kind":"assistant","scope_entity_id":"t1",' +
+    '"project_name":null}';
+  const ev = parseEvent(raw);
+  assert.deepEqual(ev, {
+    type: "scope.changed",
+    scope: { scope_kind: "assistant", scope_entity_id: "t1", project_name: null },
+  });
+});
+
 test("unwraps the envelope for agent.step and error", () => {
   const step = parseEvent(
     'event: agent.step\ndata: {"data":{"step":{"tool":"twin.get_node"}},"thread_id":"t"}',

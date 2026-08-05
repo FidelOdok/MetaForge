@@ -176,6 +176,72 @@ class TestCreateThread:
 
 
 # ===================================================================
+# PATCH /threads/{thread_id}/scope (MET-580)
+# ===================================================================
+
+
+class TestUpdateThreadScope:
+    """Rescoping a thread IN PLACE — the human/API side of MET-580. The
+    agent-callable ``chat.set_project_scope`` tool goes through the same
+    ``apply_thread_scope`` helper (tested directly in test_chat_scope.py), so
+    coverage here is about the HTTP contract, not the resolution logic."""
+
+    def test_switches_to_project_and_preserves_thread_id(self, client: TestClient) -> None:
+        created = _create_thread(client, scope_kind="session", scope_entity_id="s1")
+        thread_id = created["id"]
+
+        resp = client.patch(
+            f"/v1/chat/threads/{thread_id}/scope",
+            json={"scope_kind": "project", "scope_entity_id": "p-123"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == thread_id  # same thread, not a new one
+        assert data["scope_kind"] == "project"
+        assert data["scope_entity_id"] == "p-123"
+
+        # The channel moved with it.
+        all_channels = client.get("/v1/chat/channels").json()["channels"]
+        channels = {ch["scope_kind"]: ch["id"] for ch in all_channels}
+        assert data["channel_id"] == channels["project"]
+
+    def test_persists_across_a_fresh_read(self, client: TestClient) -> None:
+        created = _create_thread(client)
+        thread_id = created["id"]
+        client.patch(
+            f"/v1/chat/threads/{thread_id}/scope",
+            json={"scope_kind": "assistant", "scope_entity_id": "a1"},
+        )
+        reread = client.get(f"/v1/chat/threads/{thread_id}").json()
+        assert reread["scope_kind"] == "assistant"
+        assert reread["scope_entity_id"] == "a1"
+
+    def test_rejects_unknown_scope_kind(self, client: TestClient) -> None:
+        created = _create_thread(client)
+        resp = client.patch(
+            f"/v1/chat/threads/{created['id']}/scope",
+            json={"scope_kind": "nonexistent-scope", "scope_entity_id": "x"},
+        )
+        assert resp.status_code == 400
+        assert "no channel" in resp.json()["detail"].lower()
+
+    def test_rejects_missing_thread(self, client: TestClient) -> None:
+        resp = client.patch(
+            "/v1/chat/threads/does-not-exist/scope",
+            json={"scope_kind": "session", "scope_entity_id": "x"},
+        )
+        assert resp.status_code == 404
+
+    def test_missing_required_field(self, client: TestClient) -> None:
+        created = _create_thread(client)
+        resp = client.patch(
+            f"/v1/chat/threads/{created['id']}/scope",
+            json={"scope_kind": "session"},
+        )
+        assert resp.status_code == 422
+
+
+# ===================================================================
 # GET /threads/{thread_id}
 # ===================================================================
 

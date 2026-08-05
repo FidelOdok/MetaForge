@@ -49,7 +49,9 @@ from api_gateway.chat.schemas import (
     ThreadListResponse,
     ThreadResponse,
     ThreadSummaryResponse,
+    UpdateThreadScopeRequest,
 )
+from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope
 from api_gateway.chat.streaming import (
     notify_agent_done,
     notify_agent_step,
@@ -134,6 +136,13 @@ def init_chat_backend(backend: ChatBackend) -> None:
     global _backend  # noqa: PLW0603
     _backend = backend
     logger.info("chat_backend_initialized", backend_type=type(backend).__name__)
+
+
+def get_chat_backend() -> ChatBackend:
+    """Accessor for the live chat backend — always call this, never bind
+    ``_backend`` at import time (MET-575: an early alias keeps pointing at the
+    empty in-memory store after ``init_chat_backend`` swaps in the real one)."""
+    return _backend
 
 
 # Legacy alias — kept for backward compatibility with tests that import `store`
@@ -376,6 +385,7 @@ async def _invoke_agent(
                     availability=availability,
                     project_brief=brief,
                     context_block=context_block,
+                    chat_backend=_backend,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 return ChatMessageRecord(
@@ -634,6 +644,50 @@ async def create_thread(body: CreateThreadRequest) -> ThreadResponse:
         created_at=thread.created_at,
         last_message_at=thread.last_message_at,
         messages=messages,
+    )
+
+
+@router.patch("/threads/{thread_id}/scope", response_model=ThreadResponse)
+async def update_thread_scope(thread_id: str, body: UpdateThreadScopeRequest) -> ThreadResponse:
+    """Rescope an EXISTING thread in place (MET-580).
+
+    Unlike ``POST /threads``, this preserves the conversation — the same
+    thread continues, and its next turn's project brief (if scoped to a
+    project) reflects the new scope. The agent-callable ``chat.set_project_scope``
+    native tool goes through the same ``apply_thread_scope`` helper, so a human
+    hitting this endpoint and the agent switching scope mid-turn behave
+    identically and both broadcast the same ``scope.changed`` SSE event.
+    """
+    thread = await _backend.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail=f"Thread {thread_id!r} not found")
+
+    project_name = None
+    if body.scope_kind == "project":
+        project = await get_project_backend().get_project(body.scope_entity_id)
+        project_name = project.name if project is not None else None
+
+    try:
+        updated = await apply_thread_scope(
+            _backend,
+            thread_id,
+            scope_kind=body.scope_kind,
+            scope_entity_id=body.scope_entity_id,
+            project_name=project_name,
+        )
+    except ScopeResolutionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ThreadResponse(
+        id=updated.id,
+        channel_id=updated.channel_id,
+        scope_kind=updated.scope_kind,
+        scope_entity_id=updated.scope_entity_id,
+        title=updated.title,
+        archived=updated.archived,
+        created_at=updated.created_at,
+        last_message_at=updated.last_message_at,
+        messages=[],
     )
 
 

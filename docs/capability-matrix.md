@@ -74,6 +74,17 @@ three-layer model and install.
 See [`integrations/claude-code.md`](integrations/claude-code.md) for
 how to drive these from Claude Code.
 
+### Chat-harness-native tools (not via the standalone MCP server)
+
+Registered directly into a chat turn's `ToolRegistry` (`orchestrator/harness/tools.py`)
+rather than through an MCP adapter — only reachable from *within* a running
+chat turn (`forge chat`, the TUI workspace, the dashboard chat), never from an
+external MCP client like Claude Code.
+
+| Tool | Purpose | UAT scenario |
+|---|---|---|
+| `chat.set_project_scope` | Rescope the CURRENT chat thread to a project (id/name/substring, or `none` to leave) — in place, preserving the conversation (MET-580) | see [`cli-reference.md`](cli-reference.md#project-scoped-chat) |
+
 ## Dashboard routes (11)
 
 Served by Vite under `dashboard/` — boot with

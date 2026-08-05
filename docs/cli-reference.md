@@ -135,14 +135,18 @@ produces is filed there.
 
 Two consequences worth knowing:
 
-- **`/project` starts a new thread.** A thread's scope is immutable server-side,
-  so switching projects means a fresh conversation; the workspace says so in the
-  transcript rather than letting you discover it when the agent has forgotten
-  what you were discussing.
-- **Asking the agent in prose does nothing.** "Let's work in project X" is a
-  message to the model, not a command — it may agree, but the thread's scope,
-  the injected brief, and where new work products land are all unchanged. Use
-  `/project` (or `--project`) instead.
+- **`/project` starts a new thread.** Typed by you, it switches by creating a
+  **new** thread in the new scope, so the conversation restarts; the workspace
+  says so in the transcript rather than letting you discover it when the agent
+  has forgotten what you were discussing.
+- **Asking the agent in prose does rescope — in place.** "Switch to project X"
+  is answered by the agent calling `chat.set_project_scope`, which rescopes the
+  **current** thread rather than starting a new one — the conversation is kept,
+  and the very next turn gets the new project's brief. An ambiguous or unknown
+  name is refused (the agent won't guess), and it must say so explicitly rather
+  than continuing to talk about the project as if the switch happened silently.
+  Watch the footer either way: it always reflects the thread's real scope,
+  whoever changed it.
 
 ## Commands
 
@@ -279,6 +283,13 @@ python -m cli.forge_cli chat --project 250aec91-6d31-4a26-bb71-5e0d1e6fedb9
 Once scoped, ask the agent about the project ("what's in this project?", "what
 did we decide about the base plate?") and it answers from the work products; ask
 it to build geometry and the result is saved back into the project.
+
+Mid-conversation you can also just ask the agent to switch: "switch to the Foo
+project" (or "leave the project") makes it call `chat.set_project_scope`, which
+rescopes the **same** thread in place — the conversation is kept, and the next
+turn's brief reflects the new project. This works whether the thread started
+scoped or unscoped. An ambiguous or unknown name is refused rather than guessed,
+and the agent must tell you explicitly that it switched.
 
 #### From prompt to CAD
 

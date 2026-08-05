@@ -38,10 +38,22 @@ export interface ContextStats {
   estimated: boolean;
 }
 
+/** The thread's scope was rescoped IN PLACE (MET-580) — by `/project`-equivalent
+ * on the gateway, or by the agent's `chat.set_project_scope` tool. Unlike a
+ * scope switch this client initiates, it can arrive mid-turn with no local
+ * trigger, so the client must render it from the event, not assume its own
+ * `/project` handler is the only source of a scope change. */
+export interface ScopeChanged {
+  scope_kind: string;
+  scope_entity_id: string;
+  project_name: string | null;
+}
+
 export type ChatEvent =
   | { type: "message.delta"; delta: string }
   | { type: "agent.step"; step: AgentStep }
   | { type: "context.stats"; stats: ContextStats }
+  | { type: "scope.changed"; scope: ScopeChanged }
   | { type: "agent.done" }
   | { type: "error"; error: string }
   | { type: "other"; event: string; data: unknown };
@@ -74,6 +86,15 @@ export function parseEvent(raw: string): ChatEvent | null {
       return { type: "agent.step", step: (data.step as AgentStep) ?? {} };
     case "context.stats":
       return { type: "context.stats", stats: data as unknown as ContextStats };
+    case "scope.changed":
+      return {
+        type: "scope.changed",
+        scope: {
+          scope_kind: String(data.scope_kind ?? ""),
+          scope_entity_id: String(data.scope_entity_id ?? ""),
+          project_name: data.project_name == null ? null : String(data.project_name),
+        },
+      };
     case "agent.done":
       return { type: "agent.done" };
     case "error":

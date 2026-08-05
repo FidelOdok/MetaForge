@@ -90,6 +90,16 @@ class ChatBackend(ABC):
     @abstractmethod
     async def update_thread_timestamp(self, thread_id: str, timestamp: datetime) -> None: ...
 
+    @abstractmethod
+    async def update_thread_scope(
+        self,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None: ...
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation
@@ -223,6 +233,22 @@ class InMemoryChatBackend(ChatBackend):
         thread = self.threads.get(thread_id)
         if thread is not None:
             thread.last_message_at = timestamp
+
+    async def update_thread_scope(
+        self,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None:
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            return None
+        thread.channel_id = channel_id
+        thread.scope_kind = scope_kind
+        thread.scope_entity_id = scope_entity_id
+        return thread
 
 
 # ---------------------------------------------------------------------------

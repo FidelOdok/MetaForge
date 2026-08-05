@@ -271,6 +271,52 @@ class PgChatRepository:
                 row.last_message_at = timestamp
                 await session.flush()
 
+    async def update_thread_scope(
+        self,
+        session: AsyncSession,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None:
+        """Rescope a thread in place (MET-580).
+
+        Unlike ``create_thread``, this mutates an *existing* thread's scope
+        columns directly — a plain UPDATE, nothing schema-level stops it. Used
+        so switching a chat's project preserves the conversation instead of
+        starting a new thread: ``_project_brief`` in ``chat/routes.py`` reads
+        ``scope_kind``/``scope_entity_id`` fresh every turn, so the very next
+        turn after this call picks up the new project's brief. ``channel_id``
+        must be the channel for the NEW ``scope_kind`` (the caller resolves it
+        via ``channel_for_scope`` the same way ``create_thread`` does) —
+        otherwise the thread would carry a channel/scope_kind pair that never
+        occurs on creation.
+        """
+        from api_gateway.db.models import ChatThreadRow
+
+        with tracer.start_as_current_span("db.update_thread_scope") as span:
+            span.set_attribute("thread_id", thread_id)
+            span.set_attribute("scope_kind", scope_kind)
+            row = await session.get(ChatThreadRow, thread_id)
+            if row is None:
+                return None
+            row.channel_id = channel_id
+            row.scope_kind = scope_kind
+            row.scope_entity_id = scope_entity_id
+            await session.flush()
+            logger.info("thread_rescoped", thread_id=thread_id, scope_kind=scope_kind)
+            return ChatThreadRecord(
+                id=row.id,
+                channel_id=row.channel_id,
+                scope_kind=row.scope_kind,
+                scope_entity_id=row.scope_entity_id,
+                title=row.title,
+                archived=row.archived,
+                created_at=row.created_at,
+                last_message_at=row.last_message_at,
+            )
+
     # ------------------------------------------------------------------
     # Messages
     # ------------------------------------------------------------------
