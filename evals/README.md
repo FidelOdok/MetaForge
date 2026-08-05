@@ -150,6 +150,27 @@ refusal fallbacks so a safety decline re-runs on Anthropic's recommended
 fallback model instead of losing the verdict. Runs without a
 `definition_of_done` or a `project_id` are skipped, never failed.
 
+### Transcript quality (`--mode transcript`)
+
+The rubrics check facts (a string recalled, a tool called) but not
+conversational quality — a reply can pass every check while being incoherent,
+ignoring an instruction, or claiming an action its tool trace never performed.
+`--mode transcript` judges each chat run's full conversation (replies **plus**
+the per-turn tool trace, with errored calls marked) on three 0–1 dimensions:
+
+- `coherence` — replies consistent with the conversation so far
+- `adherence` — each reply does what that turn's user message asked
+- `grounding` — action/data claims match the tool trace (an "I recorded it"
+  with no successful tool call scores low; hedging after failures scores high)
+
+```bash
+python3 evals/judge.py --report evals/chat_report.json --mode transcript --backend claude-cli
+```
+
+Attaches an advisory `judge_transcript` block per run (same verdict shape,
+same `--votes` median aggregation) and a report-level `judge_transcript`
+summary. Runs without `turns` are skipped.
+
 ## Online evals over production traces (`score_sessions.py`, MET-572)
 
 Session capture records every MCP tool call into `/v1/sessions`, but the
