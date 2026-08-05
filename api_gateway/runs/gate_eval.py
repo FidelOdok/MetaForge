@@ -16,6 +16,7 @@ from uuid import UUID
 import structlog
 
 from api_gateway.projects.backend import ProjectBackend
+from orchestrator.design_flow.executor import ConstraintReport
 
 logger = structlog.get_logger(__name__)
 
@@ -103,3 +104,67 @@ class ProjectGateEvaluator:
             since_ts=since_ts,
         )
         return present
+
+
+class TwinConstraintChecker:
+    """`ConstraintChecker` backed by the twin's constraint engine (MET-583).
+
+    Evaluates all constraints on the main branch, then scopes violations to
+    the run's project where the data allows it: a violation citing
+    ``work_product_ids`` counts only if at least one of them belongs to the
+    project; a violation citing none is global and always counts. (The engine
+    itself is not project-scoped today — see MET-583.)
+    """
+
+    def __init__(self, twin: object, backend: ProjectBackend | None = None) -> None:
+        self._twin = twin
+        self._backend = backend
+
+    async def _project_wp_ids(self, project_id: str | None) -> set[str] | None:
+        """The project's work-product ids, or None when unscopable."""
+        if not project_id or self._backend is None:
+            return None
+        try:
+            project = await self._backend.get_project(project_id)
+        except Exception:  # noqa: BLE001 - scoping is best-effort
+            return None
+        if project is None:
+            return None
+        return {str(getattr(wp, "id", "")) for wp in project.work_products}
+
+    async def check(self, project_id: str | None) -> ConstraintReport:
+        evaluate = getattr(self._twin, "evaluate_constraints", None)
+        if evaluate is None:
+            return ConstraintReport(checked=False)
+        result = await evaluate(branch="main")
+        scope = await self._project_wp_ids(project_id)
+
+        def _in_scope(violation: object) -> bool:
+            wp_ids = [str(w) for w in getattr(violation, "work_product_ids", []) or []]
+            if not wp_ids or scope is None:
+                return True  # global violation, or nothing to scope against
+            return any(w in scope for w in wp_ids)
+
+        def _fmt(violation: object) -> str:
+            name = getattr(violation, "constraint_name", "?")
+            message = getattr(violation, "message", "")
+            return f"{name}: {message}" if message else str(name)
+
+        violations = [_fmt(v) for v in result.violations if _in_scope(v)]
+        warnings = [_fmt(v) for v in result.warnings if _in_scope(v)]
+        report = ConstraintReport(
+            checked=True,
+            passed=not violations,
+            evaluated_count=int(getattr(result, "evaluated_count", 0)),
+            violations=violations,
+            warnings=warnings,
+        )
+        logger.info(
+            "gate_eval_constraints",
+            project_id=project_id,
+            passed=report.passed,
+            violations=len(violations),
+            warnings=len(warnings),
+            evaluated=report.evaluated_count,
+        )
+        return report

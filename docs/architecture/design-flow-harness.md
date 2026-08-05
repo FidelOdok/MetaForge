@@ -179,6 +179,31 @@ This makes completeness machine-enforced and quality human-judged: the machine
 guarantees the deliverable exists in the twin; the human reviews whether it's
 right.
 
+## Constraint-as-gate-criteria (MET-583)
+
+Gate *criteria* were previously prose shown to the approver but never
+evaluated. Now every gate also evaluates the project's recorded constraints
+through the twin's constraint engine (`TwinConstraintChecker` in
+`api_gateway/runs/gate_eval.py`):
+
+- **Every gate** appends the real constraint state to its approval reason —
+  `Constraints: OK (N evaluated)` or the violation/warning list — so the
+  reviewer sees data, not just prose.
+- **Gates with `enforce_constraints`** (the final gate of each built-in flow:
+  V&V sign-off on `design_v1`/`mech_v1`, Manufacturing readiness on
+  `hardware_v1`) fail-fast when any ERROR-severity violation applies to the
+  run's project, with the same contract as a missing required deliverable.
+- **Best-effort**: a broken or absent constraint engine reads as "unchecked"
+  and never blocks or crashes a run.
+- **Scoping**: the engine evaluates the branch, not the project — violations
+  citing `work_product_ids` are filtered to the run's project; violations
+  citing none are treated as global and always count.
+
+The gate skeleton stays hardcoded (versioned code); the criteria come from
+the project's own constraint data. The structured constraint-creation tool
+(MET-582) is what fills that data from the Requirements phase; decision-derived
+phase applicability (MET-585) is the planned complement.
+
 ## What's built vs. planned
 
 **Built (Phase 1):** the `design_v1`, `mech_v1`, and full 7-phase `hardware_v1`

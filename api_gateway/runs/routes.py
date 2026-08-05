@@ -103,7 +103,7 @@ def _launch_flow(run_id: str) -> None:
     from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
-    from api_gateway.runs.gate_eval import ProjectGateEvaluator
+    from api_gateway.runs.gate_eval import ProjectGateEvaluator, TwinConstraintChecker
     from api_gateway.runs.mech_handlers import (
         GoalDrivenMechanicalHandler,
         HybridBrain,
@@ -165,6 +165,9 @@ def _launch_flow(run_id: str) -> None:
         coordinator=_gate_coordinator,
         # The twin lets the gate require a *loadable* cad_model, not a bare node.
         gate_evaluator=ProjectGateEvaluator(project_backend, twin=get_twin()),
+        # MET-583: constraint state surfaces at every gate; enforce_constraints
+        # gates fail-fast on ERROR-severity violations.
+        constraint_checker=TwinConstraintChecker(get_twin(), project_backend),
     )
     task = asyncio.create_task(executor.run(run_id))
     _flow_tasks.add(task)
