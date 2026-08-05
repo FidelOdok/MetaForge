@@ -91,6 +91,82 @@ def truncate_observation(text: str, max_chars: int = 2000) -> str:
     return f"{text[:max_chars]}…[truncated {dropped} chars]"
 
 
+def _shrink_structurally(
+    value: dict[str, Any] | list[Any],
+    max_chars: int,
+    *,
+    render: Callable[[Any], str],
+) -> str | None:
+    """Drop trailing items from the largest list until ``render`` fits.
+
+    ``value`` itself if it IS a list, else its largest list-valued field (the
+    common ``{"items": [...], "total": N}`` tool-envelope shape). Every other
+    key is preserved, and the number of omitted items is recorded — so a
+    truncated collection still reports an accurate count instead of a blind
+    character slice landing mid-item with the summary field (e.g. ``total``)
+    chopped off and no way to tell what's missing. Binary-searches the widest
+    prefix that fits (so this costs O(log n) re-renders, not O(n)). Returns
+    ``None`` when there's no list to shrink — the caller falls back to a
+    blind slice.
+    """
+    key: str | None
+    if isinstance(value, list):
+        items, key = value, None
+    else:
+        list_keys = [k for k, v in value.items() if isinstance(v, list) and v]
+        if not list_keys:
+            return None
+        key = max(list_keys, key=lambda k: len(value[k]))
+        items = value[key]
+
+    def candidate(n: int) -> Any:
+        omitted = len(items) - n
+        if key is None:
+            kept: list[Any] = list(items[:n])
+            if omitted:
+                kept.append(f"…[{omitted} more items omitted]")
+            return kept
+        out = dict(value)
+        out[key] = items[:n]
+        if omitted:
+            out[f"{key}_omitted_count"] = omitted
+        return out
+
+    lo, hi = 0, len(items)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(render(candidate(mid))) <= max_chars:
+            lo = mid
+        else:
+            hi = mid - 1
+    return render(candidate(lo))
+
+
+def truncate_observation_value(
+    value: Any,
+    max_chars: int = 2000,
+    *,
+    render: Callable[[Any], str] = str,
+) -> str:
+    """Render + cap an observation with an EXPLICIT marker (MET-568, MET-58X).
+
+    ``render`` is the caller's normal stringifier (``str`` for the ReAct
+    trace, JSON for the native tool-calling loop) — used unchanged whenever
+    the rendered text already fits. Only when it doesn't, and ``value`` is a
+    dict or list, does this reach past a blind character slice: see
+    ``_shrink_structurally``. A blind slice on a large list-shaped tool
+    result (e.g. ``project.list``'s ``{"projects": [...], "total": N}``) can
+    land mid-array and cut off the trailing ``total`` field entirely — the
+    exact metadata a model needs to self-report "N of M" rather than
+    discovering an arbitrary cut with no idea how much is missing.
+    """
+    text = render(value)
+    if len(text) <= max_chars or not isinstance(value, dict | list):
+        return truncate_observation(text, max_chars)
+    shrunk = _shrink_structurally(value, max_chars, render=render)
+    return truncate_observation(shrunk if shrunk is not None else text, max_chars)
+
+
 def budget_history(
     history: Sequence[dict[str, Any]],
     *,

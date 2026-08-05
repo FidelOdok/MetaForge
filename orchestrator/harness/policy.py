@@ -26,7 +26,7 @@ from typing import Any
 
 import structlog
 
-from orchestrator.harness.compression import compress_trace, truncate_observation
+from orchestrator.harness.compression import compress_trace, truncate_observation_value
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke
 from orchestrator.harness.react import ReActAction, ReActParseError, ReActStep, ToolCall
@@ -166,7 +166,11 @@ class ModelPolicy:
                 # MET-568: cap each observation with an explicit marker — a
                 # huge tool result used to be inlined verbatim into EVERY
                 # subsequent prompt of the turn, compounding until overflow.
-                obs = truncate_observation(str(s.error or s.observation), _MAX_OBS_CHARS)
+                # MET-58X: a dict/list-shaped observation (e.g. project.list's
+                # {"projects": [...], "total": N}) shrinks its list first, so
+                # the trailing summary field survives instead of being
+                # chopped off by a blind character slice mid-array.
+                obs = truncate_observation_value(s.error or s.observation, _MAX_OBS_CHARS)
                 lines.append(f"- called {s.tool_call.name} -> {obs}")
         return "\n".join(lines) or "(no tool calls yet)"
 
