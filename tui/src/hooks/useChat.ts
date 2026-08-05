@@ -237,6 +237,31 @@ export function useChat(
               case "context.stats":
                 setContextStats(ev.stats);
                 break;
+              case "scope.changed": {
+                // The agent's chat.set_project_scope tool rescoped THIS thread
+                // in place (MET-580) — no new thread, so this is the only
+                // signal the client gets. Update state and notice it exactly
+                // like a human-initiated switch, since the model's own prose
+                // reply is not a substitute (it might not mention it, or might
+                // vary in wording) — the transcript record must not depend on
+                // the model choosing to say so.
+                const next: ChatScope =
+                  ev.scope.scope_kind === "project"
+                    ? {
+                        kind: "project",
+                        id: ev.scope.scope_entity_id,
+                        name: ev.scope.project_name ?? ev.scope.scope_entity_id,
+                      }
+                    : assistantScope();
+                setThreadScope(next);
+                note(
+                  next.kind === "project"
+                    ? `— project → ${next.name} (set by the agent) —`
+                    : "— left the project (set by the agent) —",
+                );
+                priorScope.current = next;
+                break;
+              }
               case "agent.done":
                 finalizeTurn();
                 break;

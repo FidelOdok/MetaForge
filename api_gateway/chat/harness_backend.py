@@ -22,6 +22,8 @@ from typing import Any
 
 import structlog
 
+from api_gateway.chat.backend import ChatBackend
+from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
 from orchestrator.harness.compression import default_token_count
 from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
@@ -48,6 +50,93 @@ from skill_registry.mcp_bridge import McpBridge
 logger = structlog.get_logger(__name__)
 
 _TRUTHY = {"1", "true", "on", "yes"}
+
+
+_DETACH_QUERIES = {"none", "off", "clear", "-"}
+
+
+def make_set_project_scope_tool(thread_id: str, backend: ChatBackend) -> NativeToolDef:
+    """``chat.set_project_scope`` — the agent's side of MET-580.
+
+    A user asking in prose to "switch to project X" previously did nothing:
+    the model just answered conversationally with no protocol effect (MET-578
+    fixed the human ``/project`` path; this is the agent path). The handler
+    closes over ``thread_id`` so the model never supplies (or mis-supplies)
+    which thread to rescope — it only ever names the project (or asks to leave
+    one, mirroring ``/project none``).
+    """
+
+    async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+        query = arguments.get("project")
+        if not query or not isinstance(query, str):
+            raise ValueError("chat.set_project_scope: 'project' is required (non-empty string)")
+
+        if query.strip().lower() in _DETACH_QUERIES:
+            try:
+                await apply_thread_scope(
+                    backend, thread_id, scope_kind="assistant", scope_entity_id=thread_id
+                )
+            except ScopeResolutionError as exc:
+                raise ValueError(str(exc)) from exc
+            logger.info("chat_scope_tool_detached", thread_id=thread_id)
+            return {
+                "scope_kind": "assistant",
+                "project_id": None,
+                "project_name": None,
+                "instruction": (
+                    "Left the project. Tell the user explicitly — don't just continue "
+                    "as if it happened silently."
+                ),
+            }
+
+        try:
+            project = await resolve_project(query)
+            await apply_thread_scope(
+                backend,
+                thread_id,
+                scope_kind="project",
+                scope_entity_id=project.id,
+                project_name=project.name,
+            )
+        except ScopeResolutionError as exc:
+            # Surfaced to the model as a tool error, same as any bad argument —
+            # it must relay the failure, not claim the switch happened.
+            raise ValueError(str(exc)) from exc
+        logger.info("chat_scope_tool_switched", thread_id=thread_id, project_id=project.id)
+        return {
+            "scope_kind": "project",
+            "project_id": project.id,
+            "project_name": project.name,
+            "instruction": (
+                f"Scope switched to project '{project.name}'. Tell the user explicitly "
+                "that you switched — don't just continue as if it happened silently."
+            ),
+        }
+
+    return NativeToolDef(
+        name="chat.set_project_scope",
+        description=(
+            "Rescope THIS conversation to a project, given its id, exact name, or a "
+            "unique substring of the name — e.g. the user says 'switch to the Foo "
+            "project'. Pass 'none' to leave the current project. An ambiguous or "
+            "unknown name is refused (never guessed); relay the refusal to the user "
+            "rather than picking one. On success, explicitly tell the user you switched."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "project": {
+                    "type": "string",
+                    "description": (
+                        "Project id, exact name, or unique substring of the name. "
+                        "'none' to leave the current project."
+                    ),
+                }
+            },
+            "required": ["project"],
+        },
+        handler=handler,
+    )
 
 
 async def mcp_tools_from_bridge(
@@ -372,19 +461,28 @@ async def _build_context(
     provider: str | None = None,
     model: str | None = None,
     enabled_tools: list[str] | None = None,
+    chat_backend: ChatBackend | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
     ``provider``/``model`` override the env defaults; ``enabled_tools`` (tool ids
     from the UI's connectors selector) restricts which MCP tools are registered
-    (``None`` = all available)."""
+    (``None`` = all available). ``chat_backend``, when given, registers
+    ``chat.set_project_scope`` (MET-580) closed over THIS turn's ``session_id`` —
+    which is the live chat thread's id — so the agent can rescope its own
+    thread on a clear user request without ever being trusted to supply (or
+    possibly mis-supply) which thread that is."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
     mcp_tools = await mcp_tools_from_bridge(mcp_bridge, enabled) if mcp_bridge is not None else []
+    native_tools = (
+        [make_set_project_scope_tool(session_id, chat_backend)] if chat_backend is not None else []
+    )
     return build_agent_runtime(
         provider_config_from_env(provider=provider, model=model),
         credentials=store,
         session_id=session_id,
         rotation_strategy=rotation_strategy_from_env(),
+        native_tools=native_tools,
         mcp_tools=mcp_tools,
     )
 
@@ -403,6 +501,7 @@ async def run_chat_turn(
     history: list[dict[str, Any]] | None = None,
     project_brief: str | None = None,
     context_block: str | None = None,
+    chat_backend: ChatBackend | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -413,12 +512,19 @@ async def run_chat_turn(
     ``provider``/``model``/``enabled_tools`` are the chat UI's per-turn selection.
     ``history`` is the prior conversation so multi-turn chats keep context.
     ``project_brief`` / ``context_block`` are placed per path (MET-566) — see
-    ``_apply_turn_context``.
+    ``_apply_turn_context``. ``chat_backend``, when given, registers
+    ``chat.set_project_scope`` (MET-580).
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
-        session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
+        session_id,
+        store,
+        mcp_bridge,
+        provider=provider,
+        model=model,
+        enabled_tools=enabled_tools,
+        chat_backend=chat_backend,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
@@ -697,6 +803,7 @@ async def run_chat_turn_streaming(
     availability: dict[str, int] | None = None,
     project_brief: str | None = None,
     context_block: str | None = None,
+    chat_backend: ChatBackend | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -712,12 +819,20 @@ async def run_chat_turn_streaming(
     context. ``project_brief`` / ``context_block`` (MET-566) are placed per
     path by ``_apply_turn_context``: the brief joins the layered system prompt
     on the native path (history-pair fallback on ReAct); retrieved context is
-    a trailing history pair on both.
+    a trailing history pair on both. ``chat_backend``, when given, registers
+    ``chat.set_project_scope`` (MET-580) so the agent can rescope THIS thread
+    on a clear user request.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
     ctx = await _build_context(
-        session_id, store, mcp_bridge, provider=provider, model=model, enabled_tools=enabled_tools
+        session_id,
+        store,
+        mcp_bridge,
+        provider=provider,
+        model=model,
+        enabled_tools=enabled_tools,
+        chat_backend=chat_backend,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store

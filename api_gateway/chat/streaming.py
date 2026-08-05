@@ -43,6 +43,7 @@ class StreamEventType(StrEnum):
     AGENT_STEP = "agent.step"
     AGENT_DONE = "agent.done"
     CONTEXT_STATS = "context.stats"
+    SCOPE_CHANGED = "scope.changed"
     ERROR = "error"
 
 
@@ -279,6 +280,33 @@ async def notify_context_stats(thread_id: str, stats: dict[str, Any]) -> int:
     event = StreamEvent(
         event=StreamEventType.CONTEXT_STATS,
         data=stats,
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_scope_changed(
+    thread_id: str,
+    *,
+    scope_kind: str,
+    scope_entity_id: str,
+    project_name: str | None = None,
+) -> int:
+    """Push a ``scope.changed`` event — the thread's scope was rescoped in place.
+
+    Emitted by ``chat/scope.py::apply_thread_scope`` (MET-580), the single path
+    both the human ``/project``-equivalent route and the agent-callable
+    ``chat.set_project_scope`` tool go through. A client renders this itself
+    (e.g. a transcript notice) rather than relying on the model's prose to
+    mention the change — the notice must appear whether or not the model says so.
+    """
+    event = StreamEvent(
+        event=StreamEventType.SCOPE_CHANGED,
+        data={
+            "scope_kind": scope_kind,
+            "scope_entity_id": scope_entity_id,
+            "project_name": project_name,
+        },
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)
