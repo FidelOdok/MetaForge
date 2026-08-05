@@ -16,8 +16,10 @@ from typing import Any
 
 from chat_rubric_common import score, turn_replied
 
-# Mirrors _HISTORY_LIMIT in api_gateway/chat/routes.py (baseline behavior).
-HISTORY_LIMIT = 20
+# Mirrors _HISTORY_LIMIT in api_gateway/chat/routes.py. MET-568 replaced the
+# hard 20-turn slice with a token budget + content-preserving summary; the
+# turn-count limit survives only as a generous safety ceiling.
+HISTORY_LIMIT = 100
 
 # Structural check ids this rubric can contribute (wiring-test contract).
 CHECKS = (

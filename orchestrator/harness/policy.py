@@ -26,12 +26,16 @@ from typing import Any
 
 import structlog
 
+from orchestrator.harness.compression import compress_trace, truncate_observation
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke
 from orchestrator.harness.react import ReActAction, ReActParseError, ReActStep, ToolCall
 from orchestrator.harness.runtime import HarnessRuntime
 
 logger = structlog.get_logger(__name__)
+
+# MET-568: per-step observation cap in the rendered trace (explicit marker).
+_MAX_OBS_CHARS = 2000
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
@@ -109,6 +113,9 @@ class ModelPolicy:
     role: str = "generator"
     invoke: Invoke = field(default=default_invoke)
     system_prefix: str = _SYSTEM
+    # MET-568: budget for the rendered trace; older steps fold into a
+    # synopsis (compress_trace) once the estimate crosses it.
+    trace_token_budget: int = 16000
     # Prior conversation ([{role, content}], oldest first). Rendered as text
     # inside the goal message rather than as real chat turns: this policy's
     # protocol demands JSON-only replies, and prose assistant turns in the
@@ -150,20 +157,26 @@ class ModelPolicy:
             )
         return "\n".join(lines)
 
-    def _render_trace(self, steps: list[ReActStep]) -> str:
-        if not steps:
+    def _render_trace(self, steps: list[ReActStep], synopsis: str | None = None) -> str:
+        if not steps and synopsis is None:
             return "(no steps yet)"
-        lines = []
+        lines = [] if synopsis is None else [synopsis]
         for s in steps:
             if s.tool_call is not None:
-                obs = s.error or s.observation
+                # MET-568: cap each observation with an explicit marker — a
+                # huge tool result used to be inlined verbatim into EVERY
+                # subsequent prompt of the turn, compounding until overflow.
+                obs = truncate_observation(str(s.error or s.observation), _MAX_OBS_CHARS)
                 lines.append(f"- called {s.tool_call.name} -> {obs}")
         return "\n".join(lines) or "(no tool calls yet)"
 
     async def next_action(self, goal: str, steps: list[ReActStep]) -> ReActAction:
+        # MET-568: fold steps beyond the token budget into a synopsis instead
+        # of letting the rendered trace grow without bound.
+        ctx = compress_trace(goal, steps, max_tokens=self.trace_token_budget)
         content = (
             f"{self._render_history()}Goal: {goal}\n\n"
-            f"Progress so far:\n{self._render_trace(steps)}\n\nNext action?"
+            f"Progress so far:\n{self._render_trace(ctx.recent, ctx.synopsis)}\n\nNext action?"
         )
         request = {
             "system": self.system_prefix + self._tool_catalog(),

@@ -20,6 +20,7 @@ from typing import Any
 
 import structlog
 
+from orchestrator.harness.compression import compact_native_messages, truncate_observation
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke
 from orchestrator.harness.react import ReActResult, ReActStep, ToolCall
@@ -61,11 +62,20 @@ def _tool_schemas(runtime: HarnessRuntime) -> list[dict[str, Any]]:
     return schemas
 
 
+_MAX_OBSERVATION_CHARS = 8000
+
+
 def _json_safe(value: Any) -> str:
+    """Serialize a tool observation, truncating LOUDLY past the cap (MET-568).
+
+    The cap was previously a silent ``[:8000]`` slice — the model had no way
+    to know a result was cut, so truncated data read as complete data.
+    """
     try:
-        return json.dumps(value)[:8000]
+        text = json.dumps(value)
     except (TypeError, ValueError):
-        return str(value)[:8000]
+        text = str(value)
+    return truncate_observation(text, _MAX_OBSERVATION_CHARS)
 
 
 async def run_native_tools(
@@ -77,6 +87,7 @@ async def run_native_tools(
     max_steps: int = 8,
     system: str = NATIVE_SYSTEM,
     history: list[dict[str, Any]] | None = None,
+    max_context_tokens: int | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
 
@@ -84,12 +95,19 @@ async def run_native_tools(
     the model can answer with context from earlier turns; it is seeded ahead of
     the current ``goal``. Falls back to a forced text answer if the step cap is
     hit, so a run never ends without a reply.
+
+    ``max_context_tokens`` (MET-568) bounds within-turn growth: when the
+    estimated message-list size crosses it, older tool exchanges are folded
+    into a synopsis (``compact_native_messages``) before the next model call.
+    ``None`` keeps the historical unbounded behavior.
     """
     tools = _tool_schemas(runtime)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
 
     for step_no in range(1, max_steps + 1):
+        if max_context_tokens is not None:
+            messages = compact_native_messages(messages, max_tokens=max_context_tokens)
         resp = await runtime.complete(
             role, {"system": system, "messages": messages, "tools": tools}, invoke
         )
