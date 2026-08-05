@@ -13,6 +13,7 @@ from orchestrator.harness.compression import (
     compact_native_messages,
     summarize_turns,
     truncate_observation,
+    truncate_observation_value,
 )
 from orchestrator.harness.native_tools import run_native_tools
 from orchestrator.harness.policy import ModelPolicy
@@ -35,6 +36,105 @@ def test_truncation_is_loud_not_silent() -> None:
 
 def test_short_observation_untouched() -> None:
     assert truncate_observation("short", max_chars=1000) == "short"
+
+
+# --- truncate_observation_value (MET-58X): structural shrink ------------------------
+# Regression for a real bug: `project.list` returns {"projects": [...15 items],
+# "total": 15}. A blind character slice on the serialized JSON lands mid-array and
+# chops off the trailing "total" key entirely — the model sees 4 intact projects, a
+# truncation marker, and no count, so it can't even say "4 of 15".
+def _big_project_list(n: int) -> dict[str, Any]:
+    return {
+        "projects": [
+            {
+                "id": f"p{i}",
+                "name": f"eval-chat_brief_project-native-1-{1785900000 + i}",
+                "description": "Eval fixture: a 100x60x25 mm IP54 sensor-node enclosure.",
+                "status": "draft",
+            }
+            for i in range(n)
+        ],
+        "total": n,
+    }
+
+
+def test_dict_with_list_field_shrinks_list_and_keeps_total() -> None:
+    import json
+
+    payload = _big_project_list(15)
+    out = truncate_observation_value(payload, max_chars=1500, render=json.dumps)
+
+    assert len(out) <= 1500
+    parsed = json.loads(out)  # must be valid, complete JSON — no dangling truncation marker
+    assert parsed["total"] == 15  # survives — the whole point of the fix
+    assert "projects_omitted_count" in parsed
+    assert parsed["projects_omitted_count"] == 15 - len(parsed["projects"])
+    assert 0 < len(parsed["projects"]) < 15  # some detail kept, not annihilated
+
+
+def test_dict_with_list_field_under_budget_is_unchanged() -> None:
+    import json
+
+    payload = {"projects": [{"id": "p1"}], "total": 1}
+    out = truncate_observation_value(payload, max_chars=1000, render=json.dumps)
+    assert out == json.dumps(payload)  # identical — no shrink needed, no marker
+
+
+def test_bare_list_shrinks_and_notes_omitted_count() -> None:
+    import json
+
+    items = [{"id": i} for i in range(200)]
+    out = truncate_observation_value(items, max_chars=500, render=json.dumps)
+    assert len(out) <= 500
+    parsed = json.loads(out)
+    assert isinstance(parsed, list)
+    assert "more items omitted" in parsed[-1]
+    assert len(parsed) - 1 < 200  # kept fewer real items than the original 200
+
+
+def test_no_list_field_falls_back_to_blind_slice() -> None:
+    payload = {"huge_blob": "x" * 5000}
+    out = truncate_observation_value(payload, max_chars=1000)
+    assert "[truncated" in out  # ordinary marker — nothing structural to shrink
+
+
+def test_non_dict_non_list_value_behaves_like_before() -> None:
+    assert truncate_observation_value("short", max_chars=1000) == "short"
+    out = truncate_observation_value("y" * 3000, max_chars=1000)
+    assert "[truncated 2000 chars]" in out
+
+
+def test_native_json_safe_preserves_project_list_total() -> None:
+    """End-to-end through native_tools.py's own render (json.dumps, no default=str
+    quirks) — the actual code path a real project.list tool call goes through.
+    60 items comfortably exceeds the real 8000-char cap."""
+    import json
+
+    from orchestrator.harness.native_tools import _json_safe
+
+    out = _json_safe(_big_project_list(60))
+    parsed = json.loads(out)
+    assert parsed["total"] == 60
+    assert parsed["projects_omitted_count"] == 60 - len(parsed["projects"])
+
+
+@pytest.mark.asyncio
+async def test_policy_trace_preserves_total_for_large_dict_observation() -> None:
+    """The ReAct (non-native) path — ModelPolicy._render_trace — has the exact
+    same defect class fixed the same way."""
+    rt = HarnessRuntime.build(CONFIG)
+    seen: dict[str, str] = {}
+
+    async def invoke(spec: ProviderSpec, request: dict) -> dict:
+        seen["content"] = request["messages"][0]["content"]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    step = ReActStep(
+        thought="t", tool_call=ToolCall("project.list", {}), observation=_big_project_list(30)
+    )
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [step])
+    assert "'total': 30" in seen["content"]  # str() repr — survives the shrink
+    assert "omitted_count" in seen["content"]
 
 
 # --- budget_history -----------------------------------------------------------------

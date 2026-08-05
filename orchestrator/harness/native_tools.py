@@ -20,7 +20,7 @@ from typing import Any
 
 import structlog
 
-from orchestrator.harness.compression import compact_native_messages, truncate_observation
+from orchestrator.harness.compression import compact_native_messages, truncate_observation_value
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke
 from orchestrator.harness.react import ReActResult, ReActStep, ToolCall
@@ -65,17 +65,27 @@ def _tool_schemas(runtime: HarnessRuntime) -> list[dict[str, Any]]:
 _MAX_OBSERVATION_CHARS = 8000
 
 
+def _render_json(value: Any) -> str:
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _json_safe(value: Any) -> str:
-    """Serialize a tool observation, truncating LOUDLY past the cap (MET-568).
+    """Serialize a tool observation, truncating LOUDLY past the cap (MET-568,
+    MET-58X).
 
     The cap was previously a silent ``[:8000]`` slice — the model had no way
-    to know a result was cut, so truncated data read as complete data.
+    to know a result was cut, so truncated data read as complete data. A
+    dict/list-shaped result (the common ``{"items": [...], "total": N}``
+    tool-envelope shape) now has its list shrunk structurally first — a
+    plain character slice can (and did) land mid-array and chop off the
+    trailing ``total`` field entirely, the exact metadata a model needs to
+    self-report "N of M" instead of discovering an arbitrary cut with no
+    idea what's missing.
     """
-    try:
-        text = json.dumps(value)
-    except (TypeError, ValueError):
-        text = str(value)
-    return truncate_observation(text, _MAX_OBSERVATION_CHARS)
+    return truncate_observation_value(value, _MAX_OBSERVATION_CHARS, render=_render_json)
 
 
 async def run_native_tools(
