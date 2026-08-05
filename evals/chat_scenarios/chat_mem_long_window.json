@@ -2,9 +2,16 @@
   "id": "chat_mem_long_window",
   "title": "Early fact recall past the 20-turn history slice (xfail until MET-568 compaction)",
   "scope": "assistant",
-  "rubric": ["chat_memory", "chat_window"],
+  "rubric": [
+    "chat_memory",
+    "chat_window"
+  ],
   "variants": [
-    { "name": "native", "provider": null, "model": null }
+    {
+      "name": "native",
+      "provider": null,
+      "model": null
+    }
   ],
   "max_turn_seconds": 240,
   "turns": [
@@ -20,24 +27,32 @@
     {
       "say": "Quick check: what alloy did I tell you at the very start of this conversation?",
       "checks": [
-        { "id": "early_alloy_recalled", "type": "reply_contains", "pattern": "7075" }
+        {
+          "id": "early_alloy_recalled",
+          "type": "reply_contains",
+          "pattern": "7075"
+        }
       ]
     },
     {
       "say": "And what was the bracket's serial number from the start?",
       "checks": [
-        { "id": "early_serial_recalled", "type": "reply_contains", "pattern": "MF-7741-X" }
+        {
+          "id": "early_serial_recalled",
+          "type": "reply_contains",
+          "pattern": "MF-7741-X"
+        }
       ]
     },
     {
       "say": "What was torque spec item 23?",
       "checks": [
-        { "id": "recent_fact_recalled", "type": "reply_contains", "pattern": "23.5" }
+        {
+          "id": "recent_fact_recalled",
+          "type": "reply_contains",
+          "pattern": "23.5"
+        }
       ]
     }
-  ],
-  "expected_today": {
-    "early_alloy_recalled": "fail",
-    "early_serial_recalled": "fail"
-  }
+  ]
 }
