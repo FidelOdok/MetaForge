@@ -51,6 +51,40 @@ def _make_mock_edge_record(edge: EdgeBase) -> MagicMock:
     return record
 
 
+class _FakeRelationship:
+    """Shape of ``record["r"]`` on a RAW record: a neo4j Relationship whose
+    properties are read via ``dict()`` (keys + __getitem__), NOT a dict."""
+
+    def __init__(self, props: dict) -> None:
+        self._props = props
+
+    def keys(self):
+        return self._props.keys()
+
+    def __getitem__(self, key):
+        return self._props[key]
+
+
+def _make_edge_stream_result(edges: list[EdgeBase]) -> MagicMock:
+    """A mock driver result that is ASYNC-ITERABLE (the raw-record path used
+    since MET-586); ``.data()`` is left as a MagicMock so tests can assert it
+    is never called for relationships."""
+    records = []
+    for edge in edges:
+        rel = _FakeRelationship(Neo4jGraphEngine._edge_to_props(edge))
+        record = MagicMock()
+        record.__getitem__ = MagicMock(side_effect=lambda key, r=rel: r if key == "r" else None)
+        records.append(record)
+
+    async def _aiter():
+        for r in records:
+            yield r
+
+    result = MagicMock()
+    result.__aiter__ = lambda self: _aiter()
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -401,26 +435,29 @@ class TestEdgeOperations:
             target_id=b.id,
             edge_type=EdgeType.DEPENDS_ON,
         )
-        edge_props = Neo4jGraphEngine._edge_to_props(edge)
 
-        mock_result = AsyncMock()
-        mock_result.data = AsyncMock(return_value=[{"r": edge_props}])
+        mock_result = _make_edge_stream_result([edge])
         mock_session.run = AsyncMock(return_value=mock_result)
 
         result = await engine.get_edges(a.id, direction="outgoing")
         assert len(result) == 1
         assert result[0].edge_type == EdgeType.DEPENDS_ON
+        # MET-586 regression: get_edges must NOT go through result.data(),
+        # which transforms a relationship into a (start_props, type,
+        # end_props) tuple and made dict(rec["r"]) explode in production
+        # whenever the start node had no properties. The old mocks returned
+        # a friendly {"r": props} dict from data(), which is exactly why
+        # unit tests passed while the live Neo4j path was broken.
+        mock_result.data.assert_not_called()
 
     async def test_get_edges_both_directions(self, engine, mock_session):
         a_id = uuid4()
         edge_out = EdgeBase(source_id=a_id, target_id=uuid4(), edge_type=EdgeType.DEPENDS_ON)
         edge_in = EdgeBase(source_id=uuid4(), target_id=a_id, edge_type=EdgeType.VALIDATES)
 
-        mock_out = AsyncMock()
-        mock_out.data = AsyncMock(return_value=[{"r": Neo4jGraphEngine._edge_to_props(edge_out)}])
-        mock_in = AsyncMock()
-        mock_in.data = AsyncMock(return_value=[{"r": Neo4jGraphEngine._edge_to_props(edge_in)}])
-        mock_session.run = AsyncMock(side_effect=[mock_out, mock_in])
+        mock_session.run = AsyncMock(
+            side_effect=[_make_edge_stream_result([edge_out]), _make_edge_stream_result([edge_in])]
+        )
 
         result = await engine.get_edges(a_id, direction="both")
         assert len(result) == 2
@@ -457,10 +494,8 @@ class TestTraversalQueries:
         b = _make_work_product("b")
         edge = EdgeBase(source_id=a.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
 
-        # get_edges returns one edge
-        edge_props = Neo4jGraphEngine._edge_to_props(edge)
-        mock_edges = AsyncMock()
-        mock_edges.data = AsyncMock(return_value=[{"r": edge_props}])
+        # get_edges returns one edge (raw-record stream, MET-586)
+        mock_edges = _make_edge_stream_result([edge])
 
         # get_node for neighbor
         b_record = _make_mock_record(b)
@@ -483,10 +518,8 @@ class TestTraversalQueries:
         mock_root = AsyncMock()
         mock_root.single = AsyncMock(return_value=a_record)
 
-        # get_edges for root (returns one edge)
-        edge_props = Neo4jGraphEngine._edge_to_props(edge)
-        mock_edges_root = AsyncMock()
-        mock_edges_root.data = AsyncMock(return_value=[{"r": edge_props}])
+        # get_edges for root (returns one edge; raw-record stream, MET-586)
+        mock_edges_root = _make_edge_stream_result([edge])
 
         # get_node for b
         b_record = _make_mock_record(b)
@@ -494,8 +527,7 @@ class TestTraversalQueries:
         mock_b_node.single = AsyncMock(return_value=b_record)
 
         # get_edges for b (depth 1 of 2, so we continue)
-        mock_edges_b = AsyncMock()
-        mock_edges_b.data = AsyncMock(return_value=[])
+        mock_edges_b = _make_edge_stream_result([])
 
         mock_session.run = AsyncMock(
             side_effect=[
@@ -529,14 +561,11 @@ class TestTraversalQueries:
         mock_root = AsyncMock()
         mock_root.single = AsyncMock(return_value=a_record)
 
-        # get_edges for a (returns one edge)
-        edge_props = Neo4jGraphEngine._edge_to_props(edge)
-        mock_edges_a = AsyncMock()
-        mock_edges_a.data = AsyncMock(return_value=[{"r": edge_props}])
+        # get_edges for a (returns one edge; raw-record stream, MET-586)
+        mock_edges_a = _make_edge_stream_result([edge])
 
-        # get_edges for b (no children)
-        mock_edges_b = AsyncMock()
-        mock_edges_b.data = AsyncMock(return_value=[])
+        # get_edges for b (no children; raw-record stream, MET-586)
+        mock_edges_b = _make_edge_stream_result([])
 
         mock_session.run = AsyncMock(side_effect=[mock_root, mock_edges_a, mock_edges_b])
 
