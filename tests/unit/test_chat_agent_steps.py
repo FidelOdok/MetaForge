@@ -71,7 +71,11 @@ def test_step_to_dict_final_step_omits_observation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_step_receives_trace(tmp_path: Path) -> None:
+async def test_on_step_receives_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # This test scripts ReAct-protocol replies — pin the ReAct path
+    # explicitly (MET-575: the path now follows the resolved provider,
+    # and the all-defaults resolution is anthropic → native).
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")
     steps: list[dict[str, Any]] = []
 
     async def on_step(s: dict[str, Any]) -> None:

@@ -381,6 +381,19 @@ async def codex_invoke(
     system, messages, _max_tokens, _temperature = _normalize_request(request)
     input_text = "\n\n".join(m.get("content", "") for m in messages)
 
+    # MET-575: this adapter cannot forward native tool schemas (the codex
+    # Responses call is built from flattened text). Silently dropping them
+    # produced turns where the model claimed "no tools available" while the
+    # harness had dozens registered. The path decision now routes codex to
+    # ReAct (tools travel as text), so reaching here with tools means a
+    # caller bypassed that — make the drop loud instead of silent.
+    if isinstance(request, dict) and request.get("tools"):
+        logger.warning(
+            "codex_native_tools_dropped",
+            n_tools=len(request["tools"]),
+            model=spec.model,
+        )
+
     # Injected client (tests) → single call, no auth handling.
     if client is not None:
         try:
