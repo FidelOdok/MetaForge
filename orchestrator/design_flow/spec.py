@@ -197,7 +197,11 @@ HARDWARE_V1 = FlowDefinition(
                 "(record-decision tool), scoped to the project."
             ),
             expected_artifacts=("prd", "constraint_set", "design_decision"),
-            required_deliverables=("design_decision",),
+            # MET-582: the requirements handler records an evaluable
+            # constraint_set (twin.record_constraint_set), so the gate can
+            # REQUIRE it — quantified limits become machine-checked criteria
+            # at every later gate instead of prose in a decision blob.
+            required_deliverables=("design_decision", "constraint_set"),
             gate=Gate(
                 name="Requirements sign-off",
                 criteria=(

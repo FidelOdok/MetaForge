@@ -159,6 +159,61 @@ def _data(envelope: Any, tool: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+_LIMIT_RE = re.compile(r"^(<=|>=|<|>|==)\s*([0-9]+(?:\.[0-9]+)?)$")
+
+
+def _slug(text: str) -> str:
+    out = "".join(ch if ch.isalnum() else "_" for ch in text.strip().lower())
+    return "_".join(p for p in out.split("_") if p)
+
+
+def constraint_entries_from_spec(constraints: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Map the extracted requirement constraints into evaluable entries (MET-582).
+
+    A quantified limit (``"<= 60"``) becomes an ERROR-severity Python
+    expression over work-product metadata (key = ``<param>_<unit>`` slug,
+    e.g. ``mass_g``). Absent metadata defaults to a PASSING value — the
+    constraint arms itself the moment a tool records the real number, and
+    a project with no data yet is not failed vacuously. Non-quantified
+    limits ("per the outline") become INFO-severity entries: documented in
+    the constraint_set work product with their verification method, never
+    gating.
+    """
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for c in constraints:
+        param = str(c.get("param") or "constraint")
+        limit = str(c.get("limit") or "").strip()
+        unit = str(c.get("unit") or "").strip()
+        verify = str(c.get("verify") or "").strip()
+        name = _slug(param) or "constraint"
+        if name in seen:
+            name = f"{name}_{sum(1 for s in seen if s.startswith(name)) + 1}"
+        seen.add(name)
+        message = f"{param} {limit} {unit}".strip() + (f" (verify: {verify})" if verify else "")
+        m = _LIMIT_RE.match(limit)
+        if m:
+            op, value = m.groups()
+            key = name + (f"_{_slug(unit)}" if unit else "")
+            default = "0" if op in ("<=", "<") else value
+            entries.append(
+                {
+                    "name": name,
+                    "expression": (
+                        f"all(float(wp.metadata.get('{key}', {default})) {op} {value} "
+                        "for wp in ctx.work_products())"
+                    ),
+                    "severity": "error",
+                    "message": message,
+                }
+            )
+        else:
+            entries.append(
+                {"name": name, "expression": "True", "severity": "info", "message": message}
+            )
+    return entries
+
+
 class GoalDrivenRequirementsHandler:
     """Records verifiable requirements (each constraint has an acceptance method) + a PRD."""
 
@@ -219,12 +274,38 @@ class GoalDrivenRequirementsHandler:
             rationale=rationale,
             project_id=context.project_id,
         )
+
+        # 3. MET-582: the quantified constraints ALSO land as an evaluable
+        #    constraint_set (Constraint nodes + typed work product) so the
+        #    constraint engine can check them at every later gate (MET-583).
+        #    The Requirements gate now REQUIRES this deliverable, so a failure
+        #    here surfaces as a readable missing-deliverable gate failure.
+        set_node = None
+        try:
+            cs_args: dict[str, Any] = {
+                "title": f"{spec['name']} constraints",
+                "constraints": constraint_entries_from_spec(spec["constraints"]),
+            }
+            if context.project_id:
+                cs_args["project_id"] = context.project_id
+            cs = _data(
+                await self._bridge.invoke("twin.record_constraint_set", cs_args),
+                "twin.record_constraint_set",
+            )
+            set_node = cs.get("node_id") if isinstance(cs, dict) else None
+        except Exception as exc:  # noqa: BLE001 - the gate enforces; don't mask the phase
+            logger.warning("requirements_constraint_set_failed", error=str(exc))
+
         return PhaseOutcome(
             summary=(
                 f"Requirements: {len(spec['functional'])} functional + {len(spec['constraints'])} "
                 f"quantified constraints, each with an acceptance/verification method; committed a "
-                f"PRD (node {prd_node})."
+                f"PRD (node {prd_node}) and an evaluable constraint set (node {set_node})."
             ),
-            artifacts=[f"prd:{prd_node}", "design_decision:requirements"],
+            artifacts=[
+                f"prd:{prd_node}",
+                f"constraint_set:{set_node}",
+                "design_decision:requirements",
+            ],
             status="completed",
         )
