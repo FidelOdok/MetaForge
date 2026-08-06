@@ -240,6 +240,13 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   *retrieved context block* is volatile per turn and is therefore a
   trailing `[retrieved context]` history pair on both paths, just
   before the user's message.
+- **Requirements-discovery directive (MET-584)** — when the project
+  has no `prd` or `constraint_set` work product, the brief instructs
+  the agent to elicit quantified requirements and record them
+  (`twin.record_constraint_set`) before substantive design work, and
+  `twin.commit_geometry` soft-warns (never blocks) when geometry lands
+  in an unconstrained project. Chat nudges; the design-flow gates
+  (MET-582/583) enforce.
 - **Telemetry** — `context.stats` gains a `retrieved_context`
   component; the `project_brief` component is now computed from the
   explicit brief text rather than sniffing the history pair.

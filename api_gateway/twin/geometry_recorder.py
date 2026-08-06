@@ -148,7 +148,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
                 minio_object_key=minio_object_key,
                 size_bytes=len(content),
             )
-            return {
+            out = {
                 "node_id": node_id,
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
@@ -157,5 +157,37 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "project_linked": linked,
                 "model_url": f"/v1/twin/nodes/{node_id}/model",
             }
+            # MET-584: soft-warn (never block) when geometry lands in a project
+            # with no recorded requirements — the model sees the warning in the
+            # tool result and can course-correct; gates enforce, chat nudges.
+            warning = await _unconstrained_warning(project_backend, project_id)
+            if warning:
+                out["warning"] = warning
+            return out
 
     return record
+
+
+async def _unconstrained_warning(project_backend: Any, project_id: str | None) -> str | None:
+    """A warning string when the target project lacks prd/constraint_set.
+
+    Best-effort: any lookup failure returns None — the commit already
+    succeeded and this must never taint it.
+    """
+    if not project_id or project_backend is None:
+        return None
+    try:
+        project = await project_backend.get_project(project_id)
+    except Exception:  # noqa: BLE001 — advisory only
+        return None
+    if project is None:
+        return None
+    types = {str(getattr(wp.type, "value", wp.type)) for wp in project.work_products}
+    if types & {"prd", "constraint_set"}:
+        return None
+    return (
+        "This project has no recorded requirements or constraints (no prd or "
+        "constraint_set work product) — the committed geometry cannot be "
+        "validated against anything. Elicit the key quantified requirements "
+        "from the user and record them with twin.record_constraint_set."
+    )

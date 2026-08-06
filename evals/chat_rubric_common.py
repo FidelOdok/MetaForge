@@ -42,6 +42,8 @@ SUPPORTED_CHECK_TYPES = (
     # For gateway_action turns (runner-performed HTTP steps, e.g. approving a
     # gate between agent turns): did the action complete?
     "action_succeeded",
+    # Negative tool assertion (MET-584): the turn must NOT have called it.
+    "tool_not_called",
 )
 
 
@@ -227,6 +229,8 @@ def run_check(check: dict[str, Any], turn: dict[str, Any]) -> bool:
         return turn_replied(turn)
     if ctype == "action_succeeded":
         return bool(turn.get("action_ok"))
+    if ctype == "tool_not_called":
+        return not any(s.get("tool") == check.get("tool") for s in tool_steps(turn))
     raise ValueError(f"unsupported check type: {ctype!r}")
 
 

@@ -242,3 +242,16 @@ def test_substitute_tolerates_sayless_action_turns() -> None:
 
     out = substitute([{"gateway_action": "approve_run"}], {"$PROJECT_ID": "p"})
     assert out == [{"gateway_action": "approve_run"}]
+
+
+def test_tool_not_called_check() -> None:
+    from chat_rubric_common import run_check
+
+    turn = {"steps": [{"tool": "mcp_twin_record_decision", "arguments": {}, "error": None}]}
+    assert run_check(
+        {"id": "x", "type": "tool_not_called", "tool": "mcp_twin_commit_geometry"}, turn
+    )
+    assert not run_check(
+        {"id": "x", "type": "tool_not_called", "tool": "mcp_twin_record_decision"}, turn
+    )
+    assert run_check({"id": "x", "type": "tool_not_called", "tool": "anything"}, {"steps": []})
