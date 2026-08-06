@@ -132,3 +132,38 @@ async def test_project_brief_caps_work_product_list(monkeypatch: pytest.MonkeyPa
     brief = await _brief(monkeypatch, _thread("project", "p-123"), _project(many))
     assert brief is not None
     assert "and 5 more" in brief
+
+
+# --------------------------------------------------------------------------
+# Requirements-discovery directive (MET-584)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bare_project_brief_carries_requirements_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No prd/constraint_set in the project -> the brief must tell the agent
+    to elicit and record requirements before substantive design work."""
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([]))
+    assert brief is not None
+    assert "NO recorded requirements" in brief
+    assert "twin.record_constraint_set" in brief
+    assert "Ask before you assume" in brief
+
+
+@pytest.mark.asyncio
+async def test_constrained_project_brief_has_no_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project([_wp("Bracket requirements", "constraint_set")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+    assert brief is not None
+    assert "NO recorded requirements" not in brief
+
+
+@pytest.mark.asyncio
+async def test_prd_alone_also_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([_wp("PRD", "prd")]))
+    assert brief is not None
+    assert "NO recorded requirements" not in brief

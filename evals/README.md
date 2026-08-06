@@ -105,6 +105,7 @@ the improvement directly.
 | `chat_tool_bigobs` | assistant | Huge tool observations: 8KB native cap vs uncapped ReAct trace |
 | `chat_tool_dedupe` | assistant | Multi-tool turn without duplicate identical calls |
 | `chat_design_launch` | project | End-to-end chat-triggered flow (MET-587): launch `hardware_v1`, runner approves gate 1 (`gateway_action`), agent reports post-approval state |
+| `chat_req_discovery` | project | Requirements discovery (MET-584): in a bare project, elicit before designing (no premature commit), record requirements when given |
 
 Turns may also be **`gateway_action`** steps the runner performs itself
 between agent turns (no message posted) — currently `approve_run`, which

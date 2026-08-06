@@ -252,6 +252,21 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     else:
         lines.append("\nThis project has no work products yet.")
 
+    # MET-584: requirements-discovery directive. Chat has no gates, so the
+    # elicitation nudge lives in the brief — the enforcement twin of this is
+    # the design-flow Requirements gate (MET-582/583).
+    types = {str(getattr(wp.type, "value", wp.type)) for wp in project.work_products}
+    if not types & {"prd", "constraint_set"}:
+        lines.append(
+            "\nThis project has NO recorded requirements or constraints (no prd "
+            "or constraint_set work product). Before substantive design work — "
+            "authoring or committing geometry, selecting components — elicit the "
+            "key quantified requirements from the user (loads, mass/envelope "
+            "budgets, power, cost, safety factors) and record them with "
+            "`twin.record_constraint_set` (and the rationale with "
+            "`twin.record_decision`). Ask before you assume."
+        )
+
     lines.append(
         f"\nTo save any CAD model or design decision into this project, pass "
         f'`project_id="{project.id}"` when you call `twin.commit_geometry` or '

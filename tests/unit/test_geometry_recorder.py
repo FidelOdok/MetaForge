@@ -165,3 +165,42 @@ class TestCommitGeometryAdapter:
             await server.commit_geometry({"name": "x"})
         with pytest.raises(ValueError, match="name"):
             await server.commit_geometry({"step_base64": _STEP_B64})
+
+
+# --------------------------------------------------------------------------
+# Unconstrained-project soft warning (MET-584)
+# --------------------------------------------------------------------------
+
+
+class _WarnBackend:
+    """get_project returns a project whose WPs carry the given types."""
+
+    def __init__(self, types: list[str] | None) -> None:
+        self._types = types
+        self.links: list = []
+
+    async def link_work_product(self, *a) -> None:
+        self.links.append(a)
+
+    async def get_project(self, project_id: str):
+        from types import SimpleNamespace
+
+        if self._types is None:
+            return None
+        return SimpleNamespace(work_products=[SimpleNamespace(type=t) for t in self._types])
+
+
+@pytest.mark.asyncio
+async def test_unconstrained_warning_paths() -> None:
+    from api_gateway.twin.geometry_recorder import _unconstrained_warning
+
+    # No requirements recorded -> warn.
+    w = await _unconstrained_warning(_WarnBackend(["cad_model"]), "p-1")
+    assert w and "no recorded requirements" in w.lower()
+    # constraint_set or prd present -> silent.
+    assert await _unconstrained_warning(_WarnBackend(["constraint_set"]), "p-1") is None
+    assert await _unconstrained_warning(_WarnBackend(["prd", "cad_model"]), "p-1") is None
+    # Unscopable (no backend / no project / no project_id) -> silent, never raises.
+    assert await _unconstrained_warning(None, "p-1") is None
+    assert await _unconstrained_warning(_WarnBackend(None), "p-1") is None
+    assert await _unconstrained_warning(_WarnBackend(["x"]), None) is None
