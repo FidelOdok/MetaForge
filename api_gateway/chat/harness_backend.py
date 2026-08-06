@@ -40,6 +40,7 @@ from orchestrator.harness.providers import (
     default_stream,
     resolve_provider,
 )
+from orchestrator.harness.providers.adapters import default_stream_events
 from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
@@ -789,6 +790,7 @@ async def run_chat_turn_streaming(
     *,
     on_delta: Callable[[str], Awaitable[None]],
     on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_thinking: Callable[[str], Awaitable[None]] | None = None,
     on_context: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
@@ -898,6 +900,11 @@ async def run_chat_turn_streaming(
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
             on_step=live_step,
+            # MET-591: token-level liveness — text deltas stream to the client
+            # while each model call generates (event-streaming providers only;
+            # unsupported families fall back to the non-streaming invoke).
+            on_thinking=on_thinking,
+            stream_events=default_stream_events if on_thinking is not None else None,
         )
     else:
         policy = ModelPolicy(

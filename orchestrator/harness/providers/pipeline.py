@@ -35,6 +35,8 @@ Role = str
 Invoke = Callable[["ProviderSpec", Any], Awaitable[Any]]
 # Injected streaming transport: yield text deltas for a resolved provider.
 StreamInvoke = Callable[["ProviderSpec", Any], AsyncIterator[str]]
+# MET-591: event streaming — yields {"type": "text_delta"|"response", ...} dicts.
+StreamEvents = Callable[["ProviderSpec", Any], AsyncIterator[dict[str, Any]]]
 # Injected sleep, so tests can assert backoff without real delays.
 Sleep = Callable[[float], Awaitable[None]]
 
@@ -246,4 +248,50 @@ class ProviderPipeline:
             attempts.append((spec, last_exc))
 
         logger.error("all_providers_failed_stream", role=role, tried=len(attempts))
+        raise AllProvidersFailedError(role, attempts)
+
+    async def stream_events_complete(
+        self, role: Role, request: Any, stream_events: StreamEvents
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream a role's response as structured events (MET-591).
+
+        Same contract as :meth:`stream_complete` — retry + provider fallback
+        happen only until the FIRST event arrives, then the provider is
+        committed. Adapters for unsupported families raise a non-retryable
+        error before their first event, so those candidates are skipped and
+        callers fall back to the non-streaming invoke when every candidate
+        declines (:class:`AllProvidersFailedError`).
+        """
+        candidates = self.resolve(role)
+        attempts: list[tuple[ProviderSpec, Exception]] = []
+
+        for spec in candidates:
+            last_exc: Exception | None = None
+            for attempt in range(self._retry.api_max_retries + 1):
+                agen = stream_events(spec, request)
+                try:
+                    first = await agen.__anext__()
+                except StopAsyncIteration:
+                    return  # empty but successful stream
+                except ProviderError as exc:
+                    last_exc = exc
+                    if not self._retry.is_retryable(exc) or attempt >= self._retry.api_max_retries:
+                        break
+                    await self._sleep(self._retry.backoff_base_seconds * (2**attempt))
+                    continue
+                except Exception as exc:  # noqa: BLE001 - non-provider failure: try next spec
+                    last_exc = exc
+                    break
+                logger.info(
+                    "provider_stream_events_ok", role=role, provider=spec.name, model=spec.model
+                )
+                yield first
+                async for event in agen:
+                    yield event
+                return
+
+            assert last_exc is not None
+            attempts.append((spec, last_exc))
+
+        logger.error("all_providers_failed_stream_events", role=role, tried=len(attempts))
         raise AllProvidersFailedError(role, attempts)

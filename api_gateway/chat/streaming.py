@@ -41,6 +41,7 @@ class StreamEventType(StrEnum):
     MESSAGE_DELTA = "message.delta"
     AGENT_TYPING = "agent.typing"
     AGENT_STEP = "agent.step"
+    AGENT_THINKING = "agent.thinking"
     AGENT_DONE = "agent.done"
     CONTEXT_STATS = "context.stats"
     SCOPE_CHANGED = "scope.changed"
@@ -238,6 +239,20 @@ async def notify_agent_typing(thread_id: str, agent_id: str = "agent") -> int:
     event = StreamEvent(
         event=StreamEventType.AGENT_TYPING,
         data={"agent_id": agent_id},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_agent_thinking(thread_id: str, delta: str) -> int:
+    """Push an ``agent.thinking`` event — a live text delta from the model
+    WHILE it generates (MET-591). Ephemeral typing-indicator-grade content:
+    clients render it in the thinking line; the persisted final message stays
+    authoritative (a rendered thinking draft may become a tool-call preamble
+    rather than the answer)."""
+    event = StreamEvent(
+        event=StreamEventType.AGENT_THINKING,
+        data={"delta": delta},
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)

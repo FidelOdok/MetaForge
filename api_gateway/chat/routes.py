@@ -55,6 +55,7 @@ from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope
 from api_gateway.chat.streaming import (
     notify_agent_done,
     notify_agent_step,
+    notify_agent_thinking,
     notify_agent_typing,
     notify_context_stats,
     notify_message_delta,
@@ -364,6 +365,9 @@ async def _invoke_agent(
                 async def _on_step(step: dict[str, object]) -> None:
                     await notify_agent_step(thread.id, step, "harness-agent")
 
+                async def _on_thinking(delta: str) -> None:
+                    await notify_agent_thinking(thread.id, delta)
+
                 async def _on_context(stats: dict[str, object]) -> None:
                     await notify_context_stats(thread.id, stats)
 
@@ -390,6 +394,7 @@ async def _invoke_agent(
                     user_content,
                     on_delta=_on_delta,
                     on_step=_on_step,
+                    on_thinking=_on_thinking,
                     on_context=_on_context,
                     session_id=thread.id,
                     mcp_bridge=_mcp_bridge,

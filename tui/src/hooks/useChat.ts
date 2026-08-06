@@ -21,7 +21,7 @@ export interface UseChat {
   error: string | null;
   messages: ChatMessage[];
   /** In-flight assistant turn (text + tool steps), or null when idle. */
-  pending: { text: string; steps: AgentStep[] } | null;
+  pending: { text: string; steps: AgentStep[]; thinking?: string } | null;
   /** Most recent per-turn context-window snapshot, or null before the first turn. */
   contextStats: ContextStats | null;
   /**
@@ -54,7 +54,9 @@ export function useChat(
   const [status, setStatus] = useState<ChatStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [pending, setPending] = useState<{ text: string; steps: AgentStep[] } | null>(null);
+  const [pending, setPending] = useState<{ text: string; steps: AgentStep[]; thinking?: string } | null>(
+    null,
+  );
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
   const [threadScope, setThreadScope] = useState<ChatScope | null>(null);
 
@@ -62,7 +64,11 @@ export function useChat(
   // Scope of the previous thread, so a *change* can be announced in the
   // transcript while the first thread of a session stays quiet.
   const priorScope = useRef<ChatScope | null>(null);
-  const bufRef = useRef<{ text: string; steps: AgentStep[] }>({ text: "", steps: [] });
+  const bufRef = useRef<{ text: string; steps: AgentStep[]; thinking: string }>({
+    text: "",
+    steps: [],
+    thinking: "",
+  });
   const statsRef = useRef<TurnStats>(newTurnStats());
   const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
   const turnSeq = useRef(0); // bumped per send; guards the fallback finalizer against a stale turn
@@ -84,7 +90,11 @@ export function useChat(
   const lastFlush = useRef(0);
   const flushNow = () => {
     lastFlush.current = Date.now();
-    setPending({ text: bufRef.current.text, steps: [...bufRef.current.steps] });
+    setPending({
+      text: bufRef.current.text,
+      steps: [...bufRef.current.steps],
+      thinking: bufRef.current.thinking,
+    });
   };
   const scheduleFlush = () => {
     const since = Date.now() - lastFlush.current;
@@ -154,7 +164,7 @@ export function useChat(
       fallback: fallback ?? null,
     });
     setMessages((m) => [...m, { role: "assistant", text: buf.text, steps: buf.steps, reason }]);
-    bufRef.current = { text: "", steps: [] };
+    bufRef.current = { text: "", steps: [], thinking: "" };
     statsRef.current = newTurnStats();
     setPending(null);
     setStatus("idle");
@@ -258,6 +268,14 @@ export function useChat(
               case "agent.step":
                 if (!thinkingRef.current) break;
                 bufRef.current.steps.push(ev.step);
+                // The step carries the full thought this draft belonged to —
+                // clear the live draft so the next call streams fresh.
+                bufRef.current.thinking = "";
+                scheduleFlush();
+                break;
+              case "agent.thinking":
+                if (!thinkingRef.current) break;
+                bufRef.current.thinking += ev.delta;
                 scheduleFlush();
                 break;
               case "context.stats":
@@ -336,12 +354,12 @@ export function useChat(
       const myTurn = (turnSeq.current += 1);
       if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
       setMessages((m) => [...m, { role: "user", text: content }]);
-      bufRef.current = { text: "", steps: [] };
+      bufRef.current = { text: "", steps: [], thinking: "" };
       statsRef.current = newTurnStats();
       thinkingRef.current = true;
       turnAbort.current = new AbortController();
       pokeIdle(); // arm the idle watchdog for this turn
-      setPending({ text: "", steps: [] });
+      setPending({ text: "", steps: [], thinking: "" });
       setStatus("thinking");
       log.info("chat.send", { threadId, chars: content.length, model, provider });
 
