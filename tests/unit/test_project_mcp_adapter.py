@@ -121,6 +121,7 @@ class TestList:
             "offset": 0,
             "limit": 20,
             "has_more": False,
+            "next_offset": None,
         }
 
     async def test_list_after_create(self, server: ProjectServer) -> None:
@@ -129,8 +130,25 @@ class TestList:
         result = await _call(server, "project.list", {})
         assert result["total"] == 2
         assert result["has_more"] is False
+        assert result["next_offset"] is None
         names = {p["name"] for p in result["projects"]}
         assert names == {"alpha", "beta"}
+
+    async def test_list_returns_summary_shape_not_full_work_products(
+        self, server: ProjectServer
+    ) -> None:
+        """MET-589: list entries drop the full work_products array (the
+
+        thing that blew list pages past the harness's truncation cap) in
+        favor of a count; project.get still has the full detail.
+        """
+        created = await _call(server, "project.create", {"name": "solo"})
+        result = await _call(server, "project.list", {})
+        entry = result["projects"][0]
+        assert "work_products" not in entry
+        assert entry["work_product_count"] == 0
+        fetched = await _call(server, "project.get", {"id": created["id"]})
+        assert "work_products" in fetched
 
     async def test_list_paginates_with_limit_and_offset(self, server: ProjectServer) -> None:
         for i in range(5):
@@ -142,14 +160,17 @@ class TestList:
         assert page1["offset"] == 0
         assert page1["limit"] == 2
         assert page1["has_more"] is True
+        assert page1["next_offset"] == 2
 
-        page2 = await _call(server, "project.list", {"limit": 2, "offset": 2})
+        page2 = await _call(server, "project.list", {"limit": 2, "offset": page1["next_offset"]})
         assert len(page2["projects"]) == 2
         assert page2["has_more"] is True
+        assert page2["next_offset"] == 4
 
-        page3 = await _call(server, "project.list", {"limit": 2, "offset": 4})
+        page3 = await _call(server, "project.list", {"limit": 2, "offset": page2["next_offset"]})
         assert len(page3["projects"]) == 1
         assert page3["has_more"] is False
+        assert page3["next_offset"] is None
 
         # Every project appears exactly once across pages, none dropped.
         seen_ids = {p["id"] for page in (page1, page2, page3) for p in page["projects"]}
@@ -172,6 +193,42 @@ class TestList:
         )
         response = json.loads(raw)
         assert "error" in response, response
+
+    async def test_list_self_caps_page_size_regardless_of_requested_limit(
+        self, server: ProjectServer
+    ) -> None:
+        """MET-589 regression: a huge `limit` used to just return every
+
+        project in one oversized payload, which the harness's own char-budget
+        truncation would then silently chop — even though the tool itself
+        reported `has_more=False`, making the caller believe it saw
+        everything. The page must now self-cap on serialized size, and
+        `has_more`/`next_offset` must reflect the *actual* returned count.
+        """
+        big_description = "x" * 3000
+        for i in range(10):
+            await _call(
+                server,
+                "project.create",
+                {"name": f"big-{i}", "description": big_description},
+            )
+
+        result = await _call(server, "project.list", {"limit": 100, "offset": 0})
+        assert result["total"] == 10
+        returned = len(result["projects"])
+        assert returned < 10  # self-cap kicked in despite limit=100 covering all 10
+        assert result["has_more"] is True
+        assert result["next_offset"] == returned
+
+        # Walk every remaining page; every project must surface exactly once.
+        seen_ids = {p["id"] for p in result["projects"]}
+        next_offset = result["next_offset"]
+        while next_offset is not None:
+            page = await _call(server, "project.list", {"limit": 100, "offset": next_offset})
+            assert len(page["projects"]) >= 1  # forward progress guaranteed
+            seen_ids.update(p["id"] for p in page["projects"])
+            next_offset = page["next_offset"]
+        assert len(seen_ids) == 10
 
 
 class TestGet:

@@ -17,6 +17,7 @@ backend is ready.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
@@ -28,6 +29,17 @@ from tool_registry.mcp_server.server import McpToolServer
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.project")
+
+# MET-589: the chat harness silently truncates any tool observation past
+# ~8000 chars (orchestrator/harness/native_tools.py::_MAX_OBSERVATION_CHARS),
+# dropping trailing list items with no way for the caller to detect it short
+# of the length shrinking underneath a `limit` it already asked for. A page
+# this small stays comfortably under that cap (with headroom for envelope
+# fields and whatever else shares the harness's context budget) regardless
+# of how many/how large the requested page's projects turn out to be —
+# `has_more`/`next_offset` are trustworthy because the page itself can never
+# trigger the harness's shrink.
+_MAX_LIST_PAGE_CHARS = 4000
 
 
 @runtime_checkable
@@ -157,11 +169,15 @@ class ProjectServer(McpToolServer):
                 adapter_id="project",
                 name="List Projects",
                 description=(
-                    "Return a page of projects the caller can see, newest "
-                    "first. Paginated via `limit`/`offset` — check "
-                    "`has_more` in the response and re-call with a higher "
-                    "`offset` to see the rest instead of assuming the "
-                    "first page is everything. Project-level scoping is "
+                    "Return a page of project summaries (no per-project "
+                    "work_products detail — call project.get for that), "
+                    "newest first. Paginated via `limit`/`offset`, but the "
+                    "actual page may hold FEWER than `limit` even when more "
+                    "remain: the response also self-caps to a safe payload "
+                    "size. Always check `has_more`/`next_offset` and keep "
+                    "re-calling with `next_offset` until `has_more` is "
+                    "false to see everything — never assume one call "
+                    "returned the full set. Project-level scoping is "
                     "handled by the backend (per-tenant deployments)."
                 ),
                 capability="project_management",
@@ -188,7 +204,7 @@ class ProjectServer(McpToolServer):
                     "properties": {
                         "projects": {
                             "type": "array",
-                            "items": _project_output_schema(),
+                            "items": _project_summary_schema(),
                         },
                         "total": {
                             "type": "integer",
@@ -199,6 +215,12 @@ class ProjectServer(McpToolServer):
                         "has_more": {
                             "type": "boolean",
                             "description": "True if projects remain beyond this page.",
+                        },
+                        "next_offset": {
+                            "type": ["integer", "null"],
+                            "description": (
+                                "Pass as `offset` for the next page; null when has_more is false."
+                            ),
                         },
                     },
                 },
@@ -384,25 +406,46 @@ class ProjectServer(McpToolServer):
                 span.set_attribute("project.scoped", True)
 
             total = len(projects)
-            page = projects[offset : offset + limit]
-            has_more = offset + len(page) < total
+            candidates = projects[offset : offset + limit]
 
-            span.set_attribute("project.result_count", len(page))
+            # MET-589: cap the page to a safe serialized size regardless of
+            # `limit` — a page that fits `limit` can still be big enough to
+            # trip the harness's own truncation, which would silently drop
+            # entries with no way for the caller to tell. Always keep at
+            # least one project so a single oversized record can't stall
+            # pagination entirely.
+            page: list[dict[str, Any]] = []
+            page_chars = 0
+            for p in candidates:
+                summary = _project_to_summary_dict(p)
+                rendered_len = len(json.dumps(summary))
+                if page and page_chars + rendered_len > _MAX_LIST_PAGE_CHARS:
+                    break
+                page.append(summary)
+                page_chars += rendered_len
+
+            returned = len(page)
+            has_more = offset + returned < total
+            next_offset = offset + returned if has_more else None
+
+            span.set_attribute("project.result_count", returned)
             span.set_attribute("project.total", total)
             logger.info(
                 "project_mcp_list",
-                result_count=len(page),
+                result_count=returned,
                 total=total,
                 offset=offset,
                 limit=limit,
+                page_chars=page_chars,
                 scoped_to=str(ctx_project_id) if ctx_project_id else None,
             )
             return {
-                "projects": [_project_to_dict(p) for p in page],
+                "projects": page,
                 "total": total,
                 "offset": offset,
                 "limit": limit,
                 "has_more": has_more,
+                "next_offset": next_offset,
             }
 
     async def handle_get(self, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -536,6 +579,26 @@ def _project_to_dict(project: ProjectLike) -> dict[str, Any]:
     }
 
 
+def _project_to_summary_dict(project: ProjectLike) -> dict[str, Any]:
+    """Lighter per-project projection used by ``project.list`` (MET-589).
+
+    Drops the full ``work_products`` array (unbounded per project — the
+    thing that made list pages balloon past the harness's truncation cap)
+    in favor of just a count. Callers that need the detail call
+    ``project.get``.
+    """
+    return {
+        "id": project.id,
+        "name": project.name,
+        "description": project.description,
+        "status": project.status,
+        "agent_count": project.agent_count,
+        "created_at": project.created_at,
+        "last_updated": project.last_updated,
+        "work_product_count": len(project.work_products),
+    }
+
+
 def _project_output_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -560,5 +623,21 @@ def _project_output_schema() -> dict[str, Any]:
                     },
                 },
             },
+        },
+    }
+
+
+def _project_summary_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "status": {"type": "string"},
+            "agent_count": {"type": "integer"},
+            "created_at": {"type": "string"},
+            "last_updated": {"type": "string"},
+            "work_product_count": {"type": "integer"},
         },
     }
