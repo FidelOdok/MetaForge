@@ -36,6 +36,9 @@ export interface ContextStats {
   utilization: number | null;
   components: ContextComponent[];
   estimated: boolean;
+  /** Real provider-reported turn usage (MET-596); present on the final emit. */
+  usage?: { input_tokens: number; output_tokens: number };
+  phase?: string;
 }
 
 /** The thread's scope was rescoped IN PLACE (MET-580) — by `/project`-equivalent

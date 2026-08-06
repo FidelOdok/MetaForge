@@ -68,6 +68,22 @@ def default_max_output_tokens() -> int:
     return DEFAULT_MAX_OUTPUT_TOKENS
 
 
+def _usage_from(
+    obj: Any, in_key: str = "input_tokens", out_key: str = "output_tokens"
+) -> dict[str, int] | None:
+    """Best-effort {input_tokens, output_tokens} from a provider usage object (MET-596)."""
+    u = getattr(obj, "usage", None)
+    if u is None:
+        return None
+    try:
+        return {
+            "input_tokens": int(getattr(u, in_key, 0) or 0),
+            "output_tokens": int(getattr(u, out_key, 0) or 0),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], int, float]:
     if not isinstance(request, dict):
         request = {"prompt": str(request)}
@@ -213,6 +229,9 @@ async def anthropic_invoke(
     result: dict[str, Any] = {"text": text, "model": getattr(resp, "model", spec.model)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    usage = _usage_from(resp)
+    if usage:
+        result["usage"] = usage
     return result
 
 
@@ -264,11 +283,15 @@ async def openai_invoke(
                 "arguments": args if isinstance(args, dict) else {},
             }
         )
-    return {
+    out: dict[str, Any] = {
         "text": msg.content or "",
         "tool_calls": tool_calls,
         "model": getattr(resp, "model", spec.model),
     }
+    usage = _usage_from(resp, "prompt_tokens", "completion_tokens")
+    if usage:
+        out["usage"] = usage
+    return out
 
 
 async def gemini_invoke(
@@ -710,6 +733,9 @@ async def openai_stream_events(
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": True,
+        # MET-596: ask for usage on the final stream chunk (OpenAI-compatible
+        # servers that don't know the option simply ignore it).
+        "stream_options": {"include_usage": True},
     }
     tools = request.get("tools") if isinstance(request, dict) else None
     if tools:
@@ -719,9 +745,11 @@ async def openai_stream_events(
     text_parts: list[str] = []
     acc: dict[int, dict[str, str]] = {}
     announced: set[int] = set()
+    usage: dict[str, int] | None = None
     try:
         stream = await client.chat.completions.create(**kwargs)
         async for chunk in stream:
+            usage = _usage_from(chunk, "prompt_tokens", "completion_tokens") or usage
             if not getattr(chunk, "choices", None):
                 continue
             delta = chunk.choices[0].delta
@@ -767,6 +795,8 @@ async def openai_stream_events(
     result: dict[str, Any] = {"text": "".join(text_parts), "model": spec.model}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    if usage:
+        result["usage"] = usage
     yield {"type": "response", "result": result}
 
 
@@ -844,6 +874,9 @@ async def anthropic_stream_events(
     result: dict[str, Any] = {"text": text, "model": getattr(final, "model", spec.model)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    usage = _usage_from(final)
+    if usage:
+        result["usage"] = usage
     yield {"type": "response", "result": result}
 
 

@@ -360,3 +360,65 @@ async def test_loop_forwards_typed_events(tmp_path: Any) -> None:
         ("action_started", "echo"),
         ("text_delta", "answer"),
     ]
+
+
+# --- MET-596: token usage capture ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_openai_stream_events_capture_usage() -> None:
+    usage_chunk = SimpleNamespace(
+        choices=[],
+        usage=SimpleNamespace(prompt_tokens=120, completion_tokens=34),
+    )
+    client = _FakeOpenAI([_chunk(content="hi"), usage_chunk])
+    events = [
+        e
+        async for e in openai_stream_events(
+            SPEC, {"messages": [{"role": "user", "content": "x"}]}, client=client
+        )
+    ]
+    assert events[-1]["result"]["usage"] == {"input_tokens": 120, "output_tokens": 34}
+    # include_usage was requested from the provider.
+    assert client.kwargs["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.asyncio
+async def test_native_loop_sums_usage_across_calls() -> None:
+    tools = ToolRegistry()
+
+    async def echo(arguments: dict[str, object]) -> object:
+        return {"ok": True}
+
+    tools.register_native("echo", description="e", input_schema={"type": "object"}, handler=echo)
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+    calls = {"n": 0}
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {
+                "text": "",
+                "tool_calls": [{"id": "c1", "name": "echo", "arguments": {}}],
+                "model": spec.model,
+                "usage": {"input_tokens": 100, "output_tokens": 10},
+            }
+        return {
+            "text": "done",
+            "model": spec.model,
+            "usage": {"input_tokens": 150, "output_tokens": 25},
+        }
+
+    result = await run_native_tools(rt, "go", invoke=invoke, max_steps=4)
+    assert result.usage == {"input_tokens": 250, "output_tokens": 35}
+
+
+@pytest.mark.asyncio
+async def test_loop_usage_none_when_provider_reports_nothing() -> None:
+    rt = HarnessRuntime.build(CONFIG)
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        return {"text": "done", "model": spec.model}
+
+    result = await run_native_tools(rt, "go", invoke=invoke, max_steps=2)
+    assert result.usage is None

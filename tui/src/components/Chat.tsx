@@ -267,7 +267,12 @@ export function Chat({
         <Box flexDirection="column" paddingX={1} marginTop={1}>
           {pending.steps.length || pending.thinking || pending.startedAction ? (
             <Box flexDirection="column">
-              <Text dimColor>· thinking</Text>
+              <Text dimColor>
+                · thinking
+                {pending.thinking || pending.text
+                  ? ` · ~${Math.max(1, Math.round(((pending.thinking?.length ?? 0) + pending.text.length) / 4))} tok`
+                  : ""}
+              </Text>
               <Box marginLeft={1} flexDirection="column">
                 {pending.steps.length ? <StepTrace steps={pending.steps} /> : null}
                 {pending.thinking ? (
