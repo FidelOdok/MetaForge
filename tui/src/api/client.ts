@@ -23,7 +23,11 @@ import type { ChatScope } from "../lib/project.js";
  * out." Passing this dispatcher only to the long-running turn POST keeps
  * every other call (health, projects, runs) on the default Agent.
  */
-const LONG_TURN_TIMEOUT_MS = 600000;
+// MET-590: with the gateway streaming agent.step events live, the real
+// liveness guard is the idle watchdog in useChat (abort when no progress
+// events arrive for a while). This is only the absolute hard ceiling so a
+// dead watchdog can't leak a request forever.
+const LONG_TURN_TIMEOUT_MS = 2_700_000; // 45 min
 const longTurnDispatcher = new Agent({
   headersTimeout: LONG_TURN_TIMEOUT_MS + 30000,
   bodyTimeout: LONG_TURN_TIMEOUT_MS + 30000,
@@ -245,12 +249,15 @@ export class GatewayClient {
     body: unknown,
     timeoutMs = 15000,
     dispatcher?: Agent,
+    signal?: AbortSignal,
   ): Promise<T> {
+    const timeout = AbortSignal.timeout(timeoutMs);
     const res = await fetch(`${this.base()}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+      // The caller's signal (idle watchdog) composes with the hard ceiling.
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       ...(dispatcher ? { dispatcher } : {}),
     } as RequestInit);
     if (!res.ok) throw new GatewayError(`POST ${path} -> ${res.status}`, res.status);
@@ -302,7 +309,7 @@ export class GatewayClient {
   async sendMessage(
     threadId: string,
     content: string,
-    opts: { provider?: string; model?: string } = {},
+    opts: { provider?: string; model?: string; signal?: AbortSignal } = {},
   ): Promise<void> {
     await this.post<unknown>(
       `/v1/chat/threads/${threadId}/messages`,
@@ -319,6 +326,7 @@ export class GatewayClient {
       // finalize prematurely, so keep it well above realistic turn times.
       LONG_TURN_TIMEOUT_MS,
       longTurnDispatcher,
+      opts.signal,
     );
   }
 }

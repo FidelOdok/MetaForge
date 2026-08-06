@@ -12,6 +12,7 @@ wraps :meth:`HarnessRuntime.complete` to ask a model for the next action.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -20,6 +21,9 @@ import structlog
 from orchestrator.harness.runtime import HarnessRuntime
 
 logger = structlog.get_logger(__name__)
+
+# MET-590: live step observer — called as each step lands, (step, index).
+OnStep = Callable[["ReActStep", int], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,7 @@ async def run_react(
     goal: str,
     *,
     max_steps: int = 8,
+    on_step: OnStep | None = None,
 ) -> ReActResult:
     """Drive the reason/act/observe loop until final or the step cap.
 
@@ -99,6 +104,16 @@ async def run_react(
     fatal to the turn.
     """
     steps: list[ReActStep] = []
+
+    async def _emit(step: ReActStep) -> None:
+        # MET-590: live progress — a broken observer must never break the turn.
+        if on_step is None:
+            return
+        try:
+            await on_step(step, len(steps) - 1)
+        except Exception as exc:  # noqa: BLE001 - observer is best-effort
+            logger.warning("react_on_step_failed", error=str(exc))
+
     for step_no in range(1, max_steps + 1):
         try:
             action = await policy.next_action(goal, steps)
@@ -115,6 +130,7 @@ async def run_react(
                     error=str(exc),
                 )
             )
+            await _emit(steps[-1])
             logger.warning("react_parse_error", goal=goal, step=step_no, error=str(exc))
             continue
 
@@ -122,6 +138,7 @@ async def run_react(
             steps.append(
                 ReActStep(thought=action.thought, tool_call=None, observation=action.final_output)
             )
+            await _emit(steps[-1])
             logger.info("react_completed", goal=goal, steps=step_no)
             return ReActResult(status="completed", output=action.final_output, steps=steps)
 
@@ -130,8 +147,10 @@ async def run_react(
         try:
             observation = await runtime.call_tool(call.name, call.arguments)
             steps.append(ReActStep(action.thought, call, observation=observation))
+            await _emit(steps[-1])
         except Exception as exc:  # noqa: BLE001 - surface tool failure to the policy, don't abort
             steps.append(ReActStep(action.thought, call, error=str(exc)))
+            await _emit(steps[-1])
             logger.warning("react_tool_error", tool=call.name, error=str(exc))
 
     logger.info("react_exhausted", goal=goal, steps=max_steps)
