@@ -420,6 +420,14 @@ async def _invoke_agent(
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error("harness_chat_failed", error=str(exc))
+                # MET-591 (live-caught): the turn is over — say so on the
+                # stream. Without this, SSE clients whose turn errored got
+                # typing + context.stats and then silence forever (no
+                # agent.done), which read as a hung turn instead of a failure.
+                try:
+                    await notify_agent_done(thread.id, "harness-agent")
+                except Exception:  # noqa: BLE001 — notification is best-effort
+                    logger.warning("agent_done_notify_failed", thread_id=thread.id)
                 return ChatMessageRecord(
                     id=str(uuid4()),
                     thread_id=thread.id,
