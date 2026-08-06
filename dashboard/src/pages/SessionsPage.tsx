@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSessions } from '../hooks/use-sessions';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
-import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
+import { useActiveProject } from '../hooks/use-active-project';
 import type { AgentSession } from '../types/session';
 
 // KC color tokens
@@ -717,8 +716,8 @@ function SessionRow({ session }: { session: AgentSession }) {
 // --- Main Page ---
 
 export function SessionsPage() {
-  const [projectId, setProjectId] = useState('');
-  const { data: sessions, isLoading } = useSessions(projectId || undefined);
+  const { activeProjectId } = useActiveProject();
+  const { data: sessions, isLoading } = useSessions(activeProjectId ?? undefined);
 
   if (isLoading) {
     return (
@@ -776,7 +775,6 @@ export function SessionsPage() {
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
-            <ProjectScopePicker value={projectId} onChange={setProjectId} />
             <span
               style={{
                 fontFamily: 'Roboto Mono, monospace',

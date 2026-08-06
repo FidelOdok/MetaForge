@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../test/test-utils';
+import { useProjectStore } from '../store/project-store';
 import type { SourceSummary } from '../types/knowledge';
 
 // Mock the endpoint module so the page's TanStack Query call resolves
@@ -11,12 +12,10 @@ vi.mock('../api/endpoints/knowledge', () => ({
   listSources: vi.fn(),
 }));
 
-// MET-452: KnowledgePage now reads ``useProjects`` to populate the
-// project dropdown + auto-select the newest project on first load.
-// Default mock returns "no projects exist" so existing tests keep the
-// pre-MET-452 behaviour (projectId stays ``''``, auto-select is a
-// no-op). Individual tests override via ``mockUseProjects.mockReturnValue(...)``
-// to exercise the dropdown / auto-select path.
+// KnowledgePage reads the shared active-project context (Context UI) via
+// ``useActiveProject``, which itself calls ``useProjects``. Default mock
+// returns "no projects exist" so tests that don't care about project scope
+// keep the simplest path (auto-select is a no-op with an empty list).
 const mockUseProjects = vi.fn(() => ({ data: [] as unknown[], isLoading: false }));
 vi.mock('../hooks/use-projects', () => ({
   useProjects: () => mockUseProjects(),
@@ -65,6 +64,11 @@ describe('KnowledgePage', () => {
   beforeEach(() => {
     mockListSources.mockReset();
     mockNavigate.mockReset();
+    mockUseProjects.mockReturnValue({ data: [], isLoading: false });
+    // The active-project store is global (persisted to localStorage) and
+    // shared across every page — reset it between tests so one test's
+    // selection can't leak into the next.
+    useProjectStore.setState({ activeProjectId: null, hasSelected: false });
   });
 
   it('renders empty state when no sources', async () => {
@@ -150,12 +154,42 @@ describe('KnowledgePage', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────
-  // MET-452: project dropdown + auto-select
+  // Context UI: global active-project scope (replaces the page-local
+  // project dropdown + auto-select/empty-fallback logic removed here).
   // ──────────────────────────────────────────────────────────────────────
 
-  it('auto-selects the most-recently-updated project on first load', async () => {
+  it('scopes the sources query to the shared active project', async () => {
+    useProjectStore.setState({
+      activeProjectId: '33333333-3333-3333-3333-333333333333',
+      hasSelected: true,
+    });
+    mockListSources.mockResolvedValue([SOURCE_COMPONENT]);
+
+    render(<KnowledgePage />);
+
+    await waitFor(() => {
+      expect(mockListSources).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: '33333333-3333-3333-3333-333333333333' }),
+      );
+    });
+  });
+
+  it('queries the default tenant (no project_id) when no project is active', async () => {
+    mockListSources.mockResolvedValue([SOURCE_COMPONENT]);
+
+    render(<KnowledgePage />);
+
+    await waitFor(() => {
+      expect(mockListSources).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: undefined }),
+      );
+    });
+  });
+
+  it('auto-selects the most-recently-updated project on first load, into the shared store', async () => {
     // Two projects, newer one last in array — auto-select should still
-    // pick the newest by lastUpdated, not the array order.
+    // pick the newest by lastUpdated, not the array order. This now
+    // happens once, globally, via the shared active-project store.
     mockUseProjects.mockReturnValue({
       data: [
         {
@@ -185,10 +219,6 @@ describe('KnowledgePage', () => {
 
     render(<KnowledgePage />);
 
-    // After auto-select runs, listSources should have been called with
-    // the newer project's UUID. Earlier "default tenant" call (project_id
-    // undefined) may also have fired during the initial render; we just
-    // assert the auto-selected call exists.
     await waitFor(() => {
       const calls = mockListSources.mock.calls;
       const sawAutoSelect = calls.some(
@@ -197,23 +227,21 @@ describe('KnowledgePage', () => {
       );
       expect(sawAutoSelect).toBe(true);
     });
-
-    // The dropdown's current value reflects the auto-selected project.
-    const select = screen.getByLabelText(/^project$/i) as HTMLSelectElement;
-    expect(select.value).toBe('22222222-2222-2222-2222-222222222222');
-
-    // "All projects" option is still reachable as the first option.
-    const allOption = Array.from(select.options).find((o) => o.value === '');
-    expect(allOption).toBeDefined();
-    expect(allOption?.textContent).toMatch(/all projects/i);
+    expect(useProjectStore.getState().activeProjectId).toBe(
+      '22222222-2222-2222-2222-222222222222',
+    );
   });
 
-  it('selecting "All projects" returns the picker to the default-tenant view', async () => {
+  it('does not re-auto-select once a project is already active', async () => {
+    useProjectStore.setState({
+      activeProjectId: '55555555-5555-5555-5555-555555555555',
+      hasSelected: true,
+    });
     mockUseProjects.mockReturnValue({
       data: [
         {
-          id: '33333333-3333-3333-3333-333333333333',
-          name: 'Some Project',
+          id: '22222222-2222-2222-2222-222222222222',
+          name: 'Newer Drone Kit',
           description: '',
           status: 'active',
           work_products: [],
@@ -228,109 +256,13 @@ describe('KnowledgePage', () => {
 
     render(<KnowledgePage />);
 
-    const select = (await screen.findByLabelText(/^project$/i)) as HTMLSelectElement;
-    // Wait for auto-select to land — the test before this one already
-    // covers that path; here we just need a known starting state.
     await waitFor(() => {
-      expect(select.value).toBe('33333333-3333-3333-3333-333333333333');
+      expect(mockListSources).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: '55555555-5555-5555-5555-555555555555' }),
+      );
     });
-
-    fireEvent.change(select, { target: { value: '' } });
-
-    // Visual-state assertion: the dropdown is back on "All projects".
-    // We don't assert listSources call order because react-query's
-    // refetch ordering after a queryKey change is timing-sensitive in
-    // jsdom; the wire contract (project_id passed through unchanged
-    // from state) is covered by ``filter chip narrows by knowledge_type``
-    // and the auto-select test above.
-    await waitFor(() => {
-      expect(select.value).toBe('');
-    });
-  });
-
-  // ──────────────────────────────────────────────────────────────────────
-  // MET-486: empty-project fallback
-  // ──────────────────────────────────────────────────────────────────────
-
-  it('falls back to "All projects" when the auto-selected project has no knowledge', async () => {
-    mockUseProjects.mockReturnValue({
-      data: [
-        {
-          id: '44444444-4444-4444-4444-444444444444',
-          name: 'Empty Kit',
-          description: '',
-          status: 'active',
-          work_products: [],
-          agentCount: 0,
-          lastUpdated: '2026-05-22T00:00:00Z',
-          createdAt: '2026-05-22T00:00:00Z',
-        },
-      ],
-      isLoading: false,
-    });
-    // The auto-selected project has no scoped knowledge; the default
-    // tenant ("All projects", project_id undefined) does.
-    mockListSources.mockImplementation(async (q) =>
-      q?.project_id === '44444444-4444-4444-4444-444444444444' ? [] : [SOURCE_COMPONENT],
+    expect(useProjectStore.getState().activeProjectId).toBe(
+      '55555555-5555-5555-5555-555555555555',
     );
-
-    render(<KnowledgePage />);
-
-    const select = (await screen.findByLabelText(/^project$/i)) as HTMLSelectElement;
-    // Auto-selects the project → empty → falls back to "All projects".
-    await waitFor(() => {
-      expect(select.value).toBe('');
-    });
-    // And the fallback surfaces the default-tenant sources instead of empty.
-    await waitFor(() => {
-      expect(screen.getByText(SOURCE_COMPONENT.source_path)).toBeInTheDocument();
-    });
-  });
-
-  it('does not fall back when the user deliberately picks an empty project', async () => {
-    mockUseProjects.mockReturnValue({
-      data: [
-        {
-          id: '55555555-5555-5555-5555-555555555555',
-          name: 'Has Knowledge',
-          description: '',
-          status: 'active',
-          work_products: [],
-          agentCount: 0,
-          lastUpdated: '2026-05-22T00:00:00Z',
-          createdAt: '2026-05-22T00:00:00Z',
-        },
-        {
-          id: '66666666-6666-6666-6666-666666666666',
-          name: 'Empty Project',
-          description: '',
-          status: 'active',
-          work_products: [],
-          agentCount: 0,
-          lastUpdated: '2026-01-01T00:00:00Z',
-          createdAt: '2026-01-01T00:00:00Z',
-        },
-      ],
-      isLoading: false,
-    });
-    // Newest (5555…) has knowledge → auto-select sticks; the older empty
-    // project (6666…) has none.
-    mockListSources.mockImplementation(async (q) =>
-      q?.project_id === '66666666-6666-6666-6666-666666666666' ? [] : [SOURCE_COMPONENT],
-    );
-
-    render(<KnowledgePage />);
-
-    const select = (await screen.findByLabelText(/^project$/i)) as HTMLSelectElement;
-    await waitFor(() => {
-      expect(select.value).toBe('55555555-5555-5555-5555-555555555555');
-    });
-
-    // User deliberately switches to the empty project — it must stay put.
-    fireEvent.change(select, { target: { value: '66666666-6666-6666-6666-666666666666' } });
-    await waitFor(() => {
-      expect(screen.getByText('No sources ingested yet')).toBeInTheDocument();
-    });
-    expect(select.value).toBe('66666666-6666-6666-6666-666666666666');
   });
 });
