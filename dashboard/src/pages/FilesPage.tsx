@@ -197,14 +197,6 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Static pipeline placeholder rows ─────────────────────────────────────────
-const STATIC_PIPELINE = [
-  { path: 'PRD.md',                  tool: 'other',  status: 'synced'       as FileLinkStatus },
-  { path: 'constraints.json',        tool: 'other',  status: 'synced'       as FileLinkStatus },
-  { path: 'bom.csv',                 tool: 'other',  status: 'changed'      as FileLinkStatus },
-  { path: 'schematic.kicad_sch',     tool: 'kicad',  status: 'disconnected' as FileLinkStatus },
-];
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 export function FilesPage() {
   const { activeProjectId } = useActiveProject();
@@ -235,7 +227,9 @@ export function FilesPage() {
 
   const FILTER_CHIPS = ['all', 'kicad', 'freecad', 'spice', 'other'];
 
-  // Pipeline rows: up to 7 most recent real links, or static if none
+  // Pipeline rows: up to 7 most recent real links, empty when there are none
+  // (no hardcoded fallback: it contradicted the File Links panel's honest
+  // "0 linked" empty state right above it).
   const pipelineRows = total > 0
     ? [...(links!)]
         .sort((a, b) => {
@@ -244,7 +238,7 @@ export function FilesPage() {
           return tb - ta;
         })
         .slice(0, 7)
-    : null;
+    : [];
 
   return (
     <div>
@@ -437,85 +431,59 @@ export function FilesPage() {
               <PanelLabel>Sync Pipeline</PanelLabel>
             </div>
 
-            {pipelineRows
-              ? pipelineRows.map(link => (
-                  <div
-                    key={link.id}
+            {pipelineRows.length === 0 ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '32px 0',
+                  minHeight: 120,
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 28, color: '#9a9aaa', opacity: 0.4 }}>
+                  sync_disabled
+                </span>
+                <span style={{ fontSize: 12, color: '#9a9aaa' }}>No sync activity yet</span>
+              </div>
+            ) : (
+              pipelineRows.map(link => (
+                <div
+                  key={link.id}
+                  style={{
+                    height: 36,
+                    padding: '0 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    borderBottom: '1px solid rgba(65,72,90,0.06)',
+                  }}
+                >
+                  <span
+                    title={link.file_path}
                     style={{
-                      height: 36,
-                      padding: '0 16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      borderBottom: '1px solid rgba(65,72,90,0.06)',
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: '#d4d4d8',
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      minWidth: 0,
                     }}
                   >
-                    <span
-                      title={link.file_path}
-                      style={{
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: '#d4d4d8',
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                      }}
-                    >
-                      {link.file_path}
-                    </span>
-                    <ToolChip tool={link.tool} />
-                    <StatusDot status={link.status} />
-                    <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9aaa', whiteSpace: 'nowrap' }}>
-                      {link.last_synced_at ? formatRelative(link.last_synced_at) : '—'}
-                    </span>
-                  </div>
-                ))
-              : STATIC_PIPELINE.map((row, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      height: 36,
-                      padding: '0 16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      borderBottom: '1px solid rgba(65,72,90,0.06)',
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: '#d4d4d8',
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {row.path}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: 'monospace',
-                        fontSize: 10,
-                        color: TOOL_CHIP[row.tool]?.color ?? '#9a9aaa',
-                        background: TOOL_CHIP[row.tool]?.bg ?? 'rgba(154,154,170,0.1)',
-                        padding: '2px 6px',
-                        borderRadius: 3,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                      }}
-                    >
-                      {row.tool}
-                    </span>
-                    <StatusDot status={row.status} />
-                    <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9aaa' }}>—</span>
-                  </div>
-                ))
-            }
+                    {link.file_path}
+                  </span>
+                  <ToolChip tool={link.tool} />
+                  <StatusDot status={link.status} />
+                  <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#9a9aaa', whiteSpace: 'nowrap' }}>
+                    {link.last_synced_at ? formatRelative(link.last_synced_at) : '—'}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 

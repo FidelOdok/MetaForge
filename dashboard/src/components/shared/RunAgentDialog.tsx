@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { StatusBadge } from './StatusBadge';
 import { useSubmitRequest, useRunStatus } from '../../hooks/use-assistant';
-import { useProjects } from '../../hooks/use-projects';
+import { useActiveProject } from '../../hooks/use-active-project';
 
 const ACTIONS = [
   { value: 'validate_stress', label: 'Validate Stress' },
@@ -19,14 +19,32 @@ interface RunAgentDialogProps {
 
 export function RunAgentDialog({ onClose }: RunAgentDialogProps) {
   const [action, setAction] = useState(ACTIONS[0]!.value);
-  const [projectId, setProjectId] = useState('');
   const [targetId, setTargetId] = useState('');
   const [runId, setRunId] = useState<string | undefined>();
-  const { data: projects } = useProjects();
-  const selectedProject = projects?.find((p) => p.id === projectId);
+  const { activeProjectId, projects } = useActiveProject();
+  // Pre-fill from the Topbar's active-project context (Context UI), but
+  // keep it a local, overridable field — the same pattern as the Design
+  // Assistant's project field, since this needs one specific project.
+  const [projectId, setProjectId] = useState(activeProjectId ?? '');
+  const selectedProject = projects.find((p) => p.id === projectId);
   const workProducts = selectedProject?.work_products ?? [];
   const submit = useSubmitRequest();
   const { data: runStatus } = useRunStatus(runId);
+
+  // Lock body scroll and support Escape-to-close while the dialog is open,
+  // so it actually behaves like a blocking modal.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onClose]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,10 +66,19 @@ export function RunAgentDialog({ onClose }: RunAgentDialogProps) {
   const isDone = runStatus?.status === 'completed' || runStatus?.status === 'failed';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="run-agent-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+      >
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+          <h3 id="run-agent-dialog-title" className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
             Run Agent
           </h3>
           <button

@@ -5,6 +5,16 @@ vi.mock('../../hooks/use-bom', () => ({
   useBom: vi.fn(),
 }));
 
+const mockUseActiveProject = vi.fn(() => ({
+  activeProjectId: null as string | null,
+  activeProject: undefined,
+  setActiveProjectId: vi.fn(),
+  projects: [] as unknown[],
+}));
+vi.mock('../../hooks/use-active-project', () => ({
+  useActiveProject: () => mockUseActiveProject(),
+}));
+
 vi.mock('../../hooks/use-scoped-chat', () => ({
   useScopedChat: () => ({
     thread: null,
@@ -35,6 +45,19 @@ describe('BomPage', () => {
     mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
     render(<BomPage />);
     expect(screen.getByText('No components')).toBeInTheDocument();
+  });
+
+  it('does not claim no project is loaded when one actually is', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'p1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
+    render(<BomPage />);
+    expect(screen.getByText('This project has no BOM components yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/when a project is loaded/)).not.toBeInTheDocument();
   });
 
   it('renders BOM table', () => {

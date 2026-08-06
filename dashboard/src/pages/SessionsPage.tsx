@@ -179,14 +179,6 @@ function sessionToDagStatus(status: AgentSession['status']): DagNodeStatus {
   return 'QUEUED';
 }
 
-const STATIC_DAG_NODES: DagNode[] = [
-  { label: 'spec', status: 'DONE' },
-  { label: 'architecture', status: 'DONE' },
-  { label: 'schematic', status: 'RUNNING' },
-  { label: 'bom', status: 'QUEUED' },
-  { label: 'test-plan', status: 'QUEUED' },
-];
-
 function DagPanel({ sessions }: { sessions: AgentSession[] }) {
   const runningSessions = sessions.filter((s) => s.status === 'running');
   const activeLabel =
@@ -196,13 +188,41 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
 
   const isRunning = runningSessions.length > 0;
 
-  const nodes: DagNode[] =
-    sessions.length > 0
-      ? sessions.slice(0, 5).map((s) => ({
-          label: s.taskType.replace(/_/g, '-'),
-          status: sessionToDagStatus(s.status),
-        }))
-      : STATIC_DAG_NODES;
+  const nodes: DagNode[] = sessions.slice(0, 5).map((s) => ({
+    label: s.taskType.replace(/_/g, '-'),
+    status: sessionToDagStatus(s.status),
+  }));
+
+  if (sessions.length === 0) {
+    return (
+      <div style={{ ...glassPanel }}>
+        <div style={{ ...panelHeader, justifyContent: 'space-between' }}>
+          <span
+            style={{
+              fontFamily: 'Roboto Mono, monospace',
+              fontSize: 10,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: KC.onSurfaceVariant,
+            }}
+          >
+            ACTIVE WORKFLOW
+          </span>
+        </div>
+        <div
+          className="flex flex-col items-center justify-center gap-2"
+          style={{ minHeight: 160, padding: 16 }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 28, color: KC.onSurfaceVariant, opacity: 0.4 }}>
+            account_tree
+          </span>
+          <span style={{ fontFamily: 'Roboto Mono, monospace', fontSize: 11, color: KC.onSurfaceVariant }}>
+            No workflow runs yet
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ ...glassPanel }}>
@@ -317,13 +337,6 @@ function logLevelLabel(status: AgentSession['status']): string {
   return status === 'failed' ? 'ERROR' : 'INFO';
 }
 
-const STATIC_LOG_LINES = [
-  { ts: '12:04:01', level: 'INFO', msg: 'Workflow spec→bom started — runId wf_0x1a2b3c' },
-  { ts: '12:04:02', level: 'INFO', msg: 'Agent requirements-agent picked up task spec' },
-  { ts: '12:04:18', level: 'INFO', msg: 'Task spec completed in 16s — status DONE' },
-  { ts: '12:04:19', level: 'WARN', msg: 'schematic agent retrying — tool timeout (attempt 1/3)' },
-];
-
 function ExecutionLogPanel({ sessions }: { sessions: AgentSession[] }) {
   return (
     <div style={{ ...glassPanel }}>
@@ -370,47 +383,21 @@ function ExecutionLogPanel({ sessions }: { sessions: AgentSession[] }) {
           lineHeight: 1.8,
         }}
       >
-        {sessions.length > 0
-          ? sessions.map((s) => (
-              <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span style={{ color: KC.onSurfaceVariant, flexShrink: 0 }}>
-                  {new Date(s.startedAt).toLocaleTimeString('en-GB', { hour12: false })}
-                </span>
-                <span style={logBadgeStyle(s.status)}>{logLevelLabel(s.status)}</span>
-                <span style={{ color: KC.onSurface }}>
-                  [{s.agentCode}] Task {s.taskType.replace(/_/g, '-')} — {s.status}
-                </span>
-              </div>
-            ))
-          : STATIC_LOG_LINES.map((line, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span style={{ color: KC.onSurfaceVariant, flexShrink: 0 }}>{line.ts}</span>
-                <span
-                  style={{
-                    background:
-                      line.level === 'ERROR'
-                        ? 'rgba(255,180,171,0.12)'
-                        : line.level === 'WARN'
-                        ? 'rgba(255,200,120,0.12)'
-                        : 'rgba(134,207,255,0.12)',
-                    color:
-                      line.level === 'ERROR'
-                        ? '#ffb4ab'
-                        : line.level === 'WARN'
-                        ? '#ffc878'
-                        : '#86cfff',
-                    padding: '0 5px',
-                    borderRadius: 3,
-                    fontSize: 9,
-                    letterSpacing: '0.06em',
-                    flexShrink: 0,
-                  }}
-                >
-                  {line.level}
-                </span>
-                <span style={{ color: KC.onSurface }}>{line.msg}</span>
-              </div>
-            ))}
+        {sessions.length > 0 ? (
+          sessions.map((s) => (
+            <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+              <span style={{ color: KC.onSurfaceVariant, flexShrink: 0 }}>
+                {new Date(s.startedAt).toLocaleTimeString('en-GB', { hour12: false })}
+              </span>
+              <span style={logBadgeStyle(s.status)}>{logLevelLabel(s.status)}</span>
+              <span style={{ color: KC.onSurface }}>
+                [{s.agentCode}] Task {s.taskType.replace(/_/g, '-')} — {s.status}
+              </span>
+            </div>
+          ))
+        ) : (
+          <div style={{ color: KC.onSurfaceVariant, opacity: 0.7 }}>No execution log yet</div>
+        )}
       </div>
     </div>
   );

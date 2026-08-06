@@ -271,7 +271,11 @@ export function BomPage() {
       {!isLoading && items.length === 0 && (
         <EmptyState
           title="No components"
-          description="BOM components will appear here when a project is loaded."
+          description={
+            activeProjectId
+              ? 'This project has no BOM components yet.'
+              : 'Select a project, or run an agent, to populate the bill of materials.'
+          }
         />
       )}
 
