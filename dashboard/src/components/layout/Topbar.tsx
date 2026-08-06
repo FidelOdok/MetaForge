@@ -19,6 +19,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   files:     'Files',
   knowledge: 'Knowledge',
   assistant: 'Design Assistant',
+  compliance: 'Compliance',
 };
 
 // ---------------------------------------------------------------------------
