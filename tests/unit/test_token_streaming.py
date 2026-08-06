@@ -2,7 +2,7 @@
 
 Covers the event-stream adapters (text deltas + fragmented tool-call
 assembly), the pipeline's first-event failover contract, and the native
-loop's on_thinking forwarding with invoke fallback.
+loop's on_stream_event forwarding with invoke fallback.
 """
 
 from __future__ import annotations
@@ -167,8 +167,9 @@ async def test_native_loop_streams_thinking_and_uses_response() -> None:
 
     thoughts: list[str] = []
 
-    async def on_thinking(delta: str) -> None:
-        thoughts.append(delta)
+    async def on_stream_event(event: dict[str, Any]) -> None:
+        if event["type"] == "text_delta":
+            thoughts.append(event["text"])
 
     async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
         raise AssertionError("invoke must not be called when streaming succeeds")
@@ -178,7 +179,7 @@ async def test_native_loop_streams_thinking_and_uses_response() -> None:
         "go",
         invoke=invoke,
         max_steps=4,
-        on_thinking=on_thinking,
+        on_stream_event=on_stream_event,
         stream_events=fake_stream_events,
     )
     assert result.status == "completed" and result.output == "done!"
@@ -194,7 +195,7 @@ async def test_native_loop_falls_back_to_invoke_when_streaming_fails() -> None:
         raise StreamingUnsupported(spec.name)
         yield {}
 
-    async def on_thinking(delta: str) -> None:
+    async def on_stream_event(event: dict[str, Any]) -> None:
         return None
 
     async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
@@ -205,7 +206,7 @@ async def test_native_loop_falls_back_to_invoke_when_streaming_fails() -> None:
         "go",
         invoke=invoke,
         max_steps=2,
-        on_thinking=on_thinking,
+        on_stream_event=on_stream_event,
         stream_events=broken_stream,
     )
     assert result.status == "completed" and result.output == "fallback answer"
@@ -227,3 +228,135 @@ async def test_no_thinking_callback_keeps_invoke_path() -> None:
         rt, "go", invoke=invoke, max_steps=2, stream_events=fake_stream_events
     )
     assert result.output == "via invoke" and streamed["n"] == 0
+
+
+# --- MET-592: typed events -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_openai_events_announce_action_at_first_named_fragment() -> None:
+    client = _FakeOpenAI(
+        [
+            _chunk(content="hmm "),
+            _chunk(tool_calls=[_tc(0, id="c1", name="freecad_pad", args='{"le')]),
+            _chunk(tool_calls=[_tc(0, args='n": 5}')]),
+        ]
+    )
+    events = [
+        e
+        async for e in openai_stream_events(
+            SPEC,
+            {"messages": [{"role": "user", "content": "go"}], "tools": [{}]},
+            client=client,
+        )
+    ]
+    types = [e["type"] for e in events]
+    # action announced right after its name arrives, BEFORE args complete.
+    assert types == ["text_delta", "action_started", "response"]
+    assert events[1]["name"] == "freecad_pad"
+    assert events[-1]["result"]["tool_calls"][0]["arguments"] == {"len": 5}
+
+
+class _FakeAnthropicStream:
+    """messages.stream(...) double yielding raw typed events."""
+
+    def __init__(self, events: list[Any], final: Any) -> None:
+        self._events = events
+        self._final = final
+
+    def __call__(self, **kwargs: Any) -> Any:
+        return self
+
+    async def __aenter__(self) -> Any:
+        return self
+
+    async def __aexit__(self, *a: Any) -> bool:
+        return False
+
+    def __aiter__(self) -> Any:
+        async def _gen():
+            for e in self._events:
+                yield e
+
+        return _gen()
+
+    async def get_final_message(self) -> Any:
+        return self._final
+
+
+@pytest.mark.asyncio
+async def test_anthropic_events_type_thinking_text_and_action() -> None:
+    from orchestrator.harness.providers.adapters import anthropic_stream_events
+
+    raw = [
+        SimpleNamespace(
+            type="content_block_delta",
+            delta=SimpleNamespace(type="thinking_delta", thinking="plan: pad the sketch"),
+        ),
+        SimpleNamespace(
+            type="content_block_delta",
+            delta=SimpleNamespace(type="text_delta", text="I'll pad it now."),
+        ),
+        SimpleNamespace(
+            type="content_block_start",
+            content_block=SimpleNamespace(type="tool_use", name="freecad_pad_sketch"),
+        ),
+    ]
+    final = SimpleNamespace(
+        model="claude-x",
+        content=[
+            SimpleNamespace(type="text", text="I'll pad it now."),
+            SimpleNamespace(type="tool_use", id="t1", name="freecad_pad_sketch", input={"len": 5}),
+        ],
+    )
+    stream = _FakeAnthropicStream(raw, final)
+    client = SimpleNamespace(messages=SimpleNamespace(stream=stream))
+    spec = ProviderSpec(name="anthropic", model="claude-x", api_key="k")
+    events = [
+        e
+        async for e in anthropic_stream_events(
+            spec, {"messages": [{"role": "user", "content": "go"}]}, client=client
+        )
+    ]
+    assert [e["type"] for e in events] == [
+        "thinking_delta",
+        "text_delta",
+        "action_started",
+        "response",
+    ]
+    assert events[0]["text"] == "plan: pad the sketch"
+    assert events[2]["name"] == "freecad_pad_sketch"
+    assert events[-1]["result"]["tool_calls"][0]["name"] == "freecad_pad_sketch"
+
+
+@pytest.mark.asyncio
+async def test_loop_forwards_typed_events(tmp_path: Any) -> None:
+    rt = HarnessRuntime.build(CONFIG)
+    seen: list[tuple[str, str]] = []
+
+    async def fake_stream_events(spec: ProviderSpec, request: Any):
+        yield {"type": "thinking_delta", "text": "reasoning..."}
+        yield {"type": "action_started", "name": "echo"}
+        yield {"type": "text_delta", "text": "answer"}
+        yield {"type": "response", "result": {"text": "answer", "model": spec.model}}
+
+    async def on_stream_event(event: dict[str, Any]) -> None:
+        seen.append((event["type"], event.get("text") or event.get("name") or ""))
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        raise AssertionError("streaming path expected")
+
+    result = await run_native_tools(
+        rt,
+        "go",
+        invoke=invoke,
+        max_steps=2,
+        on_stream_event=on_stream_event,
+        stream_events=fake_stream_events,
+    )
+    assert result.output == "answer"
+    assert seen == [
+        ("thinking_delta", "reasoning..."),
+        ("action_started", "echo"),
+        ("text_delta", "answer"),
+    ]

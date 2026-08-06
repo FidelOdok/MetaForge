@@ -790,7 +790,8 @@ async def run_chat_turn_streaming(
     *,
     on_delta: Callable[[str], Awaitable[None]],
     on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    on_thinking: Callable[[str], Awaitable[None]] | None = None,
+    on_thinking: Callable[[str, str], Awaitable[None]] | None = None,
+    on_action_started: Callable[[str], Awaitable[None]] | None = None,
     on_context: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
@@ -872,6 +873,20 @@ async def run_chat_turn_streaming(
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_failed", error=str(exc))
 
+    # MET-591/592: fan typed provider-stream events out to the dedicated
+    # notifier callbacks. None when no observer wants them (streaming off).
+    stream_event_cb: Any = None
+    if on_thinking is not None or on_action_started is not None:
+
+        async def stream_event_cb(event: dict[str, Any]) -> None:
+            etype = event.get("type")
+            if etype == "text_delta" and on_thinking is not None:
+                await on_thinking(str(event.get("text", "")), "draft")
+            elif etype == "thinking_delta" and on_thinking is not None:
+                await on_thinking(str(event.get("text", "")), "reasoning")
+            elif etype == "action_started" and on_action_started is not None:
+                await on_action_started(str(event.get("name", "")))
+
     # MET-590: stream each step AS IT HAPPENS. Long agentic turns (multi-part
     # CAD builds) previously emitted their whole trace only after the loop —
     # clients saw nothing for minutes, and their hard request timeouts killed
@@ -900,11 +915,11 @@ async def run_chat_turn_streaming(
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
             on_step=live_step,
-            # MET-591: token-level liveness — text deltas stream to the client
-            # while each model call generates (event-streaming providers only;
-            # unsupported families fall back to the non-streaming invoke).
-            on_thinking=on_thinking,
-            stream_events=default_stream_events if on_thinking is not None else None,
+            # MET-591/592: token-level liveness — typed deltas stream to the
+            # client while each model call generates (event-streaming
+            # providers only; others fall back to the non-streaming invoke).
+            on_stream_event=stream_event_cb,
+            stream_events=default_stream_events if stream_event_cb is not None else None,
         )
     else:
         policy = ModelPolicy(
