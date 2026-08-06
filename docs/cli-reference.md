@@ -122,6 +122,30 @@ forge chat -m "what's in this project?" --project "Monitor Build Demo"
 | `/help` | List the slash commands |
 | `Esc` | Quit |
 
+### What it looks like
+
+Real captures from the compiled binary (`tmux` driving `forge` against a live
+gateway) — not mockups.
+
+**Launch** — the welcome screen, a message composed and ready to send:
+
+![The forge TUI welcome screen, showing the banner, keybinding hints, and a message typed into the input box](assets/tui/welcome.png)
+
+**A turn in progress** — the model calls a tool, then answers. This is the
+literal answer to "Tell me about the Quadruped Robot project": one
+`project.get`-style call, then a formatted response using what it returned.
+
+![Animated capture of a forge TUI chat turn: typing a question, a tool call streaming in with a spinner, then the final formatted answer](assets/tui/chat-demo.gif)
+
+The same turn once it settles, so the tool-call trace and the full answer are
+both visible at once:
+
+![A completed forge TUI chat turn, showing the tool call line and the full formatted answer below it](assets/tui/chat-answer.png)
+
+**The Runs pane** (`^R`) — same footer, different content pane:
+
+![The forge TUI Runs pane, empty, with a hint to press ^N or run `forge runs create`](assets/tui/runs-pane.png)
+
 ### What "project" in the status line means
 
 The project segment of the status footer is the **scope of the live chat thread**

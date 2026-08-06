@@ -103,6 +103,8 @@ dashboard/test-results/
 
 # Screenshots (test/debug artifacts)
 *.png
+# ...except committed documentation images (docs/assets/).
+!docs/assets/**/*.png
 
 # Playwright MCP logs
 .playwright-mcp/
