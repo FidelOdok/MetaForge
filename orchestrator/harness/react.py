@@ -67,6 +67,9 @@ class ReActResult:
     status: str  # "completed" | "exhausted"
     output: Any | None
     steps: list[ReActStep]
+    # MET-596: summed provider-reported token usage across the turn's model
+    # calls ({input_tokens, output_tokens}); None when no call reported usage.
+    usage: dict[str, int] | None = None
 
 
 class ReActParseError(Exception):

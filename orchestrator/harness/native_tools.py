@@ -118,6 +118,17 @@ async def run_native_tools(
     tools = _tool_schemas(runtime)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
+    # MET-596: sum provider-reported usage across the turn's model calls.
+    usage_total = {"input_tokens": 0, "output_tokens": 0}
+    usage_seen = False
+
+    def _tally(resp: Any) -> None:
+        nonlocal usage_seen
+        u = resp.get("usage") if isinstance(resp, dict) else None
+        if isinstance(u, dict):
+            usage_seen = True
+            usage_total["input_tokens"] += int(u.get("input_tokens", 0) or 0)
+            usage_total["output_tokens"] += int(u.get("output_tokens", 0) or 0)
 
     async def _emit(step: ReActStep) -> None:
         # MET-590: live progress — a broken observer must never break the turn.
@@ -164,12 +175,18 @@ async def run_native_tools(
         if max_context_tokens is not None:
             messages = compact_native_messages(messages, max_tokens=max_context_tokens)
         resp = await _model_call({"system": system, "messages": messages, "tools": tools})
+        _tally(resp)
         text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
         calls = resp.get("tool_calls") if isinstance(resp, dict) else None
 
         if not calls:
             logger.info("native_tools_completed", steps=step_no)
-            return ReActResult(status="completed", output=text, steps=steps)
+            return ReActResult(
+                status="completed",
+                output=text,
+                steps=steps,
+                usage=usage_total if usage_seen else None,
+            )
 
         # Record the assistant turn (with its tool calls) so the next request has
         # the full history the provider expects.
@@ -218,6 +235,12 @@ async def run_native_tools(
         }
     )
     resp = await _model_call({"system": system, "messages": messages})
+    _tally(resp)
     final = resp.get("text", "") if isinstance(resp, dict) else str(resp)
     logger.info("native_tools_finalized", steps=max_steps)
-    return ReActResult(status="completed", output=final, steps=steps)
+    return ReActResult(
+        status="completed",
+        output=final,
+        steps=steps,
+        usage=usage_total if usage_seen else None,
+    )

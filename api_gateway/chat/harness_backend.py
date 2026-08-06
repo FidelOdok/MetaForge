@@ -957,6 +957,10 @@ async def run_chat_turn_streaming(
             )
             final_stats["phase"] = "final"
             final_stats["trace_tokens"] = trace_tokens
+            # MET-596: real provider-reported token usage for the whole turn
+            # (summed across the loop's model calls), alongside the estimates.
+            if getattr(result, "usage", None):
+                final_stats["usage"] = result.usage
             final_stats["used"] = int(final_stats.get("used", 0)) + trace_tokens
             final_stats["available"] = max(
                 0, int(final_stats.get("window", 0)) - int(final_stats["used"])
