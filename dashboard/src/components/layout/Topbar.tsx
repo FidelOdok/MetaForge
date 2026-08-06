@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { RunAgentDialog } from '../shared/RunAgentDialog';
+import { ProjectSwitcher } from '../shared/ProjectSwitcher';
 import { useProjects } from '../../hooks/use-projects';
 import { useSessions } from '../../hooks/use-sessions';
 
@@ -133,6 +134,7 @@ export function Topbar() {
 
         {/* Right-side actions */}
         <div className="flex items-center gap-2">
+          <ProjectSwitcher />
           <button
             type="button"
             onClick={() => setRunDialogOpen(true)}

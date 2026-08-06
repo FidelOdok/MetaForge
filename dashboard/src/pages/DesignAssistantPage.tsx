@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSubmitRequest, useRunStatus } from '../hooks/use-assistant';
-import { useProjects } from '../hooks/use-projects';
+import { useActiveProject } from '../hooks/use-active-project';
 import { AssistantChat } from '../components/chat/AssistantChat';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -458,12 +458,30 @@ export function DesignAssistantPage() {
   const [prompt, setPrompt] = useState('');
   const [action, setAction] = useState<string>(ACTIONS[0].value);
   const [projectId, setProjectId] = useState<string>('');
+  // Tracks whether the user has touched the Project field directly, so the
+  // one-time pre-fill from the global active project (Context UI) never
+  // clobbers a deliberate choice.
+  const [projectTouched, setProjectTouched] = useState(false);
   const [targetId, setTargetId] = useState<string>('');
   const [runId, setRunId] = useState<string | undefined>(undefined);
 
-  const { data: projects } = useProjects();
+  const { activeProjectId, projects } = useActiveProject();
   const submitRequest = useSubmitRequest();
   const { data: runStatus } = useRunStatus(runId);
+
+  // Pre-fill the required Project field from the shared active-project
+  // context (this form needs one specific project, not "All projects", so
+  // it stays a local, overridable field rather than reading the context
+  // directly like the filter-style pickers on other pages).
+  useEffect(() => {
+    if (projectTouched || projectId) return;
+    if (activeProjectId) setProjectId(activeProjectId);
+  }, [activeProjectId, projectTouched, projectId]);
+
+  function handleProjectChange(value: string) {
+    setProjectTouched(true);
+    setProjectId(value);
+  }
 
   const isRunning =
     runStatus?.status === 'running' || runStatus?.status === 'pending';
@@ -577,7 +595,7 @@ export function DesignAssistantPage() {
                 <KCSelect
                   id="project-select"
                   value={projectId}
-                  onChange={setProjectId}
+                  onChange={handleProjectChange}
                   disabled={!!runId}
                 >
                   <option value="">Select a project...</option>

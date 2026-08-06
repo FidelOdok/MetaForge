@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
-import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
+import { useActiveProject } from '../hooks/use-active-project';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
@@ -275,8 +275,8 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
 
 // ─── ApprovalsPage ───────────────────────────────────────────────────────────
 export function ApprovalsPage() {
-  const [projectId, setProjectId] = useState('');
-  const { data, isLoading } = useProposals(projectId || undefined);
+  const { activeProjectId } = useActiveProject();
+  const { data, isLoading } = useProposals(activeProjectId ?? undefined);
 
   if (isLoading) {
     return (
@@ -332,7 +332,6 @@ export function ApprovalsPage() {
           </span>
         </div>
         <div className="flex items-center gap-2" style={{ marginTop: 3 }}>
-          <ProjectScopePicker value={projectId} onChange={setProjectId} />
           <span
             className="font-mono rounded px-2 py-0.5"
             style={{
