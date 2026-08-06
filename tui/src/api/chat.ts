@@ -128,10 +128,16 @@ export async function* streamThread(
   threadId: string,
   signal: AbortSignal,
   onOpen?: () => void,
+  // MET-593: resume cursor shared across reconnects — the caller keeps one
+  // object per conversation; we read lastId on connect and update it as
+  // id-stamped events arrive, so a reconnect replays exactly the gap.
+  resume?: { lastId: string | null },
 ): AsyncGenerator<ChatEvent> {
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  if (resume?.lastId) headers["Last-Event-ID"] = resume.lastId;
   const res = await fetch(`${base}/v1/chat/threads/${threadId}/stream`, {
     signal,
-    headers: { Accept: "text/event-stream" },
+    headers,
   });
   if (!res.ok || !res.body) throw new Error(`chat stream -> ${res.status}`);
   onOpen?.();
@@ -148,6 +154,10 @@ export async function* streamThread(
       const raw = buf.slice(0, sep);
       buf = buf.slice(sep + 2);
       log.debug("sse.frame", { raw });
+      if (resume) {
+        const idLine = raw.split("\n").find((l) => l.startsWith("id:"));
+        if (idLine) resume.lastId = idLine.slice(3).trim();
+      }
       const ev = parseEvent(raw);
       // A delta event that parsed to no text is the fingerprint of an SSE
       // payload/parse mismatch — surface it loudly rather than silently drop it.

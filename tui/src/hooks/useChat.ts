@@ -254,7 +254,9 @@ export function useChat(
       priorScope.current = effective;
 
       // 2. Stream, reconnecting on drop. The thread lives server-side, so on a
-      //    network blip we just reattach to its stream.
+      //    network blip we just reattach to its stream — resuming from the
+      //    last received event id so the gap is replayed, not lost (MET-593).
+      const resume: { lastId: string | null } = { lastId: null };
       wait = 500;
       while (alive) {
         try {
@@ -265,7 +267,13 @@ export function useChat(
             setStatus(thinkingRef.current ? "thinking" : "idle");
             log.info("chat.stream_connected", { threadId });
           };
-          for await (const ev of streamThread(client.baseUrl(), threadId, controller.signal, onOpen)) {
+          for await (const ev of streamThread(
+            client.baseUrl(),
+            threadId,
+            controller.signal,
+            onOpen,
+            resume,
+          )) {
             if (!alive) break;
             statsRef.current.events += 1;
             pokeIdle(); // MET-590: any event = progress; keep the turn alive
