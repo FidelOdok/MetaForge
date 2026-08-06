@@ -51,7 +51,8 @@ export interface ScopeChanged {
 
 export type ChatEvent =
   | { type: "message.delta"; delta: string }
-  | { type: "agent.thinking"; delta: string }
+  | { type: "agent.thinking"; delta: string; kind: "draft" | "reasoning" }
+  | { type: "agent.action_started"; tool: string }
   | { type: "agent.step"; step: AgentStep }
   | { type: "context.stats"; stats: ContextStats }
   | { type: "scope.changed"; scope: ScopeChanged }
@@ -84,9 +85,17 @@ export function parseEvent(raw: string): ChatEvent | null {
     case "message.delta":
       return { type: "message.delta", delta: String(data.delta ?? "") };
     case "agent.thinking":
-      // MET-591: live model-text deltas while a step generates — ephemeral
-      // (renders in the thinking line; the final message stays authoritative).
-      return { type: "agent.thinking", delta: String(data.delta ?? "") };
+      // MET-591/592: live typed model-text deltas — ephemeral (renders in
+      // the thinking line; the final message stays authoritative).
+      return {
+        type: "agent.thinking",
+        delta: String(data.delta ?? ""),
+        kind: data.kind === "reasoning" ? "reasoning" : "draft",
+      };
+    case "agent.action_started":
+      // MET-592: the model committed to a tool call — name known before
+      // arguments finish streaming or execution starts.
+      return { type: "agent.action_started", tool: String(data.tool ?? "") };
     case "agent.step":
       return { type: "agent.step", step: (data.step as AgentStep) ?? {} };
     case "context.stats":

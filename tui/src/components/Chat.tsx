@@ -225,7 +225,7 @@ export function Chat({
           completion. */}
       {pending ? (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
-          {pending.steps.length || pending.thinking ? (
+          {pending.steps.length || pending.thinking || pending.startedAction ? (
             <Box flexDirection="column">
               <Text dimColor>· thinking</Text>
               <Box marginLeft={1} flexDirection="column">
@@ -234,6 +234,9 @@ export function Chat({
                   <Text dimColor wrap="truncate-end">
                     {pending.thinking.slice(-600)}
                   </Text>
+                ) : null}
+                {pending.startedAction ? (
+                  <Text color="yellow">→ calling {pending.startedAction} …</Text>
                 ) : null}
               </Box>
             </Box>

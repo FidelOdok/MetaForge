@@ -21,7 +21,12 @@ export interface UseChat {
   error: string | null;
   messages: ChatMessage[];
   /** In-flight assistant turn (text + tool steps), or null when idle. */
-  pending: { text: string; steps: AgentStep[]; thinking?: string } | null;
+  pending: {
+    text: string;
+    steps: AgentStep[];
+    thinking?: string;
+    startedAction?: string;
+  } | null;
   /** Most recent per-turn context-window snapshot, or null before the first turn. */
   contextStats: ContextStats | null;
   /**
@@ -54,7 +59,12 @@ export function useChat(
   const [status, setStatus] = useState<ChatStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [pending, setPending] = useState<{ text: string; steps: AgentStep[]; thinking?: string } | null>(
+  const [pending, setPending] = useState<{
+    text: string;
+    steps: AgentStep[];
+    thinking?: string;
+    startedAction?: string;
+  } | null>(
     null,
   );
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
@@ -64,11 +74,12 @@ export function useChat(
   // Scope of the previous thread, so a *change* can be announced in the
   // transcript while the first thread of a session stays quiet.
   const priorScope = useRef<ChatScope | null>(null);
-  const bufRef = useRef<{ text: string; steps: AgentStep[]; thinking: string }>({
-    text: "",
-    steps: [],
-    thinking: "",
-  });
+  const bufRef = useRef<{
+    text: string;
+    steps: AgentStep[];
+    thinking: string;
+    startedAction: string;
+  }>({ text: "", steps: [], thinking: "", startedAction: "" });
   const statsRef = useRef<TurnStats>(newTurnStats());
   const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
   const turnSeq = useRef(0); // bumped per send; guards the fallback finalizer against a stale turn
@@ -94,6 +105,7 @@ export function useChat(
       text: bufRef.current.text,
       steps: [...bufRef.current.steps],
       thinking: bufRef.current.thinking,
+      startedAction: bufRef.current.startedAction,
     });
   };
   const scheduleFlush = () => {
@@ -164,7 +176,7 @@ export function useChat(
       fallback: fallback ?? null,
     });
     setMessages((m) => [...m, { role: "assistant", text: buf.text, steps: buf.steps, reason }]);
-    bufRef.current = { text: "", steps: [], thinking: "" };
+    bufRef.current = { text: "", steps: [], thinking: "", startedAction: "" };
     statsRef.current = newTurnStats();
     setPending(null);
     setStatus("idle");
@@ -269,8 +281,14 @@ export function useChat(
                 if (!thinkingRef.current) break;
                 bufRef.current.steps.push(ev.step);
                 // The step carries the full thought this draft belonged to —
-                // clear the live draft so the next call streams fresh.
+                // clear the live draft + started-action marker.
                 bufRef.current.thinking = "";
+                bufRef.current.startedAction = "";
+                scheduleFlush();
+                break;
+              case "agent.action_started":
+                if (!thinkingRef.current) break;
+                bufRef.current.startedAction = ev.tool;
                 scheduleFlush();
                 break;
               case "agent.thinking":
@@ -354,12 +372,12 @@ export function useChat(
       const myTurn = (turnSeq.current += 1);
       if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
       setMessages((m) => [...m, { role: "user", text: content }]);
-      bufRef.current = { text: "", steps: [], thinking: "" };
+      bufRef.current = { text: "", steps: [], thinking: "", startedAction: "" };
       statsRef.current = newTurnStats();
       thinkingRef.current = true;
       turnAbort.current = new AbortController();
       pokeIdle(); // arm the idle watchdog for this turn
-      setPending({ text: "", steps: [], thinking: "" });
+      setPending({ text: "", steps: [], thinking: "", startedAction: "" });
       setStatus("thinking");
       log.info("chat.send", { threadId, chars: content.length, model, provider });
 

@@ -100,7 +100,7 @@ async def run_native_tools(
     history: list[dict[str, Any]] | None = None,
     max_context_tokens: int | None = None,
     on_step: OnStep | None = None,
-    on_thinking: Callable[[str], Awaitable[None]] | None = None,
+    on_stream_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     stream_events: StreamEvents | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
@@ -128,14 +128,14 @@ async def run_native_tools(
         except Exception as exc:  # noqa: BLE001 - observer is best-effort
             logger.warning("native_on_step_failed", error=str(exc))
 
-    async def _think(delta: str) -> None:
-        # MET-591: token-level liveness — never breaks the turn.
-        if on_thinking is None:
+    async def _forward(event: dict[str, Any]) -> None:
+        # MET-591/592: token-level liveness, typed — never breaks the turn.
+        if on_stream_event is None:
             return
         try:
-            await on_thinking(delta)
+            await on_stream_event(event)
         except Exception as exc:  # noqa: BLE001 - observer is best-effort
-            logger.warning("native_on_thinking_failed", error=str(exc))
+            logger.warning("native_on_stream_event_failed", error=str(exc))
 
     async def _model_call(request: dict[str, Any]) -> Any:
         """One model call: event-streaming when wired (text deltas flow to
@@ -143,15 +143,16 @@ async def run_native_tools(
         A streaming failure (unsupported family, mid-negotiation error) falls
         back to the invoke path — behavior then matches the pre-MET-591 loop.
         """
-        if stream_events is None or on_thinking is None:
+        if stream_events is None or on_stream_event is None:
             return await runtime.complete(role, request, invoke)
         try:
             result: Any = None
             async for event in runtime.stream_events(role, request, stream_events):
-                if event.get("type") == "text_delta" and event.get("text"):
-                    await _think(str(event["text"]))
-                elif event.get("type") == "response":
+                etype = event.get("type")
+                if etype == "response":
                     result = event.get("result")
+                elif etype in ("text_delta", "thinking_delta", "action_started"):
+                    await _forward(event)
             if result is not None:
                 return result
             logger.warning("native_stream_no_response_event")

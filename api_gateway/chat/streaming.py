@@ -42,6 +42,7 @@ class StreamEventType(StrEnum):
     AGENT_TYPING = "agent.typing"
     AGENT_STEP = "agent.step"
     AGENT_THINKING = "agent.thinking"
+    AGENT_ACTION_STARTED = "agent.action_started"
     AGENT_DONE = "agent.done"
     CONTEXT_STATS = "context.stats"
     SCOPE_CHANGED = "scope.changed"
@@ -244,15 +245,33 @@ async def notify_agent_typing(thread_id: str, agent_id: str = "agent") -> int:
     return await stream_manager.broadcast(event)
 
 
-async def notify_agent_thinking(thread_id: str, delta: str) -> int:
+async def notify_agent_thinking(thread_id: str, delta: str, kind: str = "draft") -> int:
     """Push an ``agent.thinking`` event — a live text delta from the model
     WHILE it generates (MET-591). Ephemeral typing-indicator-grade content:
     clients render it in the thinking line; the persisted final message stays
     authoritative (a rendered thinking draft may become a tool-call preamble
-    rather than the answer)."""
+    rather than the answer).
+
+    ``kind`` types the delta (MET-592, Claude block-tag pattern): ``draft``
+    for ordinary response text mid-loop, ``reasoning`` for extended-thinking
+    blocks — clients may render them differently.
+    """
     event = StreamEvent(
         event=StreamEventType.AGENT_THINKING,
-        data={"delta": delta},
+        data={"delta": delta, "kind": kind},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_agent_action_started(thread_id: str, tool: str) -> int:
+    """Push an ``agent.action_started`` event — the model committed to a tool
+    call and its NAME is known, before arguments finish streaming and before
+    execution (MET-592 "typed from step zero"). The completed ``agent.step``
+    for the same call follows once it executes."""
+    event = StreamEvent(
+        event=StreamEventType.AGENT_ACTION_STARTED,
+        data={"tool": tool},
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)

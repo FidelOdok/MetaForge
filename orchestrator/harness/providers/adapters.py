@@ -718,6 +718,7 @@ async def openai_stream_events(
 
     text_parts: list[str] = []
     acc: dict[int, dict[str, str]] = {}
+    announced: set[int] = set()
     try:
         stream = await client.chat.completions.create(**kwargs)
         async for chunk in stream:
@@ -729,9 +730,8 @@ async def openai_stream_events(
                 text_parts.append(content)
                 yield {"type": "text_delta", "text": content}
             for tc in getattr(delta, "tool_calls", None) or []:
-                slot = acc.setdefault(
-                    int(getattr(tc, "index", 0) or 0), {"id": "", "name": "", "arguments": ""}
-                )
+                idx = int(getattr(tc, "index", 0) or 0)
+                slot = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
                 if getattr(tc, "id", None):
                     slot["id"] = tc.id
                 fn = getattr(tc, "function", None)
@@ -740,6 +740,11 @@ async def openai_stream_events(
                         slot["name"] += fn.name
                     if getattr(fn, "arguments", None):
                         slot["arguments"] += fn.arguments
+                # MET-592 "typed from step zero": announce the action the
+                # moment its NAME is known — long before arguments finish.
+                if slot["name"] and idx not in announced:
+                    announced.add(idx)
+                    yield {"type": "action_started", "name": slot["name"]}
     except ProviderError:
         raise
     except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
@@ -796,9 +801,26 @@ async def anthropic_stream_events(
 
     try:
         async with client.messages.stream(**kwargs) as stream:
-            async for text in stream.text_stream:
-                if text:
-                    yield {"type": "text_delta", "text": text}
+            # Raw event iteration (MET-592): typed blocks instead of the
+            # text-only convenience stream — thinking_delta (extended
+            # thinking) is distinguishable from text_delta, and a tool_use
+            # block announces its NAME at content_block_start, before its
+            # input_json_delta arguments finish assembling.
+            async for event in stream:
+                etype = getattr(event, "type", "")
+                if etype == "content_block_start":
+                    block = getattr(event, "content_block", None)
+                    if getattr(block, "type", None) == "tool_use":
+                        yield {"type": "action_started", "name": getattr(block, "name", "")}
+                elif etype == "content_block_delta":
+                    d = getattr(event, "delta", None)
+                    dtype = getattr(d, "type", "")
+                    text = getattr(d, "text", None)
+                    thinking = getattr(d, "thinking", None)
+                    if dtype == "text_delta" and text:
+                        yield {"type": "text_delta", "text": text}
+                    elif dtype == "thinking_delta" and thinking:
+                        yield {"type": "thinking_delta", "text": thinking}
             final = await stream.get_final_message()
     except ProviderError:
         raise
