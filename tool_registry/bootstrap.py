@@ -192,6 +192,7 @@ async def bootstrap_tool_registry(
     proposal_recorder: Any = None,
     constraint_recorder: Any = None,
     run_launcher: Any = None,
+    document_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -366,6 +367,7 @@ async def bootstrap_tool_registry(
                     geometry_recorder=geometry_recorder,
                     proposal_recorder=proposal_recorder,
                     constraint_recorder=constraint_recorder,
+                    document_recorder=document_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
