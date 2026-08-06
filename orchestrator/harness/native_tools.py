@@ -63,7 +63,15 @@ def _tool_schemas(runtime: HarnessRuntime) -> list[dict[str, Any]]:
     return schemas
 
 
-_MAX_OBSERVATION_CHARS = 8000
+# MET-598: this was a tiny, fixed constant unrelated to the model's actual
+# context window — trace_token_budget() (harness_backend.py) already scales
+# the *overall* trace to ~60% of a model's real window (e.g. 240k tokens for
+# a 400k-token model), but this PER-OBSERVATION cap stayed hardcoded at 8000
+# chars regardless, forcing tools like project.list down to a handful of
+# items per page no matter what `limit` a caller asked for. Raised to a
+# budget sized against real large-list tool responses (100 realistic project
+# records measured at ~40k-57k chars) with headroom to spare.
+_MAX_OBSERVATION_CHARS = 75_000
 
 
 def _render_json(value: Any) -> str:
