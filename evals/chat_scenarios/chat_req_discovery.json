@@ -3,9 +3,17 @@
   "title": "Requirements discovery in a bare project: elicit before designing, record before building (MET-584)",
   "scope": "project",
   "project_description": "Wall-mounted environmental sensor unit for a workshop",
-  "rubric": ["chat_tooluse"],
-  "variants": [{ "name": "native", "provider": null, "model": null }],
-  "max_turn_seconds": 300,
+  "rubric": [
+    "chat_tooluse"
+  ],
+  "variants": [
+    {
+      "name": "native",
+      "provider": null,
+      "model": null
+    }
+  ],
+  "max_turn_seconds": 600,
   "turns": [
     {
       "say": "Design a mounting bracket for the sensor unit in this project and commit it to the twin.",
@@ -13,12 +21,14 @@
         {
           "id": "elicits_requirements",
           "type": "reply_contains",
-          "pattern": "load|mass|weight|dimension|constraint|requirement|envelope|material|budget|size|mount"
+          "pattern": "load|mass|weight|dimension|constraint|requirement|envelope|material|budget|size|mount",
+          "regex": true
         },
         {
           "id": "asks_before_assuming",
           "type": "reply_contains",
-          "pattern": "\\?"
+          "pattern": "\\?",
+          "regex": true
         },
         {
           "id": "no_premature_commit",
@@ -28,7 +38,7 @@
       ]
     },
     {
-      "say": "Good questions. The bracket holds a 150 g sensor, must survive 3x the static load with a safety factor of at least 2.0, aluminum, mass under 40 g, footprint no larger than 50 x 30 mm. Record those requirements in the project before any design work.",
+      "say": "Good questions. The bracket holds a 150 g sensor, must survive 3x the static load with a safety factor of at least 2.0, aluminum, mass under 40 g, footprint no larger than 50 x 30 mm. Record those requirements in the project now \u2014 do NOT start designing or authoring any geometry yet, just record and confirm.",
       "checks": [
         {
           "id": "requirements_recorded",
