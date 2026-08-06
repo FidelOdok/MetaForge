@@ -23,7 +23,7 @@ import structlog
 from orchestrator.harness.compression import compact_native_messages, truncate_observation_value
 from orchestrator.harness.providers import default_invoke
 from orchestrator.harness.providers.pipeline import Invoke
-from orchestrator.harness.react import ReActResult, ReActStep, ToolCall
+from orchestrator.harness.react import OnStep, ReActResult, ReActStep, ToolCall
 from orchestrator.harness.runtime import HarnessRuntime
 
 logger = structlog.get_logger(__name__)
@@ -98,6 +98,7 @@ async def run_native_tools(
     system: str = NATIVE_SYSTEM,
     history: list[dict[str, Any]] | None = None,
     max_context_tokens: int | None = None,
+    on_step: OnStep | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
 
@@ -114,6 +115,15 @@ async def run_native_tools(
     tools = _tool_schemas(runtime)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
+
+    async def _emit(step: ReActStep) -> None:
+        # MET-590: live progress — a broken observer must never break the turn.
+        if on_step is None:
+            return
+        try:
+            await on_step(step, len(steps) - 1)
+        except Exception as exc:  # noqa: BLE001 - observer is best-effort
+            logger.warning("native_on_step_failed", error=str(exc))
 
     for step_no in range(1, max_steps + 1):
         if max_context_tokens is not None:
@@ -162,6 +172,7 @@ async def run_native_tools(
                     ReActStep(thought=text, tool_call=ToolCall(name, args), error=str(exc))
                 )
                 logger.warning("native_tool_error", tool=name, error=str(exc))
+            await _emit(steps[-1])
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
 
     # Step cap hit — force a final text answer (no tools) so we never return empty.

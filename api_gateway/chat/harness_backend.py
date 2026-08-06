@@ -870,6 +870,21 @@ async def run_chat_turn_streaming(
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_failed", error=str(exc))
 
+    # MET-590: stream each step AS IT HAPPENS. Long agentic turns (multi-part
+    # CAD builds) previously emitted their whole trace only after the loop —
+    # clients saw nothing for minutes, and their hard request timeouts killed
+    # healthy turns (disconnect cancels the turn by design, so all work was
+    # lost). Live steps give clients both visibility and a liveness signal.
+    live_step: Any = None
+    if on_step is not None:
+        _cb = on_step
+
+        async def live_step(step: Any, index: int) -> None:
+            try:
+                await _cb(_step_to_dict(step, index))
+            except Exception as exc:  # noqa: BLE001 — legibility is non-critical
+                logger.warning("chat_step_emit_failed", index=index, error=str(exc))
+
     if native:
         result = await run_native_tools(
             ctx.runtime,
@@ -882,6 +897,7 @@ async def run_chat_turn_streaming(
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
+            on_step=live_step,
         )
     else:
         policy = ModelPolicy(
@@ -891,7 +907,9 @@ async def run_chat_turn_streaming(
             history=full_history,
             trace_token_budget=trace_token_budget(provider, model),
         )
-        result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
+        result = await run_react(
+            ctx.runtime, policy, user_content, max_steps=steps, on_step=live_step
+        )
     logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
 
     # MET-568: re-emit context stats AFTER the loop so the meter reflects what
@@ -925,15 +943,8 @@ async def run_chat_turn_streaming(
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_final_failed", error=str(exc))
 
-    # Surface the agent's trace (tool calls, observations, reasoning) so the UI
-    # can render a legible timeline instead of only the final text. Best-effort:
-    # a bad step callback must never break the turn.
-    if on_step is not None:
-        for i, step in enumerate(result.steps):
-            try:
-                await on_step(_step_to_dict(step, i))
-            except Exception as exc:  # noqa: BLE001 — legibility is non-critical
-                logger.warning("chat_step_emit_failed", index=i, error=str(exc))
+    # MET-590: steps were already streamed live during the loop (live_step),
+    # so no post-loop re-emit — duplicates would double-render the timeline.
 
     if result.status != "completed":
         await on_delta(_FALLBACK_ANSWER)

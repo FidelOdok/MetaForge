@@ -97,3 +97,96 @@ async def test_on_step_receives_trace(tmp_path: Path, monkeypatch: pytest.Monkey
     assert len(steps) == 1
     assert steps[0]["final"] is True
     assert steps[0]["thought"] == "all done"
+
+
+# --- MET-590: steps stream LIVE during the loop ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_steps_stream_during_loop_not_after(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The step for tool call N must reach on_step BEFORE the model is asked
+    for step N+1 — that liveness is what lets clients keep long turns alive
+    (a fixed client timeout killed a healthy 5-minute CAD turn; MET-590)."""
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")
+    emitted: list[dict[str, Any]] = []
+    seen_at_invoke: list[int] = []
+
+    replies = iter(
+        [
+            '{"thought": "look", "tool": "echo", "arguments": {"n": 1}}',
+            '{"thought": "again", "tool": "echo", "arguments": {"n": 2}}',
+            '{"final": "done"}',
+        ]
+    )
+
+    async def invoke(spec: Any, request: dict[str, Any]) -> dict[str, Any]:
+        seen_at_invoke.append(len(emitted))
+        return {"text": next(replies), "model": spec.model}
+
+    async def on_step(s: dict[str, Any]) -> None:
+        emitted.append(s)
+
+    async def on_delta(_d: str) -> None:
+        return None
+
+    out = await run_chat_turn_streaming(
+        "run echo twice",
+        on_delta=on_delta,
+        on_step=on_step,
+        invoke=invoke,
+        stream_invoke=_no_stream,
+        credentials=CredentialStore(tmp_path / "c.json"),
+    )
+    assert out == "done"
+    # 2 tool steps + the final reasoning step, each exactly once (no
+    # post-loop duplicate emission).
+    assert len(emitted) == 3
+    # Liveness: by the 2nd model call one step had already streamed; by the
+    # 3rd, two had. (First call necessarily sees zero.)
+    assert seen_at_invoke == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_native_loop_streams_steps_live(tmp_path: Path) -> None:
+    from orchestrator.harness.native_tools import run_native_tools
+    from orchestrator.harness.providers import load_provider_config
+    from orchestrator.harness.runtime import HarnessRuntime
+    from orchestrator.harness.tools import ToolRegistry
+
+    tools = ToolRegistry()
+
+    async def echo(arguments: dict[str, object]) -> object:
+        return {"ok": True}
+
+    tools.register_native("echo", description="echo", input_schema={"type": "object"}, handler=echo)
+    rt = HarnessRuntime.build(
+        load_provider_config(
+            {"roles": {"generator": [{"provider": "anthropic", "model": "claude-opus-4-8"}]}}
+        ),
+        tools=tools,
+    )
+
+    emitted: list[int] = []
+    seen_at_invoke: list[int] = []
+    calls = {"n": 0}
+
+    async def invoke(spec: Any, request: dict[str, Any]) -> dict[str, Any]:
+        seen_at_invoke.append(len(emitted))
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return {
+                "text": "",
+                "tool_calls": [{"id": f"c{calls['n']}", "name": "echo", "arguments": {}}],
+                "model": spec.model,
+            }
+        return {"text": "done", "model": spec.model}
+
+    async def on_step(step: Any, index: int) -> None:
+        emitted.append(index)
+
+    result = await run_native_tools(rt, "go", invoke=invoke, max_steps=5, on_step=on_step)
+    assert result.status == "completed"
+    assert emitted == [0, 1]
+    assert seen_at_invoke == [0, 1, 2]  # each step streamed before the next model call

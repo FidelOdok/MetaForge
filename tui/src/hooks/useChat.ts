@@ -67,6 +67,12 @@ export function useChat(
   const thinkingRef = useRef(false); // a turn is in flight (drives status after reconnect)
   const turnSeq = useRef(0); // bumped per send; guards the fallback finalizer against a stale turn
   const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // MET-590: idle watchdog. The gateway now streams agent.step events live,
+  // so "healthy but slow" and "hung" are distinguishable: as long as progress
+  // events keep arriving we keep the turn's POST alive (up to the client's
+  // 45-min hard ceiling); only sustained SILENCE aborts it.
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const turnAbort = useRef<AbortController | null>(null);
 
   // Coalesce streamed deltas into ~16 fps repaints. A fast turn can emit 200+
   // deltas in a couple of seconds; calling setPending on each one repaints the
@@ -108,9 +114,28 @@ export function useChat(
   // what stops a lost `agent.done` (dropped on an SSE reconnect) from leaving the
   // chat stuck on "thinking" forever: the POST resolves only when the turn is
   // done server-side, so it's an authoritative fallback terminal signal.
+  const IDLE_ABORT_MS = 300000; // 5 min with no progress events => hung turn
+  const clearIdle = () => {
+    if (idleTimer.current) {
+      clearTimeout(idleTimer.current);
+      idleTimer.current = null;
+    }
+  };
+  const pokeIdle = () => {
+    if (!thinkingRef.current || !turnAbort.current) return;
+    clearIdle();
+    const ac = turnAbort.current;
+    idleTimer.current = setTimeout(() => {
+      log.warn("chat.turn_idle_abort", { idleMs: IDLE_ABORT_MS });
+      ac.abort(new Error(`no progress events for ${IDLE_ABORT_MS / 60000} minutes`));
+    }, IDLE_ABORT_MS);
+  };
+
   const finalizeTurn = (fallback?: string) => {
     if (!thinkingRef.current) return; // already finalized by the other path
     thinkingRef.current = false;
+    clearIdle();
+    turnAbort.current = null;
     if (fallbackTimer.current) {
       clearTimeout(fallbackTimer.current);
       fallbackTimer.current = null;
@@ -221,6 +246,7 @@ export function useChat(
           for await (const ev of streamThread(client.baseUrl(), threadId, controller.signal, onOpen)) {
             if (!alive) break;
             statsRef.current.events += 1;
+            pokeIdle(); // MET-590: any event = progress; keep the turn alive
             switch (ev.type) {
               case "message.delta":
                 if (!thinkingRef.current) break; // stray event after finalize
@@ -313,6 +339,8 @@ export function useChat(
       bufRef.current = { text: "", steps: [] };
       statsRef.current = newTurnStats();
       thinkingRef.current = true;
+      turnAbort.current = new AbortController();
+      pokeIdle(); // arm the idle watchdog for this turn
       setPending({ text: "", steps: [] });
       setStatus("thinking");
       log.info("chat.send", { threadId, chars: content.length, model, provider });
@@ -329,7 +357,9 @@ export function useChat(
           if (turnSeq.current === myTurn) finalizeTurn(fallback);
         }, GRACE_MS);
       };
-      void client.sendMessage(threadId, content, { model, provider }).then(
+      void client
+        .sendMessage(threadId, content, { model, provider, signal: turnAbort.current.signal })
+        .then(
         () => armFallback("stream ended without a completion event"),
         (e: Error) => {
           log.error("chat.send_failed", { threadId, error: e.message });
