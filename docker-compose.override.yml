@@ -121,6 +121,21 @@ services:
       - ./metaforge:/app/metaforge
       - ./pyproject.toml:/app/pyproject.toml:ro
       - adapter-workspace:/workspace:ro
+    # Override the gateway image's baked-in HEALTHCHECK (it probes :8000,
+    # the gateway's port) — this sidecar serves on :8765, so without this
+    # the container reports "unhealthy" forever while working fine.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
