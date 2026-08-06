@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { loadConfig, setConfigValue } from "./config.js";
 import { GatewayClient } from "./api/client.js";
@@ -30,7 +30,10 @@ const ALERT_COLOR = { gate: "yellow", done: "green", failed: "red" } as const;
  * gateway's project list before the chat thread is created, so the session
  * starts already scoped to that project.
  */
-export function App({ initialProject }: { initialProject?: string } = {}) {
+export function App({
+  initialProject,
+  continueLatest,
+}: { initialProject?: string; continueLatest?: boolean } = {}) {
   const { exit } = useApp();
   const cfg = loadConfig();
   const [client] = useState(() => new GatewayClient(cfg));
@@ -41,7 +44,7 @@ export function App({ initialProject }: { initialProject?: string } = {}) {
   // Requested chat scope. `null` while `--project` is being resolved, so useChat
   // holds off instead of creating a throwaway assistant thread first.
   const [scope, setScope] = useState<ChatScope | null>(() =>
-    initialProject ? null : assistantScope(),
+    initialProject || continueLatest ? null : assistantScope(),
   );
   const [scopeError, setScopeError] = useState<string | null>(null);
   const { awaiting, alert } = useRunAlerts(client);
@@ -50,6 +53,8 @@ export function App({ initialProject }: { initialProject?: string } = {}) {
   // Own the chat thread here (not inside <Chat>) so it survives view switches —
   // ^R/^B/^N no longer tear down the SSE stream and drop the conversation.
   const chat = useChat(client, model, provider, scope);
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
 
   // Change the session model/provider live and persist it (mirrors `forge
   // config set`), so /model in chat sticks across launches too.
@@ -96,6 +101,34 @@ export function App({ initialProject }: { initialProject?: string } = {}) {
       alive = false;
     };
   }, [client]);
+
+  // Resolve `--continue` once (MET-595): resume the most recent thread, or
+  // fall back to a fresh assistant scope when there is nothing to resume.
+  useEffect(() => {
+    if (!continueLatest) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const { pickerCandidates } = await import("./lib/resume.js");
+        const threads = pickerCandidates(await client.listThreads(50), null, 1);
+        if (!alive) return;
+        if (threads.length) {
+          chatRef.current?.resume(threads[0].id);
+        } else {
+          setScopeError("--continue: no resumable sessions — starting fresh");
+          setScope(assistantScope());
+        }
+      } catch (e) {
+        if (!alive) return;
+        setScopeError(`--continue: ${(e as Error).message}`);
+        setScope(assistantScope());
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, continueLatest]);
 
   // Resolve `--project` once, then release the chat thread. A name that doesn't
   // resolve is reported and the session continues unscoped — the footer will say

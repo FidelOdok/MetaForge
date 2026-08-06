@@ -115,6 +115,7 @@ forge chat -m "what's in this project?" --project "Monitor Build Demo"
 |---|---|
 | `^T` `^R` `^B` `^N` | chat · runs · twin · new run |
 | `PageUp` / `PageDn` | Scroll the transcript |
+| `/resume` | Pick a previous session (title · scope · activity) and continue it — the transcript backfills and the server rebuilds the conversation's context per turn (MET-595). `forge --continue` / `-c` resumes the most recent session directly at launch |
 | `/project [id\|name]` | Show the current project, or switch to one. Switching starts a **new thread** — see below. `/project none` leaves the project |
 | `/model <slug>` | Change the model for this session (persisted to `~/.forge/config.json`) |
 | `/provider <id>` | Change the provider for this session |

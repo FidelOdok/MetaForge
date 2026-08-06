@@ -10,12 +10,14 @@
 import { parseArgs } from "../commands.js";
 
 /** Flags the interactive workspace understands. Anything else is a command. */
-const TUI_FLAGS = new Set(["project", "p", "debug"]);
+const TUI_FLAGS = new Set(["project", "p", "debug", "continue", "c"]);
 
 export interface Invocation {
   mode: "tui" | "command" | "version";
   /** `--project <id|name>` for the workspace (tui mode only). */
   initialProject?: string;
+  /** `--continue`/`-c`: reattach to the most recent chat thread (MET-595). */
+  continueLatest?: boolean;
   /** Verbose file logging was requested (`--debug`). */
   debug: boolean;
 }
@@ -36,9 +38,11 @@ export function decideInvocation(argv: string[]): Invocation {
   if (positional !== undefined && positional !== "ui") return { mode: "command", debug };
 
   const project = flags.project ?? flags.p;
+  const cont = flags.continue === true || flags.c === true;
   return {
     mode: "tui",
     debug,
     ...(typeof project === "string" ? { initialProject: project } : {}),
+    ...(cont ? { continueLatest: true } : {}),
   };
 }

@@ -71,6 +71,24 @@ export interface TwinNode {
   metadata?: Record<string, unknown>;
 }
 
+export interface ThreadSummary {
+  id: string;
+  scope_kind: string;
+  scope_entity_id: string;
+  title: string;
+  archived: boolean;
+  last_message_at?: string;
+  message_count?: number;
+}
+
+export interface ThreadDetail {
+  id: string;
+  scope_kind?: string;
+  scope_entity_id?: string;
+  title?: string;
+  messages?: ThreadMessage[];
+}
+
 export interface ThreadMessage {
   role?: string;
   actor_kind?: string;
@@ -183,8 +201,19 @@ export class GatewayClient {
     return data.nodes ?? [];
   }
 
-  async getThread(id: string): Promise<{ messages?: ThreadMessage[] }> {
-    return this.get<{ messages?: ThreadMessage[] }>(`/v1/chat/threads/${id}`);
+  async getThread(id: string): Promise<ThreadDetail> {
+    return this.get<ThreadDetail>(`/v1/chat/threads/${id}`);
+  }
+
+  /** Recent chat threads, newest activity first (MET-595 resume picker). */
+  async listThreads(perPage = 20): Promise<ThreadSummary[]> {
+    const d = await this.get<{ threads?: ThreadSummary[] }>(
+      `/v1/chat/threads?per_page=${perPage}`,
+    );
+    const threads = d.threads ?? [];
+    return threads.sort((a, b) =>
+      String(b.last_message_at ?? "").localeCompare(String(a.last_message_at ?? "")),
+    );
   }
 
   async listSources(): Promise<Array<Record<string, unknown>>> {

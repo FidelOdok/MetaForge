@@ -25,6 +25,8 @@ function chatState(overrides: Partial<UseChat> = {}): UseChat {
     contextStats: null,
     threadScope: null,
     send: () => {},
+    resume: () => {},
+    threadId: null,
     ...overrides,
   };
 }

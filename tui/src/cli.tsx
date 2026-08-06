@@ -12,7 +12,7 @@ import { decideInvocation } from "./lib/invocation.js";
  *   - bare + piped (no TTY) → print a hint (can't render a UI without a TTY)
  */
 const rawArgv = process.argv.slice(2);
-const { mode, initialProject, debug } = decideInvocation(rawArgv);
+const { mode, initialProject, continueLatest, debug } = decideInvocation(rawArgv);
 // `--debug` is a global flag, not a subcommand; log.ts reads it straight off
 // argv, so all that's needed here is the env default.
 if (debug) process.env.FORGE_LOG ??= "1";
@@ -22,7 +22,7 @@ if (mode === "version") {
   void runCommand(["version"]).then((code) => process.exit(code));
 } else if (mode === "tui") {
   if (process.stdout.isTTY && process.stdin.isTTY) {
-    render(<App initialProject={initialProject} />);
+    render(<App initialProject={initialProject} continueLatest={continueLatest} />);
   } else {
     process.stderr.write("forge: no TTY — the interactive UI needs a terminal.\n");
     process.stderr.write("Use a command instead, e.g. `forge runs list` or `forge --help`.\n");

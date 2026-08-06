@@ -21,6 +21,9 @@ export interface UseChat {
   error: string | null;
   messages: ChatMessage[];
   /** In-flight assistant turn (text + tool steps), or null when idle. */
+  /** Attach to an existing thread and backfill its transcript (MET-595). */
+  resume: (threadId: string) => void;
+  threadId: string | null;
   pending: {
     text: string;
     steps: AgentStep[];
@@ -69,6 +72,11 @@ export function useChat(
   );
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
   const [threadScope, setThreadScope] = useState<ChatScope | null>(null);
+  // MET-595: when set, the connect effect ATTACHES to this existing thread
+  // (backfilling its transcript) instead of creating a new one. seq forces the
+  // effect to rerun even when resuming the same id twice.
+  const [resumeReq, setResumeReq] = useState<{ threadId: string; seq: number } | null>(null);
+  const [attachedThread, setAttachedThread] = useState<string | null>(null);
 
   const threadRef = useRef<string | null>(null);
   // Scope of the previous thread, so a *change* can be announced in the
@@ -184,7 +192,7 @@ export function useChat(
 
   const key = scopeKey(scope);
   useEffect(() => {
-    if (scope === null) return; // caller is still resolving the scope
+    if (scope === null && resumeReq === null) return; // caller still resolving
     const controller = new AbortController();
     let alive = true;
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -203,16 +211,40 @@ export function useChat(
     setStatus("connecting");
 
     void (async () => {
-      // 1. Create the thread, retrying while the gateway is unreachable rather
-      //    than giving up — a cold gateway at launch shouldn't be a dead end.
-      //    A 4xx on a project scope is different: the gateway has answered and
-      //    won't change its mind (e.g. no channel seeded for `scope_kind=project`),
-      //    so retrying is pointless. Say so and continue unscoped rather than
-      //    wedging the chat or — worse — leaving the UI showing a project scope
-      //    the thread doesn't have.
+      // 0. Resume path (MET-595): attach to an existing thread instead of
+      //    creating one. The server rebuilds context per turn, so the resumed
+      //    conversation continues with full (token-budgeted) memory; we only
+      //    need to render its persisted transcript locally.
       let threadId = "";
       let wait = 500;
-      let effective = scope;
+      let effective: ChatScope = scope ?? assistantScope();
+      if (resumeReq !== null) {
+        try {
+          const detail = await client.getThread(resumeReq.threadId);
+          threadId = detail.id;
+          threadRef.current = threadId;
+          const { backfillMessages } = await import("../lib/resume.js");
+          const prior = backfillMessages(detail.messages ?? []);
+          effective =
+            detail.scope_kind === "project"
+              ? {
+                  kind: "project",
+                  id: detail.scope_entity_id ?? "",
+                  name: detail.title || (detail.scope_entity_id ?? ""),
+                }
+              : assistantScope();
+          note(
+            `— resumed "${detail.title || threadId.slice(0, 8)}" · ${prior.length} earlier messages —`,
+          );
+          if (prior.length) setMessages((m) => [...m, ...prior]);
+          log.info("chat.thread_resumed", { threadId, messages: prior.length });
+        } catch (e) {
+          note(`resume failed: ${(e as Error).message}`);
+          log.error("chat.resume_failed", { error: (e as Error).message });
+          setStatus("idle");
+          return;
+        }
+      }
       while (alive && !threadId) {
         try {
           const t = await client.createThread(effective, "TUI session");
@@ -240,6 +272,7 @@ export function useChat(
         }
       }
       if (!alive) return;
+      setAttachedThread(threadId);
       setThreadScope(effective);
       // Announce a switch (not the first thread of the session): the new thread
       // starts empty server-side, and pretending otherwise would be a lie the
@@ -371,7 +404,11 @@ export function useChat(
     // `key` (not `scope`) is the dependency: an assistant scope carries a random
     // entity id, so comparing the object itself would recreate the thread every
     // render.
-  }, [client, key]);
+  }, [client, key, resumeReq]);
+
+  const resume = useCallback((threadId: string) => {
+    setResumeReq((r) => ({ threadId, seq: (r?.seq ?? 0) + 1 }));
+  }, []);
 
   const send = useCallback(
     (content: string) => {
@@ -417,5 +454,15 @@ export function useChat(
     [client, model, provider],
   );
 
-  return { status, error, messages, pending, contextStats, threadScope, send };
+  return {
+    status,
+    error,
+    messages,
+    pending,
+    contextStats,
+    threadScope,
+    send,
+    resume,
+    threadId: attachedThread,
+  };
 }
