@@ -30,16 +30,25 @@ from tool_registry.mcp_server.server import McpToolServer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.project")
 
-# MET-589: the chat harness silently truncates any tool observation past
-# ~8000 chars (orchestrator/harness/native_tools.py::_MAX_OBSERVATION_CHARS),
-# dropping trailing list items with no way for the caller to detect it short
-# of the length shrinking underneath a `limit` it already asked for. A page
-# this small stays comfortably under that cap (with headroom for envelope
-# fields and whatever else shares the harness's context budget) regardless
-# of how many/how large the requested page's projects turn out to be —
-# `has_more`/`next_offset` are trustworthy because the page itself can never
-# trigger the harness's shrink.
-_MAX_LIST_PAGE_CHARS = 4000
+# MET-589: the chat harness silently truncates any tool observation past a
+# char budget, dropping trailing list items with no way for the caller to
+# detect it short of the length shrinking underneath a `limit` it already
+# asked for. There are TWO such budgets depending on which loop is driving
+# the model, and this tool has no way to know which one applies:
+#   - native tool-calling: _MAX_OBSERVATION_CHARS = 8000 (native_tools.py)
+#   - legacy ReAct (e.g. openai-codex/gpt-5.5 today): _MAX_OBS_CHARS = 2000
+#     (policy.py), applied to a `str(dict)` render of the SAME observation
+# A page sized for the 8000 budget alone still gets re-shrunk by the 2000
+# one — confirmed live: the model saw `has_more`/`next_offset` from this
+# tool's own pagination AND a second, uncoordinated `projects_omitted_count`
+# for items on the same page, and (reasonably) stopped trusting either,
+# re-querying overlapping ranges instead of walking `next_offset` cleanly.
+# Target the SMALLER budget so neither loop's shrink ever re-triggers on a
+# page this tool already considers complete (barring a single project with
+# a description near its 2000-char max, which alone can still exceed even
+# this — acceptable, since that only affects rendering of the one already-
+# known item, not `has_more`/`next_offset`, which stay accurate regardless).
+_MAX_LIST_PAGE_CHARS = 1500
 
 
 @runtime_checkable

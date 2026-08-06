@@ -277,6 +277,44 @@ class TestList:
             next_offset = page["next_offset"]
         assert len(seen_ids) == 10
 
+    async def test_list_page_survives_the_legacy_react_loops_tighter_budget(
+        self, server: ProjectServer
+    ) -> None:
+        """MET-589 regression: self-capping for the native tool-calling
+
+        loop's 8000-char budget wasn't enough. The legacy ReAct loop
+        (orchestrator/harness/policy.py, still in use for some
+        model/provider combos) applies its OWN, much tighter 2000-char
+        truncation to a `str(dict)` render of the SAME observation — caught
+        live: a page sized for 8000 still got re-shrunk at 2000, so the
+        model saw `has_more`/`next_offset` from this tool's own pagination
+        AND a second, uncoordinated `projects_omitted_count` for items on
+        the page it already had. A page this tool considers complete must
+        survive that tighter budget too, or the two truncation layers give
+        the model conflicting signals about what's missing.
+        """
+        from orchestrator.harness.compression import truncate_observation_value
+
+        for i in range(8):
+            await _call(
+                server,
+                "project.create",
+                {
+                    "name": f"react-budget-{i}",
+                    "description": "A realistic project description, not empty.",
+                },
+            )
+
+        result = await _call(server, "project.list", {"limit": 100, "offset": 0})
+        assert result["has_more"] is True  # self-cap still kicked in below limit=100
+
+        rendered_for_react_loop = truncate_observation_value(result, 2000)
+        assert "projects_omitted_count" not in rendered_for_react_loop, (
+            "page fit the native loop's budget but got re-shrunk by the ReAct "
+            "loop's tighter one -- has_more/next_offset no longer match what "
+            "the model actually sees"
+        )
+
 
 class TestGet:
     async def test_get_by_id_round_trips(self, server: ProjectServer) -> None:
