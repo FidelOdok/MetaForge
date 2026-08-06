@@ -225,11 +225,16 @@ export function Chat({
           completion. */}
       {pending ? (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
-          {pending.steps.length ? (
+          {pending.steps.length || pending.thinking ? (
             <Box flexDirection="column">
               <Text dimColor>· thinking</Text>
-              <Box marginLeft={1}>
-                <StepTrace steps={pending.steps} />
+              <Box marginLeft={1} flexDirection="column">
+                {pending.steps.length ? <StepTrace steps={pending.steps} /> : null}
+                {pending.thinking ? (
+                  <Text dimColor wrap="truncate-end">
+                    {pending.thinking.slice(-600)}
+                  </Text>
+                ) : null}
               </Box>
             </Box>
           ) : null}

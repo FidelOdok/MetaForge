@@ -51,6 +51,7 @@ export interface ScopeChanged {
 
 export type ChatEvent =
   | { type: "message.delta"; delta: string }
+  | { type: "agent.thinking"; delta: string }
   | { type: "agent.step"; step: AgentStep }
   | { type: "context.stats"; stats: ContextStats }
   | { type: "scope.changed"; scope: ScopeChanged }
@@ -82,6 +83,10 @@ export function parseEvent(raw: string): ChatEvent | null {
   switch (event) {
     case "message.delta":
       return { type: "message.delta", delta: String(data.delta ?? "") };
+    case "agent.thinking":
+      // MET-591: live model-text deltas while a step generates — ephemeral
+      // (renders in the thinking line; the final message stays authoritative).
+      return { type: "agent.thinking", delta: String(data.delta ?? "") };
     case "agent.step":
       return { type: "agent.step", step: (data.step as AgentStep) ?? {} };
     case "context.stats":

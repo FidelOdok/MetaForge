@@ -16,13 +16,14 @@ vLLM / Ollama), and ``anthropic_invoke`` translates that shape to/from Anthropic
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
 
 from orchestrator.harness.compression import compact_native_messages, truncate_observation_value
 from orchestrator.harness.providers import default_invoke
-from orchestrator.harness.providers.pipeline import Invoke
+from orchestrator.harness.providers.pipeline import Invoke, StreamEvents
 from orchestrator.harness.react import OnStep, ReActResult, ReActStep, ToolCall
 from orchestrator.harness.runtime import HarnessRuntime
 
@@ -99,6 +100,8 @@ async def run_native_tools(
     history: list[dict[str, Any]] | None = None,
     max_context_tokens: int | None = None,
     on_step: OnStep | None = None,
+    on_thinking: Callable[[str], Awaitable[None]] | None = None,
+    stream_events: StreamEvents | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
 
@@ -125,12 +128,41 @@ async def run_native_tools(
         except Exception as exc:  # noqa: BLE001 - observer is best-effort
             logger.warning("native_on_step_failed", error=str(exc))
 
+    async def _think(delta: str) -> None:
+        # MET-591: token-level liveness — never breaks the turn.
+        if on_thinking is None:
+            return
+        try:
+            await on_thinking(delta)
+        except Exception as exc:  # noqa: BLE001 - observer is best-effort
+            logger.warning("native_on_thinking_failed", error=str(exc))
+
+    async def _model_call(request: dict[str, Any]) -> Any:
+        """One model call: event-streaming when wired (text deltas flow to
+        ``on_thinking`` as they generate), non-streaming invoke otherwise.
+        A streaming failure (unsupported family, mid-negotiation error) falls
+        back to the invoke path — behavior then matches the pre-MET-591 loop.
+        """
+        if stream_events is None or on_thinking is None:
+            return await runtime.complete(role, request, invoke)
+        try:
+            result: Any = None
+            async for event in runtime.stream_events(role, request, stream_events):
+                if event.get("type") == "text_delta" and event.get("text"):
+                    await _think(str(event["text"]))
+                elif event.get("type") == "response":
+                    result = event.get("result")
+            if result is not None:
+                return result
+            logger.warning("native_stream_no_response_event")
+        except Exception as exc:  # noqa: BLE001 - streaming is an optimization
+            logger.info("native_stream_fallback_to_invoke", reason=str(exc)[:200])
+        return await runtime.complete(role, request, invoke)
+
     for step_no in range(1, max_steps + 1):
         if max_context_tokens is not None:
             messages = compact_native_messages(messages, max_tokens=max_context_tokens)
-        resp = await runtime.complete(
-            role, {"system": system, "messages": messages, "tools": tools}, invoke
-        )
+        resp = await _model_call({"system": system, "messages": messages, "tools": tools})
         text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
         calls = resp.get("tool_calls") if isinstance(resp, dict) else None
 
@@ -184,7 +216,7 @@ async def run_native_tools(
             ),
         }
     )
-    resp = await runtime.complete(role, {"system": system, "messages": messages}, invoke)
+    resp = await _model_call({"system": system, "messages": messages})
     final = resp.get("text", "") if isinstance(resp, dict) else str(resp)
     logger.info("native_tools_finalized", steps=max_steps)
     return ReActResult(status="completed", output=final, steps=steps)

@@ -655,3 +655,192 @@ def default_stream(spec: ProviderSpec, request: Any) -> AsyncIterator[str]:
     if name in _CODEX_NAMES:
         return codex_stream(spec, request)
     return openai_stream(spec, request)
+
+
+# ---------------------------------------------------------------------------
+# Event streaming (MET-591): text deltas + assembled tool calls in one stream
+# ---------------------------------------------------------------------------
+#
+# The plain ``*_stream`` adapters above yield only text and drop ``tools`` —
+# unusable inside the native tool-calling loop. These variants stream the SAME
+# request shape ``*_invoke`` takes and yield structured events:
+#
+#     {"type": "text_delta", "text": str}          # as tokens generate
+#     {"type": "response", "result": {...}}        # terminal; result matches
+#                                                  # the *_invoke return shape
+#
+# so the loop can forward live text while still receiving the exact response
+# object it would have gotten from the non-streaming call.
+
+
+class StreamingUnsupported(ProviderError):
+    """This provider family has no event-streaming adapter — fall back to
+    the non-streaming invoke (never retried; not a provider fault)."""
+
+    def __init__(self, family: str) -> None:
+        super().__init__(
+            f"event streaming unsupported for provider family '{family}'", retryable=False
+        )
+
+
+async def openai_stream_events(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream an OpenAI-compatible completion as events (text + tool calls).
+
+    Tool-call fragments arrive per chunk keyed by ``index`` (``id``/``name``
+    once, ``function.arguments`` split across chunks) and are assembled into
+    the same ``tool_calls`` shape :func:`openai_invoke` returns.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if system:
+        messages = [{"role": "system", "content": system}, *messages]
+    if client is None:
+        from openai import AsyncOpenAI
+
+        client = cast(
+            Any,
+            AsyncOpenAI(
+                api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+            ),
+        )
+    kwargs: dict[str, Any] = {
+        "model": spec.model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+    tools = request.get("tools") if isinstance(request, dict) else None
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = request.get("tool_choice", "auto")
+
+    text_parts: list[str] = []
+    acc: dict[int, dict[str, str]] = {}
+    try:
+        stream = await client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                text_parts.append(content)
+                yield {"type": "text_delta", "text": content}
+            for tc in getattr(delta, "tool_calls", None) or []:
+                slot = acc.setdefault(
+                    int(getattr(tc, "index", 0) or 0), {"id": "", "name": "", "arguments": ""}
+                )
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] += fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["arguments"] += fn.arguments
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+    tool_calls: list[dict[str, Any]] = []
+    for idx in sorted(acc):
+        slot = acc[idx]
+        try:
+            args = json.loads(slot["arguments"] or "{}")
+        except (ValueError, TypeError):
+            args = {}
+        tool_calls.append(
+            {
+                "id": slot["id"],
+                "name": slot["name"],
+                "arguments": args if isinstance(args, dict) else {},
+            }
+        )
+    result: dict[str, Any] = {"text": "".join(text_parts), "model": spec.model}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    yield {"type": "response", "result": result}
+
+
+async def anthropic_stream_events(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream an Anthropic completion as events (text + tool calls).
+
+    Text arrives as ``text_delta`` events; ``tool_use`` blocks assemble from
+    ``content_block_start`` + ``input_json_delta``. The terminal response is
+    taken from the SDK's accumulated final message and parsed exactly like
+    :func:`anthropic_invoke`.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    tools = request.get("tools") if isinstance(request, dict) else None
+    if client is None:
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(
+            api_key=_require_key(spec, "ANTHROPIC_API_KEY"), base_url=spec.base_url or None
+        )
+    kwargs: dict[str, Any] = {
+        "model": spec.model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": _to_anthropic_messages(messages) if tools else messages,
+    }
+    if system:
+        kwargs["system"] = system
+    if tools:
+        kwargs["tools"] = _to_anthropic_tools(tools)
+
+    try:
+        async with client.messages.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                if text:
+                    yield {"type": "text_delta", "text": text}
+            final = await stream.get_final_message()
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+    text = "".join(
+        getattr(block, "text", "")
+        for block in final.content
+        if getattr(block, "type", None) == "text"
+    )
+    tool_calls = [
+        {
+            "id": getattr(block, "id", ""),
+            "name": getattr(block, "name", ""),
+            "arguments": dict(getattr(block, "input", None) or {}),
+        }
+        for block in final.content
+        if getattr(block, "type", None) == "tool_use"
+    ]
+    result: dict[str, Any] = {"text": text, "model": getattr(final, "model", spec.model)}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    yield {"type": "response", "result": result}
+
+
+def default_stream_events(spec: ProviderSpec, request: Any) -> AsyncIterator[dict[str, Any]]:
+    """Dispatch to the event-streaming adapter by provider family.
+
+    Families without one (gemini / bedrock / codex — codex's Responses stream
+    cannot carry the loop's tool schemas) raise :class:`StreamingUnsupported`,
+    which the pipeline treats as non-retryable so callers fall back to the
+    non-streaming invoke with identical behavior.
+    """
+    name = spec.name.lower()
+    if name in _ANTHROPIC_NAMES:
+        return anthropic_stream_events(spec, request)
+    if name in _GEMINI_NAMES or name in _BEDROCK_NAMES or name in _CODEX_NAMES:
+
+        async def _unsupported() -> AsyncIterator[dict[str, Any]]:
+            raise StreamingUnsupported(name)
+            yield {}  # pragma: no cover - makes this an async generator
+
+        return _unsupported()
+    return openai_stream_events(spec, request)

@@ -25,7 +25,12 @@ from orchestrator.harness.providers import (
     RotationStrategy,
     store_backed_invoke,
 )
-from orchestrator.harness.providers.pipeline import Invoke, ProviderSpec, StreamInvoke
+from orchestrator.harness.providers.pipeline import (
+    Invoke,
+    ProviderSpec,
+    StreamEvents,
+    StreamInvoke,
+)
 from orchestrator.harness.runs import InMemoryRunStore
 from orchestrator.harness.tools import GateCheck, ToolRegistry
 
@@ -120,6 +125,15 @@ class HarnessRuntime:
         """
         async for delta in self.providers.stream_complete(role, request, stream_invoke):
             yield delta
+
+    async def stream_events(
+        self, role: str, request: Any, stream_events: StreamEvents
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream a role's response as structured events (MET-591) — text deltas
+        while the model generates, terminated by the full response object.
+        Failover happens only before the first event (see the pipeline)."""
+        async for event in self.providers.stream_events_complete(role, request, stream_events):
+            yield event
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Invoke a registered tool, enforcing this runtime's gate policy."""
