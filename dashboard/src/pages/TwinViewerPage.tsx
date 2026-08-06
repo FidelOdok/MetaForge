@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
-import { useTwinNodes, useTwinNode, useTwinRelationships } from '../hooks/use-twin';
+import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../hooks/use-twin';
 import { useActiveProject } from '../hooks/use-active-project';
 import { useScopedChat } from '../hooks/use-scoped-chat';
 import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
@@ -325,6 +325,9 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
           </div>
         )}
 
+        {/* Revision history (GET /v1/twin/nodes/{id}/versions) */}
+        <NodeHistorySection nodeId={node.id} />
+
         {/* Pending design-change proposals for this node (gated apply, MET-548) */}
         <div className="px-3 py-2 flex-shrink-0">
           <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
@@ -342,6 +345,59 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             onCreateThread={chat.createThread}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── NodeHistorySection ─────────────────────────────────────────────────────────
+/**
+ * Revision history for the selected node. `useNodeVersionHistory` and its
+ * underlying endpoint already existed but had no UI consumer anywhere in
+ * the dashboard — this is that missing consumer.
+ */
+function NodeHistorySection({ nodeId }: { nodeId: string }) {
+  const { data: revisions, isLoading } = useNodeVersionHistory(nodeId);
+  const [expanded, setExpanded] = useState(false);
+
+  if (isLoading || !revisions || revisions.length === 0) return null;
+
+  const sorted = [...revisions].sort((a, b) => b.revision - a.revision);
+  const visible = expanded ? sorted : sorted.slice(0, 3);
+
+  return (
+    <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+          History · {revisions.length}
+        </div>
+        {sorted.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: KC.onSurfaceVariant, fontSize: 10, fontFamily: 'inherit' }}
+          >
+            {expanded ? 'Show less' : `Show all ${sorted.length}`}
+          </button>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {visible.map((rev) => (
+          <div key={rev.revision} className="flex items-start gap-2" style={{ fontSize: 11 }}>
+            <span
+              className="font-mono rounded px-1 flex-shrink-0"
+              style={{ background: KC.surfaceHigh, color: KC.onSurfaceVariant, fontSize: 10 }}
+            >
+              v{rev.revision}
+            </span>
+            <div className="min-w-0">
+              <div style={{ color: KC.onSurface }}>{rev.change_description}</div>
+              <div className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+                {formatRelativeTime(rev.created_at)} · {rev.content_hash.slice(0, 8)}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

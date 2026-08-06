@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { listSources } from '../api/endpoints/knowledge';
+import { listSources, searchKnowledge } from '../api/endpoints/knowledge';
 import { useActiveProject } from '../hooks/use-active-project';
 import { formatRelativeTime } from '../utils/format-time';
-import type { KnowledgeType, SourceSummary } from '../types/knowledge';
+import type { KnowledgeSearchResult, KnowledgeType, SourceSummary } from '../types/knowledge';
 
 // ---------------------------------------------------------------------------
 // Knowledge-type chip styling — pulled from the Kinetic Console palette so
@@ -152,6 +152,30 @@ export function KnowledgePage() {
   const [sortKey, setSortKey] = useState<SortKey>('indexed_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
+  // Semantic search (GET /v1/knowledge/search) — a real, previously-unused
+  // backend capability. Debounced so we don't fire a request per keystroke;
+  // a non-empty debounced query replaces the source-listing table below
+  // with matched entries instead of filtering it client-side.
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+  const isSearching = debouncedSearch.length > 0;
+
+  const { data: searchResults, isLoading: isSearchLoading } = useQuery({
+    queryKey: ['knowledge', 'search', debouncedSearch, filterType],
+    queryFn: () =>
+      searchKnowledge({
+        query: debouncedSearch,
+        knowledge_type: filterType === 'all' ? undefined : filterType,
+        limit: 20,
+      }),
+    enabled: isSearching,
+    staleTime: 30_000,
+  });
+
   // The filter chip pushes ``knowledge_type`` to the server so we don't
   // pull rows we'll just discard; the project_id filter does the same.
   const { data: sources, isLoading } = useQuery({
@@ -162,6 +186,7 @@ export function KnowledgePage() {
         project_id: activeProjectId ?? undefined,
       }),
     staleTime: 30_000,
+    enabled: !isSearching,
   });
 
   const sortedSources = useMemo(() => {
@@ -198,8 +223,36 @@ export function KnowledgePage() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span style={{ fontSize: 18, fontWeight: 500, color: '#e8e8ed' }}>Knowledge</span>
           <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>
-            {total} {total === 1 ? 'source' : 'sources'} · L1 corpus
+            {isSearching
+              ? `${searchResults?.length ?? 0} match${(searchResults?.length ?? 0) === 1 ? '' : 'es'}`
+              : `${total} ${total === 1 ? 'source' : 'sources'} · L1 corpus`}
           </span>
+        </div>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <span
+            className="material-symbols-outlined"
+            style={{ position: 'absolute', left: 8, fontSize: 14, color: '#9a9aaa', pointerEvents: 'none' }}
+          >
+            search
+          </span>
+          <input
+            type="text"
+            aria-label="Search knowledge"
+            placeholder="Search knowledge…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            style={{
+              width: 260,
+              padding: '6px 10px 6px 28px',
+              background: 'rgba(30,31,38,0.85)',
+              border: '1px solid rgba(65,72,90,0.3)',
+              borderRadius: 4,
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: '#e2e2eb',
+              outline: 'none',
+            }}
+          />
         </div>
       </div>
 
@@ -255,7 +308,44 @@ export function KnowledgePage() {
         </div>
       </div>
 
-      {/* ── Sources table ───────────────────────────────────────────────── */}
+      {isSearching ? (
+        /* ── Search results ────────────────────────────────────────────── */
+        <div style={GLASS} role="region" aria-label="Search results">
+          {isSearchLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 8 }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#9a9aaa' }}>
+                progress_activity
+              </span>
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>Searching…</span>
+            </div>
+          ) : !searchResults || searchResults.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '48px 24px',
+                minHeight: 160,
+                textAlign: 'center',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#9a9aaa', opacity: 0.4 }}>
+                search_off
+              </span>
+              <span style={{ fontSize: 13, color: '#e2e2eb' }}>No matches for &ldquo;{debouncedSearch}&rdquo;</span>
+            </div>
+          ) : (
+            <div role="rowgroup">
+              {searchResults.map((result) => (
+                <SearchResultRow key={result.id} result={result} onOpenSource={navigate} />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      /* ── Sources table ───────────────────────────────────────────────── */
       <div style={GLASS} role="region" aria-label="Knowledge sources">
         {/* Header */}
         <div
@@ -324,6 +414,7 @@ export function KnowledgePage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -368,6 +459,71 @@ function EmptySourcesState() {
       >
         forge ingest &lt;path&gt;
       </code>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search result row
+// ---------------------------------------------------------------------------
+
+function SearchResultRow({
+  result,
+  onOpenSource,
+}: {
+  result: KnowledgeSearchResult;
+  onOpenSource: (path: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const clickable = !!result.source_path;
+
+  return (
+    <div
+      role="row"
+      tabIndex={clickable ? 0 : undefined}
+      onClick={() => {
+        if (result.source_path) onOpenSource(`/knowledge/sources/${encodeURIComponent(result.source_path)}`);
+      }}
+      onKeyDown={(e) => {
+        if (clickable && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onOpenSource(`/knowledge/sources/${encodeURIComponent(result.source_path!)}`);
+        }
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        padding: '10px 16px',
+        borderBottom: '1px solid rgba(65,72,90,0.08)',
+        cursor: clickable ? 'pointer' : 'default',
+        background: hovered ? '#282a30' : 'transparent',
+        transition: 'background 0.15s',
+        outline: 'none',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <TypeChip type={result.knowledge_type} />
+        {result.source_path && (
+          <span
+            style={{
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: '#9a9aaa',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {result.source_path}
+          </span>
+        )}
+      </div>
+      <span style={{ fontSize: 12, color: '#d4d4d8', lineHeight: 1.5 }}>
+        {result.content.length > 240 ? `${result.content.slice(0, 240)}…` : result.content}
+      </span>
     </div>
   );
 }

@@ -5,6 +5,7 @@ vi.mock('../../hooks/use-twin', () => ({
   useTwinNodes: vi.fn(),
   useTwinNode: vi.fn(),
   useTwinRelationships: vi.fn(() => ({ data: [] })),
+  useNodeVersionHistory: vi.fn(() => ({ data: [], isLoading: false })),
 }));
 
 vi.mock('../../hooks/use-scoped-chat', () => ({
@@ -72,10 +73,12 @@ vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
 }));
 
 import { TwinViewerPage } from '../TwinViewerPage';
-import { useTwinNodes, useTwinNode } from '../../hooks/use-twin';
+import { useTwinNodes, useTwinNode, useNodeVersionHistory } from '../../hooks/use-twin';
+import { fireEvent } from '@testing-library/react';
 
 const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
+const mockUseNodeVersionHistory = vi.mocked(useNodeVersionHistory);
 
 describe('TwinViewerPage', () => {
   it('renders Digital Twin heading', () => {
@@ -113,5 +116,63 @@ describe('TwinViewerPage', () => {
     // KC spec uses 'MODEL' and 'GRAPH' (uppercase monospace) in the segmented toggle
     expect(screen.getByText('MODEL')).toBeInTheDocument();
     expect(screen.getAllByText('GRAPH').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows revision history for a selected node (previously unwired to any UI)', () => {
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({
+      data: [
+        { revision: 2, created_at: new Date().toISOString(), content_hash: 'abcdef1234', change_description: 'Widened mounting hole', metadata_snapshot: {} },
+        { revision: 1, created_at: new Date().toISOString(), content_hash: '0123456789', change_description: 'Initial import', metadata_snapshot: {} },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useNodeVersionHistory>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+    expect(screen.getByText('History · 2')).toBeInTheDocument();
+    expect(screen.getByText('Widened mounting hole')).toBeInTheDocument();
+    expect(screen.getByText('Initial import')).toBeInTheDocument();
+  });
+
+  it('does not render a history section when a node has no revisions', () => {
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+    expect(screen.queryByText(/History ·/)).not.toBeInTheDocument();
   });
 });
