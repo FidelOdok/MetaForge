@@ -800,7 +800,7 @@ async def send_message(
 
 
 @router.get("/threads/{thread_id}/stream")
-async def stream_thread_events(thread_id: str) -> StreamingResponse:
+async def stream_thread_events(thread_id: str, request: Request) -> StreamingResponse:
     """Stream real-time events for a chat thread via Server-Sent Events.
 
     The client receives events as they occur:
@@ -822,10 +822,17 @@ async def stream_thread_events(thread_id: str) -> StreamingResponse:
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    logger.info("sse_stream_requested", thread_id=thread_id)
+    # MET-593: standard SSE resume — replay the gap since the client's last
+    # received event id (Last-Event-ID header, query param as fallback).
+    raw_last = request.headers.get("last-event-id") or request.query_params.get("last_event_id")
+    last_event_id: int | None = None
+    if raw_last and str(raw_last).lstrip("-").isdigit():
+        last_event_id = int(raw_last)
+
+    logger.info("sse_stream_requested", thread_id=thread_id, resume_from=last_event_id)
 
     return StreamingResponse(
-        stream_thread(thread_id, manager=stream_manager),
+        stream_thread(thread_id, manager=stream_manager, last_event_id=last_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
