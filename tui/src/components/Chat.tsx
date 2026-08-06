@@ -4,6 +4,8 @@ import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import type { ThreadSummary } from "../api/client.js";
+import { describeThread, pickerCandidates } from "../lib/resume.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
@@ -79,6 +81,9 @@ export function Chat({
   const { status, error, messages, pending, send } = chat;
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  // MET-595: /resume thread picker — when non-null it replaces the input box.
+  const [picker, setPicker] = useState<ThreadSummary[] | null>(null);
+  const [pickerIdx, setPickerIdx] = useState(0);
   const busy = status === "thinking";
   const reconnecting = status === "reconnecting";
   const { rows: termRows, cols } = useTerminalSize();
@@ -100,6 +105,23 @@ export function Chat({
   const draft = useRef("");
 
   useInput((_i, key) => {
+    // Picker mode captures navigation keys (MET-595).
+    if (picker !== null) {
+      if (key.upArrow) setPickerIdx((i) => Math.max(0, i - 1));
+      else if (key.downArrow) setPickerIdx((i) => Math.min(picker.length - 1, i + 1));
+      else if (key.return) {
+        const chosen = picker[pickerIdx];
+        setPicker(null);
+        if (chosen) {
+          chat.resume(chosen.id);
+          setNotice(`resuming "${chosen.title || chosen.id.slice(0, 8)}" …`);
+        }
+      } else if (key.escape) {
+        setPicker(null);
+        setNotice(null);
+      }
+      return;
+    }
     if (history.length === 0) return;
     if (key.upArrow) {
       if (histPos.current === null) {
@@ -159,8 +181,26 @@ export function Chat({
           setNotice(`/project failed: ${e.message}`),
         );
         return true;
+      case "resume":
+        setNotice("loading sessions…");
+        void client
+          .listThreads(50)
+          .then((threads) => {
+            const items = pickerCandidates(threads, chat.threadId);
+            if (!items.length) {
+              setNotice("no resumable sessions found");
+              return;
+            }
+            setPickerIdx(0);
+            setPicker(items);
+            setNotice(null);
+          })
+          .catch((e: Error) => setNotice(`/resume failed: ${e.message}`));
+        return true;
       case "help":
-        setNotice("/project <id|name> · /model <slug> · /provider <id> · /help · Esc quit");
+        setNotice(
+          "/resume · /project <id|name> · /model <slug> · /provider <id> · /help · Esc quit",
+        );
         return true;
       default:
         setNotice(`unknown command: /${cmd} (try /help)`);
@@ -273,16 +313,35 @@ export function Chat({
         </Box>
       ) : null}
 
-      {/* Input pinned to the bottom of the live region. */}
-      <Box marginX={1} borderStyle="round" borderColor={busy || reconnecting ? "yellow" : "blue"} paddingX={1}>
-        <Text color={busy || reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
-        <TextInput
-          value={input}
-          onChange={onInputChange}
-          onSubmit={onSubmit}
-          placeholder={placeholder}
-        />
-      </Box>
+      {/* MET-595: /resume picker replaces the input box while open. */}
+      {picker !== null ? (
+        <Box marginX={1} borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
+          <Text color="cyan" bold>
+            resume a session  (↑/↓ · Enter · Esc)
+          </Text>
+          {picker.map((t, i) => (
+            <Text key={t.id} color={i === pickerIdx ? "cyan" : undefined} inverse={i === pickerIdx}>
+              {describeThread(t)}
+            </Text>
+          ))}
+        </Box>
+      ) : (
+        /* Input pinned to the bottom of the live region. */
+        <Box
+          marginX={1}
+          borderStyle="round"
+          borderColor={busy || reconnecting ? "yellow" : "blue"}
+          paddingX={1}
+        >
+          <Text color={busy || reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
+          <TextInput
+            value={input}
+            onChange={onInputChange}
+            onSubmit={onSubmit}
+            placeholder={placeholder}
+          />
+        </Box>
+      )}
     </>
   );
 
