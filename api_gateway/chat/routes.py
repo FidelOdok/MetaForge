@@ -63,6 +63,7 @@ from api_gateway.chat.streaming import (
     stream_manager,
     stream_thread,
 )
+from api_gateway.chat.turn_capture import capture_step, capture_turn_done
 
 # MET-575: import the ACCESSOR, never the module attribute. A
 # ``from ... import _backend as _project_backend`` binds the in-memory
@@ -363,8 +364,15 @@ async def _invoke_agent(
                 async def _on_delta(delta: str) -> None:
                     await notify_message_delta(thread.id, delta)
 
+                capture_project = thread.scope_entity_id if thread.scope_kind == "project" else None
+                step_count = {"n": 0}
+
                 async def _on_step(step: dict[str, object]) -> None:
+                    step_count["n"] += 1
                     await notify_agent_step(thread.id, step, "harness-agent")
+                    # MET-594: tee the live step into the durable
+                    # Action-Observation log (best-effort by contract).
+                    await capture_step(thread.id, capture_project, step)
 
                 async def _on_thinking(delta: str, kind: str = "draft") -> None:
                     await notify_agent_thinking(thread.id, delta, kind)
@@ -413,6 +421,9 @@ async def _invoke_agent(
                     chat_backend=_backend,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
+                await capture_turn_done(
+                    thread.id, capture_project, status="completed", steps=step_count["n"]
+                )
                 return ChatMessageRecord(
                     id=str(uuid4()),
                     thread_id=thread.id,

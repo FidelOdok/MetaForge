@@ -747,6 +747,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         backend="postgres" if type(chat_backend).__name__ == "PgChatBackend" else "in_memory",
     )
 
+    from api_gateway.chat.turn_capture import init_turn_capture
+
+    # MET-594: tee live chat steps into the agent-session event log.
+    init_turn_capture(getattr(app.state, "agent_session_store", None))
+
     init_project_backend(project_backend)
     logger.info(
         "project_backend_selected",
