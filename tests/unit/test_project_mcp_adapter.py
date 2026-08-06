@@ -180,6 +180,25 @@ class TestList:
         result = await _call(server, "project.list", {"limit": 5000})
         assert result["limit"] == 100
 
+    async def test_list_accepts_numeric_strings_for_limit_and_offset(
+        self, server: ProjectServer
+    ) -> None:
+        """Regression (MET-589): some MCP call paths deliver numeric args as
+
+        strings (e.g. "2") rather than JSON numbers. A strict
+        ``isinstance(x, int)`` check rejected those with a false "must be an
+        integer" error even though the value was perfectly valid — caught
+        live on fidel-dev, where every explicit limit/offset call failed.
+        """
+        for i in range(3):
+            await _call(server, "project.create", {"name": f"str-arg-{i}"})
+
+        result = await _call(server, "project.list", {"limit": "2", "offset": "0"})
+        assert len(result["projects"]) == 2
+        assert result["limit"] == 2
+        assert result["offset"] == 0
+        assert result["has_more"] is True
+
     async def test_list_rejects_invalid_limit(self, server: ProjectServer) -> None:
         raw = await server.handle_request(
             json.dumps(
@@ -188,6 +207,34 @@ class TestList:
                     "id": "1",
                     "method": "tool/call",
                     "params": {"tool_id": "project.list", "arguments": {"limit": 0}},
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
+
+    async def test_list_rejects_non_numeric_limit(self, server: ProjectServer) -> None:
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {"tool_id": "project.list", "arguments": {"limit": "not-a-number"}},
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
+
+    async def test_list_rejects_boolean_limit(self, server: ProjectServer) -> None:
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {"tool_id": "project.list", "arguments": {"limit": True}},
                 }
             )
         )

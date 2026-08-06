@@ -385,11 +385,24 @@ class ProjectServer(McpToolServer):
 
     async def handle_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.list") as span:
-            limit = arguments.get("limit", 20)
-            offset = arguments.get("offset", 0)
-            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            limit_raw = arguments.get("limit", 20)
+            offset_raw = arguments.get("offset", 0)
+            if isinstance(limit_raw, bool) or isinstance(offset_raw, bool):
+                raise ValueError(
+                    "project.list: 'limit' and 'offset' must be integers, not booleans"
+                )
+            try:
+                # Some MCP call paths deliver numeric args as strings (e.g.
+                # "20") rather than JSON numbers — coerce like every other
+                # numeric-arg adapter in this codebase (memory/knowledge/twin)
+                # instead of rejecting valid input on a strict isinstance check.
+                limit = int(limit_raw)
+                offset = int(offset_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("project.list: 'limit' and 'offset' must be integers") from exc
+            if limit < 1:
                 raise ValueError("project.list: 'limit' must be a positive integer")
-            if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+            if offset < 0:
                 raise ValueError("project.list: 'offset' must be a non-negative integer")
             limit = min(limit, 100)
 
