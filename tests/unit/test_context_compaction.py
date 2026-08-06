@@ -107,15 +107,15 @@ def test_non_dict_non_list_value_behaves_like_before() -> None:
 def test_native_json_safe_preserves_project_list_total() -> None:
     """End-to-end through native_tools.py's own render (json.dumps, no default=str
     quirks) — the actual code path a real project.list tool call goes through.
-    60 items comfortably exceeds the real 8000-char cap."""
+    600 items comfortably exceeds the real 75_000-char cap (MET-598)."""
     import json
 
     from orchestrator.harness.native_tools import _json_safe
 
-    out = _json_safe(_big_project_list(60))
+    out = _json_safe(_big_project_list(600))
     parsed = json.loads(out)
-    assert parsed["total"] == 60
-    assert parsed["projects_omitted_count"] == 60 - len(parsed["projects"])
+    assert parsed["total"] == 600
+    assert parsed["projects_omitted_count"] == 600 - len(parsed["projects"])
 
 
 @pytest.mark.asyncio
@@ -130,10 +130,10 @@ async def test_policy_trace_preserves_total_for_large_dict_observation() -> None
         return {"text": '{"final": "done"}', "model": spec.model}
 
     step = ReActStep(
-        thought="t", tool_call=ToolCall("project.list", {}), observation=_big_project_list(30)
+        thought="t", tool_call=ToolCall("project.list", {}), observation=_big_project_list(600)
     )
     await ModelPolicy(rt, invoke=invoke).next_action("goal", [step])
-    assert "'total': 30" in seen["content"]  # str() repr — survives the shrink
+    assert "'total': 600" in seen["content"]  # str() repr — survives the shrink
     assert "omitted_count" in seen["content"]
 
 
@@ -265,7 +265,7 @@ async def test_policy_truncates_observations_with_marker() -> None:
         seen["content"] = request["messages"][0]["content"]
         return {"text": '{"final": "done"}', "model": spec.model}
 
-    steps = [ReActStep(thought="t", tool_call=ToolCall("big", {}), observation="y" * 9000)]
+    steps = [ReActStep(thought="t", tool_call=ToolCall("big", {}), observation="y" * 90_000)]
     await ModelPolicy(rt, invoke=invoke).next_action("goal", steps)
     assert "[truncated" in seen["content"]
 

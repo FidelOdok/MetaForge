@@ -252,8 +252,14 @@ class TestList:
         everything. The page must now self-cap on serialized size, and
         `has_more`/`next_offset` must reflect the *actual* returned count.
         """
+        # MET-598 raised the self-cap budget to 60_000 chars (from 1500) so a
+        # realistic 100-item page fits in one call. 25 projects at a 3000-char
+        # description (~3280 json chars each, ~82k total) still comfortably
+        # exceeds that new ceiling, so this keeps exercising the self-cap
+        # itself rather than the (now much larger) budget it targets.
         big_description = "x" * 3000
-        for i in range(10):
+        project_count = 25
+        for i in range(project_count):
             await _call(
                 server,
                 "project.create",
@@ -261,9 +267,9 @@ class TestList:
             )
 
         result = await _call(server, "project.list", {"limit": 100, "offset": 0})
-        assert result["total"] == 10
+        assert result["total"] == project_count
         returned = len(result["projects"])
-        assert returned < 10  # self-cap kicked in despite limit=100 covering all 10
+        assert returned < project_count  # self-cap kicked in despite limit=100 covering all
         assert result["has_more"] is True
         assert result["next_offset"] == returned
 
@@ -275,45 +281,72 @@ class TestList:
             assert len(page["projects"]) >= 1  # forward progress guaranteed
             seen_ids.update(p["id"] for p in page["projects"])
             next_offset = page["next_offset"]
-        assert len(seen_ids) == 10
+        assert len(seen_ids) == project_count
 
-    async def test_list_page_survives_the_legacy_react_loops_tighter_budget(
+    async def test_list_page_survives_the_legacy_react_loops_budget(
         self, server: ProjectServer
     ) -> None:
-        """MET-589 regression: self-capping for the native tool-calling
+        """MET-589/MET-598 regression: self-capping for one harness loop's
 
-        loop's 8000-char budget wasn't enough. The legacy ReAct loop
+        budget isn't enough on its own — the legacy ReAct loop
         (orchestrator/harness/policy.py, still in use for some
-        model/provider combos) applies its OWN, much tighter 2000-char
-        truncation to a `str(dict)` render of the SAME observation — caught
-        live: a page sized for 8000 still got re-shrunk at 2000, so the
-        model saw `has_more`/`next_offset` from this tool's own pagination
-        AND a second, uncoordinated `projects_omitted_count` for items on
-        the page it already had. A page this tool considers complete must
-        survive that tighter budget too, or the two truncation layers give
-        the model conflicting signals about what's missing.
+        model/provider combos) applies its OWN truncation to a `str(dict)`
+        render of the SAME observation. Caught live when both budgets were
+        tiny (8000 native / 2000 ReAct): a page sized for one still got
+        re-shrunk by the other, so the model saw `has_more`/`next_offset`
+        from this tool's own pagination AND a second, uncoordinated
+        `projects_omitted_count` for items on the page it already had.
+        Import the REAL constant (not a hardcoded number) so this stays
+        correct as either budget changes — and push the page to right at
+        this tool's own self-cap ceiling, the actual worst case for the
+        pairing of the two budgets.
         """
         from orchestrator.harness.compression import truncate_observation_value
+        from orchestrator.harness.policy import _MAX_OBS_CHARS
 
-        for i in range(8):
+        # ~300-char description (realistic verbose real-world project, e.g.
+        # the "Quadruped Robot" fixture) x enough projects to push this
+        # tool's own self-cap (60_000 chars) to its ceiling.
+        description = "A realistic, fairly verbose project description. " * 6
+        for i in range(150):
+            await _call(
+                server,
+                "project.create",
+                {"name": f"react-budget-{i}", "description": description},
+            )
+
+        result = await _call(server, "project.list", {"limit": 100, "offset": 0})
+        assert result["has_more"] is True  # self-cap kicked in — page is at its ceiling
+
+        rendered_for_react_loop = truncate_observation_value(result, _MAX_OBS_CHARS)
+        assert "projects_omitted_count" not in rendered_for_react_loop, (
+            "page fit this tool's own self-cap but got re-shrunk by the ReAct "
+            "loop's budget -- has_more/next_offset no longer match what the "
+            "model actually sees"
+        )
+
+    async def test_list_returns_at_least_100_realistic_projects_in_one_call(
+        self, server: ProjectServer
+    ) -> None:
+        """The actual user-facing requirement: a realistic 100-project
+
+        workspace should list in ONE call, not require walking many pages.
+        """
+        for i in range(100):
             await _call(
                 server,
                 "project.create",
                 {
-                    "name": f"react-budget-{i}",
-                    "description": "A realistic project description, not empty.",
+                    "name": f"realistic-project-{i}",
+                    "description": "A wall-mounted environmental sensor unit for a workshop.",
                 },
             )
 
         result = await _call(server, "project.list", {"limit": 100, "offset": 0})
-        assert result["has_more"] is True  # self-cap still kicked in below limit=100
-
-        rendered_for_react_loop = truncate_observation_value(result, 2000)
-        assert "projects_omitted_count" not in rendered_for_react_loop, (
-            "page fit the native loop's budget but got re-shrunk by the ReAct "
-            "loop's tighter one -- has_more/next_offset no longer match what "
-            "the model actually sees"
-        )
+        assert result["total"] == 100
+        assert len(result["projects"]) == 100
+        assert result["has_more"] is False
+        assert result["next_offset"] is None
 
 
 class TestGet:

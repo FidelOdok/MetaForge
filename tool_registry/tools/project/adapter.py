@@ -30,25 +30,30 @@ from tool_registry.mcp_server.server import McpToolServer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.project")
 
-# MET-589: the chat harness silently truncates any tool observation past a
-# char budget, dropping trailing list items with no way for the caller to
-# detect it short of the length shrinking underneath a `limit` it already
-# asked for. There are TWO such budgets depending on which loop is driving
-# the model, and this tool has no way to know which one applies:
-#   - native tool-calling: _MAX_OBSERVATION_CHARS = 8000 (native_tools.py)
-#   - legacy ReAct (e.g. openai-codex/gpt-5.5 today): _MAX_OBS_CHARS = 2000
+# MET-589: the chat harness truncates any tool observation past a char
+# budget, dropping trailing list items with no way for the caller to detect
+# it short of the length shrinking underneath a `limit` it already asked
+# for. There are TWO such budgets depending on which loop is driving the
+# model, and this tool has no way to know which one applies:
+#   - native tool-calling: _MAX_OBSERVATION_CHARS (native_tools.py)
+#   - legacy ReAct (e.g. openai-codex/gpt-5.5 today): _MAX_OBS_CHARS
 #     (policy.py), applied to a `str(dict)` render of the SAME observation
-# A page sized for the 8000 budget alone still gets re-shrunk by the 2000
-# one — confirmed live: the model saw `has_more`/`next_offset` from this
-# tool's own pagination AND a second, uncoordinated `projects_omitted_count`
-# for items on the same page, and (reasonably) stopped trusting either,
-# re-querying overlapping ranges instead of walking `next_offset` cleanly.
-# Target the SMALLER budget so neither loop's shrink ever re-triggers on a
-# page this tool already considers complete (barring a single project with
-# a description near its 2000-char max, which alone can still exceed even
-# this — acceptable, since that only affects rendering of the one already-
-# known item, not `has_more`/`next_offset`, which stay accurate regardless).
-_MAX_LIST_PAGE_CHARS = 1500
+# A page sized for one budget alone can still get re-shrunk by the other —
+# confirmed live when both were tiny (8000/2000): the model saw
+# `has_more`/`next_offset` from this tool's own pagination AND a second,
+# uncoordinated `projects_omitted_count` for items on the same page, and
+# (reasonably) stopped trusting either, re-querying overlapping ranges
+# instead of walking `next_offset` cleanly. MET-598 raised both harness
+# budgets to 75_000 (previously hardcoded far below what a modern large-
+# context model can actually spare — trace_token_budget() already scales the
+# *overall* trace to the model's real window). Target comfortably under the
+# smaller of the two so a page this tool considers complete survives either
+# loop: 100 realistic project records measured at ~40k-57k chars, so 60_000
+# leaves real margin (barring a single project with a description near its
+# 2000-char max, which alone can still exceed this — acceptable, since that
+# only affects rendering of the one already-known item, not
+# `has_more`/`next_offset`, which stay accurate regardless).
+_MAX_LIST_PAGE_CHARS = 60_000
 
 
 @runtime_checkable

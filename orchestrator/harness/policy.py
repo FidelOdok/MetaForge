@@ -35,7 +35,13 @@ from orchestrator.harness.runtime import HarnessRuntime
 logger = structlog.get_logger(__name__)
 
 # MET-568: per-step observation cap in the rendered trace (explicit marker).
-_MAX_OBS_CHARS = 2000
+# MET-598: was a tiny, fixed 2000 chars regardless of the model's actual
+# context window (compare trace_token_budget() in harness_backend.py, which
+# already scales the *overall* trace to ~60% of a model's real window). This
+# per-step cap was the odd one out and forced tools like project.list down to
+# a handful of items per page no matter what `limit` a caller requested.
+# Raised to match native_tools.py's _MAX_OBSERVATION_CHARS.
+_MAX_OBS_CHARS = 75_000
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
