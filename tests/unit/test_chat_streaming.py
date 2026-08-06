@@ -286,7 +286,9 @@ class TestStreamThread:
         await task
 
         assert len(results) == 1
-        assert results[0].startswith("event: message.created\n")
+        # MET-593: broadcast events carry a resume id line before the event line.
+        assert results[0].startswith("id: ")
+        assert "event: message.created\n" in results[0]
 
     @pytest.mark.asyncio
     async def test_stops_on_sentinel(self) -> None:
