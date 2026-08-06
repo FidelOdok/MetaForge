@@ -115,15 +115,63 @@ class TestCreate:
 class TestList:
     async def test_list_empty(self, server: ProjectServer) -> None:
         result = await _call(server, "project.list", {})
-        assert result == {"projects": [], "total": 0}
+        assert result == {
+            "projects": [],
+            "total": 0,
+            "offset": 0,
+            "limit": 20,
+            "has_more": False,
+        }
 
     async def test_list_after_create(self, server: ProjectServer) -> None:
         await _call(server, "project.create", {"name": "alpha"})
         await _call(server, "project.create", {"name": "beta"})
         result = await _call(server, "project.list", {})
         assert result["total"] == 2
+        assert result["has_more"] is False
         names = {p["name"] for p in result["projects"]}
         assert names == {"alpha", "beta"}
+
+    async def test_list_paginates_with_limit_and_offset(self, server: ProjectServer) -> None:
+        for i in range(5):
+            await _call(server, "project.create", {"name": f"project-{i}"})
+
+        page1 = await _call(server, "project.list", {"limit": 2, "offset": 0})
+        assert len(page1["projects"]) == 2
+        assert page1["total"] == 5
+        assert page1["offset"] == 0
+        assert page1["limit"] == 2
+        assert page1["has_more"] is True
+
+        page2 = await _call(server, "project.list", {"limit": 2, "offset": 2})
+        assert len(page2["projects"]) == 2
+        assert page2["has_more"] is True
+
+        page3 = await _call(server, "project.list", {"limit": 2, "offset": 4})
+        assert len(page3["projects"]) == 1
+        assert page3["has_more"] is False
+
+        # Every project appears exactly once across pages, none dropped.
+        seen_ids = {p["id"] for page in (page1, page2, page3) for p in page["projects"]}
+        assert len(seen_ids) == 5
+
+    async def test_list_limit_is_capped_at_100(self, server: ProjectServer) -> None:
+        result = await _call(server, "project.list", {"limit": 5000})
+        assert result["limit"] == 100
+
+    async def test_list_rejects_invalid_limit(self, server: ProjectServer) -> None:
+        raw = await server.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tool/call",
+                    "params": {"tool_id": "project.list", "arguments": {"limit": 0}},
+                }
+            )
+        )
+        response = json.loads(raw)
+        assert "error" in response, response
 
 
 class TestGet:

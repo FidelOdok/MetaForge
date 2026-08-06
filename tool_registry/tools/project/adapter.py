@@ -157,12 +157,32 @@ class ProjectServer(McpToolServer):
                 adapter_id="project",
                 name="List Projects",
                 description=(
-                    "Return every project the caller can see. No filter "
-                    "args today; project-level scoping is handled by the "
-                    "backend (per-tenant deployments)."
+                    "Return a page of projects the caller can see, newest "
+                    "first. Paginated via `limit`/`offset` — check "
+                    "`has_more` in the response and re-call with a higher "
+                    "`offset` to see the rest instead of assuming the "
+                    "first page is everything. Project-level scoping is "
+                    "handled by the backend (per-tenant deployments)."
                 ),
                 capability="project_management",
-                input_schema={"type": "object", "properties": {}},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100,
+                            "default": 20,
+                            "description": "Max projects to return in this page (capped at 100).",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 0,
+                            "description": "Number of projects to skip, for paging.",
+                        },
+                    },
+                },
                 output_schema={
                     "type": "object",
                     "properties": {
@@ -170,7 +190,16 @@ class ProjectServer(McpToolServer):
                             "type": "array",
                             "items": _project_output_schema(),
                         },
-                        "total": {"type": "integer"},
+                        "total": {
+                            "type": "integer",
+                            "description": "Total projects visible to the caller, across pages.",
+                        },
+                        "offset": {"type": "integer"},
+                        "limit": {"type": "integer"},
+                        "has_more": {
+                            "type": "boolean",
+                            "description": "True if projects remain beyond this page.",
+                        },
                     },
                 },
                 phase=1,
@@ -334,6 +363,14 @@ class ProjectServer(McpToolServer):
 
     async def handle_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.list") as span:
+            limit = arguments.get("limit", 20)
+            offset = arguments.get("offset", 0)
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                raise ValueError("project.list: 'limit' must be a positive integer")
+            if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+                raise ValueError("project.list: 'offset' must be a non-negative integer")
+            limit = min(limit, 100)
+
             ctx_project_id = current_context().project_id
             projects = await self.backend.list_projects()
 
@@ -346,15 +383,26 @@ class ProjectServer(McpToolServer):
                 span.set_attribute("mcp.project_id", ctx_id_str)
                 span.set_attribute("project.scoped", True)
 
-            span.set_attribute("project.result_count", len(projects))
+            total = len(projects)
+            page = projects[offset : offset + limit]
+            has_more = offset + len(page) < total
+
+            span.set_attribute("project.result_count", len(page))
+            span.set_attribute("project.total", total)
             logger.info(
                 "project_mcp_list",
-                result_count=len(projects),
+                result_count=len(page),
+                total=total,
+                offset=offset,
+                limit=limit,
                 scoped_to=str(ctx_project_id) if ctx_project_id else None,
             )
             return {
-                "projects": [_project_to_dict(p) for p in projects],
-                "total": len(projects),
+                "projects": [_project_to_dict(p) for p in page],
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "has_more": has_more,
             }
 
     async def handle_get(self, arguments: dict[str, Any]) -> dict[str, Any] | None:
