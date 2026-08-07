@@ -15,19 +15,6 @@ vi.mock('../../hooks/use-active-project', () => ({
   useActiveProject: () => mockUseActiveProject(),
 }));
 
-vi.mock('../../hooks/use-scoped-chat', () => ({
-  useScopedChat: () => ({
-    thread: null,
-    messages: [],
-    isTyping: false,
-    sendMessage: vi.fn(),
-    createThread: vi.fn(),
-    isLoading: false,
-    isCreating: false,
-    isSending: false,
-  }),
-}));
-
 import { BomPage } from '../BomPage';
 import { useBom } from '../../hooks/use-bom';
 

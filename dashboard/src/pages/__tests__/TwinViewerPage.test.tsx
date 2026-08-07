@@ -8,19 +8,6 @@ vi.mock('../../hooks/use-twin', () => ({
   useNodeVersionHistory: vi.fn(() => ({ data: [], isLoading: false })),
 }));
 
-vi.mock('../../hooks/use-scoped-chat', () => ({
-  useScopedChat: () => ({
-    thread: null,
-    messages: [],
-    isTyping: false,
-    sendMessage: vi.fn(),
-    createThread: vi.fn(),
-    isLoading: false,
-    isCreating: false,
-    isSending: false,
-  }),
-}));
-
 vi.mock('../../hooks/use-conversion', () => ({
   useUploadAndConvert: () => ({
     mutate: vi.fn(),

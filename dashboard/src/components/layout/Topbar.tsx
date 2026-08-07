@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { RunAgentDialog } from '../shared/RunAgentDialog';
 import { ProjectSwitcher } from '../shared/ProjectSwitcher';
 import { useProjects } from '../../hooks/use-projects';
 import { useSessions } from '../../hooks/use-sessions';
@@ -18,7 +17,6 @@ const SEGMENT_LABELS: Record<string, string> = {
   twin:      'Digital Twin',
   files:     'Files',
   knowledge: 'Knowledge',
-  assistant: 'Design Assistant',
   compliance: 'Compliance',
 };
 
@@ -88,7 +86,6 @@ function useBreadcrumbs(): { segments: BreadcrumbSegment[]; pageTitle: string } 
 // ---------------------------------------------------------------------------
 
 export function Topbar() {
-  const [runDialogOpen, setRunDialogOpen] = useState(false);
   const { segments, pageTitle } = useBreadcrumbs();
 
   useEffect(() => {
@@ -96,63 +93,46 @@ export function Topbar() {
   }, [pageTitle]);
 
   return (
-    <>
-      <header
-        className="glass flex h-10 shrink-0 items-center justify-between px-5"
-        style={{
-          background: 'rgba(25,27,34,0.85)',
-          borderBottom: '1px solid rgba(65,72,90,0.2)',
-        }}
-      >
-        {/* Breadcrumbs */}
-        <nav aria-label="Breadcrumb" className="flex items-center">
-          {segments.length === 0 ? (
-            <span className="font-mono text-xs text-on-surface-variant">MetaForge</span>
-          ) : (
-            <ol className="flex items-center gap-1.5">
-              {segments.map((seg, idx) => (
-                <li key={idx} className="flex items-center gap-1.5">
-                  {idx > 0 && (
-                    <span className="font-mono text-xs text-on-surface-variant" aria-hidden="true">
-                      /
-                    </span>
-                  )}
-                  <span
-                    className={
-                      seg.isCurrent
-                        ? 'font-mono text-xs font-medium text-on-surface'
-                        : 'font-mono text-xs text-on-surface-variant'
-                    }
-                    aria-current={seg.isCurrent ? 'page' : undefined}
-                  >
-                    {seg.label}
+    <header
+      className="glass flex h-10 shrink-0 items-center justify-between px-5"
+      style={{
+        background: 'rgba(25,27,34,0.85)',
+        borderBottom: '1px solid rgba(65,72,90,0.2)',
+      }}
+    >
+      {/* Breadcrumbs */}
+      <nav aria-label="Breadcrumb" className="flex items-center">
+        {segments.length === 0 ? (
+          <span className="font-mono text-xs text-on-surface-variant">MetaForge</span>
+        ) : (
+          <ol className="flex items-center gap-1.5">
+            {segments.map((seg, idx) => (
+              <li key={idx} className="flex items-center gap-1.5">
+                {idx > 0 && (
+                  <span className="font-mono text-xs text-on-surface-variant" aria-hidden="true">
+                    /
                   </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </nav>
+                )}
+                <span
+                  className={
+                    seg.isCurrent
+                      ? 'font-mono text-xs font-medium text-on-surface'
+                      : 'font-mono text-xs text-on-surface-variant'
+                  }
+                  aria-current={seg.isCurrent ? 'page' : undefined}
+                >
+                  {seg.label}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </nav>
 
-        {/* Right-side actions */}
-        <div className="flex items-center gap-2">
-          <ProjectSwitcher />
-          <button
-            type="button"
-            onClick={() => setRunDialogOpen(true)}
-            className="rounded px-3 py-1 font-sans text-xs font-medium transition-colors"
-            style={{
-              background: '#e67e22',
-              color: '#111319',
-            }}
-          >
-            Run Agent
-          </button>
-        </div>
-      </header>
-
-      {runDialogOpen && (
-        <RunAgentDialog onClose={() => setRunDialogOpen(false)} />
-      )}
-    </>
+      {/* Right-side actions */}
+      <div className="flex items-center gap-2">
+        <ProjectSwitcher />
+      </div>
+    </header>
   );
 }

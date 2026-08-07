@@ -3,8 +3,6 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSession } from '../hooks/use-sessions';
-import { useScopedChat } from '../hooks/use-scoped-chat';
-import { SessionChatPanel } from '../components/chat/integrations/SessionChatPanel';
 import type { AgentEvent, AgentSession } from '../types/session';
 
 // KC color tokens
@@ -85,11 +83,6 @@ function PanelHeader({ label }: { label: string }) {
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: session, isLoading } = useSession(id);
-
-  const chat = useScopedChat({
-    scopeKind: 'session',
-    entityId: id ?? '',
-  });
 
   if (isLoading) {
     return (
@@ -230,19 +223,6 @@ export function SessionDetailPage() {
           </div>
         )}
       </GlassPanel>
-
-      {/* Session Chat Panel */}
-      <div style={{ marginTop: 16 }}>
-        <SessionChatPanel
-          sessionId={session.id}
-          sessionTitle={session.taskType.replace(/_/g, ' ')}
-          thread={chat.thread}
-          messages={chat.messages}
-          isTyping={chat.isTyping}
-          onSendMessage={chat.sendMessage}
-          onCreateThread={chat.createThread}
-        />
-      </div>
     </div>
   );
 }

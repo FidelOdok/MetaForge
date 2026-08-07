@@ -6,19 +6,6 @@ vi.mock('../../hooks/use-assistant', () => ({
   useDecideProposal: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-vi.mock('../../hooks/use-scoped-chat', () => ({
-  useScopedChat: () => ({
-    thread: null,
-    messages: [],
-    isTyping: false,
-    sendMessage: vi.fn(),
-    createThread: vi.fn(),
-    isLoading: false,
-    isCreating: false,
-    isSending: false,
-  }),
-}));
-
 import { ApprovalsPage } from '../ApprovalsPage';
 import { useProposals } from '../../hooks/use-assistant';
 

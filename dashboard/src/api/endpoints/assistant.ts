@@ -1,36 +1,5 @@
 import apiClient from '../client';
 
-export interface SubmitRequestPayload {
-  action: string;
-  target_id?: string;
-  project_id: string;
-  prompt?: string;
-  parameters?: Record<string, unknown>;
-  session_id?: string;
-}
-
-export interface AssistantResponse {
-  request_id: string;
-  status: string;
-  result: Record<string, unknown>;
-  errors: string[];
-}
-
-export interface RunStatusResponse {
-  run_id: string;
-  status: string;
-  steps: Record<string, {
-    status: string;
-    agent_code: string;
-    task_type: string;
-    result: Record<string, unknown>;
-    error: string | null;
-    started_at: string | null;
-    completed_at: string | null;
-  }>;
-  completed_at: string | null;
-}
-
 export interface Proposal {
   change_id: string;
   agent_code: string;
@@ -49,16 +18,6 @@ export interface Proposal {
 export interface ProposalListResponse {
   proposals: Proposal[];
   total: number;
-}
-
-export async function submitRequest(payload: SubmitRequestPayload): Promise<AssistantResponse> {
-  const { data } = await apiClient.post<AssistantResponse>('/assistant/request', payload);
-  return data;
-}
-
-export async function getRunStatus(runId: string): Promise<RunStatusResponse> {
-  const { data } = await apiClient.get<RunStatusResponse>(`/assistant/request/${runId}`);
-  return data;
 }
 
 export async function getProposals(projectId?: string): Promise<ProposalListResponse> {

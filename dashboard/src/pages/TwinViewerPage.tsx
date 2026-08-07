@@ -5,8 +5,6 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
 import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../hooks/use-twin';
 import { useActiveProject } from '../hooks/use-active-project';
-import { useScopedChat } from '../hooks/use-scoped-chat';
-import { NodeChatPanel } from '../components/chat/integrations/NodeChatPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
 import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
@@ -223,11 +221,6 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
 }
 
 function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
-  const chat = useScopedChat({
-    scopeKind: 'digital-twin-node',
-    entityId: node.id,
-    label: node.name,
-  });
   const loadModel = useViewerStore((s) => s.loadModel);
   const setViewMode = useViewerStore((s) => s.setViewMode);
   const [loading3d, setLoading3d] = useState(false);
@@ -331,19 +324,6 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         {/* Pending design-change proposals for this node (gated apply, MET-548) */}
         <div className="px-3 py-2 flex-shrink-0">
           <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
-        </div>
-
-        {/* Chat */}
-        <div className="px-3 py-2 flex-1 min-h-0">
-          <NodeChatPanel
-            nodeId={node.id}
-            nodeName={node.name}
-            thread={chat.thread}
-            messages={chat.messages}
-            isTyping={chat.isTyping}
-            onSendMessage={chat.sendMessage}
-            onCreateThread={chat.createThread}
-          />
         </div>
       </div>
     </div>
@@ -513,99 +493,6 @@ function SceneDropdown({
   );
 }
 
-// ── TwinChatDock (persistent bottom chat strip) ───────────────────────────────
-/**
- * Always-on, project/twin-scoped chat that lives at the bottom of the twin —
- * a persistent agent you can talk to about the whole design, independent of
- * any node/part selection. Collapses to a single bar; expands upward. Distinct
- * from the node/part-scoped chats in NodeDetail / BomAnnotationPanel (MET-548).
- */
-function TwinChatDock({
-  projectId,
-  projectLabel,
-  defaultOpen = false,
-}: {
-  projectId: string;
-  projectLabel: string;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const entityId = projectId || 'twin-global';
-  const subject = projectId ? projectLabel : 'the whole twin';
-  const chat = useScopedChat({
-    scopeKind: 'project',
-    entityId,
-    label: `Twin Assistant — ${projectLabel}`,
-  });
-  const msgCount = chat.messages.length;
-
-  return (
-    <div style={{ position: 'absolute', bottom: 32, left: 16, right: 16, zIndex: 46 }}>
-      <GlassPanel
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          height: open ? 440 : 36,
-          transition: 'height 0.16s ease',
-        }}
-      >
-        {/* Collapsed bar / header — click anywhere to toggle */}
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-2 px-3 flex-shrink-0"
-          style={{
-            height: 36,
-            width: '100%',
-            background: 'transparent',
-            border: 'none',
-            borderBottom: open ? `1px solid ${KC.border}` : 'none',
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 15, color: KC.orange }}>
-            forum
-          </span>
-          <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurface }}>
-            Assistant
-          </span>
-          {!open && (
-            <span className="font-mono truncate" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
-              — ask about {subject}…
-            </span>
-          )}
-          <span style={{ flex: 1 }} />
-          {msgCount > 0 && (
-            <span className="font-mono rounded px-1.5" style={{ fontSize: 10, background: KC.surfaceHigh, color: KC.onSurfaceVariant }}>
-              {msgCount}
-            </span>
-          )}
-          <span className="material-symbols-outlined" style={{ fontSize: 16, color: KC.onSurfaceVariant }}>
-            {open ? 'expand_more' : 'expand_less'}
-          </span>
-        </button>
-
-        {/* Chat body (only mounted when open) */}
-        {open && (
-          <div className="flex-1 min-h-0 p-2">
-            <NodeChatPanel
-              nodeId={entityId}
-              nodeName={subject}
-              thread={chat.thread}
-              messages={chat.messages}
-              isTyping={chat.isTyping}
-              onSendMessage={chat.sendMessage}
-              onCreateThread={chat.createThread}
-            />
-          </div>
-        )}
-      </GlassPanel>
-    </div>
-  );
-}
-
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
 
@@ -640,7 +527,7 @@ export function TwinViewerPage() {
   // ── project scope — Context UI ──
   // Reads the single global active-project selection every page now shares
   // (the Topbar switcher), instead of the page-local scope this used to keep.
-  const { activeProjectId, projects: projectOptions } = useActiveProject();
+  const { activeProjectId } = useActiveProject();
 
   // ── data ──
   const { data: nodes, isLoading, isFetching, dataUpdatedAt } = useTwinNodes(activeProjectId ?? undefined);
@@ -1255,18 +1142,6 @@ export function TwinViewerPage() {
         </Link>
       </div>
 
-      {/* ═══════════════════════════════════════════
-          PERSISTENT TWIN CHAT — bottom dock (always on)
-      ════════════════════════════════════════════ */}
-      <TwinChatDock
-        projectId={activeProjectId ?? ''}
-        projectLabel={
-          activeProjectId
-            ? (projectOptions.find((p) => p.id === activeProjectId)?.name ?? 'Project')
-            : 'All projects'
-        }
-        defaultOpen={searchParams.get('assistant') === '1'}
-      />
 
       {/* ═══════════════════════════════════════════
           STATUS BAR — 32px pinned to bottom

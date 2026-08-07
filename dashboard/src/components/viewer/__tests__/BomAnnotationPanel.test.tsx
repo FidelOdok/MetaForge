@@ -31,20 +31,6 @@ vi.mock('../../../hooks/use-bom', () => ({
   useBom: vi.fn(() => ({ data: [] })),
 }));
 
-vi.mock('../../../hooks/use-scoped-chat', () => ({
-  useScopedChat: vi.fn(() => ({
-    thread: null,
-    messages: [],
-    isTyping: false,
-    sendMessage: vi.fn(),
-    createThread: vi.fn(),
-  })),
-}));
-
-vi.mock('../../chat/integrations/NodeChatPanel', () => ({
-  NodeChatPanel: () => <div data-testid="node-chat-panel" />,
-}));
-
 describe('BomAnnotationPanel', () => {
   it('shows empty state when no mesh is selected', () => {
     mockViewerState = { selectedMeshName: null, manifest: null };
@@ -55,13 +41,6 @@ describe('BomAnnotationPanel', () => {
   it('shows part info when mesh is selected', () => {
     mockViewerState = { selectedMeshName: 'mesh_0', manifest: MOCK_MANIFEST };
     const { getAllByText } = render(<BomAnnotationPanel />);
-    // Appears in the header and in the "Commenting on <part>" context chip.
     expect(getAllByText('Base Plate').length).toBeGreaterThan(0);
-  });
-
-  it('shows the "commenting on" context affordance', () => {
-    mockViewerState = { selectedMeshName: 'mesh_0', manifest: MOCK_MANIFEST };
-    const { getByText } = render(<BomAnnotationPanel />);
-    expect(getByText(/Commenting on/i)).toBeInTheDocument();
   });
 });

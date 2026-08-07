@@ -1,11 +1,8 @@
-import { useState } from 'react';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
 import { useActiveProject } from '../hooks/use-active-project';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
-import { useScopedChat } from '../hooks/use-scoped-chat';
-import { ApprovalChatPanel } from '../components/chat/integrations/ApprovalChatPanel';
 import type { Proposal } from '../api/endpoints/assistant';
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
@@ -82,14 +79,7 @@ function DiffPanel({ diff }: { diff: Record<string, unknown> }) {
 // ─── ProposalCard ────────────────────────────────────────────────────────────
 function ProposalCard({ proposal }: { proposal: Proposal }) {
   const decide = useDecideProposal();
-  const [chatOpen, setChatOpen] = useState(false);
   const isPending = proposal.status === 'pending';
-
-  const chat = useScopedChat({
-    scopeKind: 'approval',
-    entityId: proposal.change_id,
-    defaultAgentCode: proposal.agent_code,
-  });
 
   function handleDecision(decision: 'approve' | 'reject') {
     decide.mutate({
@@ -219,21 +209,6 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
             <span className="material-symbols-outlined" style={{ fontSize: 14 }}>cancel</span>
             Reject
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setChatOpen(!chatOpen)}
-            className="gap-1.5 ml-auto"
-            style={{
-              color: KC.onSurfaceVariant,
-              border: `1px solid ${KC.border}`,
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
-              {chatOpen ? 'chat_bubble' : 'chat_bubble_outline'}
-            </span>
-            {chatOpen ? 'Hide' : 'Discuss'}
-          </Button>
         </div>
       )}
 
@@ -246,27 +221,6 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           Decided {formatRelativeTime(proposal.decided_at)}
           {proposal.reviewer && ` · ${proposal.reviewer}`}
           {proposal.decision_reason && ` — ${proposal.decision_reason}`}
-        </div>
-      )}
-
-      {/* Inline chat */}
-      {chatOpen && (
-        <div
-          className="mt-1 rounded"
-          style={{
-            borderTop: `1px solid ${KC.border}`,
-            paddingTop: 12,
-          }}
-        >
-          <ApprovalChatPanel
-            approvalId={proposal.change_id}
-            agentCode={proposal.agent_code}
-            thread={chat.thread}
-            messages={chat.messages}
-            isTyping={chat.isTyping}
-            onSendMessage={chat.sendMessage}
-            onCreateThread={chat.createThread}
-          />
         </div>
       )}
     </div>

@@ -10,19 +10,6 @@ vi.mock('../../hooks/use-sessions', () => ({
   useSession: vi.fn(),
 }));
 
-vi.mock('../../hooks/use-scoped-chat', () => ({
-  useScopedChat: () => ({
-    thread: null,
-    messages: [],
-    isTyping: false,
-    sendMessage: vi.fn(),
-    createThread: vi.fn(),
-    isLoading: false,
-    isCreating: false,
-    isSending: false,
-  }),
-}));
-
 import { SessionDetailPage } from '../SessionDetailPage';
 import { useSession } from '../../hooks/use-sessions';
 

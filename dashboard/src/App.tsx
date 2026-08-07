@@ -13,7 +13,6 @@ import { ApprovalsPage } from './pages/ApprovalsPage';
 import { BomPage } from './pages/BomPage';
 import { TwinViewerPage } from './pages/TwinViewerPage';
 import { FilesPage } from './pages/FilesPage';
-import { DesignAssistantPage } from './pages/DesignAssistantPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { SourceDetailPage } from './pages/SourceDetailPage';
 import { CompliancePage } from './pages/CompliancePage';
@@ -106,14 +105,6 @@ export function App() {
               element={
                 <ErrorBoundary>
                   <FilesPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="assistant"
-              element={
-                <ErrorBoundary>
-                  <DesignAssistantPage />
                 </ErrorBoundary>
               }
             />
