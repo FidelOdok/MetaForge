@@ -43,3 +43,24 @@ export interface SourcesQuery {
   limit?: number;
   offset?: number;
 }
+
+/**
+ * One semantic search hit from ``GET /api/v1/knowledge/search``. Distinct
+ * from `SourceSummary` — search returns individual matched chunks/entries,
+ * not source-level rollups.
+ */
+export interface KnowledgeSearchResult {
+  id: string;
+  content: string;
+  knowledge_type: KnowledgeType | null;
+  metadata: Record<string, unknown>;
+  source_path: string | null;
+  created_at: string;
+}
+
+/** Params supported by ``GET /api/v1/knowledge/search``. */
+export interface KnowledgeSearchQuery {
+  query: string;
+  knowledge_type?: KnowledgeType;
+  limit?: number;
+}

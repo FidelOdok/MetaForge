@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { AgentStep } from '@/types/chat';
 
 // ---------------------------------------------------------------------------
@@ -49,56 +50,77 @@ interface ChatUIActions {
 // Store
 // ---------------------------------------------------------------------------
 
-export const useChatStore = create<ChatUIState & ChatUIActions>((set) => ({
-  // -- initial state --
-  streamingContent: {},
-  agentSteps: {},
-  typingThreadIds: new Set<string>(),
-  selectedProvider: null,
-  selectedModel: null,
-  enabledTools: null,
+// The model/provider/tools selection is persisted to localStorage so it
+// survives a reload (it used to reset every time). This is a per-user,
+// client-side preference only — it is intentionally NOT written through
+// PUT /v1/harness/selection, which is an admin-scoped endpoint that
+// overrides the gateway's system-wide default for every user/session, not
+// a per-user setting.
+export const useChatStore = create<ChatUIState & ChatUIActions>()(
+  persist(
+    (set) => ({
+      // -- initial state --
+      streamingContent: {},
+      agentSteps: {},
+      typingThreadIds: new Set<string>(),
+      selectedProvider: null,
+      selectedModel: null,
+      enabledTools: null,
 
-  // -- actions --
-  appendStreamChunk: (messageId, chunk) =>
-    set((state) => ({
-      streamingContent: {
-        ...state.streamingContent,
-        [messageId]: (state.streamingContent[messageId] ?? '') + chunk,
-      },
-    })),
+      // -- actions --
+      appendStreamChunk: (messageId, chunk) =>
+        set((state) => ({
+          streamingContent: {
+            ...state.streamingContent,
+            [messageId]: (state.streamingContent[messageId] ?? '') + chunk,
+          },
+        })),
 
-  clearStreamContent: (messageId) =>
-    set((state) => {
-      const { [messageId]: _removed, ...rest } = state.streamingContent;
-      return { streamingContent: rest };
+      clearStreamContent: (messageId) =>
+        set((state) => {
+          const { [messageId]: _removed, ...rest } = state.streamingContent;
+          return { streamingContent: rest };
+        }),
+
+      appendAgentStep: (threadId, step) =>
+        set((state) => ({
+          agentSteps: {
+            ...state.agentSteps,
+            [threadId]: [...(state.agentSteps[threadId] ?? []), step],
+          },
+        })),
+
+      clearAgentSteps: (threadId) =>
+        set((state) => {
+          const { [threadId]: _removed, ...rest } = state.agentSteps;
+          return { agentSteps: rest };
+        }),
+
+      setAgentTyping: (threadId, isTyping) =>
+        set((state) => {
+          const next = new Set(state.typingThreadIds);
+          if (isTyping) {
+            next.add(threadId);
+          } else {
+            next.delete(threadId);
+          }
+          return { typingThreadIds: next };
+        }),
+
+      setModel: (provider, model) => set({ selectedProvider: provider, selectedModel: model }),
+
+      setEnabledTools: (toolIds) => set({ enabledTools: toolIds }),
     }),
-
-  appendAgentStep: (threadId, step) =>
-    set((state) => ({
-      agentSteps: {
-        ...state.agentSteps,
-        [threadId]: [...(state.agentSteps[threadId] ?? []), step],
-      },
-    })),
-
-  clearAgentSteps: (threadId) =>
-    set((state) => {
-      const { [threadId]: _removed, ...rest } = state.agentSteps;
-      return { agentSteps: rest };
-    }),
-
-  setAgentTyping: (threadId, isTyping) =>
-    set((state) => {
-      const next = new Set(state.typingThreadIds);
-      if (isTyping) {
-        next.add(threadId);
-      } else {
-        next.delete(threadId);
-      }
-      return { typingThreadIds: next };
-    }),
-
-  setModel: (provider, model) => set({ selectedProvider: provider, selectedModel: model }),
-
-  setEnabledTools: (toolIds) => set({ enabledTools: toolIds }),
-}));
+    {
+      name: 'metaforge.chat-model-selection',
+      version: 1,
+      // Only the durable preference persists — streaming/typing state is
+      // per-session runtime state and must not survive a reload.
+      partialize: (state) => ({
+        selectedProvider: state.selectedProvider,
+        selectedModel: state.selectedModel,
+        enabledTools: state.enabledTools,
+      }),
+    },
+  ),
+);

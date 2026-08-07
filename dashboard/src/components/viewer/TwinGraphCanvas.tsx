@@ -6,7 +6,7 @@
  * pan, zoom, and click to select nodes.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -15,6 +15,7 @@ import {
   type Node,
   type Edge,
   type NodeMouseHandler,
+  type ReactFlowInstance,
   Position,
   MarkerType,
 } from '@xyflow/react';
@@ -167,6 +168,16 @@ const nodeTypes = { twin: TwinNode };
 const COL_W = 220;
 const ROW_H = 90;
 
+// The page overlays a floating node-detail panel at `right:72, width:320`
+// (392px total) whenever a node is selected. react-flow's own fitView has no
+// way to reserve space asymmetrically for that, so a freshly-selected node
+// can end up laid out underneath it — most visibly at narrower viewports
+// where 392px is a much bigger share of the canvas. Panning the selected
+// node left by half that reserved width keeps it clear of the panel.
+const DETAIL_PANEL_RESERVED_PX = 392;
+const DEFAULT_NODE_WIDTH = 180; // TwinNode's min/maxWidth midpoint, if unmeasured
+const DEFAULT_NODE_HEIGHT = 52;
+
 function layoutNodes(twinNodes: TwinNode[]): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>();
   // Group by domain for visual clustering
@@ -199,6 +210,8 @@ export function TwinGraphCanvas({
   selectedId,
   onSelectNode,
 }: TwinGraphCanvasProps) {
+  const rfInstanceRef = useRef<ReactFlowInstance<Node<TwinNodeData>, Edge> | null>(null);
+
   const positions = useMemo(() => layoutNodes(twinNodes), [twinNodes]);
 
   const rfNodes: Node<TwinNodeData>[] = useMemo(
@@ -256,6 +269,25 @@ export function TwinGraphCanvas({
 
   const onPaneClick = useCallback(() => onSelectNode(null), [onSelectNode]);
 
+  // Keep the selected node clear of the floating detail panel by shifting
+  // the viewport's center to the right (which moves the node left on
+  // screen) by half the panel's reserved width, converted to flow units.
+  useEffect(() => {
+    const instance = rfInstanceRef.current;
+    if (!instance || !selectedId) return;
+    const pos = positions.get(selectedId);
+    if (!pos) return;
+    const measured = instance.getNode(selectedId)?.measured;
+    const nodeW = measured?.width ?? DEFAULT_NODE_WIDTH;
+    const nodeH = measured?.height ?? DEFAULT_NODE_HEIGHT;
+    const { zoom } = instance.getViewport();
+    const offsetX = (DETAIL_PANEL_RESERVED_PX / 2) / zoom;
+    instance.setCenter(pos.x + nodeW / 2 + offsetX, pos.y + nodeH / 2, {
+      zoom,
+      duration: 300,
+    });
+  }, [selectedId, positions]);
+
   return (
     <div style={{ width: '100%', height: '100%' }}>
       <ReactFlow
@@ -264,6 +296,7 @@ export function TwinGraphCanvas({
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onInit={(instance) => { rfInstanceRef.current = instance; }}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         colorMode="dark"
@@ -281,6 +314,13 @@ export function TwinGraphCanvas({
             background: KC.surfaceContainer,
             border: `1px solid ${KC.border}`,
             borderRadius: 6,
+            // The page overlays a floating "Nodes" list panel at bottom-left
+            // (left:16, bottom:80) on top of this canvas — react-flow's
+            // default bottom-left offset (~10px) puts the (multi-button,
+            // ~106px tall) control stack squarely under that panel. Clear
+            // its footprint with margin to spare.
+            bottom: 96,
+            left: 16,
           }}
         />
         <MiniMap

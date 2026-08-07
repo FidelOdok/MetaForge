@@ -30,8 +30,19 @@ describe('SessionsPage', () => {
   it('shows empty state', () => {
     mockUseSessions.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    // New orchestrator layout shows static DAG + log when no sessions
     expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+  });
+
+  it('shows honest empty states instead of fake demo content when there are no sessions', () => {
+    mockUseSessions.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useSessions>);
+    render(<SessionsPage />);
+    // The DAG and execution log panels used to fall back to a fabricated
+    // "schematic RUNNING" workflow and fixed timestamps that contradicted
+    // the real "0 workflows running" state — they must not appear.
+    expect(screen.queryByText('schematic')).not.toBeInTheDocument();
+    expect(screen.queryByText(/12:04/)).not.toBeInTheDocument();
+    expect(screen.getByText('No workflow runs yet')).toBeInTheDocument();
+    expect(screen.getByText('No execution log yet')).toBeInTheDocument();
   });
 
   it('renders session list', () => {

@@ -2,14 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../test/test-utils';
 import { useProjectStore } from '../store/project-store';
-import type { SourceSummary } from '../types/knowledge';
+import type { KnowledgeSearchResult, SourceSummary } from '../types/knowledge';
 
 // Mock the endpoint module so the page's TanStack Query call resolves
 // against a deterministic in-memory data set. We mock at the module
 // boundary (endpoints/knowledge) rather than the hook layer because the
-// page calls ``listSources`` directly via ``useQuery``.
+// page calls ``listSources``/``searchKnowledge`` directly via ``useQuery``.
 vi.mock('../api/endpoints/knowledge', () => ({
   listSources: vi.fn(),
+  searchKnowledge: vi.fn(),
 }));
 
 // KnowledgePage reads the shared active-project context (Context UI) via
@@ -32,9 +33,10 @@ vi.mock('react-router-dom', async () => {
 });
 
 import { KnowledgePage } from '../pages/KnowledgePage';
-import { listSources } from '../api/endpoints/knowledge';
+import { listSources, searchKnowledge } from '../api/endpoints/knowledge';
 
 const mockListSources = vi.mocked(listSources);
+const mockSearchKnowledge = vi.mocked(searchKnowledge);
 
 const SOURCE_DECISION: SourceSummary = {
   source_path: 'uat://decisions/regulator-choice.md',
@@ -63,6 +65,7 @@ const SOURCE_FAILURE: SourceSummary = {
 describe('KnowledgePage', () => {
   beforeEach(() => {
     mockListSources.mockReset();
+    mockSearchKnowledge.mockReset();
     mockNavigate.mockReset();
     mockUseProjects.mockReturnValue({ data: [], isLoading: false });
     // The active-project store is global (persisted to localStorage) and
@@ -264,5 +267,67 @@ describe('KnowledgePage', () => {
     expect(useProjectStore.getState().activeProjectId).toBe(
       '55555555-5555-5555-5555-555555555555',
     );
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Semantic search (GET /v1/knowledge/search) — previously unused by the
+  // dashboard; the page only listed/filtered sources.
+  // ──────────────────────────────────────────────────────────────────────
+
+  const SEARCH_HIT: KnowledgeSearchResult = {
+    id: 'k1',
+    content: 'The regulator was switched to a buck converter for efficiency at 5V/2A loads.',
+    knowledge_type: 'design_decision',
+    metadata: {},
+    source_path: 'uat://decisions/regulator-choice.md',
+    created_at: new Date().toISOString(),
+  };
+
+  it('runs a debounced semantic search and shows matches instead of the source list', async () => {
+    mockListSources.mockResolvedValue([SOURCE_DECISION]);
+    mockSearchKnowledge.mockResolvedValue([SEARCH_HIT]);
+
+    render(<KnowledgePage />);
+    await screen.findByText(SOURCE_DECISION.source_path);
+
+    fireEvent.change(screen.getByLabelText(/search knowledge/i), { target: { value: 'regulator' } });
+
+    await waitFor(() => {
+      expect(mockSearchKnowledge).toHaveBeenCalledWith(
+        expect.objectContaining({ query: 'regulator' }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/buck converter/)).toBeInTheDocument();
+    });
+    // The source-listing table is replaced while searching, not merged with it.
+    expect(screen.queryByRole('region', { name: 'Knowledge sources' })).not.toBeInTheDocument();
+  });
+
+  it('shows a "no matches" state for a search with zero hits', async () => {
+    mockListSources.mockResolvedValue([]);
+    mockSearchKnowledge.mockResolvedValue([]);
+
+    render(<KnowledgePage />);
+    fireEvent.change(screen.getByLabelText(/search knowledge/i), { target: { value: 'nonexistent' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('No matches for “nonexistent”')).toBeInTheDocument();
+    });
+  });
+
+  it('reverts to the source list when the search box is cleared', async () => {
+    mockListSources.mockResolvedValue([SOURCE_DECISION]);
+    mockSearchKnowledge.mockResolvedValue([SEARCH_HIT]);
+
+    render(<KnowledgePage />);
+    const input = screen.getByLabelText(/search knowledge/i);
+    fireEvent.change(input, { target: { value: 'regulator' } });
+    await waitFor(() => expect(screen.getByText(/buck converter/)).toBeInTheDocument());
+
+    fireEvent.change(input, { target: { value: '' } });
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Knowledge sources' })).toBeInTheDocument();
+    });
   });
 });

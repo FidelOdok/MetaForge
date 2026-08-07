@@ -16,6 +16,7 @@ import { FilesPage } from './pages/FilesPage';
 import { DesignAssistantPage } from './pages/DesignAssistantPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { SourceDetailPage } from './pages/SourceDetailPage';
+import { CompliancePage } from './pages/CompliancePage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -129,6 +130,14 @@ export function App() {
               element={
                 <ErrorBoundary>
                   <SourceDetailPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="compliance"
+              element={
+                <ErrorBoundary>
+                  <CompliancePage />
                 </ErrorBoundary>
               }
             />

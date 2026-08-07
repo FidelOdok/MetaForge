@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: '/twin',      icon: 'hub',          title: 'Digital Twin'         },
   { to: '/files',     icon: 'folder',       title: 'Files'                },
   { to: '/knowledge', icon: 'psychology',   title: 'Knowledge'            },
+  { to: '/compliance', icon: 'verified_user', title: 'Compliance'         },
 ] as const;
 
 // ---------------------------------------------------------------------------

@@ -141,9 +141,31 @@ export async function syncNode(nodeId: string): Promise<SyncResult> {
   return data;
 }
 
-export async function getNodeVersionHistory(nodeId: string): Promise<Record<string, unknown>[]> {
-  const { data } = await apiClient.get<Record<string, unknown>[]>(`/twin/nodes/${nodeId}/versions`);
-  return data;
+/** One snapshot in a work product's revision history (``WorkProductRevision``). */
+export interface WorkProductRevision {
+  revision: number;
+  created_at: string;
+  content_hash: string;
+  change_description: string;
+  metadata_snapshot: Record<string, unknown>;
+}
+
+interface WorkProductVersionHistoryRaw {
+  work_product_id: string;
+  revisions: WorkProductRevision[];
+  total: number;
+}
+
+/**
+ * Full revision history for a work product.
+ *
+ * Backed by ``GET /v1/twin/nodes/{node_id}/versions``, which returns a
+ * ``WorkProductVersionHistory`` object (``{work_product_id, revisions,
+ * total}``) — this unwraps `.revisions` so callers get a plain list.
+ */
+export async function getNodeVersionHistory(nodeId: string): Promise<WorkProductRevision[]> {
+  const { data } = await apiClient.get<WorkProductVersionHistoryRaw>(`/twin/nodes/${nodeId}/versions`);
+  return data.revisions ?? [];
 }
 
 // ── Work-product file download / open / preview (MET-483) ───────────────────
