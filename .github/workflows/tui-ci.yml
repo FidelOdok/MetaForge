@@ -11,7 +11,7 @@ on:
 jobs:
   check:
     name: Typecheck & Test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     defaults:
       run:
         working-directory: tui
@@ -28,7 +28,7 @@ jobs:
 
   binary:
     name: Build single binary (bun)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     defaults:
       run:
         working-directory: tui

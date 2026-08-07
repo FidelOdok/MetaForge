@@ -13,7 +13,7 @@ concurrency:
 jobs:
   lint:
     name: Lint & Format
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,7 +26,7 @@ jobs:
 
   typecheck:
     name: Type Check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,7 +39,7 @@ jobs:
 
   test:
     name: Unit & Contract Tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,7 +58,7 @@ jobs:
 
   changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     if: github.event_name == 'pull_request'
     outputs:
       dashboard: ${{ steps.filter.outputs.dashboard }}
@@ -73,7 +73,7 @@ jobs:
 
   dashboard:
     name: Dashboard Type Check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, fidel-dev]
     needs: changes
     if: needs.changes.outputs.dashboard == 'true'
     steps:
