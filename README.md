@@ -11,6 +11,16 @@ keeps every step versioned and auditable.
 > **Prime rule:** if it can't be versioned, reviewed, and built —
 > MetaForge doesn't output it.
 
+### See it in action
+
+A real turn in the interactive `forge` TUI — the assistant calls a
+tool, then answers from what it returned:
+
+![Animated capture of a forge TUI chat turn: typing a question, a tool call streaming in with a spinner, then the final formatted answer](docs/assets/tui/chat-demo.gif)
+
+More screenshots (welcome screen, the Runs pane) in the
+[CLI reference](docs/cli-reference.md#what-it-looks-like).
+
 ```mermaid
 flowchart LR
     intent["Human intent<br/>PRD · Constraints"]
