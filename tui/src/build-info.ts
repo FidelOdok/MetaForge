@@ -4,7 +4,7 @@
  * commit it was built from — the missing signal behind the stale-CLI trap.
  */
 export const BUILD = {
-  version: "0.3.79",
-  commit: "f7e8bb7",
-  date: "2026-08-06",
+  version: "0.3.91",
+  commit: "d605cc1",
+  date: "2026-08-07",
 } as const;

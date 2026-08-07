@@ -77,7 +77,7 @@ function printHelp(): void {
       ...quickstart,
       "",
       "Interactive workspace (bare `forge` in a terminal)",
-      "  type to chat · ^R runs · ^B twin · ^N new run · ^T chat · Esc quit",
+      "  type to chat · Ctrl+R runs · Ctrl+B twin · Ctrl+N new run · Ctrl+T chat · Esc quit",
       "  forge --project <id|name>     start scoped to a project",
       "  /project <id|name>            switch project (new thread) · /project none to leave",
       "  /model <slug>                 switch model",
