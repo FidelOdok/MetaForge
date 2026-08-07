@@ -6,6 +6,7 @@ import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ThreadSummary } from "../api/client.js";
 import { describeThread, pickerCandidates } from "../lib/resume.js";
+import { transcriptHeight } from "../lib/transcript-height.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
@@ -374,11 +375,21 @@ export function Chat({
   }
 
   // Transcript layout: finalized turns live in <Static> (native scrollback,
-  // never repainted), the live region follows the content below them.
+  // never repainted). MET-607: the live region is bottom-pinned via a
+  // min-height spacer sized from an ESTIMATE of the Static content's height
+  // (Ink can't measure scrollback). Clamped at 0, so drift is a slightly
+  // short gap at worst — and once the transcript exceeds one screen the
+  // spacer is 0 and this is exactly the old content-flow behavior.
+  const FOOTER_ROWS = 2;
+  const staticEstimate =
+    welcomeHeight(cols, client.baseUrl()) + transcriptHeight(messages, cols);
+  const pinHeight = Math.max(0, termRows - staticEstimate - FOOTER_ROWS - 1);
   return (
     <Box flexDirection="column" flexGrow={1}>
       {staticContent}
-      {liveRegion}
+      <Box flexDirection="column" minHeight={pinHeight} justifyContent="flex-end">
+        {liveRegion}
+      </Box>
     </Box>
   );
 }
