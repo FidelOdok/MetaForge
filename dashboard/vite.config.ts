@@ -78,6 +78,14 @@ export default defineConfig({
         ws: true,
         configure: (_proxy, options) => attachLiveTarget(options, true),
       },
+      // GET /health lives at the gateway's bare root (api_gateway/health.py's
+      // router has no prefix), unlike everything else under /api/v1 -- needs
+      // its own proxy entry.
+      '/health': {
+        target: resolveApiTarget(),
+        changeOrigin: true,
+        configure: (_proxy, options) => attachLiveTarget(options),
+      },
     },
   },
 });

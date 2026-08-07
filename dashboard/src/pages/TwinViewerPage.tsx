@@ -643,7 +643,7 @@ export function TwinViewerPage() {
   const { activeProjectId, projects: projectOptions } = useActiveProject();
 
   // ── data ──
-  const { data: nodes, isLoading } = useTwinNodes(activeProjectId ?? undefined);
+  const { data: nodes, isLoading, isFetching, dataUpdatedAt } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
   const { data: relationships = [] } = useTwinRelationships();
   const items = nodes ?? [];
@@ -734,9 +734,14 @@ export function TwinViewerPage() {
 
   // ── status bar label ──
   const statusLabel = isGraphMode ? 'GRAPH VIEW' : 'ORBIT MODE';
+  // Was a hardcoded "X 0.0 Y 0.0 Z 0.0" that never reflected the actual
+  // camera or selection — now shows the real selected part, or an honest
+  // "no selection" state.
   const statusCenter = isGraphMode
     ? `${items.length} node${items.length !== 1 ? 's' : ''}`
-    : 'X  0.0    Y  0.0    Z  0.0';
+    : selectedMeshName
+      ? `selected · ${selectedMeshName}`
+      : 'no selection';
 
   return (
     /*
@@ -1290,9 +1295,26 @@ export function TwinViewerPage() {
         </span>
 
         <div className="flex items-center gap-2" style={{ width: 140, justifyContent: 'flex-end' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00a3e4', flexShrink: 0, display: 'inline-block' }} />
-          <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>Synced</span>
-          <span className="font-mono" style={{ fontSize: 11, color: 'rgba(154,154,170,0.55)' }}>live</span>
+          {/* Was a static "Synced · live" regardless of actual fetch state —
+              now reflects the real 10s twin-node poll (useTwinNodes). */}
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: isFetching ? '#f59e0b' : '#00a3e4',
+              flexShrink: 0,
+              display: 'inline-block',
+            }}
+          />
+          <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
+            {isFetching ? 'Syncing…' : 'Synced'}
+          </span>
+          {!isFetching && dataUpdatedAt > 0 && (
+            <span className="font-mono" style={{ fontSize: 11, color: 'rgba(154,154,170,0.55)' }}>
+              {formatRelativeTime(new Date(dataUpdatedAt).toISOString())}
+            </span>
+          )}
         </div>
       </footer>
 

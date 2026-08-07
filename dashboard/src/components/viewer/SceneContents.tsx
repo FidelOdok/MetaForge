@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useViewerStore } from '../../store/viewer-store';
 import { useTransientTransform } from '../../store/transient-transform-store';
 import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
+import { computeExplodeOffset } from '../../lib/explode';
 import { TransformGizmo } from './TransformGizmo';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
@@ -23,6 +24,7 @@ interface MeshEntry {
   meshName: string;
   originalMaterial: THREE.Material | THREE.Material[];
   center: THREE.Vector3;
+  boundingBox: { min: [number, number, number]; max: [number, number, number] };
 }
 
 export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsProps) {
@@ -33,6 +35,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
   const explodeFactor = useViewerStore((s) => s.explodeFactor);
+  const explodeDirection = useViewerStore((s) => s.explodeDirection);
 
   // Rigid-group manipulation (MET-519). Groups resolve against the *actual*
   // GLB scene mesh names (captured below), not the manifest part names — the
@@ -106,6 +109,10 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
           meshName,
           originalMaterial: mesh.material,
           center,
+          boundingBox: {
+            min: [box.min.x, box.min.y, box.min.z],
+            max: [box.max.x, box.max.y, box.max.z],
+          },
         });
         orderedNames.push(meshName);
       }
@@ -153,11 +160,14 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   useEffect(() => {
     const targets = new Map<string, THREE.Vector3>();
     for (const [name, entry] of meshMapRef.current) {
-      const offset = entry.center.clone().sub(assemblyCenter).multiplyScalar(explodeFactor * 2);
-      targets.set(name, offset);
+      const fromCenter = entry.center.clone().sub(assemblyCenter);
+      // Toggling direction in ExplodedViewControls used to change the label
+      // only -- the explosion itself always ran the radial math regardless.
+      const offset = computeExplodeOffset(fromCenter, explodeDirection, explodeFactor);
+      targets.set(name, new THREE.Vector3(offset.x, offset.y, offset.z));
     }
     targetPositions.current = targets;
-  }, [explodeFactor, assemblyCenter]);
+  }, [explodeFactor, explodeDirection, assemblyCenter]);
 
   useFrame(() => {
     // Read the live drag delta without subscribing (avoids per-frame React renders).
@@ -187,7 +197,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
         meshName,
         name: entry.name,
         nodeId,
-        boundingBox: entry.center ? undefined : undefined,
+        boundingBox: entry.boundingBox,
       });
     }
   };

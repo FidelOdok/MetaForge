@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render } from '../../../test/test-utils';
+import { fireEvent, render } from '../../../test/test-utils';
 import { ComponentTree } from '../ComponentTree';
 import type { ModelManifest } from '../../../types/viewer';
 
@@ -14,13 +14,30 @@ const MOCK_MANIFEST: ModelManifest = {
   stats: { triangleCount: 2400, fileSize: 48000 },
 };
 
+const NESTED_MANIFEST: ModelManifest = {
+  parts: [
+    {
+      name: 'Assembly',
+      meshName: 'mesh_root',
+      boundingBox: { min: [0, 0, 0], max: [1, 1, 1] },
+      children: [
+        { name: 'Screw A', meshName: 'mesh_screw_a', children: [], boundingBox: { min: [0, 0, 0], max: [1, 1, 1] } },
+      ],
+    },
+  ],
+  meshToNodeMap: {},
+  materials: [],
+  stats: { triangleCount: 100, fileSize: 1000 },
+};
+
 const mockSelectPart = vi.fn();
 const mockToggleVisibility = vi.fn();
+let mockManifest: ModelManifest = MOCK_MANIFEST;
 
 vi.mock('../../../store/viewer-store', () => ({
   useViewerStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) => {
     const state = {
-      manifest: MOCK_MANIFEST,
+      manifest: mockManifest,
       selectedMeshName: null,
       hiddenMeshes: new Set(),
       selectPart: mockSelectPart,
@@ -33,6 +50,7 @@ vi.mock('../../../store/viewer-store', () => ({
 describe('ComponentTree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockManifest = MOCK_MANIFEST;
   });
 
   it('renders tree from manifest parts', () => {
@@ -62,5 +80,19 @@ describe('ComponentTree', () => {
     expect(getByText('Support Bracket')).toBeInTheDocument();
     expect(queryByText('Base Plate')).not.toBeInTheDocument();
     expect(queryByText('Top Cap')).not.toBeInTheDocument();
+  });
+
+  it('"Collapse all" / "Expand all" actually toggles node expansion (regression: used to be a no-op)', () => {
+    mockManifest = NESTED_MANIFEST;
+    const { getByText, queryByText, getByTitle } = render(<ComponentTree />);
+
+    // Starts expanded by default.
+    expect(getByText('Screw A')).toBeInTheDocument();
+
+    fireEvent.click(getByTitle('Collapse all'));
+    expect(queryByText('Screw A')).not.toBeInTheDocument();
+
+    fireEvent.click(getByTitle('Expand all'));
+    expect(getByText('Screw A')).toBeInTheDocument();
   });
 });
