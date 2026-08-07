@@ -39,7 +39,7 @@ export const CLI_QUICKSTART: [string, string][] = [
 /** Key/action hints shown in the interactive workspace. */
 export const TUI_HINTS: [string, string][] = [
   ["type a message", "ask the assistant — it can call tools"],
-  ["^R  ^B  ^N  ^T", "runs · twin · new run · chat"],
+  ["Ctrl+R  Ctrl+B  Ctrl+N  Ctrl+T", "runs · twin · new run · chat"],
   ["/project <id|name>", "scope the chat to a project (new thread)"],
   ["/model <slug>", "switch model    ·    Esc  quit"],
 ];

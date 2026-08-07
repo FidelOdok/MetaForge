@@ -205,7 +205,7 @@ export function App({
           <Text color={ALERT_COLOR[alert.kind]}>
             {alert.kind === "gate" ? "🔔 " : alert.kind === "done" ? "✓ " : "✗ "}
             {alert.text}
-            {alert.kind === "gate" ? <Text dimColor> — ^R to review</Text> : null}
+            {alert.kind === "gate" ? <Text dimColor> — Ctrl+R to review</Text> : null}
           </Text>
         </Box>
       )}
@@ -270,7 +270,7 @@ export function App({
           <Text color={view === "new" ? "cyan" : undefined}>new</Text>
           {" · "}
           <Text color={view === "twin" ? "cyan" : undefined}>twin</Text>
-          {"   ^T/^R/^N/^B  ·  PageUp/PageDn scroll"}
+          {"   Ctrl+T/R/N/B  ·  PageUp/PageDn scroll"}
         </Text>
       </Box>
     </Box>
