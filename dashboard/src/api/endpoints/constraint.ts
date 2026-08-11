@@ -1,10 +1,27 @@
 import apiClient from '../client';
 
-/** Translation delta of a dragged rigid group, in world units (mm). */
+/** Single-axis rotation delta of a dragged rigid group (degrees). */
+export interface RotationDelta {
+  axis: 'x' | 'y' | 'z';
+  angle_deg: number;
+}
+
+/** Single-axis scale delta of a dragged rigid group (multiplier). */
+export interface ScaleDelta {
+  axis: 'x' | 'y' | 'z';
+  factor: number;
+}
+
+/**
+ * Delta of a dragged rigid group: translation (mm), or — exactly one of —
+ * a single-axis rotation or scale, matching whichever gizmo mode produced it.
+ */
 export interface DeltaTransform {
   dx: number;
   dy: number;
   dz: number;
+  rotation?: RotationDelta;
+  scale?: ScaleDelta;
 }
 
 export interface ConstraintSuggestion {

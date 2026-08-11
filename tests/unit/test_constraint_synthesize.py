@@ -8,6 +8,8 @@ import pytest
 
 from api_gateway.constraint.routes import (
     DeltaTransform,
+    RotationDelta,
+    ScaleDelta,
     SynthesizeRequest,
     synthesize_constraint,
 )
@@ -49,6 +51,102 @@ class TestSynthesize:
     def test_empty_group_name_rejected(self) -> None:
         with pytest.raises(ValueError):
             SynthesizeRequest(group_name="", delta=DeltaTransform(dx=1.0))
+
+
+class TestSynthesizeRotation:
+    async def _rotate(self, group: str, axis: str, angle_deg: float):
+        return await synthesize_constraint(
+            SynthesizeRequest(
+                group_name=group,
+                delta=DeltaTransform(rotation=RotationDelta(axis=axis, angle_deg=angle_deg)),
+            )
+        )
+
+    async def test_rotation_becomes_a_constraint(self) -> None:
+        resp = await self._rotate("hinge_group", "y", 45.0)
+        assert resp.status == "ok"
+        assert resp.constraint is not None
+        assert resp.constraint.parameter == "hinge_group_rotation_y"
+        assert resp.constraint.value == 45.0
+        assert resp.constraint.unit == "deg"
+        assert "about Y" in resp.suggestion
+
+    async def test_zero_rotation_is_noop(self) -> None:
+        resp = await self._rotate("g", "x", 0.0)
+        assert resp.status == "noop"
+        assert resp.constraint is None
+
+
+class TestSynthesizeScale:
+    async def _scale(self, group: str, axis: str, factor: float):
+        return await synthesize_constraint(
+            SynthesizeRequest(
+                group_name=group,
+                delta=DeltaTransform(scale=ScaleDelta(axis=axis, factor=factor)),
+            )
+        )
+
+    async def test_scale_becomes_a_constraint(self) -> None:
+        resp = await self._scale("bracket_group", "z", 1.5)
+        assert resp.status == "ok"
+        assert resp.constraint is not None
+        assert resp.constraint.parameter == "bracket_group_scale_z"
+        assert resp.constraint.value == 1.5
+        assert "along Z" in resp.suggestion
+
+    async def test_identity_scale_is_noop(self) -> None:
+        resp = await self._scale("g", "x", 1.0)
+        assert resp.status == "noop"
+        assert resp.constraint is None
+
+    async def test_oversized_scale_is_conflict(self) -> None:
+        resp = await self._scale("g", "x", 15.0)
+        assert resp.status == "conflict"
+        assert resp.constraint is None
+        assert resp.conflict_reason and "feasible" in resp.conflict_reason
+
+    async def test_negative_scale_is_conflict(self) -> None:
+        resp = await self._scale("g", "x", -1.0)
+        assert resp.status == "conflict"
+        assert resp.constraint is None
+
+
+class TestParametricBindingRotationAndScale:
+    """MET-611: rotation/scale Apply also binds when session_id + obj_id supplied."""
+
+    async def test_rotation_binds_with_default_property_path(self) -> None:
+        fake = AsyncMock()
+        fake.apply_parametric_binding.return_value = {"bound": True, "expression": "e"}
+        with patch("api_gateway.constraint.routes._freecad_client", fake):
+            resp = await synthesize_constraint(
+                SynthesizeRequest(
+                    group_name="hinge",
+                    delta=DeltaTransform(rotation=RotationDelta(axis="y", angle_deg=30.0)),
+                    session_id="s",
+                    obj_id="o",
+                )
+            )
+        assert resp.bound is True
+        kwargs = fake.apply_parametric_binding.call_args.kwargs
+        assert kwargs["parameter"] == "hinge_rotation_y"
+        assert kwargs["property_path"] == "Placement.Rotation.Angle"
+
+    async def test_scale_binds_with_default_property_path(self) -> None:
+        fake = AsyncMock()
+        fake.apply_parametric_binding.return_value = {"bound": True, "expression": "e"}
+        with patch("api_gateway.constraint.routes._freecad_client", fake):
+            resp = await synthesize_constraint(
+                SynthesizeRequest(
+                    group_name="bracket",
+                    delta=DeltaTransform(scale=ScaleDelta(axis="x", factor=2.0)),
+                    session_id="s",
+                    obj_id="o",
+                )
+            )
+        assert resp.bound is True
+        kwargs = fake.apply_parametric_binding.call_args.kwargs
+        assert kwargs["parameter"] == "bracket_scale_x"
+        assert kwargs["property_path"] == "Scale"
 
 
 class TestParametricBinding:

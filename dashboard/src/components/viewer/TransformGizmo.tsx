@@ -1,48 +1,61 @@
 import { useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from '@react-three/drei';
-import type { Vec3 } from '../../store/transient-transform-store';
+import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 
 interface TransformGizmoProps {
   /** World-space centroid of the selected group (gizmo origin). */
   centroid: [number, number, number];
-  /** Called with the translation delta (world units) as the gizmo is dragged. */
-  onDelta: (delta: Vec3) => void;
+  /** Active interaction mode — translate/rotate/scale. */
+  mode: TransformMode;
+  /** Called with the mode-appropriate delta as the gizmo is dragged. */
+  onChange: (mode: TransformMode, value: Vec3) => void;
 }
 
 /**
- * Translate gizmo for a selected rigid group (MET-519, Phase 1.5).
- *
- * Wraps drei's `TransformControls` around an invisible proxy object placed at
- * the group centroid. Dragging the proxy reports a delta (proxy − centroid) to
- * the caller, which applies it to the group's meshes — the gizmo itself never
- * touches the meshes (stateless by design; only the delta matters). Because the
- * OrbitControls is `makeDefault`, drei auto-suppresses orbit while dragging.
- *
- * Rotation handles are Phase 2; this is translate-only.
+ * Transform gizmo for a selected rigid group (MET-519, extended MET-611 to
+ * rotate/scale). Wraps drei's `TransformControls` around an invisible proxy
+ * object placed at the group centroid. Dragging the proxy reports a delta —
+ * translation as (proxy − centroid), rotation/scale as the proxy's own Euler
+ * angles / scale factors since the proxy always starts at identity rotation
+ * and unit scale — to the caller, which applies it to the group's meshes; the
+ * gizmo itself never touches the meshes (stateless by design; only the delta
+ * matters). Because OrbitControls is `makeDefault`, drei auto-suppresses
+ * orbit while dragging.
  */
-export function TransformGizmo({ centroid, onDelta }: TransformGizmoProps) {
+export function TransformGizmo({ centroid, mode, onChange }: TransformGizmoProps) {
   const [proxy, setProxy] = useState<THREE.Object3D | null>(null);
 
-  // Re-seat the proxy at the centroid whenever the selection (centroid) changes.
+  // Re-seat the proxy at the centroid (and reset rotation/scale to identity)
+  // whenever the selection (centroid) changes, so each mode's delta is always
+  // measured from a clean baseline.
   useEffect(() => {
-    if (proxy) proxy.position.set(centroid[0], centroid[1], centroid[2]);
+    if (!proxy) return;
+    proxy.position.set(centroid[0], centroid[1], centroid[2]);
+    proxy.rotation.set(0, 0, 0);
+    proxy.scale.set(1, 1, 1);
   }, [proxy, centroid]);
 
   const handleChange = () => {
     if (!proxy) return;
-    onDelta([
-      proxy.position.x - centroid[0],
-      proxy.position.y - centroid[1],
-      proxy.position.z - centroid[2],
-    ]);
+    if (mode === 'translate') {
+      onChange('translate', [
+        proxy.position.x - centroid[0],
+        proxy.position.y - centroid[1],
+        proxy.position.z - centroid[2],
+      ]);
+    } else if (mode === 'rotate') {
+      onChange('rotate', [proxy.rotation.x, proxy.rotation.y, proxy.rotation.z]);
+    } else {
+      onChange('scale', [proxy.scale.x, proxy.scale.y, proxy.scale.z]);
+    }
   };
 
   return (
     <>
       <object3D ref={setProxy} />
       {proxy && (
-        <TransformControls object={proxy} mode="translate" onObjectChange={handleChange} />
+        <TransformControls object={proxy} mode={mode} onObjectChange={handleChange} />
       )}
     </>
   );
