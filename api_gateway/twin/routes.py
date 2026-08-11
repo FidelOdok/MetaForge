@@ -6,7 +6,6 @@ Endpoints live under ``/v1/twin``.
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -15,6 +14,13 @@ import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
 from api_gateway.convert.service import ConversionService
+from api_gateway.twin.boolean_ops import (
+    BooleanOpError,
+    InvalidFormatError,
+    NodeNotFoundError,
+    NoOverlapError,
+    perform_boolean_op,
+)
 from api_gateway.twin.file_link import (
     FileLink,
     FileLinkCreateRequest,
@@ -34,6 +40,8 @@ from api_gateway.twin.import_service import (
     infer_wp_type,
 )
 from api_gateway.twin.schemas import (
+    BooleanCutRequest,
+    BooleanCutResponse,
     TwinNodeListResponse,
     TwinNodeResponse,
     TwinRelationshipListResponse,
@@ -187,7 +195,78 @@ async def get_twin_node(node_id: str) -> TwinNodeResponse:
         return _wp_to_response(wp)
 
 
-_WORKSPACE_DIR = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+@router.post("/nodes/boolean-cut", response_model=BooleanCutResponse, status_code=201)
+async def boolean_cut_nodes(body: BooleanCutRequest) -> BooleanCutResponse:
+    """Real CSG boolean-cut between two committed STEP work products (MET-612).
+
+    A direct-commit endpoint, not the ``twin.propose_change``/apply HITL
+    pipeline — a human cutting their own open model is not meaningfully
+    different from clicking Save (same rationale as ``twin.record_document``,
+    whose apply executor doesn't fit this action either). Drives the
+    containerized CadQuery adapter via the shared MCP bridge, then commits the
+    result through the geometry recorder with provenance edges to both inputs.
+    """
+    from api_gateway.chat.routes import get_mcp_bridge
+    from api_gateway.projects.routes import get_project_backend
+    from api_gateway.twin.geometry_recorder import make_geometry_recorder
+
+    with tracer.start_as_current_span("twin.boolean_cut_route") as span:
+        span.set_attribute("boolean_cut.operation", body.operation)
+        recorder = make_geometry_recorder(_twin, get_project_backend())
+        try:
+            rec = await perform_boolean_op(
+                twin=_twin,
+                bridge=get_mcp_bridge(),
+                recorder=recorder,
+                target_node_id=body.target_node_id,
+                cutter_node_id=body.cutter_node_id,
+                operation=body.operation,
+                result_name=body.result_name,
+            )
+        except NodeNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidFormatError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except NoOverlapError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except BooleanOpError as exc:
+            span.record_exception(exc)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": -32001,
+                    "message": "CAD adapter unavailable — boolean operation could not run",
+                    "detail": str(exc),
+                },
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — adapter/network failure -> 503
+            span.record_exception(exc)
+            logger.warning("boolean_cut_adapter_error", error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": -32001,
+                    "message": "CAD adapter unavailable — boolean operation could not run",
+                    "detail": str(exc),
+                },
+            ) from exc
+
+        node_id = rec.get("node_id")
+        if not node_id:
+            raise HTTPException(
+                status_code=500, detail="boolean-cut committed but no node id returned"
+            )
+        wp = await _twin.get_work_product(UUID(str(node_id)))
+        if wp is None:
+            raise HTTPException(
+                status_code=500, detail="boolean-cut committed node could not be re-read"
+            )
+        return BooleanCutResponse(
+            node=_wp_to_response(wp),
+            operation=body.operation,
+            result_volume_mm3=float(rec.get("result_volume_mm3") or 0.0),
+            result_area_mm2=float(rec.get("result_area_mm2") or 0.0),
+        )
 
 
 @router.get("/nodes/{node_id}/model")
@@ -276,50 +355,22 @@ def _content_type_for(fmt: str, filename: str) -> str:
 def _resolve_blob(wp: WorkProduct) -> tuple[bytes, str]:
     """Return ``(content, filename)`` for a work product's stored blob.
 
-    Resolution order matches the storage layering:
-
-    1. **MinIO object key** — if the WP records one in metadata
-       (``minio_object_key``), fetch the blob from object storage. This
-       is the architecture's source of truth for work-product blobs
-       (Planner data-modalities.md).
-    2. **Local file path** — the import path stores blobs on disk via
-       ``shared.storage`` and records the absolute path in ``file_path``;
-       workspace-relative paths resolve against the adapter workspace
-       (mirrors ``get_node_model``).
-
-    Raises ``HTTPException(404)`` when no retrievable blob exists — which
-    is exactly the "work product has no file behind it" case.
+    Thin wrapper over the promoted ``blob_store.resolve_work_product_blob``
+    (MET-612) so non-route callers (e.g. the boolean-cut endpoint) share the
+    exact same MinIO-first-then-local resolution without importing the router.
     """
-    filename = str(wp.metadata.get("original_filename") or "") or (
-        f"{wp.name}.{wp.format}" if wp.format else wp.name
-    )
+    from api_gateway.twin.blob_store import resolve_work_product_blob
 
-    object_key = wp.metadata.get("minio_object_key")
-    if isinstance(object_key, str) and object_key:
-        try:
-            from api_gateway.twin.blob_store import fetch_work_product_blob
-
-            return fetch_work_product_blob(object_key), filename
-        except HTTPException:
-            raise
-        except Exception as exc:  # storage misconfigured / object gone
-            logger.warning("wp_blob_minio_fetch_failed", key=object_key, error=str(exc))
-            raise HTTPException(
-                status_code=502, detail="Work product blob could not be read from storage"
-            ) from exc
-
-    file_path = wp.file_path
-    if not file_path:
-        raise HTTPException(
-            status_code=404,
-            detail="Work product has no stored file (empty file_path and no object key)",
-        )
-    path = Path(file_path)
-    if not path.is_absolute():
-        path = _WORKSPACE_DIR / path
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Stored file not found: {path.name}")
-    return path.read_bytes(), (filename or path.name)
+    try:
+        return resolve_work_product_blob(wp)
+    except HTTPException as exc:
+        if exc.status_code == 502:
+            logger.warning(
+                "wp_blob_minio_fetch_failed",
+                key=wp.metadata.get("minio_object_key"),
+                error=exc.detail,
+            )
+        raise
 
 
 @router.get("/nodes/{node_id}/file")

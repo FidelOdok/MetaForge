@@ -1,6 +1,28 @@
 import { create } from 'zustand';
 import type { ExplodeDirection, ModelManifest } from '../types/viewer';
 
+/** Boolean-cut mode (MET-612): 'idle' (hidden) → 'picking-cutter' (choosing a
+ * sibling node) → 'ready' (cutter loaded, Hole/Group enabled). */
+export type BooleanCutMode = 'idle' | 'picking-cutter' | 'ready';
+
+interface BooleanCutState {
+  mode: BooleanCutMode;
+  targetNodeId: string | null;
+  cutterNodeId: string | null;
+  cutterGlbUrl: string | null;
+  cutterManifest: ModelManifest | null;
+  cutting: boolean;
+}
+
+const BOOLEAN_CUT_IDLE: BooleanCutState = {
+  mode: 'idle',
+  targetNodeId: null,
+  cutterNodeId: null,
+  cutterGlbUrl: null,
+  cutterManifest: null,
+  cutting: false,
+};
+
 interface ViewerState {
   glbUrl: string | null;
   manifest: ModelManifest | null;
@@ -27,6 +49,22 @@ interface ViewerState {
   registerCameraReset: (fn: () => void) => void;
   /** Trigger the camera reset (called from outside the Canvas). */
   resetCamera: () => void;
+
+  /** Additive boolean-cut slice (MET-612) — never touches the primary
+   * glbUrl/manifest/selectedMeshName state above. */
+  booleanCut: BooleanCutState;
+  /** Enter picking-cutter mode for the currently-open node. */
+  openBooleanCut: (targetNodeId: string) => void;
+  /** A cutter node's model finished loading — advance to 'ready'. */
+  setBooleanCutCutter: (
+    cutterNodeId: string,
+    cutterGlbUrl: string,
+    cutterManifest: ModelManifest,
+  ) => void;
+  /** Clear the chosen cutter without leaving boolean-cut mode. */
+  clearBooleanCutCutter: () => void;
+  setBooleanCutting: (cutting: boolean) => void;
+  closeBooleanCut: () => void;
 }
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
@@ -90,4 +128,36 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     const fn = get()._cameraResetFn;
     if (fn) fn();
   },
+
+  booleanCut: BOOLEAN_CUT_IDLE,
+
+  openBooleanCut: (targetNodeId) =>
+    set({ booleanCut: { ...BOOLEAN_CUT_IDLE, mode: 'picking-cutter', targetNodeId } }),
+
+  setBooleanCutCutter: (cutterNodeId, cutterGlbUrl, cutterManifest) =>
+    set((state) => ({
+      booleanCut: {
+        ...state.booleanCut,
+        mode: 'ready',
+        cutterNodeId,
+        cutterGlbUrl,
+        cutterManifest,
+      },
+    })),
+
+  clearBooleanCutCutter: () =>
+    set((state) => ({
+      booleanCut: {
+        ...state.booleanCut,
+        mode: 'picking-cutter',
+        cutterNodeId: null,
+        cutterGlbUrl: null,
+        cutterManifest: null,
+      },
+    })),
+
+  setBooleanCutting: (cutting) =>
+    set((state) => ({ booleanCut: { ...state.booleanCut, cutting } })),
+
+  closeBooleanCut: () => set({ booleanCut: BOOLEAN_CUT_IDLE }),
 }));

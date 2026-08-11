@@ -37,7 +37,8 @@ services:
       - ./observability:/app/observability
       - ./metaforge:/app/metaforge
       - ./pyproject.toml:/app/pyproject.toml:ro
-      - adapter-workspace:/workspace:ro
+      # Read-write (MET-612): boolean-cut staging writes input STEP files here.
+      - adapter-workspace:/workspace
 
   dashboard-dev:
     image: node:20-alpine

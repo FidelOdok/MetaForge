@@ -184,3 +184,51 @@ export async function fetchNodeFileText(nodeId: string): Promise<string> {
   const { data } = await apiClient.get(`/twin/nodes/${nodeId}/file`, { responseType: 'text' });
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 }
+
+// ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────
+
+export type BooleanCutOperation = 'subtract' | 'union' | 'intersect';
+
+export interface BooleanCutResult {
+  node: TwinNode;
+  operation: BooleanCutOperation;
+  resultVolumeMm3: number;
+  resultAreaMm2: number;
+}
+
+interface BooleanCutApiResponse {
+  node: TwinNodeApiResponse;
+  operation: string;
+  result_volume_mm3: number;
+  result_area_mm2: number;
+}
+
+/** POST /v1/twin/nodes/boolean-cut — subtract/union/intersect two STEP nodes,
+ * committing a real new geometry node (not a client-side visual trick). */
+export async function booleanCutNodes(
+  targetNodeId: string,
+  cutterNodeId: string,
+  operation: BooleanCutOperation,
+  resultName?: string,
+): Promise<BooleanCutResult> {
+  const { data } = await apiClient.post<BooleanCutApiResponse>('/twin/nodes/boolean-cut', {
+    target_node_id: targetNodeId,
+    cutter_node_id: cutterNodeId,
+    operation,
+    result_name: resultName,
+  });
+  return {
+    node: {
+      id: data.node.id,
+      name: data.node.name,
+      type: data.node.type as TwinNode['type'],
+      domain: data.node.domain,
+      status: data.node.status,
+      properties: data.node.properties,
+      updatedAt: data.node.updatedAt,
+    },
+    operation: data.operation as BooleanCutOperation,
+    resultVolumeMm3: data.result_volume_mm3,
+    resultAreaMm2: data.result_area_mm2,
+  };
+}

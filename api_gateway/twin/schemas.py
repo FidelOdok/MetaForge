@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class TwinNodeResponse(BaseModel):
@@ -39,3 +41,21 @@ class TwinRelationshipListResponse(BaseModel):
 
     relationships: list[TwinRelationshipResponse]
     total: int
+
+
+class BooleanCutRequest(BaseModel):
+    """Real boolean CSG operation between two committed CAD work products (MET-612)."""
+
+    target_node_id: str = Field(min_length=1)
+    cutter_node_id: str = Field(min_length=1)
+    operation: Literal["subtract", "union", "intersect"] = "subtract"
+    result_name: str | None = None
+
+
+class BooleanCutResponse(BaseModel):
+    """The newly-committed result node of a boolean-cut operation."""
+
+    node: TwinNodeResponse
+    operation: str
+    result_volume_mm3: float
+    result_area_mm2: float

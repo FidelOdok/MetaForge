@@ -223,6 +223,7 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
 function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
   const loadModel = useViewerStore((s) => s.loadModel);
   const setViewMode = useViewerStore((s) => s.setViewMode);
+  const openBooleanCut = useViewerStore((s) => s.openBooleanCut);
   const [loading3d, setLoading3d] = useState(false);
   const isCAD = node.properties.wp_type === 'cad_model';
 
@@ -250,6 +251,13 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
       setLoading3d(false);
     }
   }, [node.id, loadModel, setViewMode]);
+
+  // Boolean-cut targets whichever node is open in the 3D panel (MET-612) —
+  // ensure this node is actually loaded there first, then enter picking mode.
+  const handleBooleanCut = useCallback(async () => {
+    await handleView3D();
+    openBooleanCut(node.id);
+  }, [handleView3D, openBooleanCut, node.id]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -286,12 +294,22 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
           </div>
         </div>
 
-        {/* View 3D */}
+        {/* View 3D / Boolean cut (MET-612) */}
         {isCAD && (
-          <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
-            <Button variant="primary" size="sm" onClick={handleView3D} disabled={loading3d} className="text-xs w-full">
+          <div className="px-3 py-2 flex-shrink-0 flex gap-1.5" style={{ borderBottom: `1px solid ${KC.border}` }}>
+            <Button variant="primary" size="sm" onClick={handleView3D} disabled={loading3d} className="text-xs flex-1">
               <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>view_in_ar</span>
               {loading3d ? 'Loading…' : 'View 3D Model'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleBooleanCut}
+              disabled={loading3d}
+              className="text-xs"
+              title="Boolean cut against another CAD node"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>content_cut</span>
             </Button>
           </div>
         )}
@@ -676,7 +694,7 @@ export function TwinViewerPage() {
         ) : (
           /* 3D model mode */
           <>
-            <R3FViewer onPartClick={handlePartClick} />
+            <R3FViewer onPartClick={handlePartClick} onBooleanCutComplete={setSelectedId} />
             {glbUrl && (
               <div
                 style={{

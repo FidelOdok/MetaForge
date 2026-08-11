@@ -77,7 +77,9 @@ services:
       - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
     volumes:
-      - adapter-workspace:/workspace:ro
+      # Read-write (MET-612): boolean-cut staging writes input STEP files here
+      # for the adapter containers to read by the same absolute path.
+      - adapter-workspace:/workspace
       # `forge auth login --provider openai-codex` (OAuth) writes the ChatGPT
       # subscription token to ~/.codex/auth.json (HOME=/root in this image).
       # Without a named volume here, that file lives on the container's

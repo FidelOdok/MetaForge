@@ -11,9 +11,13 @@ import { useSynthesizeConstraint } from '../../hooks/use-constraint-synthesis';
 import type { DeltaTransform } from '../../api/endpoints/constraint';
 import { useToast } from '../ui/Toast';
 import { SceneContents } from './SceneContents';
+import { BooleanCutPanel } from './BooleanCutPanel';
 import type { PartInfo } from '../../types/viewer';
 
 const RAD_TO_DEG = 180 / Math.PI;
+
+// Tinkercad's translucent-red hole preview (MET-612).
+const CUTTER_OVERLAY_TINT = { color: '#ff3b30', opacity: 0.35 };
 
 const MODE_LABELS: Record<TransformMode, string> = {
   translate: 'MOVE',
@@ -49,6 +53,9 @@ function formatReadout(mode: TransformMode, delta: Vec3, rotationDelta: Vec3, sc
 
 interface R3FViewerProps {
   onPartClick?: (part: PartInfo) => void;
+  /** Called after a successful boolean-cut with the new node's id, so the
+   * host page can pivot its own "selected node" state (MET-612). */
+  onBooleanCutComplete?: (newNodeId: string) => void;
 }
 
 // Kinetic Console palette (see project_kinetic_console_design) — this file
@@ -198,10 +205,11 @@ function GizmoControls() {
   );
 }
 
-export function R3FViewer({ onPartClick }: R3FViewerProps) {
+export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps) {
   const glbUrl = useViewerStore((s) => s.glbUrl);
   const manifest = useViewerStore((s) => s.manifest);
   const resetCamera = useViewerStore((s) => s.resetCamera);
+  const booleanCut = useViewerStore((s) => s.booleanCut);
   const themeMode = useThemeStore((s) => s.mode);
 
   const isDark =
@@ -234,6 +242,19 @@ export function R3FViewer({ onPartClick }: R3FViewerProps) {
             onPartClick={onPartClick}
           />
         </Suspense>
+
+        {/* Boolean-cut cutter preview (MET-612) — translucent red, same Canvas,
+            identity transform (v1 scope: both models authored already
+            positioned relative to the target's origin). */}
+        {booleanCut.cutterGlbUrl && booleanCut.cutterManifest && (
+          <Suspense fallback={null}>
+            <SceneContents
+              glbUrl={booleanCut.cutterGlbUrl}
+              manifest={booleanCut.cutterManifest}
+              overlayTint={CUTTER_OVERLAY_TINT}
+            />
+          </Suspense>
+        )}
 
         <CameraController />
 
@@ -274,6 +295,9 @@ export function R3FViewer({ onPartClick }: R3FViewerProps) {
 
       {/* Rigid-group Apply/Revert overlay (MET-519) */}
       <GizmoControls />
+
+      {/* Boolean-cut panel (MET-612) */}
+      <BooleanCutPanel onCutComplete={onBooleanCutComplete} />
 
       {/* Controls hint overlay — bottom-14 clears the 32px twin status bar */}
       <div className="absolute bottom-14 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">

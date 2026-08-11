@@ -19,6 +19,11 @@ interface SceneContentsProps {
   glbUrl: string;
   manifest: ModelManifest;
   onPartClick?: (part: PartInfo) => void;
+  /** Boolean-cut cutter preview (MET-612): when set, every mesh renders with
+   * this shared translucent material instead of its normal per-part one —
+   * Tinkercad's translucent-red hole preview. Implies non-interactive: a
+   * tinted overlay is a passive preview, so clicks don't select/highlight. */
+  overlayTint?: { color: string; opacity: number };
 }
 
 interface MeshEntry {
@@ -30,7 +35,7 @@ interface MeshEntry {
   boundingBox: { min: [number, number, number]; max: [number, number, number] };
 }
 
-export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsProps) {
+export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: SceneContentsProps) {
   const { scene } = useGLTF(glbUrl);
   const groupRef = useRef<THREE.Group>(null);
   const meshMapRef = useRef<Map<string, MeshEntry>>(new Map());
@@ -78,6 +83,19 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
         depthWrite: false,
       }),
     [],
+  );
+
+  const tintMaterial = useMemo(
+    () =>
+      overlayTint
+        ? new THREE.MeshStandardMaterial({
+            color: overlayTint.color,
+            transparent: true,
+            opacity: overlayTint.opacity,
+            depthWrite: false,
+          })
+        : null,
+    [overlayTint?.color, overlayTint?.opacity],
   );
 
   // Compute assembly center for exploded view
@@ -134,17 +152,19 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
     setSceneMeshNames(orderedNames);
   }, [scene, manifest]);
 
-  // Update highlight and visibility
+  // Update highlight, visibility, and tint
   useEffect(() => {
     for (const [name, entry] of meshMapRef.current) {
       entry.mesh.visible = !hiddenMeshes.has(name);
-      if (name === selectedMeshName) {
+      if (tintMaterial) {
+        entry.mesh.material = tintMaterial;
+      } else if (name === selectedMeshName) {
         entry.mesh.material = highlightMaterial;
       } else {
         entry.mesh.material = entry.originalMaterial;
       }
     }
-  }, [selectedMeshName, hiddenMeshes, highlightMaterial]);
+  }, [selectedMeshName, hiddenMeshes, highlightMaterial, tintMaterial]);
 
   // Gizmo centroid = mean of the selected group's member-mesh centers (MET-519).
   useEffect(() => {
@@ -226,7 +246,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} onClick={handleClick} />
+      <primitive object={scene} onClick={overlayTint ? undefined : handleClick} />
       {gizmoCentroid && (
         <TransformGizmo centroid={gizmoCentroid} mode={gizmoMode} onChange={handleGizmoChange} />
       )}
