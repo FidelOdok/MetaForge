@@ -86,3 +86,33 @@ test("unwraps the envelope for agent.step and error", () => {
   const err = parseEvent('event: error\ndata: {"data":{"error":"boom"},"thread_id":"t"}');
   assert.deepEqual(err, { type: "error", error: "boom" });
 });
+
+// MET-610: the compiled binary runs under Bun, whose fetch kills any
+// connection idle for 5 minutes. Both long-lived fetches must opt out with
+// Bun's `timeout: false`, or a silent model call severs the stream/turn.
+test("stream fetch disables the runtime idle timeout (MET-610)", async () => {
+  const { streamThread } = await import("./chat.js");
+  const orig = globalThis.fetch;
+  let init: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (_url: unknown, i?: unknown) => {
+    init = i as Record<string, unknown>;
+    return {
+      ok: true,
+      body: new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      }),
+    } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    const events = [];
+    for await (const ev of streamThread("http://x", "t1", new AbortController().signal)) {
+      events.push(ev);
+    }
+    assert.deepEqual(events, []);
+    assert.equal(init?.timeout, false);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

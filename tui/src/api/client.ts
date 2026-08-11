@@ -33,6 +33,17 @@ const longTurnDispatcher = new Agent({
   bodyTimeout: LONG_TURN_TIMEOUT_MS + 30000,
 });
 
+/**
+ * MET-610: the shipped binary is compiled with Bun, whose fetch ignores the
+ * undici `dispatcher` above AND applies its own 5-minute *idle* timeout
+ * (aborting with "The operation timed out." once no response bytes arrive
+ * for 300s — which is what every long turn POST looks like, since the
+ * gateway sends nothing until the turn settles). `timeout: false` is Bun's
+ * escape hatch; Node's fetch ignores the unknown option, so both runtimes
+ * end up with only the intended guards (idle watchdog + 45-min ceiling).
+ */
+export const NO_RUNTIME_IDLE_TIMEOUT = { timeout: false } as const;
+
 export interface HealthComponent {
   name: string;
   status: string;
@@ -287,7 +298,9 @@ export class GatewayClient {
       body: JSON.stringify(body),
       // The caller's signal (idle watchdog) composes with the hard ceiling.
       signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
-      ...(dispatcher ? { dispatcher } : {}),
+      // The dispatcher raises undici's timeouts (Node); NO_RUNTIME_IDLE_TIMEOUT
+      // disables Bun's 5-min idle timeout (the compiled binary). MET-610.
+      ...(dispatcher ? { dispatcher, ...NO_RUNTIME_IDLE_TIMEOUT } : {}),
     } as RequestInit);
     if (!res.ok) throw new GatewayError(`POST ${path} -> ${res.status}`, res.status);
     return (await res.json()) as T;
