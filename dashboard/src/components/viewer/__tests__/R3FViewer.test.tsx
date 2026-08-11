@@ -16,6 +16,8 @@ vi.mock('@react-three/drei', () => ({
   Environment: () => null,
   ContactShadows: () => null,
   Grid: () => null,
+  GizmoHelper: () => null,
+  GizmoViewcube: () => null,
   useGLTF: vi.fn(() => ({
     scene: { traverse: vi.fn(), clone: vi.fn() },
     nodes: {},

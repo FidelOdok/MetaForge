@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, ContactShadows, Grid } from '@react-three/drei';
+import { OrbitControls, Environment, ContactShadows, Grid, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
@@ -14,6 +14,15 @@ import type { PartInfo } from '../../types/viewer';
 interface R3FViewerProps {
   onPartClick?: (part: PartInfo) => void;
 }
+
+// Kinetic Console palette (see project_kinetic_console_design) — this file
+// predates that token set living anywhere shared/importable, so the handful
+// of colors the ViewCube needs are declared locally rather than reaching
+// into TwinViewerPage's private KC object.
+const VIEWCUBE_COLOR = '#282a30'; // surface-high
+const VIEWCUBE_HOVER_COLOR = '#e67e22'; // primary-container (brand orange)
+const VIEWCUBE_TEXT_COLOR = '#e2e2eb'; // on-surface
+const VIEWCUBE_STROKE_COLOR = 'rgba(65,72,90,0.4)';
 
 function LoadingFallback() {
   return (
@@ -153,6 +162,18 @@ export function R3FViewer({ onPartClick }: R3FViewerProps) {
         </Suspense>
 
         <CameraController />
+
+        {/* ViewCube — click a face/edge/corner to snap the camera to that
+            orientation, or drag to orbit manually (Tinkercad-style nav). */}
+        <GizmoHelper alignment="top-right" margin={[64, 64]}>
+          <GizmoViewcube
+            color={VIEWCUBE_COLOR}
+            hoverColor={VIEWCUBE_HOVER_COLOR}
+            textColor={VIEWCUBE_TEXT_COLOR}
+            strokeColor={VIEWCUBE_STROKE_COLOR}
+          />
+        </GizmoHelper>
+
         <Environment preset="studio" />
         <ContactShadows
           position={[0, -0.5, 0]}
@@ -185,11 +206,13 @@ export function R3FViewer({ onPartClick }: R3FViewerProps) {
         Left drag: rotate · Scroll: zoom · Right drag: pan · Click a part to move it
       </div>
 
-      {/* Camera reset button — top-14 sits below the page's top-right controls row */}
+      {/* Camera reset button — bottom-right (bottom-14 clears the twin status
+          bar, matching the controls-hint overlay) so it doesn't sit on top of
+          the ViewCube anchored top-right. */}
       <button
         type="button"
         onClick={resetCamera}
-        className="absolute right-3 top-14 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+        className="absolute right-3 bottom-14 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
         title="Reset camera to default view"
         aria-label="Reset camera"
       >
