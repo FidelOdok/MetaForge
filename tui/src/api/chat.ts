@@ -5,6 +5,7 @@
  */
 
 import { log } from "../log.js";
+import { NO_RUNTIME_IDLE_TIMEOUT } from "./client.js";
 
 export interface AgentStep {
   index?: number;
@@ -141,7 +142,11 @@ export async function* streamThread(
   const res = await fetch(`${base}/v1/chat/threads/${threadId}/stream`, {
     signal,
     headers,
-  });
+    // MET-610: disable Bun's 5-min fetch idle timeout — a silent model call
+    // (codex lane streams no tokens) would otherwise sever the stream and
+    // force a reconnect cycle. Node's fetch ignores the unknown option.
+    ...NO_RUNTIME_IDLE_TIMEOUT,
+  } as RequestInit);
   if (!res.ok || !res.body) throw new Error(`chat stream -> ${res.status}`);
   onOpen?.();
 

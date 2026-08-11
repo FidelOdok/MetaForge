@@ -144,7 +144,9 @@ export function useChat(
   // what stops a lost `agent.done` (dropped on an SSE reconnect) from leaving the
   // chat stuck on "thinking" forever: the POST resolves only when the turn is
   // done server-side, so it's an authoritative fallback terminal signal.
-  const IDLE_ABORT_MS = 300000; // 5 min with no progress events => hung turn
+  // MET-610: 10 min, not 5 — the openai-codex lane streams no tokens, so a
+  // single long model call is legitimately silent between agent.step events.
+  const IDLE_ABORT_MS = 600000; // 10 min with no progress events => hung turn
   const clearIdle = () => {
     if (idleTimer.current) {
       clearTimeout(idleTimer.current);
