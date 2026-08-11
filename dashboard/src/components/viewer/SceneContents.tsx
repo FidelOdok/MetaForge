@@ -7,10 +7,13 @@ import { useTransientTransform } from '../../store/transient-transform-store';
 import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
 import { computeExplodeOffset } from '../../lib/explode';
 import { TransformGizmo } from './TransformGizmo';
+import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
 const HIGHLIGHT_COLOR = new THREE.Color(0x3b82f6);
 const HIGHLIGHT_OPACITY = 0.4;
+const IDENTITY_QUATERNION = new THREE.Quaternion();
+const IDENTITY_SCALE_VECTOR = new THREE.Vector3(1, 1, 1);
 
 interface SceneContentsProps {
   glbUrl: string;
@@ -50,7 +53,15 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   );
   const selectedGroup = useTransientTransform((s) => s.selectedGroup);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
+  const gizmoMode = useTransientTransform((s) => s.mode);
   const setDelta = useTransientTransform((s) => s.setDelta);
+  const setRotationDelta = useTransientTransform((s) => s.setRotationDelta);
+  const setScaleDelta = useTransientTransform((s) => s.setScaleDelta);
+  const handleGizmoChange = (mode: TransformMode, value: Vec3) => {
+    if (mode === 'translate') setDelta(value);
+    else if (mode === 'rotate') setRotationDelta(value);
+    else setScaleDelta(value);
+  };
   const [gizmoCentroid, setGizmoCentroid] = useState<[number, number, number] | null>(null);
 
   const memberMeshes = useMemo(() => {
@@ -169,18 +180,29 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
     targetPositions.current = targets;
   }, [explodeFactor, explodeDirection, assemblyCenter]);
 
+  const tmpEuler = useRef(new THREE.Euler());
+  const tmpQuat = useRef(new THREE.Quaternion());
+  const tmpScale = useRef(new THREE.Vector3());
+
   useFrame(() => {
-    // Read the live drag delta without subscribing (avoids per-frame React renders).
-    const delta = useTransientTransform.getState().delta;
+    // Read the live drag deltas without subscribing (avoids per-frame React renders).
+    const { delta, rotationDelta, scaleDelta } = useTransientTransform.getState();
+    const targetQuat = tmpQuat.current.setFromEuler(
+      tmpEuler.current.set(rotationDelta[0], rotationDelta[1], rotationDelta[2]),
+    );
+    const targetScale = tmpScale.current.set(scaleDelta[0], scaleDelta[1], scaleDelta[2]);
     for (const [name, entry] of meshMapRef.current) {
       const base = targetPositions.current.get(name);
       const t = tmpTarget.current.set(base?.x ?? 0, base?.y ?? 0, base?.z ?? 0);
-      if (memberMeshes.has(name)) {
+      const isMember = memberMeshes.has(name);
+      if (isMember) {
         t.x += delta[0];
         t.y += delta[1];
         t.z += delta[2];
       }
       entry.mesh.position.lerp(t, 0.3);
+      entry.mesh.quaternion.slerp(isMember ? targetQuat : IDENTITY_QUATERNION, 0.3);
+      entry.mesh.scale.lerp(isMember ? targetScale : IDENTITY_SCALE_VECTOR, 0.3);
     }
   });
 
@@ -205,7 +227,9 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   return (
     <group ref={groupRef}>
       <primitive object={scene} onClick={handleClick} />
-      {gizmoCentroid && <TransformGizmo centroid={gizmoCentroid} onDelta={setDelta} />}
+      {gizmoCentroid && (
+        <TransformGizmo centroid={gizmoCentroid} mode={gizmoMode} onChange={handleGizmoChange} />
+      )}
     </group>
   );
 }

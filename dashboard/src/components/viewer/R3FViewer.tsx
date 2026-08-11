@@ -6,10 +6,46 @@ import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useThemeStore } from '../../store/theme-store';
 import { useTransientTransform } from '../../store/transient-transform-store';
+import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import { useSynthesizeConstraint } from '../../hooks/use-constraint-synthesis';
+import type { DeltaTransform } from '../../api/endpoints/constraint';
 import { useToast } from '../ui/Toast';
 import { SceneContents } from './SceneContents';
 import type { PartInfo } from '../../types/viewer';
+
+const RAD_TO_DEG = 180 / Math.PI;
+
+const MODE_LABELS: Record<TransformMode, string> = {
+  translate: 'MOVE',
+  rotate: 'ROTATE',
+  scale: 'SCALE',
+};
+
+/** Axis (x/y/z) and value of the component farthest from `baseline`. */
+function dominantAxis(v: Vec3, baseline: number): { axis: 'x' | 'y' | 'z'; value: number } {
+  const candidates: Array<{ axis: 'x' | 'y' | 'z'; value: number }> = [
+    { axis: 'x', value: v[0] },
+    { axis: 'y', value: v[1] },
+    { axis: 'z', value: v[2] },
+  ];
+  return candidates.reduce((best, c) =>
+    Math.abs(c.value - baseline) > Math.abs(best.value - baseline) ? c : best,
+  );
+}
+
+/** Live numeric readout text for the active gizmo mode (e.g. "12.4mm", "34.2°", "120%"). */
+function formatReadout(mode: TransformMode, delta: Vec3, rotationDelta: Vec3, scaleDelta: Vec3): string {
+  if (mode === 'translate') {
+    const mag = Math.sqrt(delta[0] ** 2 + delta[1] ** 2 + delta[2] ** 2);
+    return `${mag.toFixed(1)}mm`;
+  }
+  if (mode === 'rotate') {
+    const { value } = dominantAxis(rotationDelta, 0);
+    return `${(value * RAD_TO_DEG).toFixed(1)}°`;
+  }
+  const { value } = dominantAxis(scaleDelta, 1);
+  return `${Math.round(value * 100)}%`;
+}
 
 interface R3FViewerProps {
   onPartClick?: (part: PartInfo) => void;
@@ -61,13 +97,20 @@ function CameraController() {
 }
 
 /**
- * Apply / Revert overlay for rigid-group manipulation (MET-519). HTML overlay
- * (outside the Canvas) shown while a group is selected. Apply posts the delta
- * to constraint synthesis; Revert discards it.
+ * Mode switcher / Apply / Revert overlay for rigid-group manipulation
+ * (MET-519, extended MET-611 with rotate/scale + a live numeric readout).
+ * HTML overlay (outside the Canvas) shown while a group is selected — reads
+ * the store directly so the readout updates on every drag tick without a
+ * useFrame bridge. Apply posts the active mode's delta to constraint
+ * synthesis; Revert discards all three pending deltas.
  */
 function GizmoControls() {
   const selectedGroup = useTransientTransform((s) => s.selectedGroup);
+  const mode = useTransientTransform((s) => s.mode);
+  const setMode = useTransientTransform((s) => s.setMode);
   const delta = useTransientTransform((s) => s.delta);
+  const rotationDelta = useTransientTransform((s) => s.rotationDelta);
+  const scaleDelta = useTransientTransform((s) => s.scaleDelta);
   const isDirty = useTransientTransform((s) => s.isDirty);
   const revert = useTransientTransform((s) => s.revert);
   const clearAfterApply = useTransientTransform((s) => s.clearAfterApply);
@@ -77,12 +120,23 @@ function GizmoControls() {
   if (!selectedGroup) return null;
 
   const onApply = () => {
+    let payload: DeltaTransform;
+    if (mode === 'translate') {
+      payload = { dx: delta[0], dy: delta[1], dz: delta[2] };
+    } else if (mode === 'rotate') {
+      const { axis, value } = dominantAxis(rotationDelta, 0);
+      payload = { dx: 0, dy: 0, dz: 0, rotation: { axis, angle_deg: value * RAD_TO_DEG } };
+    } else {
+      const { axis, value } = dominantAxis(scaleDelta, 1);
+      payload = { dx: 0, dy: 0, dz: 0, scale: { axis, factor: value } };
+    }
+
     synth.mutate(
-      { groupName: selectedGroup, delta: { dx: delta[0], dy: delta[1], dz: delta[2] } },
+      { groupName: selectedGroup, delta: payload },
       {
         onSuccess: (res) => {
           if (res.status === 'conflict') {
-            toast.error(res.conflict_reason ?? 'Constraint conflict — move rejected');
+            toast.error(res.conflict_reason ?? 'Constraint conflict — change rejected');
             revert();
           } else if (res.status === 'noop') {
             toast.info('No change to apply');
@@ -98,9 +152,29 @@ function GizmoControls() {
 
   return (
     <div className="absolute left-1/2 top-3 z-50 -translate-x-1/2 flex flex-col gap-2 rounded-md bg-black/60 px-3 py-2 text-xs text-white/90 select-none">
-      <div className="font-mono">
-        {selectedGroup}
-        {isDirty && <span className="ml-1 text-amber-400">• modified</span>}
+      <div className="font-mono flex items-center gap-2">
+        <span>{selectedGroup}</span>
+        {isDirty && (
+          <span className="text-amber-400">
+            • {formatReadout(mode, delta, rotationDelta, scaleDelta)}
+          </span>
+        )}
+      </div>
+      <div className="flex gap-1 rounded border border-white/10 p-0.5">
+        {(Object.keys(MODE_LABELS) as TransformMode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            className={`flex-1 rounded px-2 py-1 font-mono text-[10px] transition-colors ${
+              mode === m
+                ? 'bg-orange-600 text-white'
+                : 'text-white/60 hover:bg-white/10 hover:text-white/90'
+            }`}
+          >
+            {MODE_LABELS[m]}
+          </button>
+        ))}
       </div>
       <div className="flex gap-2">
         <button
