@@ -374,8 +374,24 @@ async def _codex_stream_deltas(
         stream=True,
     )
     async for event in stream:
-        if getattr(event, "type", "") == "response.output_text.delta":
+        etype = getattr(event, "type", "")
+        if etype == "response.output_text.delta":
             yield getattr(event, "delta", "") or ""
+        elif etype in ("response.incomplete", "response.failed"):
+            # MET-614: a length-capped or failed response used to return
+            # silently truncated text, which downstream parses as a malformed
+            # ReAct reply and burns a recovery round-trip. Surface it as
+            # retryable — a fresh generation usually fits.
+            response = getattr(event, "response", None)
+            details = getattr(response, "incomplete_details", None) or getattr(
+                response, "error", None
+            )
+            reason = getattr(details, "reason", None) or getattr(details, "message", None)
+            raise ProviderError(
+                f"codex response ended '{etype.removeprefix('response.')}'"
+                + (f" ({reason})" if reason else ""),
+                retryable=True,
+            )
 
 
 async def _codex_call(
