@@ -46,6 +46,33 @@ def test_parse_json_missing_tool_and_final_raises() -> None:
         parse_action('{"thought": "I built the assembly and committed it."}')
 
 
+# --- MET-614: replies that are structurally honest but strictly invalid ----
+def test_parse_tolerates_literal_newlines_in_strings() -> None:
+    """Live-caught (kitchen-shelf turn): a multi-line CAD script or rationale
+    inside a string value carries raw newlines, which strict JSON rejects even
+    though the reply is exactly the shape the protocol asked for."""
+    a = parse_action(
+        '{"thought": "generate the frame", "tool": "cadquery.execute_script",'
+        ' "arguments": {"script": "import cadquery as cq\nresult = cq.Workplane()"}}'
+    )
+    assert a.tool_call.name == "cadquery.execute_script"
+    assert "\n" in a.tool_call.arguments["script"]
+
+
+def test_parse_tolerates_trailing_prose_containing_braces() -> None:
+    """Prose after the object used to shift the first-{ .. last-} slice onto
+    an unparseable range; the first complete object must win."""
+    a = parse_action('{"thought": "done", "final": "ok"}\nThat covers {all} of it.')
+    assert a.is_final and a.final_output == "ok"
+
+
+def test_parse_truncated_json_still_raises() -> None:
+    """A length-capped reply whose object never closes is NOT recoverable —
+    the loop's retry nudge is the correct path for it."""
+    with pytest.raises(ReActParseError):
+        parse_action('{"thought": "long reasoning", "tool": "mcp_twin_record_decision", "argu')
+
+
 # --- ModelPolicy -----------------------------------------------------------
 def _scripted_invoke(*replies: str):
     calls = {"n": 0}

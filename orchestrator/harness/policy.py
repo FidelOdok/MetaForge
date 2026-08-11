@@ -88,10 +88,24 @@ def parse_action(text: str) -> ReActAction:
     start, end = raw.find("{"), raw.rfind("}")
     obj = None
     if start != -1 and end > start:
+        # MET-614: strict=False — long payloads (multi-line rationale, CAD
+        # scripts) routinely carry literal newlines inside string values,
+        # which strict JSON rejects even though the reply is structurally
+        # exactly what the protocol asked for.
         try:
-            obj = json.loads(raw[start : end + 1])
+            obj = json.loads(raw[start : end + 1], strict=False)
         except json.JSONDecodeError:
             obj = None
+    if not isinstance(obj, dict) and start != -1:
+        # MET-614: the first-{ .. last-} slice breaks when prose after the
+        # object contains its own "}". Fall back to decoding the FIRST
+        # complete object and ignoring whatever trails it.
+        try:
+            candidate, _ = json.JSONDecoder(strict=False).raw_decode(raw[start:])
+        except json.JSONDecodeError:
+            candidate = None
+        if isinstance(candidate, dict):
+            obj = candidate
     if not isinstance(obj, dict):
         raise ReActParseError(
             "reply must be ONLY a JSON object shaped "
