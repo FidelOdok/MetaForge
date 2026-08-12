@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import time
 from typing import Any
 
@@ -61,6 +62,51 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             return fallback, fallback_tool
 
         raise RuntimeError(f"No CAD backend available. Tried {preferred_tool} and {fallback_tool}.")
+
+    async def _commit_geometry(
+        self, *, cad_file: str, shape_type: str, material: str, project_id: str | None
+    ) -> tuple[bool, str | None, str | None, str | None]:
+        """Best-effort persist the exported STEP file via twin.commit_geometry.
+
+        Reading *cad_file* directly only works when the CAD backend runs
+        in-process with this skill (true for cadquery today); a containerized
+        backend whose filesystem isn't shared with this process reports a
+        commit_error instead of raising, so a caller that asked to persist
+        can see why it didn't happen without the whole skill failing.
+
+        Returns:
+            (committed, twin_node_id, model_url, commit_error).
+        """
+        if not await self.context.mcp.is_available("twin.commit_geometry"):
+            return False, None, None, "twin.commit_geometry tool is not available"
+
+        try:
+            with open(cad_file, "rb") as fh:
+                step_base64 = base64.b64encode(fh.read()).decode("ascii")
+        except OSError as exc:
+            self.logger.warning(
+                "Could not read generated CAD file to commit it",
+                cad_file=cad_file,
+                error=str(exc),
+            )
+            return False, None, None, f"could not read {cad_file}: {exc}"
+
+        arguments: dict[str, Any] = {
+            "name": f"{shape_type} ({material})",
+            "step_base64": step_base64,
+            "domain": "mechanical",
+            "format": "step",
+        }
+        if project_id:
+            arguments["project_id"] = project_id
+
+        try:
+            result = await self.context.mcp.invoke("twin.commit_geometry", arguments, timeout=60)
+        except Exception as exc:
+            self.logger.warning("twin.commit_geometry failed", error=str(exc))
+            return False, None, None, str(exc)
+
+        return True, result.get("node_id"), result.get("model_url"), None
 
     async def validate_preconditions(self, input_data: GenerateCadInput) -> list[str]:
         """Check that the work_product exists and at least one CAD tool is available."""
@@ -160,6 +206,21 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             span.set_attribute("volume_mm3", volume_mm3)
             span.set_attribute("elapsed_s", elapsed)
 
+            # 6. Persist into the Twin so this skill always leaves a reviewable
+            # work product behind (MET-615) rather than an ephemeral adapter file.
+            committed = False
+            twin_node_id: str | None = None
+            model_url: str | None = None
+            commit_error: str | None = None
+            if input_data.commit:
+                committed, twin_node_id, model_url, commit_error = await self._commit_geometry(
+                    cad_file=cad_file,
+                    shape_type=input_data.shape_type,
+                    material=input_data.material,
+                    project_id=input_data.project_id,
+                )
+                span.set_attribute("committed", committed)
+
             return GenerateCadOutput(
                 work_product_id=input_data.work_product_id,
                 cad_file=cad_file,
@@ -169,6 +230,10 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                 bounding_box=bounding_box,
                 parameters_used=parameters_used,
                 material=input_data.material,
+                committed=committed,
+                twin_node_id=twin_node_id,
+                model_url=model_url,
+                commit_error=commit_error,
             )
 
     async def validate_output(self, output: GenerateCadOutput) -> list[str]:

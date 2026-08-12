@@ -271,9 +271,11 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
         )
 
     lines.append(
-        f"\nTo save any CAD model or design decision into this project, pass "
-        f'`project_id="{project.id}"` when you call `twin.commit_geometry` or '
-        f"`twin.record_decision`. Ground your answers in the work products above."
+        f"\nAny CAD model you generate in this project is NOT saved until you call "
+        f'`twin.commit_geometry` with `project_id="{project.id}"` — do this before your '
+        f"final answer whenever you generated or modified geometry this turn. Record "
+        f'design decisions the same way with `twin.record_decision` (`project_id="{project.id}"`). '
+        f"Ground your answers in the work products above."
     )
     return "\n".join(lines)
 

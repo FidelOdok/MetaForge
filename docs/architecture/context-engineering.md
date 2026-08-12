@@ -247,6 +247,14 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   `twin.commit_geometry` soft-warns (never blocks) when geometry lands
   in an unconstrained project. Chat nudges; the design-flow gates
   (MET-582/583) enforce.
+- **Geometry-commit directive (MET-615)** — both harness system prompts
+  (native and ReAct) and the project brief now state explicitly that
+  `freecad.*`/`cadquery.*` tools only write to a local, ephemeral
+  adapter workspace, and that any turn which generates or modifies
+  geometry must call `twin.commit_geometry` before the final answer.
+  Before this, the only mention was a soft how-to clause in the brief;
+  a full session could generate a CAD model and never persist it as a
+  work product without the agent — or the user — noticing.
 - **Telemetry** — `context.stats` gains a `retrieved_context`
   component; the `project_brief` component is now computed from the
   explicit brief text rather than sniffing the history pair.

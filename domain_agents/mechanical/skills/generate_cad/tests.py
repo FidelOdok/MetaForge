@@ -293,6 +293,87 @@ class TestGenerateCadHandler:
         )
         assert any("empty" in e for e in errors)
 
+    async def test_commit_skipped_when_tool_unavailable(self):
+        """Default commit=True degrades gracefully when twin.commit_geometry isn't registered."""
+        _ctx, handler, work_product = await _make_ctx_and_handler()
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+            )
+        )
+
+        assert output.committed is False
+        assert output.twin_node_id is None
+        assert output.commit_error == "twin.commit_geometry tool is not available"
+
+    async def test_commit_geometry_invoked_when_available(self, tmp_path):
+        """When commit=True and the tool is available, the STEP file is read and committed."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+
+        step_file = tmp_path / "bracket_test.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_parametric", {**CADQUERY_CAD_RESULT, "cad_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response(
+            "twin.commit_geometry",
+            {"node_id": "node-123", "model_url": "https://twin.local/models/node-123"},
+        )
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                project_id="13d60463-433b-4735-af07-690cbf8e07b9",
+            )
+        )
+
+        assert output.committed is True
+        assert output.twin_node_id == "node-123"
+        assert output.model_url == "https://twin.local/models/node-123"
+        assert output.commit_error is None
+
+    async def test_commit_false_skips_persistence(self):
+        """commit=False never attempts to persist, even when the tool is available."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-123"})
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                commit=False,
+            )
+        )
+
+        assert output.committed is False
+        assert output.commit_error is None
+
+    async def test_commit_error_when_file_unreadable(self):
+        """A cad_file this process can't read (e.g. containerized backend) reports commit_error."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-123"})
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+            )
+        )
+
+        assert output.committed is False
+        assert output.commit_error is not None
+        assert "output/bracket_test.step" in output.commit_error
+
     async def test_validate_output_zero_volume(self):
         """Output validation catches zero volume."""
         from .schema import BoundingBox, GenerateCadOutput
