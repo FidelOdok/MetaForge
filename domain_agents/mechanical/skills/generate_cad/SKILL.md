@@ -6,11 +6,9 @@ Generate parametric CAD geometry from a shape type and dimensions using CadQuery
 
 1. Takes a shape type, a dimensions map, and a material as input
 2. Invokes the parametric CAD tool (CadQuery, falling back to FreeCAD) via MCP to build the solid
-3. Exports the geometry to a STEP file
-4. Unless `commit=False`, reads the STEP file back and calls `twin.commit_geometry`
-   so a `cad_model` work product exists in the Twin without a separate step (MET-615)
-5. Returns the file path plus computed mass properties (volume, surface area) and
-   the commit outcome
+3. Exports the geometry to a STEP file, then (unless `commit=False`) commits it via
+   `twin.commit_geometry` so a `cad_model` work product exists in one step (MET-615)
+4. Returns the file path, mass properties (volume, surface area), and commit outcome
 
 ## Tools Required
 
@@ -30,24 +28,15 @@ Generate parametric CAD geometry from a shape type and dimensions using CadQuery
 
 ## Output
 
-- `cad_file` -- path to the generated STEP file
-- `shape_type` -- the shape that was generated
-- `volume_mm3` -- solid volume in cubic millimeters
-- `surface_area_mm2` -- surface area in square millimeters
-- `parameters_used` -- the resolved parameters the solid was built from
-- `material` -- material recorded on the part
-- `committed` -- whether the geometry was persisted into the Twin
-- `twin_node_id` / `model_url` -- set when `committed` is true
-- `commit_error` -- set when `commit=true` was requested but persistence was
-  skipped or failed (e.g. `twin.commit_geometry` unavailable, or the exported
-  file isn't readable from this process — see Limitations)
+- `cad_file`, `shape_type`, `volume_mm3`, `surface_area_mm2`, `parameters_used`,
+  `material` -- as before
+- `committed` / `twin_node_id` / `model_url` -- persistence outcome
+- `commit_error` -- set when a requested commit was skipped or failed
 
 ## Limitations
 
-- Generates a single parametric solid, not multi-body assemblies (see `create_assembly`)
-- The commit step reads `cad_file` directly from disk, which only works when
-  the CAD backend runs in-process with this skill (true for cadquery today).
-  A containerized backend whose filesystem isn't shared with this process
-  will report a non-fatal `commit_error` instead of a committed work product —
-  check `committed` on the output rather than assuming success
+- Single parametric solid, not multi-body assemblies (see `create_assembly`)
+- Commit reads `cad_file` from disk, which only works when the CAD backend runs
+  in-process with this skill (true for cadquery today); a containerized backend
+  reports `commit_error` instead -- check `committed`, don't assume success
 - Bounded to the parametric shapes the CAD adapter exposes
