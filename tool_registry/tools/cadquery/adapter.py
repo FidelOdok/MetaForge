@@ -190,7 +190,12 @@ class CadqueryServer(McpToolServer):
                 tool_id="cadquery.export_geometry",
                 adapter_id="cadquery",
                 name="Export Geometry",
-                description="Export CAD model to STEP/STL/OBJ/BREP/AMF/SVG format",
+                description=(
+                    "Export CAD model to STEP/STL/OBJ/BREP/AMF/SVG format. Output is "
+                    "written to the adapter's local filesystem only — it is NOT "
+                    "persisted or visible in the project/Twin until "
+                    "twin.commit_geometry is called."
+                ),
                 capability="cad_export",
                 input_schema={
                     "type": "object",

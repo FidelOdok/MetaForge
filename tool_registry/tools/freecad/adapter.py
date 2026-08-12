@@ -72,7 +72,11 @@ class FreecadServer(McpToolServer):
                 tool_id="freecad.export_geometry",
                 adapter_id="freecad",
                 name="Export Geometry",
-                description="Export CAD model to STEP/STL/OBJ/BREP format",
+                description=(
+                    "Export CAD model to STEP/STL/OBJ/BREP format. Output is written "
+                    "to the adapter's local filesystem only — it is NOT persisted or "
+                    "visible in the project/Twin until twin.commit_geometry is called."
+                ),
                 capability="cad_export",
                 input_schema={
                     "type": "object",
@@ -905,7 +909,10 @@ class FreecadServer(McpToolServer):
             ),
             (
                 "export_model",
-                "Export a session object to STEP and return the bytes (base64)",
+                "Export a session object to STEP and return the bytes (base64). "
+                "Returned bytes are NOT persisted anywhere — call "
+                "twin.commit_geometry (session_id + obj_id) afterward to add it "
+                "to the project/Twin as a cad_model work product.",
                 "cad_export",
                 obj_schema(
                     {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
