@@ -1,10 +1,19 @@
-"""Assembly export resolution (MET-10).
+"""Assembly export resolution (MET-10) and STEP export (MET-616).
 
 `export_model` on an `App::Part` assembly used to crash with
 `'App.Part' object has no attribute 'Shape'` — the container has no `.Shape` of
 its own. `_shape_leaves` flattens a container into its child leaf shapes so the
-export/measure path can build a compound. FreeCAD isn't in CI, so these exercise
-the pure traversal with duck-typed fakes (no FreeCAD, no `Part`).
+read-only measure/describe path can build a compound (MET-10).
+
+`export_object_step_bytes` (the STEP export path) does NOT use that compound:
+FreeCAD's raw `Shape.exportStep()` has no concept of Labels, so exporting a
+flattened compound collapsed every assembly into one anonymous STEP PRODUCT
+(MET-616). It instead passes the live object straight to the document-aware
+`Import.export()`, which writes one PRODUCT per object and preserves the
+assembly hierarchy.
+
+FreeCAD isn't in CI, so these exercise the pure traversal / call shape with
+duck-typed fakes (no FreeCAD, no `Part`, no `Import`).
 """
 
 from __future__ import annotations
@@ -93,3 +102,69 @@ class TestResolveShape:
         with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True):
             with pytest.raises(ValueError, match="no exportable geometry"):
                 ops._resolve_shape(_part(label="EmptyRig"))
+
+
+class _FakeImport:
+    """Records the object list `Import.export` was called with and writes a
+    marker file, so tests can assert on both without real FreeCAD."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[object]] = []
+
+    def export(self, objs: list[object], path: str) -> None:
+        self.calls.append(objs)
+        with open(path, "wb") as fh:
+            fh.write(b"STEP;fake-export")
+
+
+class TestExportObjectStepBytes:
+    """MET-616: export must go through the object-list ``Import`` module, not a
+    raw ``Shape.exportStep()`` on a flattened compound — the raw shape writer
+    has no concept of FreeCAD Labels, so an assembly's children all landed in
+    one anonymous PRODUCT and the multi-part structure was lost.
+    """
+
+    def test_requires_freecad(self, ops: FreecadOperations) -> None:
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.export_object_step_bytes(_leaf(_Shape()))
+
+    def test_empty_assembly_raises_before_exporting(self, ops: FreecadOperations) -> None:
+        fake_import = _FakeImport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(_part(label="EmptyRig"))
+        assert fake_import.calls == []  # never attempted the export
+
+    def test_exports_the_object_itself_not_a_flattened_compound(
+        self, ops: FreecadOperations
+    ) -> None:
+        """The whole point of MET-616: pass the live object (assembly or leaf)
+        straight to Import.export so it can write one PRODUCT per child,
+        instead of pre-flattening to a compound that has no Label identity."""
+        assembly = _part(_leaf(_Shape()), _leaf(_Shape()), label="TableAssembly")
+        fake_import = _FakeImport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            result = ops.export_object_step_bytes(assembly)
+
+        assert fake_import.calls == [[assembly]]  # the container, not its leaves
+        assert result == b"STEP;fake-export"
+
+    def test_single_leaf_object_also_goes_through_import_export(
+        self, ops: FreecadOperations
+    ) -> None:
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            ops.export_object_step_bytes(leaf)
+
+        assert fake_import.calls == [[leaf]]

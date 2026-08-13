@@ -22,11 +22,13 @@ tracer = get_tracer("tool_registry.tools.freecad.operations")
 # Conditional FreeCAD import -- allows testing without FreeCAD installed
 try:
     import FreeCAD  # type: ignore[import-untyped]
+    import Import  # type: ignore[import-untyped]
     import Part  # type: ignore[import-untyped]
 
     HAS_FREECAD = True
 except ImportError:
     FreeCAD = None  # type: ignore[assignment]
+    Import = None  # type: ignore[assignment]
     Part = None  # type: ignore[assignment]
     HAS_FREECAD = False
 
@@ -1405,18 +1407,26 @@ class FreecadOperations:
         return leaves
 
     def _resolve_shape(self, obj: Any) -> Any:
-        """The shape to export/measure for ``obj`` — its own, or a compound of an
+        """The shape to measure for ``obj`` — its own, or a compound of an
         assembly's children (MET-10: ``export_model`` on an ``App::Part`` used to
-        crash with ``'App.Part' object has no attribute 'Shape'``)."""
+        crash with ``'App.Part' object has no attribute 'Shape'``).
+
+        For read-only inspection (measure/describe_model/shape_props) only —
+        the compound this builds has no Label/PRODUCT identity, so it must
+        NOT be used for STEP export (see ``export_object_step_bytes``)."""
         self._require_freecad()
         leaves = self._shape_leaves(obj)
         if not leaves:
-            label = getattr(obj, "Label", getattr(obj, "Name", obj))
-            raise ValueError(
-                f"nothing to export: {label!r} has no exportable geometry "
-                "(an empty assembly, or a body with no features yet)"
-            )
+            self._raise_empty_geometry(obj)
         return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
+
+    @staticmethod
+    def _raise_empty_geometry(obj: Any) -> None:
+        label = getattr(obj, "Label", getattr(obj, "Name", obj))
+        raise ValueError(
+            f"nothing to export: {label!r} has no exportable geometry "
+            "(an empty assembly, or a body with no features yet)"
+        )
 
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
@@ -1477,19 +1487,29 @@ class FreecadOperations:
         }
 
     def export_object_step_bytes(self, obj: Any) -> bytes:
-        """Export a live object's shape to STEP and return the bytes.
+        """Export a live object to STEP and return the bytes.
 
         Bytes (not a container-local path) so the gateway/twin layer can persist
         them to MinIO regardless of where the adapter runs (MET-529).
+
+        Uses the document-aware ``Import`` module (MET-616), not a raw
+        ``Shape.exportStep()`` on a flattened compound: the raw shape STEP
+        writer has no concept of FreeCAD Labels, so an assembly's children
+        all landed in one anonymous PRODUCT named after the OCCT translator
+        header, and the multi-part structure was lost. ``Import.export``
+        walks the live object (following into an ``App::Part``'s children
+        itself) and writes one PRODUCT per object, preserving Labels and
+        the assembly hierarchy — verified empirically against FreeCAD 7.8.
         """
         self._require_freecad()
         import tempfile
 
-        shape = self._resolve_shape(obj)
+        if not self._shape_leaves(obj):
+            self._raise_empty_geometry(obj)
         with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
             tmp_path = tmp.name
         try:
-            shape.exportStep(tmp_path)
+            Import.export([obj], tmp_path)
             return Path(tmp_path).read_bytes()
         finally:
             try:
