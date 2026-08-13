@@ -70,3 +70,17 @@ test("pendingHeight: thinking preview wraps like any other text", () => {
     1 + 1 + wrappedLines("a".repeat(200), 82 - 2 - 1) + 1,
   );
 });
+
+test("pendingHeight: extraTraceLines accounts for MET-617's '… N earlier steps' marker", () => {
+  const pending = { text: "", steps: [{ tool: "echo" }] };
+  const base = pendingHeight(pending, 200, true, 0);
+  assert.equal(pendingHeight(pending, 200, true, 1), base + 1);
+});
+
+test("pendingHeight: fed the MET-617-clipped tail, not the raw turn, stays bounded", () => {
+  // A long turn's raw steps/text would blow up the estimate; the caller is
+  // expected to pass the already-viewport-clipped tail instead (Chat.tsx).
+  const rawSteps = Array.from({ length: 40 }, () => ({ tool: "echo" }));
+  const clippedPending = { text: "…tail of a very long streamed answer", steps: rawSteps.slice(-3) };
+  assert.ok(pendingHeight(clippedPending, 82, true, 1) < pendingHeight({ text: "x".repeat(4000), steps: rawSteps }, 82, true, 0));
+});

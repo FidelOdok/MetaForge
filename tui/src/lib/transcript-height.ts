@@ -63,14 +63,26 @@ export interface PendingLike {
  * the moment growing content first exceeds the stale reservation. Feeding
  * this estimate into that calculation keeps the reservation shrinking in
  * step with `pending`'s growth instead.
+ *
+ * MET-617 bounds what the live region actually renders to a viewport-sized
+ * tail (see `lib/live-tail.ts`) — callers pass the already-clipped `steps`/
+ * `text` (what's really on screen), not the raw unbounded turn, and
+ * `extraTraceLines` for MET-617's own "… N earlier steps" marker row so this
+ * stays an exact match for what's rendered instead of a stale overestimate.
  */
-export function pendingHeight(pending: PendingLike | null, cols: number, busy: boolean): number {
+export function pendingHeight(
+  pending: PendingLike | null,
+  cols: number,
+  busy: boolean,
+  extraTraceLines = 0,
+): number {
   if (!pending) return 0;
   const wrapW = Math.max(1, cols - 2); // Box has paddingX={1}
   let rows = 1; // marginTop
   const hasTrace = pending.steps.length > 0 || !!pending.thinking || !!pending.startedAction;
   if (hasTrace) {
     rows += 1; // "· thinking [~N tok]"
+    rows += extraTraceLines;
     for (let i = 0; i < pending.steps.length; i++) {
       rows += Math.max(1, Math.ceil(110 / Math.max(1, wrapW - 1))); // marginLeft={1}
     }
