@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef } from 'react';
+import { Suspense, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, ContactShadows, Grid, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
@@ -76,22 +76,57 @@ function LoadingFallback() {
   );
 }
 
-/** Registers a camera-reset callback in the store so the button outside Canvas can trigger it. */
+// Isometric-ish viewing direction, pre-normalized (1, 0.75, 1) — a fixed
+// angle looks natural regardless of model size; only the DISTANCE scales
+// with modelBounds.radius below.
+const VIEW_DIR = { x: 0.6247, y: 0.4685, z: 0.6247 };
+// Distance-to-radius ratio that comfortably fits a bounding sphere in a 45°
+// FOV camera with headroom (a tighter ratio clips corners on a tilted view).
+const FIT_DISTANCE_FACTOR = 2.2;
+// Generic framing used only before any model has reported its bounds (e.g.
+// the very first frame, or an empty scene) — matches the previous hardcoded
+// camera/target so behavior is unchanged until real bounds are available.
+const DEFAULT_BOUNDS = { center: [0, 0, 0] as [number, number, number], radius: 36 };
+
+/** Registers a camera-reset callback in the store so the button outside Canvas
+ * can trigger it, and fits the camera to the loaded model's actual size and
+ * position — a fixed generic framing regardless of what's loaded (MET-620)
+ * could put the orbit pivot nowhere near the model, which reads as the ground
+ * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
   const { camera } = useThree();
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
+  const modelBounds = useViewerStore((s) => s.modelBounds);
+
+  const fitToModel = useCallback(() => {
+    const { center, radius } = modelBounds ?? DEFAULT_BOUNDS;
+    const dist = radius * FIT_DISTANCE_FACTOR;
+    camera.position.set(
+      center[0] + VIEW_DIR.x * dist,
+      center[1] + VIEW_DIR.y * dist,
+      center[2] + VIEW_DIR.z * dist,
+    );
+    camera.lookAt(center[0], center[1], center[2]);
+    if (controlsRef.current) {
+      controlsRef.current.target.set(center[0], center[1], center[2]);
+      controlsRef.current.update();
+    }
+  }, [camera, modelBounds]);
 
   useEffect(() => {
-    registerCameraReset(() => {
-      camera.position.set(80, 60, 80);
-      camera.lookAt(0, 0, 0);
-      if (controlsRef.current) {
-        controlsRef.current.target.set(0, 0, 0);
-        controlsRef.current.update();
-      }
-    });
-  }, [camera, registerCameraReset]);
+    registerCameraReset(fitToModel);
+  }, [registerCameraReset, fitToModel]);
+
+  // Auto-fit whenever a new model's bounds become available — initial load,
+  // or switching to a different work product — so the camera doesn't stay on
+  // whatever generic framing was there before this model existed.
+  useEffect(() => {
+    if (modelBounds) fitToModel();
+    // fitToModel already depends on modelBounds; re-running on its own
+    // change (not fitToModel's identity) is exactly "a new model loaded".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelBounds]);
 
   return (
     <OrbitControls
@@ -244,6 +279,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
+  const modelBounds = useViewerStore((s) => s.modelBounds);
   const themeMode = useThemeStore((s) => s.mode);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
 
@@ -254,6 +290,19 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
       window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   const bgColor = isDark ? '#18181b' : '#f4f4f5';
+
+  // Size and position the ground plane to the loaded model instead of a
+  // fixed [0,-0.5,0]/200-unit grid that could sit nowhere near a small or
+  // off-center model — the mismatch is exactly what made an orbit look like
+  // the grid was the thing rotating (MET-620).
+  const groundY = (modelBounds?.groundY ?? 0) - 0.5;
+  const modelRadius = modelBounds?.radius ?? 36;
+  const gridSize = Math.max(20, modelRadius * 6);
+  // Cell/section spacing scale with the model too — the original 5/25 values
+  // were sized for roughly this reference radius, so this keeps that same
+  // ratio (unchanged look for a model near that size) instead of a tiny part
+  // getting comically coarse grid cells or a huge one getting illegibly fine ones.
+  const gridScale = modelRadius / 36;
 
   if (!glbUrl || !manifest) {
     return (
@@ -317,21 +366,21 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
 
         <Environment preset="studio" />
         <ContactShadows
-          position={[0, -0.5, 0]}
+          position={[modelBounds?.center[0] ?? 0, groundY, modelBounds?.center[2] ?? 0]}
           opacity={isDark ? 0.3 : 0.5}
-          scale={100}
+          scale={gridSize / 2}
           blur={2}
         />
         <Grid
-          args={[200, 200]}
-          position={[0, -0.5, 0]}
-          cellSize={5}
+          args={[gridSize, gridSize]}
+          position={[modelBounds?.center[0] ?? 0, groundY, modelBounds?.center[2] ?? 0]}
+          cellSize={5 * gridScale}
           cellThickness={0.5}
           cellColor={isDark ? '#333' : '#ddd'}
-          sectionSize={25}
+          sectionSize={25 * gridScale}
           sectionThickness={1}
           sectionColor={isDark ? '#555' : '#bbb'}
-          fadeDistance={200}
+          fadeDistance={gridSize}
           infiniteGrid
         />
 

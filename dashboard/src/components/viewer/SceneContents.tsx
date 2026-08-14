@@ -98,18 +98,44 @@ export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: Sc
     [overlayTint?.color, overlayTint?.opacity],
   );
 
-  // Compute assembly center for exploded view
-  const assemblyCenter = useMemo(() => {
+  // Whole-scene bounding box — backs both the exploded-view center below and
+  // modelBounds (camera auto-fit + grid sizing), so it's computed once.
+  const assemblyBox = useMemo(() => {
     const box = new THREE.Box3();
     scene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         box.expandByObject(child);
       }
     });
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    return center;
+    return box;
   }, [scene]);
+
+  // Compute assembly center for exploded view
+  const assemblyCenter = useMemo(() => {
+    const center = new THREE.Vector3();
+    assemblyBox.getCenter(center);
+    return center;
+  }, [assemblyBox]);
+
+  // Publish the model's real extent so the camera can fit itself to whatever
+  // is actually loaded, and the ground grid can be sized/positioned to match
+  // — previously both were fixed regardless of the model, which could make an
+  // orbit look like the (large, static) grid was rotating rather than the
+  // (possibly off-center or oddly scaled) object (MET-620). Only the primary
+  // model drives this — a boolean-cut cutter preview is a secondary overlay.
+  const setModelBounds = useViewerStore((s) => s.setModelBounds);
+  useEffect(() => {
+    if (overlayTint || assemblyBox.isEmpty()) return;
+    const center = new THREE.Vector3();
+    assemblyBox.getCenter(center);
+    const size = new THREE.Vector3();
+    assemblyBox.getSize(size);
+    setModelBounds({
+      center: [center.x, center.y, center.z],
+      radius: Math.max(size.length() / 2, 1),
+      groundY: assemblyBox.min.y,
+    });
+  }, [assemblyBox, overlayTint, setModelBounds]);
 
   // Build mesh map on mount
   useEffect(() => {
