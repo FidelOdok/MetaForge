@@ -23,6 +23,21 @@ const BOOLEAN_CUT_IDLE: BooleanCutState = {
   cutting: false,
 };
 
+/** The loaded model's actual world-space extent (MET-620), computed once from
+ * its GLB scene. Lets the camera fit itself to whatever is actually loaded —
+ * previously the camera always started at a hardcoded generic position
+ * regardless of the model's real size/position, and the ground grid was a
+ * fixed size unrelated to it — so an orbit could look like the (large,
+ * fixed-size) grid was rotating rather than the (possibly off-center, wrongly
+ * scaled) object. */
+export interface ModelBounds {
+  center: [number, number, number];
+  /** Half the bounding-box diagonal — used to scale camera distance and grid size. */
+  radius: number;
+  /** The model's lowest point — where the ground plane should actually sit. */
+  groundY: number;
+}
+
 interface ViewerState {
   glbUrl: string | null;
   manifest: ModelManifest | null;
@@ -34,6 +49,9 @@ interface ViewerState {
   viewMode: '3d' | 'graph';
   /** Callback registered by the R3F canvas to reset the camera. */
   _cameraResetFn: (() => void) | null;
+  /** Set by SceneContents once the primary model's GLB scene has loaded. */
+  modelBounds: ModelBounds | null;
+  setModelBounds: (bounds: ModelBounds | null) => void;
 
   loadModel: (glbUrl: string, manifest: ModelManifest) => void;
   selectPart: (meshName: string | null) => void;
@@ -77,9 +95,19 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   animating: false,
   viewMode: 'graph',
   _cameraResetFn: null,
+  modelBounds: null,
+  setModelBounds: (bounds) => set({ modelBounds: bounds }),
 
   loadModel: (glbUrl, manifest) =>
-    set({ glbUrl, manifest, selectedMeshName: null, hiddenMeshes: new Set(), explodeFactor: 0, viewMode: '3d' }),
+    set({
+      glbUrl,
+      manifest,
+      selectedMeshName: null,
+      hiddenMeshes: new Set(),
+      explodeFactor: 0,
+      viewMode: '3d',
+      modelBounds: null,
+    }),
 
   selectPart: (meshName) => set({ selectedMeshName: meshName }),
 
@@ -120,6 +148,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       hiddenMeshes: new Set(),
       explodeFactor: 0,
       viewMode: 'graph',
+      modelBounds: null,
     }),
 
   registerCameraReset: (fn) => set({ _cameraResetFn: fn }),

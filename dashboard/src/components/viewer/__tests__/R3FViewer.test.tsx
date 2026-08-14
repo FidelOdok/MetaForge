@@ -9,6 +9,14 @@ import { useViewerStore } from '../../../store/viewer-store';
 // Canvas would otherwise swallow — it needs WebGL, which jsdom doesn't have.
 let capturedOnPointerMissed: (() => void) | undefined;
 
+// A minimal but real-enough fake THREE.Camera — CameraController calls
+// camera.position.set(...) and camera.lookAt(...); a plain {} (the old mock)
+// throws on the first fit attempt.
+const fakeCamera = {
+  position: { x: 0, y: 0, z: 0, set: vi.fn() },
+  lookAt: vi.fn(),
+};
+
 // Mock @react-three/fiber Canvas — it requires WebGL which jsdom doesn't have
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({
@@ -22,14 +30,26 @@ vi.mock('@react-three/fiber', () => ({
     return <div data-testid="r3f-canvas">{children}</div>;
   },
   useFrame: vi.fn(),
-  useThree: vi.fn(() => ({ scene: {}, camera: {}, gl: {} })),
+  useThree: vi.fn(() => ({ scene: {}, camera: fakeCamera, gl: {} })),
 }));
+
+// Captures the last props each mocked component received, so tests can
+// assert on Grid/ContactShadows sizing without a real WebGL renderer.
+let capturedGridProps: Record<string, unknown> | undefined;
+let capturedShadowProps: Record<string, unknown> | undefined;
+let capturedFitToModel: (() => void) | undefined;
 
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
   Environment: () => null,
-  ContactShadows: () => null,
-  Grid: () => null,
+  ContactShadows: (props: Record<string, unknown>) => {
+    capturedShadowProps = props;
+    return null;
+  },
+  Grid: (props: Record<string, unknown>) => {
+    capturedGridProps = props;
+    return null;
+  },
   GizmoHelper: () => null,
   GizmoViewcube: () => null,
   useGLTF: vi.fn(() => ({
@@ -48,6 +68,8 @@ vi.mock('../../../store/viewer-store', () => ({
       hiddenMeshes: new Set(),
       explodeFactor: 0,
       resetCamera: vi.fn(),
+      registerCameraReset: vi.fn(),
+      modelBounds: null,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
     };
     return selector(state);
@@ -61,8 +83,8 @@ vi.mock('../../../store/theme-store', () => ({
   }),
 }));
 
-// Out of scope for these tests (deselect wiring) — stub so a fake manifest
-// doesn't need to satisfy their real prop contracts.
+// Out of scope for these tests (deselect wiring, camera fit) — stub so a fake
+// manifest doesn't need to satisfy their real prop contracts.
 vi.mock('../SceneContents', () => ({ SceneContents: () => null }));
 vi.mock('../BooleanCutPanel', () => ({ BooleanCutPanel: () => null }));
 
@@ -93,6 +115,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
       explodeFactor: 0,
       resetCamera: vi.fn(),
       registerCameraReset: vi.fn(),
+      modelBounds: null,
       selectPart: selectPartMock,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
     };
@@ -152,5 +175,90 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
     });
     capturedOnPointerMissed?.();
     expect(useTransientTransform.getState().selectedGroup).toBeNull();
+  });
+});
+
+// A model must be "loaded" (glbUrl + manifest truthy) for the viewer to
+// render past its placeholder and mount CameraController/Grid.
+describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
+  beforeEach(() => {
+    fakeCamera.position.set.mockClear();
+    fakeCamera.lookAt.mockClear();
+    capturedGridProps = undefined;
+    capturedShadowProps = undefined;
+    capturedFitToModel = undefined;
+  });
+
+  function mockViewerState(modelBounds: Record<string, unknown> | null) {
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: (fn: () => void) => {
+          capturedFitToModel = fn;
+        },
+        modelBounds,
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+  }
+
+  it('falls back to the generic framing via Reset View when no model bounds are available yet', () => {
+    mockViewerState(null);
+    render(<R3FViewer />);
+
+    // Nothing has loaded, so the auto-fit-on-load effect never fires — only
+    // an explicit Reset View (the registered callback) should frame anything.
+    expect(fakeCamera.position.set).not.toHaveBeenCalled();
+    capturedFitToModel?.();
+
+    // DEFAULT_BOUNDS: center [0,0,0], radius 36 -> dist 36*2.2=79.2.
+    expect(fakeCamera.position.set).toHaveBeenCalled();
+    const [x, y, z] = fakeCamera.position.set.mock.calls[0] ?? [];
+    expect(x).toBeCloseTo(0.6247 * 79.2, 1);
+    expect(y).toBeCloseTo(0.4685 * 79.2, 1);
+    expect(z).toBeCloseTo(0.6247 * 79.2, 1);
+    expect(fakeCamera.lookAt).toHaveBeenCalledWith(0, 0, 0);
+  });
+
+  it('fits the camera to the loaded model — off-center, arbitrary size', () => {
+    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
+    render(<R3FViewer />);
+
+    const dist = 100 * 2.2;
+    const [x, y, z] = fakeCamera.position.set.mock.calls[0] ?? [];
+    expect(x).toBeCloseTo(10 + 0.6247 * dist, 1);
+    expect(y).toBeCloseTo(5 + 0.4685 * dist, 1);
+    expect(z).toBeCloseTo(-2 + 0.6247 * dist, 1);
+    expect(fakeCamera.lookAt).toHaveBeenCalledWith(10, 5, -2);
+  });
+
+  it('sizes and positions the grid/ground-shadow to the model instead of a fixed 200 units', () => {
+    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
+    render(<R3FViewer />);
+
+    // gridSize = max(20, radius*6) = 600; groundY = model.groundY - 0.5.
+    expect(capturedGridProps?.args).toEqual([600, 600]);
+    expect(capturedGridProps?.position).toEqual([10, -3.5, -2]);
+    expect(capturedGridProps?.fadeDistance).toBe(600);
+    // cellSize/sectionSize scale by radius/36.
+    expect(capturedGridProps?.cellSize).toBeCloseTo(5 * (100 / 36), 5);
+    expect(capturedGridProps?.sectionSize).toBeCloseTo(25 * (100 / 36), 5);
+    expect(capturedShadowProps?.position).toEqual([10, -3.5, -2]);
+    expect(capturedShadowProps?.scale).toBe(300);
+  });
+
+  it('uses the generic 200-ish default grid before any model bounds exist', () => {
+    mockViewerState(null);
+    render(<R3FViewer />);
+
+    // gridSize = max(20, 36*6) = 216 — close to the old fixed 200, unchanged
+    // "nothing loaded yet" look.
+    expect(capturedGridProps?.args).toEqual([216, 216]);
+    expect(capturedGridProps?.position).toEqual([0, -0.5, 0]);
   });
 });
