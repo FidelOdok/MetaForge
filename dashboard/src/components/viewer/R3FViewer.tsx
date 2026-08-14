@@ -121,8 +121,21 @@ function GizmoControls() {
   const isDirty = useTransientTransform((s) => s.isDirty);
   const revert = useTransientTransform((s) => s.revert);
   const clearAfterApply = useTransientTransform((s) => s.clearAfterApply);
+  const selectGroup = useTransientTransform((s) => s.selectGroup);
   const synth = useSynthesizeConstraint();
   const toast = useToast();
+
+  // Escape deselects (and discards any pending delta, same as clicking empty
+  // canvas) — previously the ONLY way out of a selection was Apply, since
+  // Revert deliberately keeps the selection (MET-618).
+  useEffect(() => {
+    if (!selectedGroup) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') selectGroup(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedGroup, selectGroup]);
 
   if (!selectedGroup) return null;
 
@@ -166,6 +179,15 @@ function GizmoControls() {
             • {formatReadout(mode, delta, rotationDelta, scaleDelta)}
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => selectGroup(null)}
+          title="Deselect (Esc)"
+          aria-label="Deselect"
+          className="ml-1 rounded px-1 text-white/50 hover:bg-white/10 hover:text-white/90"
+        >
+          ×
+        </button>
       </div>
       <div className="flex gap-1 rounded border border-white/10 p-0.5">
         {(Object.keys(MODE_LABELS) as TransformMode[]).map((m) => (
@@ -211,6 +233,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const themeMode = useThemeStore((s) => s.mode);
+  const selectGroup = useTransientTransform((s) => s.selectGroup);
 
   const isDark =
     themeMode === 'dark' ||
@@ -234,6 +257,11 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 10000 }}
         gl={{ preserveDrawingBuffer: true }}
         style={{ background: bgColor }}
+        // A click that doesn't hit any mesh (empty grid/background) deselects
+        // the active group — the same drei/r3f idiom used for click-to-select.
+        // A drag-to-orbit never fires this (no `click` without movement), so
+        // it can't be triggered by accident while navigating the camera.
+        onPointerMissed={() => selectGroup(null)}
       >
         <Suspense fallback={<LoadingFallback />}>
           <SceneContents
