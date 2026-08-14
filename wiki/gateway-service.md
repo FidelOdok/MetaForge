@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Gateway Service
 
 The HTTP/WebSocket "front door" — `api_gateway/`.

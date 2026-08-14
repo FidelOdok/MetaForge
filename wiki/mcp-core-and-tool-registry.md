@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # MCP Core & Tool Registry
 
 Two distinct layers, easy to conflate:

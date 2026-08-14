@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # MCP HTTP Sidecar
 
 The dev MetaForge MCP server runs as a sidecar service (`mcp-http`) in `docker-compose.override.yml`, not embedded in the gateway process. It listens on `0.0.0.0:8765`, reuses the gateway image, mounts the same source tree for hot-reload, and shares the `metaforge` docker network so it can reach `postgres` + `neo4j`.

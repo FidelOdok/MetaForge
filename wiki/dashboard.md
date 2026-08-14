@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Dashboard
 
 React/TypeScript app — `dashboard/` (Vite, Playwright e2e, vitest). Real and mature, not scaffolding.

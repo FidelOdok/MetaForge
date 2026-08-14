@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Orchestrator
 
 The coordination engine ("the brain") — `orchestrator/`.

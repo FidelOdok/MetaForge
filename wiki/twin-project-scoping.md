@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Twin Project Scoping
 
 A work product's project membership lives in **two independent places**, read by two different views:

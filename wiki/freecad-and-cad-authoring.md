@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # FreeCAD & CAD Authoring Conventions
 
 ## Architecture: headless FreeCAD, no external server

@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # CI, Lint & Docker Gotchas
 
 ## `ruff check` passing locally does not mean CI passes

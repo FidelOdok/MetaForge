@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Repository Structure Drift
 
 Places where the actual repo tree (verified 2026-08-11) diverges from CLAUDE.md's "canonical layout" diagram. None of these are bugs by themselves — they're just places a newcomer (human or agent) following the diagram literally will get confused.

@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Digital Twin
 
 The WorkProduct graph that owns all design state — `twin_core/`.

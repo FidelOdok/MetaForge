@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Domain Agents
 
 One agent per engineering discipline — `domain_agents/`. All of these are real implementations, not stubs (verified 2026-08-11):

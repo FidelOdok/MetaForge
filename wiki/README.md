@@ -1,43 +1,29 @@
 # MetaForge Wiki
 
-A compounding knowledge base for this codebase, in the spirit of Andrej Karpathy's ["LLM wiki"](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern: plain markdown, one page per entity, cross-linked, written and maintained by whichever agent (or human) is working in this repo at the time.
+A compounding knowledge base for this codebase, following Andrej Karpathy's ["LLM wiki"](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern.
 
-## What this is not
+## The core idea
 
-- **Not `docs/`.** `docs/` is the curated, published architecture reference (MkDocs site, `--strict` CI). It answers "how does the system work." This wiki answers "what do you need to know to work in this repo effectively that isn't obvious from reading the code once" — drift between docs and reality, gotchas, dead ends, where things actually live vs. where an architecture diagram says they should live.
-- **Not personal memory.** Claude Code's per-user memory (`~/.claude/projects/.../memory/`) is private to one person's local sessions. This wiki is checked into git — every contributor and every agent that clones this repo gets it. Promote a personal memory into this wiki once it's proven durable and would help someone else, not before.
-- **Not a replacement for reading code.** A wiki page is a shortcut and a warning label, not a substitute for verifying against current source.
+A RAG-style setup re-derives an answer from raw sources every time you ask. This wiki instead **compiles knowledge once and keeps it current**: an agent reads a source (here, the codebase, git history, docs/, or a proven-out personal-memory note), extracts what's durable, and files it into a structured, cross-linked markdown page — updating existing pages when new information contradicts or refines them. The wiki gets richer with every session, not just longer.
 
-## How to use it
+## The three layers
 
-- Before working in an unfamiliar part of the repo, check if a page here already covers it.
-- When you learn something durable and non-obvious — a gotcha, a piece of drift between docs and reality, a "look here not there" fact — write or update a page. Don't wait for permission; that's the whole point of a compounding wiki.
-- Keep pages short. An entity page is a note, not an essay. Link out to `docs/` for the full architectural story.
-- Cross-link with normal relative markdown links (`[Twin Core](digital-twin.md)`) so pages read as a graph, not a list, and render as real links on GitHub.
-- Correct or delete a page the moment you find it's wrong. Stale wiki pages are worse than no wiki — date-stamp claims that are likely to rot (`verified 2026-08-11`) so the next reader can judge freshness.
-- Add new pages to the index below in the same change that creates them.
+1. **Raw sources** — immutable, read but never modified: the codebase itself, git history, `docs/` (as-built architecture), the MetaForge-Planner repo (forward plans), and any personal Claude Code memory notes once they've proven durable.
+2. **The wiki** — this directory. Entity/concept pages, `index.md`, `log.md`. Agents own this layer entirely; humans read it and can correct it, but the maintenance burden is the agent's job.
+3. **The schema** — `CLAUDE.md`'s "Compounding knowledge — this repo's `wiki/`" section. It defines the Ingest / Query / Lint operations below and is the file every agent reads to know how to behave here.
 
-## Index
+## Operations
 
-### Architecture (grounded against actual code — not the aspirational canonical layout in CLAUDE.md)
+- **Ingest** — when you learn something durable and non-obvious (a gotcha, a piece of docs/reality drift, a "look here not there" correction), write or update a page, update `index.md`, and append a `log.md` entry. Don't wait to be asked.
+- **Query** — before working in an unfamiliar part of the repo, read `index.md` first to find relevant pages, then drill in. If answering a question produces something worth keeping (a comparison, a root-cause writeup, a synthesis) — file it back as a page instead of letting it evaporate into chat history.
+- **Lint** — periodically check for: pages contradicting each other, claims a newer page has superseded, orphan pages with no inbound links, concepts mentioned repeatedly but lacking their own page, and `updated:` dates old enough that the underlying code may have moved on. Fix what you find; log the pass.
 
-- [Gateway Service](gateway-service.md) — FastAPI front door, `api_gateway/server.py`
-- [Orchestrator](orchestrator.md) — scheduler/workflow engine, in-memory today, Temporal scaffolding not yet live
-- [Digital Twin](digital-twin.md) — `twin_core/`, dual-backend (in-memory default, Neo4j opt-in); legacy `digital_twin/` dir still present
-- [Skill Registry](skill-registry.md) — skill catalog + MCP bridging
-- [MCP Core & Tool Registry](mcp-core-and-tool-registry.md) — wire protocol vs. tool adapters, the two layers
-- [Domain Agents](domain-agents.md) — mechanical/electronics/firmware/simulation/supply_chain/compliance, all real
-- [CLI & TUI](cli-and-tui.md) — `cli/forge_cli/` (mature) vs `tui/` (canonical target, still scaffold)
-- [Dashboard](dashboard.md) — React/Vite app
-- [Observability Stack](observability-stack.md) — structlog + OTel + Prometheus wiring
-- [Agent Session Capture](agent-session-capture.md) — how tool calls and reasoning get recorded
+## Conventions
 
-### Operational knowledge (promoted from personal memory — durable, applies to anyone working here)
+- One page per entity/concept, plain markdown, `kebab-case.md` filenames, H1 title matching the entity name.
+- Every page starts with `---\nupdated: YYYY-MM-DD\n---` frontmatter — the one signal a lint pass has for staleness.
+- Cross-link with relative markdown links (`[Twin Core](digital-twin.md)`) so pages render as real links on GitHub and read as a graph, not a list.
+- Keep pages short — a note, not an essay. Link out to `docs/` for the full architectural story.
+- Correct or delete a page the moment you find it's wrong. A stale wiki page is worse than no page.
 
-- [MCP HTTP Sidecar](mcp-http-sidecar.md) — how dev MCP is reached, and what breaks reconnection
-- [CAD/FEA Adapter Containers](cad-fea-adapter-containers.md) — why heavy tools silently fall back and fail with `-32001`
-- [Twin Project Scoping](twin-project-scoping.md) — project membership is stored twice; both must be written
-- [FreeCAD & CAD Authoring Conventions](freecad-and-cad-authoring.md) — headless FreeCAD architecture, naming, colour rules
-- [Chat Harness & SSE](chat-harness-and-sse.md) — how dashboard/TUI chat actually streams, and where it breaks
-- [CI, Lint & Docker Gotchas](ci-lint-and-docker-gotchas.md) — ruff check vs format, forcing a real IP change
-- [Repository Structure Drift](repository-structure-drift.md) — where the code has diverged from CLAUDE.md's canonical layout
+Start at [`index.md`](index.md) for the full catalog, or [`log.md`](log.md) for the history of what's been ingested.

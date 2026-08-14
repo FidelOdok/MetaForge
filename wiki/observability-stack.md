@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Observability Stack
 
 `observability/` — real and fairly complete, not aspirational (verified 2026-08-11):

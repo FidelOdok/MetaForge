@@ -48,11 +48,12 @@ When **planning new features or making architectural decisions**, fetch the rele
 
 ### Compounding knowledge — this repo's `wiki/`
 
-The **`wiki/`** directory is a third, distinct source: not curated docs, not forward plans, but a git-tracked, agent-maintained knowledge base of durable operational facts — gotchas, drift between docs and reality, "look here not there" corrections — in the spirit of Andrej Karpathy's "LLM wiki" pattern. Start at `wiki/README.md`, which explains the pattern and indexes every page.
+The **`wiki/`** directory is a third, distinct source: not curated docs, not forward plans, but a git-tracked, agent-maintained knowledge base of durable operational facts — gotchas, drift between docs and reality, "look here not there" corrections — following Andrej Karpathy's "LLM wiki" pattern. This CLAUDE.md section *is* the schema Karpathy's pattern calls for: the file that tells you how the wiki is structured and what to do with it. Start at `wiki/README.md` for the full pattern explanation, `wiki/index.md` for the page catalog, `wiki/log.md` for the ingest history.
 
-- Check `wiki/` before working in an unfamiliar part of the repo — it often has a warning label `docs/` doesn't.
-- When you learn something durable and non-obvious that would help the next agent or engineer, write or update a page there in the same session you learned it. Don't wait to be asked.
-- `wiki/` is not `docs/`: it's not published, not subject to `mkdocs build --strict`, and has no nav to maintain. Keep entries short and link with relative markdown links.
+- `wiki/` is not `docs/`: it's not published, not subject to `mkdocs build --strict`, and has no nav to maintain. One page per entity/concept, `kebab-case.md`, `---\nupdated: YYYY-MM-DD\n---` frontmatter on every page, cross-linked with relative markdown links.
+- **Ingest** — when you learn something durable and non-obvious (a gotcha, a piece of docs-vs-reality drift, a "look here not there" correction), write or update a page **in the same session**, update `wiki/index.md`, and append an entry to `wiki/log.md` (`## [YYYY-MM-DD] ingest | <title>`). Don't wait to be asked.
+- **Query** — before working in an unfamiliar part of the repo, read `wiki/index.md` first. If your answer to a question is worth keeping — a root-cause writeup, a comparison, a synthesis — file it back into the wiki as a new page instead of letting it evaporate into chat history; log it as `query`.
+- **Lint** — periodically (or when something feels off), check for contradictions between pages, claims a newer page has superseded, orphan pages nothing links to, concepts mentioned repeatedly with no page of their own, and stale `updated:` dates. Fix what you find and log the pass as `lint`.
 
 ## Project & Task Management (Linear)
 

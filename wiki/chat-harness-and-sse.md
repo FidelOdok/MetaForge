@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Chat Harness & SSE
 
 How dashboard/TUI chat actually wires to the backend harness, and where it breaks.

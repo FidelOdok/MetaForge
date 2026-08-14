@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # Agent Session Capture
 
 How an external agent's tool calls and reasoning get recorded into the digital thread (MET-492).

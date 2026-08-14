@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # CLI & TUI
 
 Two separate client implementations, at different maturity (verified 2026-08-11):

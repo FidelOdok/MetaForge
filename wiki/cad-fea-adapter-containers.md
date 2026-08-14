@@ -1,3 +1,7 @@
+---
+updated: 2026-08-11
+---
+
 # CAD/FEA Adapter Containers
 
 The MCP sidecar is built from the gateway `Dockerfile`, which does **not** ship native CAD/FEA runtimes (cadquery/OCP, FreeCAD, CalculiX, kicad-cli). Those run as separate adapter containers — `cadquery-adapter`, `freecad-adapter`, `calculix-adapter`, `occt-converter` — and `tool_registry/bootstrap.py` connects to them via `METAFORGE_ADAPTER_*_URL` env vars.
