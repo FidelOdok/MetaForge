@@ -76,7 +76,15 @@ describe('R3FViewer', () => {
 // A model must be "loaded" (glbUrl + manifest truthy) for the viewer to
 // render past its placeholder and mount <GizmoControls />.
 describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
+  // selectPart (highlight tint / status bar / BOM panel) lives in the SAME
+  // store as glbUrl/manifest but is a DIFFERENT piece of selection state than
+  // selectGroup (the gizmo, in transient-transform-store) — a live check
+  // found the gizmo cleared on deselect but the mesh still read as selected,
+  // because only selectGroup(null) was being called. Both must clear.
+  let selectPartMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
+    selectPartMock = vi.fn();
     const fakeState = {
       glbUrl: 'blob:fake',
       manifest: { parts: [] },
@@ -85,6 +93,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
       explodeFactor: 0,
       resetCamera: vi.fn(),
       registerCameraReset: vi.fn(),
+      selectPart: selectPartMock,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
     };
     vi.mocked(useViewerStore).mockImplementation((selector) =>
@@ -98,7 +107,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
     capturedOnPointerMissed = undefined;
   });
 
-  it('shows the selected group and clears it on Escape', () => {
+  it('shows the selected group and clears it (gizmo + mesh highlight) on Escape', () => {
     const { getByText, queryByText } = render(<R3FViewer />);
     expect(getByText('bracket_v2')).toBeInTheDocument();
 
@@ -108,6 +117,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
 
     expect(useTransientTransform.getState().selectedGroup).toBeNull();
     expect(queryByText('bracket_v2')).not.toBeInTheDocument();
+    expect(selectPartMock).toHaveBeenCalledWith(null);
   });
 
   it('clears the selection via the × button, discarding any pending delta', () => {
@@ -119,15 +129,17 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
     const state = useTransientTransform.getState();
     expect(state.selectedGroup).toBeNull();
     expect(state.delta).toEqual([0, 0, 0]);
+    expect(selectPartMock).toHaveBeenCalledWith(null);
   });
 
-  it('clears the selection when a click misses every mesh (onPointerMissed)', () => {
+  it('clears the selection (gizmo + mesh highlight) when a click misses every mesh (onPointerMissed)', () => {
     render(<R3FViewer />);
     expect(useTransientTransform.getState().selectedGroup).toBe('bracket_v2');
 
     capturedOnPointerMissed?.();
 
     expect(useTransientTransform.getState().selectedGroup).toBeNull();
+    expect(selectPartMock).toHaveBeenCalledWith(null);
   });
 
   it('does not deselect while nothing is selected (no-op safety)', () => {
