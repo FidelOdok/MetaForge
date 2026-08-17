@@ -33,19 +33,14 @@ vi.mock('@react-three/fiber', () => ({
   useThree: vi.fn(() => ({ scene: {}, camera: fakeCamera, gl: {} })),
 }));
 
-// Captures the last props each mocked component received, so tests can
-// assert on Grid/ContactShadows sizing without a real WebGL renderer.
+// Captures the last props Grid received, so tests can assert on its sizing
+// without a real WebGL renderer.
 let capturedGridProps: Record<string, unknown> | undefined;
-let capturedShadowProps: Record<string, unknown> | undefined;
 let capturedFitToModel: (() => void) | undefined;
 
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
   Environment: () => null,
-  ContactShadows: (props: Record<string, unknown>) => {
-    capturedShadowProps = props;
-    return null;
-  },
   Grid: (props: Record<string, unknown>) => {
     capturedGridProps = props;
     return null;
@@ -185,7 +180,6 @@ describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
     fakeCamera.position.set.mockClear();
     fakeCamera.lookAt.mockClear();
     capturedGridProps = undefined;
-    capturedShadowProps = undefined;
     capturedFitToModel = undefined;
   });
 
@@ -237,7 +231,7 @@ describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
     expect(fakeCamera.lookAt).toHaveBeenCalledWith(10, 5, -2);
   });
 
-  it('sizes and positions the grid/ground-shadow to the model instead of a fixed 200 units', () => {
+  it('sizes and positions the grid to the model instead of a fixed 200 units', () => {
     mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
     render(<R3FViewer />);
 
@@ -248,8 +242,6 @@ describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
     // cellSize/sectionSize scale by radius/36.
     expect(capturedGridProps?.cellSize).toBeCloseTo(5 * (100 / 36), 5);
     expect(capturedGridProps?.sectionSize).toBeCloseTo(25 * (100 / 36), 5);
-    expect(capturedShadowProps?.position).toEqual([10, -3.5, -2]);
-    expect(capturedShadowProps?.scale).toBe(300);
   });
 
   it('uses the generic 200-ish default grid before any model bounds exist', () => {
