@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, Grid, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
@@ -280,7 +280,6 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
-  const modelBounds = useViewerStore((s) => s.modelBounds);
   const themeMode = useThemeStore((s) => s.mode);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
 
@@ -291,23 +290,6 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
       window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   const bgColor = isDark ? '#18181b' : '#f4f4f5';
-
-  // Size and position the ground plane to the loaded model instead of a
-  // fixed [0,-0.5,0]/200-unit grid that could sit nowhere near a small or
-  // off-center model — the mismatch is exactly what made an orbit look like
-  // the grid was the thing rotating (MET-620). Grid is the ONLY ground
-  // surface (no separate ContactShadows quad) — Tinkercad's floor is a
-  // single plane too; stacking two coplanar surfaces at this same position
-  // was a latent z-fighting bug that MET-620's larger draw distances made
-  // clearly visible (MET-621).
-  const groundY = (modelBounds?.groundY ?? 0) - 0.5;
-  const modelRadius = modelBounds?.radius ?? 36;
-  const gridSize = Math.max(20, modelRadius * 6);
-  // Cell/section spacing scale with the model too — the original 5/25 values
-  // were sized for roughly this reference radius, so this keeps that same
-  // ratio (unchanged look for a model near that size) instead of a tiny part
-  // getting comically coarse grid cells or a huge one getting illegibly fine ones.
-  const gridScale = modelRadius / 36;
 
   if (!glbUrl || !manifest) {
     return (
@@ -379,18 +361,10 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
             <Environment preset="studio" />
           </Suspense>
         </ErrorBoundary>
-        <Grid
-          args={[gridSize, gridSize]}
-          position={[modelBounds?.center[0] ?? 0, groundY, modelBounds?.center[2] ?? 0]}
-          cellSize={5 * gridScale}
-          cellThickness={0.5}
-          cellColor={isDark ? '#333' : '#ddd'}
-          sectionSize={25 * gridScale}
-          sectionThickness={1}
-          sectionColor={isDark ? '#555' : '#bbb'}
-          fadeDistance={gridSize}
-          infiniteGrid
-        />
+        {/* Ground grid temporarily hidden — drei's Grid draws lines via a
+            derivative-based shader that shimmers/flickers on its own,
+            independent of the z-fighting MET-621 fixed. Restoring it needs a
+            plain-material (baked-texture) plane instead (MET-623). */}
 
         <ambientLight intensity={0.4} />
         <directionalLight position={[50, 50, 25]} intensity={0.8} />

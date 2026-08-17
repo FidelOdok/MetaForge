@@ -33,9 +33,6 @@ vi.mock('@react-three/fiber', () => ({
   useThree: vi.fn(() => ({ scene: {}, camera: fakeCamera, gl: {} })),
 }));
 
-// Captures the last props Grid received, so tests can assert on its sizing
-// without a real WebGL renderer.
-let capturedGridProps: Record<string, unknown> | undefined;
 let capturedFitToModel: (() => void) | undefined;
 // Toggled by the MET-622 test to simulate the HDR CDN fetch failing —
 // Environment throwing must stay contained by its local ErrorBoundary.
@@ -49,10 +46,6 @@ vi.mock('@react-three/drei', () => ({
         'Could not load studio_small_03_1k.hdr: fetch for "https://raw.githubusercontent.com/pmndrs/drei-assets/..." failed',
       );
     }
-    return null;
-  },
-  Grid: (props: Record<string, unknown>) => {
-    capturedGridProps = props;
     return null;
   },
   GizmoHelper: () => null,
@@ -191,12 +184,11 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
 });
 
 // A model must be "loaded" (glbUrl + manifest truthy) for the viewer to
-// render past its placeholder and mount CameraController/Grid.
-describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
+// render past its placeholder and mount CameraController.
+describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
   beforeEach(() => {
     fakeCamera.position.set.mockClear();
     fakeCamera.lookAt.mockClear();
-    capturedGridProps = undefined;
     capturedFitToModel = undefined;
   });
 
@@ -247,29 +239,6 @@ describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
     expect(z).toBeCloseTo(-2 + 0.6247 * dist, 1);
     expect(fakeCamera.lookAt).toHaveBeenCalledWith(10, 5, -2);
   });
-
-  it('sizes and positions the grid to the model instead of a fixed 200 units', () => {
-    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
-    render(<R3FViewer />);
-
-    // gridSize = max(20, radius*6) = 600; groundY = model.groundY - 0.5.
-    expect(capturedGridProps?.args).toEqual([600, 600]);
-    expect(capturedGridProps?.position).toEqual([10, -3.5, -2]);
-    expect(capturedGridProps?.fadeDistance).toBe(600);
-    // cellSize/sectionSize scale by radius/36.
-    expect(capturedGridProps?.cellSize).toBeCloseTo(5 * (100 / 36), 5);
-    expect(capturedGridProps?.sectionSize).toBeCloseTo(25 * (100 / 36), 5);
-  });
-
-  it('uses the generic 200-ish default grid before any model bounds exist', () => {
-    mockViewerState(null);
-    render(<R3FViewer />);
-
-    // gridSize = max(20, 36*6) = 216 — close to the old fixed 200, unchanged
-    // "nothing loaded yet" look.
-    expect(capturedGridProps?.args).toEqual([216, 216]);
-    expect(capturedGridProps?.position).toEqual([0, -0.5, 0]);
-  });
 });
 
 // A failed HDR fetch inside Environment previously had nowhere to go but the
@@ -300,9 +269,9 @@ describe('R3FViewer — a failed Environment HDR load is contained (MET-622)', (
   it('keeps the rest of the viewer rendered instead of crashing the whole page', () => {
     const { getByTestId } = render(<R3FViewer />);
 
-    // The Canvas (and everything else inside it — Grid, gizmo, controls)
-    // rendered fine; only Environment's own local ErrorBoundary caught
-    // anything, so nothing bubbled up to replace the page.
+    // The Canvas (and everything else inside it — gizmo, controls) rendered
+    // fine; only Environment's own local ErrorBoundary caught anything, so
+    // nothing bubbled up to replace the page.
     expect(getByTestId('r3f-canvas')).toBeInTheDocument();
   });
 });
