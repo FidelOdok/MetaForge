@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, ContactShadows, Grid, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { OrbitControls, Environment, Grid, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
@@ -294,7 +294,11 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   // Size and position the ground plane to the loaded model instead of a
   // fixed [0,-0.5,0]/200-unit grid that could sit nowhere near a small or
   // off-center model — the mismatch is exactly what made an orbit look like
-  // the grid was the thing rotating (MET-620).
+  // the grid was the thing rotating (MET-620). Grid is the ONLY ground
+  // surface (no separate ContactShadows quad) — Tinkercad's floor is a
+  // single plane too; stacking two coplanar surfaces at this same position
+  // was a latent z-fighting bug that MET-620's larger draw distances made
+  // clearly visible (MET-621).
   const groundY = (modelBounds?.groundY ?? 0) - 0.5;
   const modelRadius = modelBounds?.radius ?? 36;
   const gridSize = Math.max(20, modelRadius * 6);
@@ -365,12 +369,6 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         </GizmoHelper>
 
         <Environment preset="studio" />
-        <ContactShadows
-          position={[modelBounds?.center[0] ?? 0, groundY, modelBounds?.center[2] ?? 0]}
-          opacity={isDark ? 0.3 : 0.5}
-          scale={gridSize / 2}
-          blur={2}
-        />
         <Grid
           args={[gridSize, gridSize]}
           position={[modelBounds?.center[0] ?? 0, groundY, modelBounds?.center[2] ?? 0]}
