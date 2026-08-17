@@ -10,6 +10,7 @@ import type { TransformMode, Vec3 } from '../../store/transient-transform-store'
 import { useSynthesizeConstraint } from '../../hooks/use-constraint-synthesis';
 import type { DeltaTransform } from '../../api/endpoints/constraint';
 import { useToast } from '../ui/Toast';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { SceneContents } from './SceneContents';
 import { BooleanCutPanel } from './BooleanCutPanel';
 import type { PartInfo } from '../../types/viewer';
@@ -368,7 +369,16 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
           />
         </GizmoHelper>
 
-        <Environment preset="studio" />
+        {/* Environment fetches its HDRI from a third-party CDN at render
+            time — a network blip there is cosmetic (IBL reflections only,
+            the ambientLight/directionalLight below already light the scene)
+            and must never crash the whole viewer via the page's ErrorBoundary
+            (MET-622). Suspense + a local ErrorBoundary contain the failure. */}
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <Environment preset="studio" />
+          </Suspense>
+        </ErrorBoundary>
         <Grid
           args={[gridSize, gridSize]}
           position={[modelBounds?.center[0] ?? 0, groundY, modelBounds?.center[2] ?? 0]}

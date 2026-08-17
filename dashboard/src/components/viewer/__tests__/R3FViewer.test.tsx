@@ -37,10 +37,20 @@ vi.mock('@react-three/fiber', () => ({
 // without a real WebGL renderer.
 let capturedGridProps: Record<string, unknown> | undefined;
 let capturedFitToModel: (() => void) | undefined;
+// Toggled by the MET-622 test to simulate the HDR CDN fetch failing —
+// Environment throwing must stay contained by its local ErrorBoundary.
+let environmentShouldThrow = false;
 
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
-  Environment: () => null,
+  Environment: () => {
+    if (environmentShouldThrow) {
+      throw new Error(
+        'Could not load studio_small_03_1k.hdr: fetch for "https://raw.githubusercontent.com/pmndrs/drei-assets/..." failed',
+      );
+    }
+    return null;
+  },
   Grid: (props: Record<string, unknown>) => {
     capturedGridProps = props;
     return null;
@@ -69,6 +79,13 @@ vi.mock('../../../store/viewer-store', () => ({
     };
     return selector(state);
   }),
+}));
+
+// The real ErrorBoundary logs via this — silence it so the MET-622 test's
+// deliberate failure doesn't spam test output while still exercising the
+// real catch behavior.
+vi.mock('../../../lib/logger', () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock('../../../store/theme-store', () => ({
@@ -252,5 +269,40 @@ describe('R3FViewer — camera and grid fit the loaded model (MET-620)', () => {
     // "nothing loaded yet" look.
     expect(capturedGridProps?.args).toEqual([216, 216]);
     expect(capturedGridProps?.position).toEqual([0, -0.5, 0]);
+  });
+});
+
+// A failed HDR fetch inside Environment previously had nowhere to go but the
+// page-level ErrorBoundary, replacing the entire viewer with "Something went
+// wrong" over what's purely cosmetic IBL lighting (MET-622).
+describe('R3FViewer — a failed Environment HDR load is contained (MET-622)', () => {
+  beforeEach(() => {
+    environmentShouldThrow = true;
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: vi.fn(),
+        modelBounds: null,
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+  });
+
+  afterEach(() => {
+    environmentShouldThrow = false;
+  });
+
+  it('keeps the rest of the viewer rendered instead of crashing the whole page', () => {
+    const { getByTestId } = render(<R3FViewer />);
+
+    // The Canvas (and everything else inside it — Grid, gizmo, controls)
+    // rendered fine; only Environment's own local ErrorBoundary caught
+    // anything, so nothing bubbled up to replace the page.
+    expect(getByTestId('r3f-canvas')).toBeInTheDocument();
   });
 });
