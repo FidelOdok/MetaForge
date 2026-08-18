@@ -376,18 +376,21 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
       {/* Boolean-cut panel (MET-612) */}
       <BooleanCutPanel onCutComplete={onBooleanCutComplete} />
 
-      {/* Controls hint overlay — bottom-14 clears the 32px twin status bar */}
-      <div className="absolute bottom-14 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
+      {/* Controls hint overlay — bottom-20 clears both the 32px twin status
+          bar and the page's bottom-left Sessions button (bottom:40 + 32px
+          tall, spans 40-72px), which this overlay's old bottom-14 (56-84px)
+          overlapped (MET-624). */}
+      <div className="absolute bottom-20 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
         Left drag: rotate · Scroll: zoom · Right drag: pan · Click a part to move it
       </div>
 
-      {/* Camera reset button — bottom-right (bottom-14 clears the twin status
-          bar, matching the controls-hint overlay) so it doesn't sit on top of
-          the ViewCube anchored top-right. */}
+      {/* Camera reset button — bottom-right (bottom-20 clears the twin status
+          bar and matches the controls-hint overlay's height, MET-624) so it
+          doesn't sit on top of the ViewCube anchored top-right. */}
       <button
         type="button"
         onClick={resetCamera}
-        className="absolute right-3 bottom-14 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+        className="absolute right-3 bottom-20 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
         title="Reset camera to default view"
         aria-label="Reset camera"
       >
