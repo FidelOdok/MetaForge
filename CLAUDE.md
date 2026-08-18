@@ -46,6 +46,15 @@ The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) is the source of 
 
 When **planning new features or making architectural decisions**, fetch the relevant docs from `FidelOdok/MetaForge-Planner` using GitHub tools before implementing. Do not invent architecture — follow what's specified there. Once a plan is built, reflect the implemented reality in this repo's `docs/`.
 
+### Compounding knowledge — this repo's `wiki/`
+
+The **`wiki/`** directory is a third, distinct source: not curated docs, not forward plans, but a git-tracked, agent-maintained knowledge base of durable operational facts — gotchas, drift between docs and reality, "look here not there" corrections — following Andrej Karpathy's "LLM wiki" pattern. This CLAUDE.md section *is* the schema Karpathy's pattern calls for: the file that tells you how the wiki is structured and what to do with it. Start at `wiki/README.md` for the full pattern explanation, `wiki/index.md` for the page catalog, `wiki/log.md` for the ingest history.
+
+- `wiki/` is not `docs/`: it's not published, not subject to `mkdocs build --strict`, and has no nav to maintain. One page per entity/concept, `kebab-case.md`, `---\nupdated: YYYY-MM-DD\n---` frontmatter on every page, cross-linked with relative markdown links.
+- **Ingest** — when you learn something durable and non-obvious (a gotcha, a piece of docs-vs-reality drift, a "look here not there" correction), write or update a page **in the same session**, update `wiki/index.md`, and append an entry to `wiki/log.md` (`## [YYYY-MM-DD] ingest | <title>`). Don't wait to be asked.
+- **Query** — before working in an unfamiliar part of the repo, read `wiki/index.md` first. If your answer to a question is worth keeping — a root-cause writeup, a comparison, a synthesis — file it back into the wiki as a new page instead of letting it evaporate into chat history; log it as `query`.
+- **Lint** — periodically (or when something feels off), check for contradictions between pages, claims a newer page has superseded, orphan pages nothing links to, concepts mentioned repeatedly with no page of their own, and stale `updated:` dates. Fix what you find and log the pass as `lint`.
+
 ## Project & Task Management (Linear)
 
 All project tracking lives in **Linear** under the **MetaForge** team:
@@ -381,7 +390,7 @@ Scoped to **gateway** and **dashboard** services only. Never auto-files bugs wit
 When an external agent (this CLI, Cursor, …) drives MetaForge over MCP, its work is captured into the digital thread's `/sessions` so reasoning + actions are reviewable. Three layers:
 
 - **Layer A — server-side auto-capture (MET-496)**: the MCP sidecar records every tool call as an `action` event into an agent session. Enforced, zero cooperation; enabled via `--capture-sessions` on the dev `mcp-http`. Works for any client.
-- **Layer B — client capture core + hooks (MET-497)**: `tools/session_capture/` (`metaforge-capture`, stdlib+httpx, no MetaForge imports) pushes `thought`/`action`/`decision` events to `/v1/sessions`. The checked-in Claude Code adapter (`.claude/hooks/metaforge_session_push.py` + `.claude/settings.json`) captures the model's *reasoning* from the transcript on `Stop`, actions on `PostToolUse`, and completes on `SessionEnd`. Per-client adapters (Cursor/OpenCode/Codex) + a transcript-tailer fallback are MET-498. Kill-switch: `METAFORGE_SESSION_CAPTURE=off`.
+- **Layer B — client capture core + hooks (MET-497)**: `tools/session_capture/` (`metaforge-capture`, stdlib+httpx, no MetaForge imports) pushes `thought`/`action`/`decision` events to `/v1/sessions`. The checked-in Claude Code adapter (`tools/session_capture/claude_code_adapter.py`, wired via `.claude/settings.json`) captures the model's *reasoning* from the transcript on `Stop`, actions on `PostToolUse`, and completes on `SessionEnd`. Per-client adapters (Cursor/OpenCode/Codex) + a transcript-tailer fallback are MET-498. Kill-switch: `METAFORGE_SESSION_CAPTURE=off`.
 - **Layer C — explicit tools (MET-494/495)**: call `session.start` / `session.log_event` (`type=decision` for design choices) / `session.complete`, and `twin.record_decision` to persist a typed ADR. `session.start` takes over the Layer-A binding so auto-actions attach to your session.
 
 Store is Postgres (`agent_sessions` / `agent_session_events`), shared by the gateway and sidecar via `DATABASE_URL` (MET-493). Capture is always best-effort — it never fails or blocks a tool call.
