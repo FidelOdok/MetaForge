@@ -158,6 +158,9 @@ cat <<'REQS'
      actually talk to an LLM:
        - Anthropic (recommended): https://console.anthropic.com/settings/keys
        - OpenAI:                  https://platform.openai.com/api-keys
+       - OpenRouter (one key, many models): https://openrouter.ai/keys
+     The harness actually supports ~30 providers (see `forge auth list` once
+     it's running) — these three are just the fastest paths to a working key.
      Everything else (Digital Twin, BOM, CAD/FEA adapters, dashboard) works
      without a key — only the conversational assistant needs one.
   5. git (to clone the repo, if you're not already inside a checkout)
@@ -217,13 +220,13 @@ fi
 log "Setting up your LLM provider"
 
 if [ -z "$LLM_API_KEY" ]; then
-  LLM_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-}}"
+  LLM_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${OPENROUTER_API_KEY:-}}}"
   [ -n "$LLM_API_KEY" ] && ok "Found an API key already in your environment"
 fi
 if [ -z "$LLM_API_KEY" ]; then
   if interactive; then
     echo "  Paste an API key to enable chat now, or press Enter to configure it later."
-    echo "  (Anthropic keys start with sk-ant-, OpenAI keys with sk-)"
+    echo "  (Anthropic keys start with sk-ant-, OpenRouter keys with sk-or-, OpenAI keys with sk-)"
     ask_hidden LLM_API_KEY "  API key: " || true
     [ -z "$LLM_API_KEY" ] && warn "Skipping — the assistant/chat layer will be unavailable until you set METAFORGE_LLM_API_KEY later."
   else
@@ -231,8 +234,12 @@ if [ -z "$LLM_API_KEY" ]; then
   fi
 fi
 if [ -n "$LLM_API_KEY" ]; then
+  # Check the more specific prefixes first — OpenRouter keys (sk-or-...) would
+  # otherwise match a naive "starts with sk-" catch-all for OpenAI and get
+  # pointed at the wrong base URL entirely.
   case "$LLM_API_KEY" in
     sk-ant-*) LLM_PROVIDER="anthropic" ;;
+    sk-or-*) LLM_PROVIDER="openrouter" ;;
     *) LLM_PROVIDER="openai" ;;
   esac
 fi
