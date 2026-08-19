@@ -45,6 +45,7 @@ class TwinServer(McpToolServer):
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
         document_recorder: Any = None,
+        blob_stager: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -83,6 +84,14 @@ class TwinServer(McpToolServer):
         # Same injection seam as decision_recorder; None keeps tool_registry
         # free of api_gateway imports.
         self._document_recorder = document_recorder
+        # MET-618: an injected async ``stage(node_id) -> dict`` that resolves a
+        # committed work product's blob and writes it into the shared adapter
+        # workspace, returning a local file_path. Without it, an agent has no
+        # way back to a work product's actual content once its authoring
+        # session is gone — every CAD/FEA tool needs a file_path, not a node
+        # id. Same injection seam as decision_recorder; None keeps
+        # tool_registry free of api_gateway imports.
+        self._blob_stager = blob_stager
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -94,6 +103,8 @@ class TwinServer(McpToolServer):
             self._register_record_constraint_set()
         if document_recorder is not None:
             self._register_record_document()
+        if blob_stager is not None:
+            self._register_stage_work_product_file()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -939,3 +950,56 @@ class TwinServer(McpToolServer):
             domain=domain if isinstance(domain, str) and domain else "mechanical",
             fmt=fmt if isinstance(fmt, str) and fmt else "step",
         )
+
+    def _register_stage_work_product_file(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.stage_work_product_file",
+                adapter_id="twin",
+                name="Stage Work Product File",
+                description=(
+                    "Materialize a committed work product's stored file onto disk and "
+                    "return a local file_path that freecad.*/cadquery.*/calculix.* tools "
+                    "can load directly (e.g. freecad.get_properties, freecad.open_session "
+                    "then import it). Call this whenever you need to inspect a work "
+                    "product's actual content — geometry, mesh, whatever — and its "
+                    "original authoring session_id is stale, unknown, or was never yours: "
+                    "do NOT give up after freecad.describe_session fails or after seeing "
+                    "an empty file_path on the twin node. This tool works for ANY "
+                    "committed work product, independent of any live session."
+                ),
+                capability="twin_read",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "Work product node UUID (from twin.get_node etc.).",
+                        },
+                    },
+                    "required": ["node_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "file_path": {"type": "string"},
+                        "filename": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "content_hash": {"type": "string"},
+                        "format": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=30),
+            ),
+            handler=self.stage_work_product_file,
+        )
+
+    async def stage_work_product_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        node_id = arguments.get("node_id")
+        if not node_id or not isinstance(node_id, str):
+            raise ValueError(
+                "twin.stage_work_product_file: 'node_id' is required (non-empty string)"
+            )
+        return await self._blob_stager(node_id)
