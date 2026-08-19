@@ -675,6 +675,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
     from api_gateway.runs.launcher import make_run_launcher
+    from api_gateway.twin.blob_stager import make_blob_stager
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
@@ -703,6 +704,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # executor only implements a `record_decision` action, so anything
         # else silently no-ops even after a human approves it.
         document_recorder=make_document_recorder(twin, project_backend),
+        # MET-618: lets an agent recover a committed work product's actual
+        # file (STEP, mesh, ...) by node id once its authoring session is
+        # gone, unknown, or was never its own.
+        blob_stager=make_blob_stager(twin),
     )
     # Apply-on-approve executor (MET-548): runs an approved proposal's diff.
     app.state.proposal_apply = make_apply_executor(decision_recorder)

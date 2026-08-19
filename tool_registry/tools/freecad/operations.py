@@ -552,8 +552,15 @@ class FreecadOperations:
             if "area" in wanted:
                 props["area"] = round(shape.Area, 2)
             if "center_of_mass" in wanted:
-                com = shape.CenterOfMass
-                props["center_of_mass"] = [round(com.x, 3), round(com.y, 3), round(com.z, 3)]
+                # ``Part.Shape`` has no ``CenterOfMass`` (only ``Part.Solid``
+                # does — it AttributeErrors on a shape/compound, which the
+                # MCP layer surfaced as an opaque "Tool execution failed"
+                # with no way to tell what broke). ``CenterOfGravity`` is the
+                # shape-level equivalent: FreeCAD computes it as the
+                # volume-weighted centroid across every solid, matching a
+                # manual per-solid CenterOfMass weighted average.
+                cog = shape.CenterOfGravity
+                props["center_of_mass"] = [round(cog.x, 3), round(cog.y, 3), round(cog.z, 3)]
             if "bounding_box" in wanted:
                 props["bounding_box"] = self._bbox_dict(shape.BoundBox)
             return {"file": input_file, "properties": props}

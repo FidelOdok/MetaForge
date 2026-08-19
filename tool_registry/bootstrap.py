@@ -193,6 +193,7 @@ async def bootstrap_tool_registry(
     constraint_recorder: Any = None,
     run_launcher: Any = None,
     document_recorder: Any = None,
+    blob_stager: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -215,6 +216,12 @@ async def bootstrap_tool_registry(
         twin_allow_mutations: When True, ``twin.query_cypher`` accepts
             mutating Cypher (CREATE / DELETE / SET / MERGE / ...). Off
             by default; every call is audit-logged regardless.
+        blob_stager: Optional async ``stage(node_id) -> dict`` (MET-618).
+            When supplied, registers ``twin.stage_work_product_file``,
+            which resolves a committed work product's blob onto the
+            shared adapter workspace so any CAD/FEA tool can load it by
+            path even after its authoring session is gone. ``None``
+            skips registration (same pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -368,6 +375,7 @@ async def bootstrap_tool_registry(
                     proposal_recorder=proposal_recorder,
                     constraint_recorder=constraint_recorder,
                     document_recorder=document_recorder,
+                    blob_stager=blob_stager,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

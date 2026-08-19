@@ -939,6 +939,16 @@ async def _bootstrap(
         geometry_recorder = make_geometry_recorder(twin, project_backend)
     except Exception as exc:  # noqa: BLE001 — degrade; commit_geometry just absent
         logger.warning("mcp_geometry_recorder_init_failed", error=str(exc))
+    # MET-618: mirror the recorders above so twin.stage_work_product_file works
+    # over the sidecar — without it, an agent whose freecad session has expired
+    # has no way back to a committed work product's actual STEP/mesh content.
+    blob_stager = None
+    try:
+        from api_gateway.twin.blob_stager import make_blob_stager
+
+        blob_stager = make_blob_stager(twin)
+    except Exception as exc:  # noqa: BLE001 — degrade; stage_work_product_file just absent
+        logger.warning("mcp_blob_stager_init_failed", error=str(exc))
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -952,6 +962,7 @@ async def _bootstrap(
         capture_sessions=getattr(args, "capture_sessions", False),
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder,
+        blob_stager=blob_stager,
     )
     return server, twin, knowledge_service, memory_store, insight_store
 

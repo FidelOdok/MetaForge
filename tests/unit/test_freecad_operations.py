@@ -215,6 +215,79 @@ class TestFreecadNotAvailableError:
         assert "Docker container" in str(err)
 
 
+class _FakeVector:
+    def __init__(self, x: float, y: float, z: float) -> None:
+        self.x, self.y, self.z = x, y, z
+
+
+class _FakeBoundBox:
+    XMin = YMin = ZMin = 0.0
+    XMax, YMax, ZMax = 600.0, 400.0, 420.0
+
+
+class _FakeShape:
+    """Mimics a multi-solid ``Part.Shape`` compound read from a STEP file."""
+
+    Volume = 6_080_000.0
+    Area = 654_400.0
+    BoundBox = _FakeBoundBox()
+    # Real Part.Shape has no CenterOfMass (only Part.Solid does) — omit it so
+    # a regression back to ``shape.CenterOfMass`` fails loudly with the same
+    # AttributeError the real FreeCAD API raises.
+    CenterOfGravity = _FakeVector(300.0, 162.105, 365.789)
+
+    def read(self, path: str) -> None:
+        self.path = path
+
+
+class _FakePart:
+    @staticmethod
+    def Shape() -> _FakeShape:
+        return _FakeShape()
+
+
+class TestGetProperties:
+    """freecad.get_properties — center_of_mass must use CenterOfGravity.
+
+    Regression coverage for a real MCP-adapter bug (MET-618): ``Part.Shape``
+    has no ``CenterOfMass`` attribute (only ``Part.Solid`` does), so asking
+    for it crashed every call with an opaque "Tool execution failed" — the
+    AttributeError never reached the caller. ``CenterOfGravity`` is the
+    shape-level equivalent FreeCAD actually exposes.
+    """
+
+    def test_center_of_mass_uses_center_of_gravity(self) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Part", _FakePart()),
+        ):
+            result = ops.get_properties("/workspace/part.step", ["center_of_mass"])
+
+        assert result["properties"]["center_of_mass"] == [300.0, 162.105, 365.789]
+
+    def test_all_properties_together(self) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Part", _FakePart()),
+        ):
+            result = ops.get_properties("/workspace/part.step")
+
+        props = result["properties"]
+        assert props["volume"] == 6_080_000.0
+        assert props["area"] == 654_400.0
+        assert props["center_of_mass"] == [300.0, 162.105, 365.789]
+        assert props["bounding_box"] == {
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "min_z": 0.0,
+            "max_x": 600.0,
+            "max_y": 400.0,
+            "max_z": 420.0,
+        }
+
+
 class TestExecuteCodeSandbox:
     """execute_code source-level guarding is validated before any FreeCAD call,
     so the sandbox policy is testable without FreeCAD bindings (MET-527)."""
