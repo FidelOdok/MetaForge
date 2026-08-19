@@ -261,8 +261,23 @@ elif [ -n "$INSTALL_DIR" ] && is_metaforge_checkout "$INSTALL_DIR"; then
   ok "Using existing checkout: $ROOT_DIR"
 else
   TARGET="${INSTALL_DIR:-./MetaForge}"
+  # Loop instead of failing outright: a stray non-checkout directory at the
+  # default path (e.g. a partial clone left over from an earlier attempt) is
+  # common enough that the user shouldn't have to re-invoke the whole
+  # curl-pipe command with a new --dir by hand.
+  while [ -d "$TARGET" ] && [ "$(ls -A "$TARGET" 2>/dev/null)" ] && ! is_metaforge_checkout "$TARGET"; do
+    warn "$TARGET exists but isn't a complete MetaForge checkout (maybe a partial clone from an earlier attempt?)."
+    if ! interactive; then
+      die "Remove it (rm -rf '$TARGET') or re-run with --dir <empty-path>."
+    fi
+    new_target=""
+    ask new_target "  Install into a different directory instead (blank to abort): " || true
+    if [ -z "${new_target:-}" ]; then
+      die "Aborted. Remove '$TARGET' yourself first, or re-run with --dir <empty-path>."
+    fi
+    TARGET="$new_target"
+  done
   if [ -d "$TARGET" ] && [ "$(ls -A "$TARGET" 2>/dev/null)" ]; then
-    is_metaforge_checkout "$TARGET" || die "$TARGET exists but isn't a complete MetaForge checkout (maybe a partial clone from an earlier attempt?). Remove it (rm -rf '$TARGET') or re-run with --dir <empty-path>."
     ROOT_DIR="$(cd "$TARGET" && pwd)"
     ok "Using existing checkout: $ROOT_DIR"
   else
