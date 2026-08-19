@@ -244,7 +244,15 @@ is_metaforge_checkout() {
   [ -f "$1/docker-compose.yml" ] && [ -f "$1/pyproject.toml" ] && grep -q '^name = "metaforge"' "$1/pyproject.toml" 2>/dev/null
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+# BASH_SOURCE is empty (not just unset) when the script is fed to bash over
+# stdin (`curl ... | bash` — there's no script file at all), and under `set
+# -u` even *indexing* an empty array is a fatal "unbound variable" error. So
+# check emptiness before touching the index, rather than expanding it and
+# hoping a fallback default masks the error.
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+fi
 if [ -n "$SCRIPT_DIR" ] && is_metaforge_checkout "$SCRIPT_DIR/.."; then
   ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   ok "Running from an existing checkout: $ROOT_DIR"
@@ -254,7 +262,7 @@ elif [ -n "$INSTALL_DIR" ] && is_metaforge_checkout "$INSTALL_DIR"; then
 else
   TARGET="${INSTALL_DIR:-./MetaForge}"
   if [ -d "$TARGET" ] && [ "$(ls -A "$TARGET" 2>/dev/null)" ]; then
-    is_metaforge_checkout "$TARGET" || die "$TARGET exists and isn't empty or a MetaForge checkout. Pass --dir <empty-path>."
+    is_metaforge_checkout "$TARGET" || die "$TARGET exists but isn't a complete MetaForge checkout (maybe a partial clone from an earlier attempt?). Remove it (rm -rf '$TARGET') or re-run with --dir <empty-path>."
     ROOT_DIR="$(cd "$TARGET" && pwd)"
     ok "Using existing checkout: $ROOT_DIR"
   else
