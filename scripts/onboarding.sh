@@ -57,8 +57,11 @@ Usage: onboarding.sh [options]
                          dev,knowledge,cadquery)
   --llm-api-key <key>    skip the interactive prompt, use this key
   --skip-cli             don't install the `forge` CLI binary
-  --full                 also start Kafka/Temporal (not required for
-                         Phase 1 core features)
+  --full                 also start the CAD/FEA/EDA tool adapters
+                         (kicad/calculix/cadquery/freecad) — everything
+                         else (Postgres/Neo4j/MinIO/Kafka/Temporal/OCCT)
+                         always starts, since the gateway requires them
+                         healthy before it will start itself
   --yes                  non-interactive: never prompt (defaults to
                          usage mode, no project name/idea prompts)
   -h, --help             show this help
@@ -151,9 +154,12 @@ bold "What you'll need:"
 cat <<'REQS'
   1. Docker Desktop (or Docker Engine + the Compose plugin)
        https://docs.docker.com/get-docker/
-  2. ~5 GB free disk space, 4 GB+ RAM free (image builds + Postgres/Neo4j/MinIO)
+  2. ~8 GB free disk space, 4 GB+ RAM free — this starts 10 containers, not
+     just the gateway/dashboard: Postgres, Neo4j, MinIO, Kafka + Zookeeper,
+     Temporal + its Postgres, and an internal STEP/GLB converter service are
+     all hard startup dependencies of the gateway, not optional extras.
   3. These ports free: 8000 (gateway), 3000 (dashboard), 7474 + 7687 (neo4j),
-     9000 + 9001 (minio)
+     9000 + 9001 (minio), 9092 (kafka), 7233 (temporal), 8100 (occt-converter)
   4. An API key from ONE model provider, so the chat/assistant layer can
      actually talk to an LLM:
        - Anthropic (recommended): https://console.anthropic.com/settings/keys
@@ -364,7 +370,12 @@ fi
 if [ "$MODE" = "usage" ]; then
   log "Building images (production mode — this can take a few minutes on first run)"
   SERVICES=(postgres neo4j minio gateway dashboard)
-  [ "$FULL_STACK" -eq 1 ] && SERVICES+=(zookeeper kafka temporal-db temporal)
+  # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
+  # they start regardless, because `gateway` has a hard `depends_on:
+  # condition: service_healthy` on all of them in docker-compose.yml. --full
+  # only controls the tool adapters, which really are optional (nothing
+  # depends_on them).
+  [ "$FULL_STACK" -eq 1 ] && SERVICES+=(kicad-adapter calculix-adapter cadquery-adapter freecad-adapter)
   # -f pins to docker-compose.yml only, skipping the auto-merged dev override
   # (hot-reload bind mounts + Vite dashboard).
   COMPOSE_BASE=("${DC[@]}" -f docker-compose.yml --profile prod)
@@ -374,7 +385,12 @@ if [ "$MODE" = "usage" ]; then
 else
   log "Starting dev containers (hot-reload override auto-applied)"
   SERVICES=(postgres neo4j minio gateway dashboard-dev)
-  [ "$FULL_STACK" -eq 1 ] && SERVICES+=(zookeeper kafka temporal-db temporal)
+  # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
+  # they start regardless, because `gateway` has a hard `depends_on:
+  # condition: service_healthy` on all of them in docker-compose.yml. --full
+  # only controls the tool adapters, which really are optional (nothing
+  # depends_on them).
+  [ "$FULL_STACK" -eq 1 ] && SERVICES+=(kicad-adapter calculix-adapter cadquery-adapter freecad-adapter)
   COMPOSE_BASE=("${DC[@]}")
   if ! "${COMPOSE_BASE[@]}" up -d "${SERVICES[@]}"; then
     warn "docker compose up reported an error — often just service_healthy ordering timing out on a slow first boot. Continuing to health checks."
@@ -400,7 +416,10 @@ wait_for_container_health() {
 }
 
 log "Waiting for services to become healthy (timeout ${HEALTH_TIMEOUT}s each)"
-for svc in postgres neo4j minio; do
+# kafka/temporal/occt-converter are always up (gateway's depends_on forces
+# them), so report on them too rather than leaving the user guessing what
+# "docker ps" surprises are doing during a long first boot.
+for svc in postgres neo4j minio zookeeper kafka temporal-db temporal occt-converter; do
   wait_for_container_health "$svc" "$HEALTH_TIMEOUT" || true
 done
 
