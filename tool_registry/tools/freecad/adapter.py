@@ -256,6 +256,49 @@ class FreecadServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="freecad.describe_step_file",
+                adapter_id="freecad",
+                name="Describe STEP File",
+                description=(
+                    "Per-component breakdown of a CAD assembly file, by name: each "
+                    "top-level shape's Label, solid_count, volume, area, and bounding "
+                    "box. Use this instead of freecad.get_properties whenever you need "
+                    "the individual PARTS of a multipart assembly (names, per-part "
+                    "volumes) rather than one flattened aggregate. Note: a multipart "
+                    "STEP export typically returns both each named leaf part AND a "
+                    "top-level assembly/product compound whose volume equals the sum "
+                    "of the parts — compare volumes/solid_count to tell them apart."
+                ),
+                capability="cad_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": (
+                                "Path to CAD file (e.g. from twin.stage_work_product_file)"
+                            ),
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string"},
+                        "components": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.describe_step_file,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="freecad.create_parametric",
                 adapter_id="freecad",
                 name="Create Parametric",
@@ -437,6 +480,15 @@ class FreecadServer(McpToolServer):
         result = await self._execute_analysis(input_file, properties)
         return result
 
+    async def describe_step_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Per-component breakdown of a multipart CAD assembly file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Describing STEP file", input_file=input_file)
+        return await self._execute_describe_step_file(input_file)
+
     async def _execute_export(
         self, input_file: str, output_format: str, output_path: str
     ) -> dict[str, Any]:
@@ -468,6 +520,10 @@ class FreecadServer(McpToolServer):
     async def _execute_analysis(self, input_file: str, properties: list[str]) -> dict[str, Any]:
         """Extract geometric properties via FreeCAD (headless)."""
         return self._ops.get_properties(input_file, properties)
+
+    async def _execute_describe_step_file(self, input_file: str) -> dict[str, Any]:
+        """Per-component breakdown via FreeCAD (headless)."""
+        return self._ops.describe_step_file(input_file)
 
     async def _execute_parametric(
         self,

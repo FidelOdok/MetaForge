@@ -72,6 +72,41 @@ def server_with_mocks() -> FreecadServer:
             },
         }
     )
+    s._execute_describe_step_file = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "file": "/models/bracket.step",
+            "components": [
+                {
+                    "label": "Tabletop",
+                    "solid_count": 1,
+                    "volume": 4_800_000.0,
+                    "area": 480_000.0,
+                    "bounding_box": {
+                        "min_x": 0.0,
+                        "min_y": 0.0,
+                        "min_z": 400.0,
+                        "max_x": 600.0,
+                        "max_y": 400.0,
+                        "max_z": 420.0,
+                    },
+                },
+                {
+                    "label": "LegA",
+                    "solid_count": 1,
+                    "volume": 640_000.0,
+                    "area": 87_200.0,
+                    "bounding_box": {
+                        "min_x": 0.0,
+                        "min_y": 0.0,
+                        "min_z": 0.0,
+                        "max_x": 40.0,
+                        "max_y": 40.0,
+                        "max_z": 400.0,
+                    },
+                },
+            ],
+        }
+    )
     return s
 
 
@@ -136,8 +171,9 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 7 skills = 40.
-        assert len(server.tool_ids) == 43
+        # 6 stateless (incl. describe_step_file, MET-629) + 8 auth + 8 feature
+        # + 4 asm + 2 inspect + 2 param + script + 7 skills = 44.
+        assert len(server.tool_ids) == 44
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -146,6 +182,7 @@ class TestFreecadServer:
             "freecad.generate_mesh",
             "freecad.boolean_operation",
             "freecad.get_properties",
+            "freecad.describe_step_file",
             "freecad.create_parametric",
             # stateful authoring (MET-528)
             "freecad.open_session",
@@ -372,6 +409,27 @@ class TestGetProperties:
 
 
 # ---------------------------------------------------------------------------
+# TestDescribeStepFile
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeStepFile:
+    async def test_describe_step_file_success(self, server_with_mocks: FreecadServer) -> None:
+        result = await server_with_mocks.describe_step_file({"input_file": "/models/bracket.step"})
+        assert result["file"] == "/models/bracket.step"
+        labels = [c["label"] for c in result["components"]]
+        assert labels == ["Tabletop", "LegA"]
+        assert result["components"][0]["solid_count"] == 1
+        assert result["components"][0]["volume"] == 4_800_000.0
+
+    async def test_describe_step_file_missing_file_raises(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        with pytest.raises(ValueError, match="input_file is required"):
+            await server_with_mocks.describe_step_file({"input_file": ""})
+
+
+# ---------------------------------------------------------------------------
 # TestUnmockedMethodsRaise
 # ---------------------------------------------------------------------------
 
@@ -411,6 +469,12 @@ class TestUnmockedMethodsDegrade:
 
         with pytest.raises(FreecadNotAvailableError):
             await server._execute_analysis("/models/test.step", ["volume"])
+
+    async def test_describe_step_file_degrades(self, server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+        with pytest.raises(FreecadNotAvailableError):
+            await server._execute_describe_step_file("/models/test.step")
 
 
 # ---------------------------------------------------------------------------
@@ -1028,7 +1092,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 43
+        assert len(response["result"]["tools"]) == 44
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1075,7 +1139,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 43
+        assert response["result"]["tools_available"] == 44
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

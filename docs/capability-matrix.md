@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (48 across 11 adapters)
+## MCP tools (49 across 11 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -48,6 +48,7 @@ KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
 | `freecad` (opt-in) | `freecad.create_parametric` | FreeCAD-driven parametric solid | _none yet_ |
 | `freecad` | `freecad.boolean_operation` | FreeCAD boolean ops | _none yet_ |
 | `freecad` | `freecad.get_properties` | FreeCAD shape properties | _none yet_ |
+| `freecad` | `freecad.describe_step_file` | Per-component breakdown of a multipart assembly file (Label/volume/area/bbox per named part, not just the flattened aggregate) (MET-629) | unit-verified (MET-629) |
 | `freecad` | `freecad.export_geometry` | FreeCAD STEP / STL / IGES export | _none yet_ |
 | `freecad` | `freecad.generate_mesh` | FreeCAD-driven mesh generation | _none yet_ |
 | `kicad` (opt-in) | `kicad.run_erc` | Electrical rules check | _none yet_ |
