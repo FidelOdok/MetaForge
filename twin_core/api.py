@@ -29,6 +29,7 @@ from twin_core.models.relationship import SubGraph
 from twin_core.models.version import Version, VersionDiff
 from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
+from twin_core.versioning.git_backend import GitVersionEngine
 
 
 @dataclass
@@ -401,6 +402,10 @@ class InMemoryTwinAPI(TwinAPI):
         - ``NEO4J_PASSWORD`` / ``METAFORGE_NEO4J_PASSWORD`` (default: ``password``)
         - ``METAFORGE_GRAPH_BACKEND`` — set to ``"neo4j"`` to force Neo4j even
           without ``NEO4J_URI``.
+        - ``METAFORGE_VERSION_BACKEND`` — set to ``"git"`` to back versioning
+          with a real git repository (see ``GitVersionEngine``) instead of
+          the default in-memory Version DAG. Requires
+          ``METAFORGE_VERSION_GIT_ROOT`` to point at a writable directory.
         """
         import structlog
 
@@ -430,7 +435,20 @@ class InMemoryTwinAPI(TwinAPI):
             graph = InMemoryGraphEngine(collector=collector)
             _logger.info("twin_api_using_in_memory_backend")
 
-        version = InMemoryVersionEngine(graph)
+        version_backend = os.environ.get("METAFORGE_VERSION_BACKEND", "memory").lower()
+        version: VersionEngine
+        if version_backend == "git":
+            git_root = os.environ.get("METAFORGE_VERSION_GIT_ROOT")
+            if not git_root:
+                raise ValueError(
+                    "METAFORGE_VERSION_BACKEND=git requires METAFORGE_VERSION_GIT_ROOT "
+                    "to point at a writable directory for the version repo"
+                )
+            version = GitVersionEngine(graph, git_root)
+            _logger.info("twin_api_using_git_version_backend", repo_path=git_root)
+        else:
+            version = InMemoryVersionEngine(graph)
+
         constraints = InMemoryConstraintEngine(graph, collector=collector)
         return cls(graph=graph, version=version, constraints=constraints, collector=collector)
 
@@ -714,10 +732,11 @@ class InMemoryTwinAPI(TwinAPI):
     # --- Versioning ---
 
     async def create_branch(self, name: str, from_branch: str = "main") -> str:
-        if from_branch in self._version._branches:  # type: ignore[attr-defined]
-            head_id = self._version._branches[from_branch]  # type: ignore[attr-defined]
-            return await self._version.create_branch(name, from_version=head_id)
-        return await self._version.create_branch(name)
+        try:
+            head = await self._version.get_head(from_branch)
+        except KeyError:
+            return await self._version.create_branch(name)
+        return await self._version.create_branch(name, from_version=head.id)
 
     async def commit(self, branch: str, message: str, author: str) -> Version:
         return await self._version.commit(branch, message, [], author)

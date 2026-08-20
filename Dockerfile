@@ -22,6 +22,12 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
+# git CLI — required by twin_core.versioning.GitVersionEngine
+# (METAFORGE_VERSION_BACKEND=git) to shell out to real git commands.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy installed packages from deps stage
 COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
