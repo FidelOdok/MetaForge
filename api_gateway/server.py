@@ -679,8 +679,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
+    from api_gateway.twin.git_repo_registry import GitRepoRegistry
 
     decision_recorder = make_decision_recorder(twin, project_backend)
+    git_registry = GitRepoRegistry.from_env(twin.graph)
     tool_registry = await bootstrap_tool_registry(
         knowledge_service=getattr(app.state, "knowledge_service", None),
         twin=twin,
@@ -690,7 +692,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         memory_insight_store=getattr(app.state, "consolidation_insight_store", None),
         agent_session_store=getattr(app.state, "agent_session_store", None),
         decision_recorder=decision_recorder,
-        geometry_recorder=make_geometry_recorder(twin, project_backend),
+        geometry_recorder=make_geometry_recorder(twin, project_backend, git_registry),
         proposal_recorder=make_proposal_recorder(approval_workflow),
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).

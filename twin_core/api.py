@@ -286,6 +286,17 @@ class TwinAPI(ABC):
         """
         ...
 
+    @property
+    @abstractmethod
+    def graph(self) -> GraphEngine:
+        """The live graph engine.
+
+        Exposed (MET-630) so gateway bootstrap can construct a
+        ``GitRepoRegistry``/``GitVersionEngine`` against the same backing
+        graph without reaching into private state.
+        """
+        ...
+
     # --- Lifecycle ---
 
     @abstractmethod
@@ -340,6 +351,10 @@ class InMemoryTwinAPI(TwinAPI):
     @property
     def constraints(self) -> ConstraintEngine:
         return self._constraints
+
+    @property
+    def graph(self) -> GraphEngine:
+        return self._graph
 
     async def aclose(self) -> None:
         close = getattr(self._graph, "close", None)

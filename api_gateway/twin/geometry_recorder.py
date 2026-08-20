@@ -49,11 +49,17 @@ def _slug(name: str) -> str:
     return (s or "geometry")[:60]
 
 
-def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
+def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry: Any = None) -> Any:
     """Return an async ``record(...)`` bound to a twin + project backend.
 
     The returned callable is what ``twin.commit_geometry`` invokes; binding the
     dependencies here keeps the MCP adapter free of api_gateway/twin_core imports.
+
+    Args:
+        git_registry: Optional ``GitRepoRegistry`` (MET-630). When given and
+            the caller supplies ``script_source``, the generation script is
+            committed to that project's real git repo (for genuine diffing)
+            and linked to the resulting CAD_MODEL node as its provenance.
     """
 
     async def record(
@@ -66,8 +72,11 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
         fmt: str = "step",
         source_tool: str = "freecad.export_model",
         extra_metadata: dict[str, Any] | None = None,
+        script_source: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        properties: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from twin_core.models.enums import WorkProductType
+        from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
 
         if not name or not isinstance(name, str):
@@ -112,6 +121,61 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["session_id"] = session_id
             if extra_metadata:
                 metadata.update(extra_metadata)
+            # MET-630: structured, queryable geometry semantics — separate
+            # from the git-versioned script text below. Parameters are the
+            # values that drove generation (e.g. pad length, hole diameter);
+            # properties are derived measurements (volume, bounding box,
+            # mass properties). Both live in the graph so twin_query_cypher
+            # / constraint evaluation can reason over them directly.
+            if parameters or properties:
+                metadata["geometry_features"] = {
+                    "parameters": parameters or {},
+                    "properties": properties or {},
+                }
+
+            # MET-630: commit the real generation script to the project's
+            # git repo — the working, diffable source of truth — as its own
+            # CAD_SOURCE_SCRIPT node, linked to the STEP node it produced.
+            # Best-effort: a script-commit failure must never block the
+            # STEP node itself from being created.
+            script_node_id: str | None = None
+            git_commit_sha: str | None = None
+            if script_source and git_registry is not None:
+                try:
+                    engine = git_registry.for_project(project_id)
+                    try:
+                        await engine.create_branch("main")
+                    except ValueError:
+                        pass  # branch already exists — fine
+                    script_hash = hashlib.sha256(script_source.encode()).hexdigest()
+                    script_path = f"mechanical/cad_src/{_slug(name)}.py"
+                    script_wp = WorkProduct(
+                        name=f"{name} (script)",
+                        type=WorkProductType.CAD_SOURCE_SCRIPT,
+                        domain=domain,
+                        file_path=script_path,
+                        content_hash=script_hash,
+                        format="py",
+                        metadata={"source_tool": source_tool},
+                        created_by=source_tool,
+                        project_id=project_id,
+                    )
+                    created_script = await twin.create_work_product(script_wp)
+                    script_id = getattr(created_script, "id", script_wp.id)
+                    script_version = await engine.commit(
+                        "main",
+                        f"author {name}",
+                        [script_id],
+                        source_tool,
+                        content={script_id: script_source.encode()},
+                    )
+                    script_node_id = str(script_id)
+                    git_commit_sha = script_version.git_commit_sha
+                    metadata["git_commit_sha"] = git_commit_sha
+                    metadata["git_path"] = script_path
+                    metadata["script_node_id"] = script_node_id
+                except Exception as exc:  # noqa: BLE001 — script commit is best-effort
+                    logger.warning("geometry_script_commit_failed", name=name, error=str(exc))
 
             now = datetime.now(UTC)
             wp = WorkProduct(
@@ -131,6 +195,13 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
             created = await twin.create_work_product(wp)
             node_id = str(getattr(created, "id", wp_id))
 
+            if script_node_id is not None:
+                try:
+                    script_id = getattr(created_script, "id")
+                    await twin.add_edge(script_id, created.id, EdgeType.PARENT_OF)
+                except Exception as exc:  # noqa: BLE001 — provenance edge is best-effort
+                    logger.warning("geometry_script_edge_failed", node_id=node_id, error=str(exc))
+
             # 2. project junction link so it shows on the Projects page.
             linked = False
             if project_id and project_backend is not None:
@@ -147,6 +218,8 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
                 linked=linked,
                 minio_object_key=minio_object_key,
                 size_bytes=len(content),
+                script_node_id=script_node_id,
+                git_commit_sha=git_commit_sha,
             )
             out = {
                 "node_id": node_id,
@@ -157,6 +230,9 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "project_linked": linked,
                 "model_url": f"/v1/twin/nodes/{node_id}/model",
             }
+            if script_node_id is not None:
+                out["script_node_id"] = script_node_id
+                out["git_commit_sha"] = git_commit_sha
             # MET-584: soft-warn (never block) when geometry lands in a project
             # with no recorded requirements — the model sees the warning in the
             # tool result and can course-correct; gates enforce, chat nudges.

@@ -898,6 +898,30 @@ class TwinServer(McpToolServer):
                         },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
+                        "script_source": {
+                            "type": "string",
+                            "description": (
+                                "The CadQuery/FreeCAD generation script text that authored "
+                                "this geometry, if any. When given, it is committed to the "
+                                "project's real git repo as the source of truth (real "
+                                "diffs/merges), linked as provenance to this STEP node."
+                            ),
+                        },
+                        "parameters": {
+                            "type": "object",
+                            "description": (
+                                "Structured values that drove generation (e.g. pad_length, "
+                                "hole_diameter) — stored on the node as queryable metadata."
+                            ),
+                        },
+                        "properties": {
+                            "type": "object",
+                            "description": (
+                                "Derived geometric measurements (volume_mm3, bounding_box, "
+                                "mass properties, etc.) — stored on the node as queryable "
+                                "metadata alongside 'parameters'."
+                            ),
+                        },
                     },
                     "required": ["name"],
                 },
@@ -931,6 +955,10 @@ class TwinServer(McpToolServer):
         session_id = arguments.get("session_id")
         domain = arguments.get("domain")
         fmt = arguments.get("format")
+        script_source = arguments.get("script_source")
+        parameters = arguments.get("parameters")
+        properties = arguments.get("properties")
+        script_source = script_source if isinstance(script_source, str) and script_source else None
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -938,4 +966,7 @@ class TwinServer(McpToolServer):
             session_id=session_id if isinstance(session_id, str) else None,
             domain=domain if isinstance(domain, str) and domain else "mechanical",
             fmt=fmt if isinstance(fmt, str) and fmt else "step",
+            script_source=script_source,
+            parameters=parameters if isinstance(parameters, dict) else None,
+            properties=properties if isinstance(properties, dict) else None,
         )
