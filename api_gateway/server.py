@@ -679,10 +679,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
-    from api_gateway.twin.git_repo_registry import GitRepoRegistry
+    from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
 
     decision_recorder = make_decision_recorder(twin, project_backend)
     git_registry = GitRepoRegistry.from_env(twin.graph)
+    init_git_registry(git_registry)
+    geometry_recorder_fn = make_geometry_recorder(twin, project_backend, git_registry)
     tool_registry = await bootstrap_tool_registry(
         knowledge_service=getattr(app.state, "knowledge_service", None),
         twin=twin,
@@ -692,7 +694,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         memory_insight_store=getattr(app.state, "consolidation_insight_store", None),
         agent_session_store=getattr(app.state, "agent_session_store", None),
         decision_recorder=decision_recorder,
-        geometry_recorder=make_geometry_recorder(twin, project_backend, git_registry),
+        geometry_recorder=geometry_recorder_fn,
         proposal_recorder=make_proposal_recorder(approval_workflow),
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).
@@ -706,8 +708,6 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # else silently no-ops even after a human approves it.
         document_recorder=make_document_recorder(twin, project_backend),
     )
-    # Apply-on-approve executor (MET-548): runs an approved proposal's diff.
-    app.state.proposal_apply = make_apply_executor(decision_recorder)
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
     logger.info(
@@ -729,6 +729,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
+    )
+    # Apply-on-approve executor (MET-548/MET-630): runs an approved
+    # proposal's diff. Needs the resolved MCP bridge (not yet available
+    # above) to apply `regenerate_geometry` actions.
+    app.state.proposal_apply = make_apply_executor(
+        decision_recorder, mcp_bridge=active_bridge, geometry_recorder=geometry_recorder_fn
     )
 
     # Initialize chat backend (PG or in-memory). Project backend is

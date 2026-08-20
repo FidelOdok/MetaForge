@@ -122,6 +122,51 @@ class TestCommit:
         deleted_ids = {c.work_product_id for c in d.changes if c.change_type == "deleted"}
         assert art.id not in deleted_ids
 
+    async def test_paths_gives_stable_file_across_fresh_work_product_ids(self, setup):
+        """Regenerating with a fresh id each time still evolves ONE git file.
+
+        Without an explicit `paths`, each work_product_id writes to
+        `work_products/<id>` — a fresh id every regeneration (as
+        geometry_recorder.py does) would write a new file each time
+        instead of evolving one, so a path-scoped `git log` on "this
+        part" would only ever show its own single commit, not real history.
+        """
+        graph, veng, art, initial = setup
+
+        gen1_wp = _make_work_product("bracket_gen1", content_hash="h1")
+        await graph.add_node(gen1_wp)
+        v1 = await veng.commit(
+            "main",
+            "author bracket",
+            [gen1_wp.id],
+            "agent",
+            content={gen1_wp.id: b"pad(10)\n"},
+            paths={gen1_wp.id: "mechanical/cad_src/bracket.py"},
+        )
+
+        gen2_wp = _make_work_product("bracket_gen2", content_hash="h2")
+        await graph.add_node(gen2_wp)
+        v2 = await veng.commit(
+            "main",
+            "widen pad",
+            [gen2_wp.id],
+            "agent",
+            content={gen2_wp.id: b"pad(15)\n"},
+            paths={gen2_wp.id: "mechanical/cad_src/bracket.py"},
+        )
+
+        log = await veng._git(["log", "main", "--format=%H", "--", "mechanical/cad_src/bracket.py"])
+        shas = [s for s in log.stdout.splitlines() if s.strip()]
+        assert v1.git_commit_sha in shas
+        assert v2.git_commit_sha in shas
+        assert len(shas) == 2
+
+        d = await veng.diff(v1.id, v2.id)
+        change = next(c for c in d.changes if c.change_type == "modified")
+        assert change.patch is not None
+        assert "-pad(10)" in change.patch
+        assert "+pad(15)" in change.patch
+
     async def test_real_content_is_committed_and_diffable(self, setup):
         """When real bytes are supplied, git diff surfaces an actual text patch."""
         graph, veng, art, initial = setup

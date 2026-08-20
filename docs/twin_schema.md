@@ -806,6 +806,21 @@ Selection is per-project: `GitRepoRegistry` (`api_gateway/twin/git_repo_registry
 
 > **Known gap**: MetaForge projects don't yet have a dedicated filesystem workspace (a project is still Postgres metadata + a `project_id` graph attribute) — `GitRepoRegistry` partitions by `project_id` under one configured root as an interim measure, not a true per-project workspace directory (tracked as a MET-630 follow-up).
 
+A commit's `paths` argument gives a work product a *stable* location (e.g. `mechanical/cad_src/bracket.py`, derived from the part's name) rather than the default `work_products/<id>`. This matters because `geometry_recorder.py` gives every regeneration a fresh graph node id — without a stable path, each regeneration would write to a brand-new git path instead of evolving one file, and `git log`/`git diff` on "this part's history" would only ever show a single commit. `geometry_recorder.py` always passes a name-derived path for this reason.
+
+### Regenerating geometry: parameter view/edit → propose → apply (MET-630)
+
+Closing the loop from "a parameter is stored in the graph" to "a human can change it and see it take effect":
+
+- `GET /v1/twin/nodes/{id}` returns `geometryParameters` (the node's `geometry_features`, unflattened — kept separate from the generic scalar-only `properties` map) and `hasScript` (whether a git-versioned generation script backs this node).
+- `GET /v1/twin/nodes/{id}/script` returns the node's current script text, read live from its project's git repo — used to seed an edit form with what's there today rather than asking a human to retype it.
+- `POST /v1/assistant/proposals` lets a human create a `DesignChangeProposal` directly (previously only an agent's `twin.propose_change` MCP call could) — e.g. `{"diff": {"action": "regenerate_geometry", "script_source": "<edited script>", "parameters": {...}}}`.
+- On approval, the apply executor's `regenerate_geometry` action (`api_gateway/twin/regenerate_geometry.py`) is no longer a no-op: it drives `cadquery.execute_script` over the shared `McpBridge`, reads the result STEP from the `ADAPTER_WORKSPACE_DIR` volume the gateway and adapter containers share (mirroring `boolean_ops.py`), and commits it through the same `geometry_recorder` path — so the new node gets git-versioned script history, `geometry_features` metadata, *and* a `SUPERSEDES` link to the part it replaces (below).
+
+### Regeneration history in the graph: SUPERSEDES chains (MET-630)
+
+Every `commit_geometry` call — not just ones going through the apply-on-approve path — links successive generations of the *same named part* (matched by `project_id` + `name`) via a `SUPERSEDES` edge (new → old), mirroring `TwinAPI.ingest_datasheet`'s existing pattern for datasheet revisions. This applies to both the `CAD_MODEL` node and its `CAD_SOURCE_SCRIPT` node independently. Without `project_id`, there's no reliable identity to match on, so unscoped commits are never linked.
+
 ---
 
 ## 5. Constraint Engine

@@ -84,8 +84,26 @@ class GitVersionEngine(VersionEngine):
         result = await self._git(["rev-parse", "--verify", "HEAD"], check=False)
         return result.returncode == 0
 
-    def _wp_path(self, work_product_id: UUID) -> Path:
+    def _wp_path(self, work_product_id: UUID, paths: dict[UUID, str] | None = None) -> Path:
+        if paths and work_product_id in paths:
+            return self._repo / paths[work_product_id]
         return self._repo / "work_products" / str(work_product_id)
+
+    def _clean_worktree(self) -> None:
+        """Remove every tracked entry (everything but ``.git``) from disk.
+
+        Used when starting a fresh orphan branch — ``git rm -rf --cached``
+        only clears the index, not the working tree, and callers may use
+        arbitrary custom paths (not just ``work_products/``), so this
+        clears the whole tree rather than one hardcoded directory.
+        """
+        for entry in self._repo.iterdir():
+            if entry.name == ".git":
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
 
     @staticmethod
     def _content_hash(data: bytes) -> str:
@@ -137,7 +155,22 @@ class GitVersionEngine(VersionEngine):
         work_product_ids: list[UUID],
         author: str,
         content: dict[UUID, bytes] | None = None,
+        paths: dict[UUID, str] | None = None,
     ) -> Version:
+        """Create a new version on the given branch.
+
+        Args:
+            paths: Optional explicit relative path per work_product_id
+                (e.g. ``{script_id: "mechanical/cad_src/bracket.py"}``).
+                Without this, each work product is written to
+                ``work_products/<id>`` — but a fresh id every regeneration
+                (as ``geometry_recorder.py`` does) would then write a new
+                file each time instead of evolving one, so ``git log``/
+                ``git diff`` on "this part's history" wouldn't show
+                anything. Passing a *stable* path (derived from the part's
+                name, not its ephemeral id) is what makes successive
+                commits land on the same path and form real git history.
+        """
         content = content or {}
 
         async with self._lock:
@@ -158,7 +191,7 @@ class GitVersionEngine(VersionEngine):
                 # inherit unrelated commits/files.
                 await self._git(["checkout", "--orphan", branch])
                 await self._git(["rm", "-rf", "--cached", "."], check=False)
-                shutil.rmtree(self._repo / "work_products", ignore_errors=True)
+                self._clean_worktree()
             else:
                 # Completely empty repo — point the unborn HEAD at this
                 # branch name before the first-ever commit lands.
@@ -171,7 +204,7 @@ class GitVersionEngine(VersionEngine):
                 data = content.get(wp_id)
                 if data is None:
                     data = getattr(node, "content_hash", "").encode()
-                path = self._wp_path(wp_id)
+                path = self._wp_path(wp_id, paths)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
 
@@ -264,12 +297,17 @@ class GitVersionEngine(VersionEngine):
                 target_node = await self._graph.get_node(target_head)
                 target_sha = getattr(target_node, "git_commit_sha", None) if target_node else None
                 if target_sha:
-                    name_status = await self._git(
-                        ["diff", "--name-only", target_sha, sha, "--", "work_products/"]
-                    )
+                    name_status = await self._git(["diff", "--name-only", target_sha, sha])
                     for line in name_status.stdout.splitlines():
-                        if line.strip():
+                        if not line.strip():
+                            continue
+                        try:
                             changed_ids.append(UUID(Path(line).name))
+                        except ValueError:
+                            # A custom (non-work_products/<uuid>) path, e.g.
+                            # mechanical/cad_src/bracket.py — no work_product
+                            # id to report; the path itself is still diffed.
+                            continue
 
             version = Version(
                 branch_name=target_branch,
@@ -343,14 +381,19 @@ class GitVersionEngine(VersionEngine):
 
         changes: list[WorkProductChange] = []
         if sha_a and sha_b:
-            name_status = await self._git(
-                ["diff", "--name-status", sha_a, sha_b, "--", "work_products/"]
-            )
+            name_status = await self._git(["diff", "--name-status", sha_a, sha_b])
             for line in name_status.stdout.splitlines():
                 if not line.strip():
                     continue
                 status, _, path = line.partition("\t")
-                work_product_id = UUID(Path(path).name)
+                # Only resolvable when the default work_products/<uuid>
+                # layout was used — a stable custom path (see commit's
+                # `paths` arg) has no single id across commits, so `path`
+                # below is the reliable identifier in that case.
+                try:
+                    work_product_id: UUID | None = UUID(Path(path).name)
+                except ValueError:
+                    work_product_id = None
 
                 old_content = await self._show(sha_a, path)
                 new_content = await self._show(sha_b, path)
@@ -360,6 +403,7 @@ class GitVersionEngine(VersionEngine):
                     changes.append(
                         WorkProductChange(
                             work_product_id=work_product_id,
+                            path=path,
                             change_type="added",
                             new_content_hash=self._content_hash(new_content or b""),
                             patch=patch_result.stdout or None,
@@ -369,6 +413,7 @@ class GitVersionEngine(VersionEngine):
                     changes.append(
                         WorkProductChange(
                             work_product_id=work_product_id,
+                            path=path,
                             change_type="deleted",
                             old_content_hash=self._content_hash(old_content or b""),
                             patch=patch_result.stdout or None,
@@ -378,6 +423,7 @@ class GitVersionEngine(VersionEngine):
                     changes.append(
                         WorkProductChange(
                             work_product_id=work_product_id,
+                            path=path,
                             change_type="modified",
                             old_content_hash=self._content_hash(old_content or b""),
                             new_content_hash=self._content_hash(new_content or b""),
@@ -392,6 +438,16 @@ class GitVersionEngine(VersionEngine):
         if result.returncode != 0:
             return None
         return result.stdout.encode()
+
+    async def read_file(self, git_commit_sha: str, path: str) -> str | None:
+        """The text content of ``path`` at ``git_commit_sha``, or None if absent.
+
+        Public read path (MET-630) for callers that need the current
+        generation script text — e.g. a dashboard parameter panel seeding
+        a regeneration proposal with the script as it stands today.
+        """
+        content = await self._show(git_commit_sha, path)
+        return content.decode() if content is not None else None
 
     async def log(self, branch: str, limit: int = 50) -> list[Version]:
         if branch not in self._branches:

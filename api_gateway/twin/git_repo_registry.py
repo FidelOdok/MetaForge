@@ -46,3 +46,18 @@ class GitRepoRegistry:
         if not root:
             return None
         return cls(graph, root)
+
+
+# Module-level singleton, set by the server lifespan — mirrors
+# get_mcp_bridge()/get_twin()'s pattern so routes can reach the active
+# registry without threading it through every call site.
+_registry: GitRepoRegistry | None = None
+
+
+def init_git_registry(registry: GitRepoRegistry | None) -> None:
+    global _registry  # noqa: PLW0603
+    _registry = registry
+
+
+def get_git_registry() -> GitRepoRegistry | None:
+    return _registry

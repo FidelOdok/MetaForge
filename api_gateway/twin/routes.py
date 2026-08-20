@@ -44,6 +44,7 @@ from api_gateway.twin.schemas import (
     BooleanCutResponse,
     TwinNodeListResponse,
     TwinNodeResponse,
+    TwinNodeScriptResponse,
     TwinRelationshipListResponse,
     TwinRelationshipResponse,
 )
@@ -111,6 +112,11 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         status="valid",
         properties=properties,
         updatedAt=wp.updated_at.isoformat(),
+        # MET-630: surface the structured (non-scalar) geometry_features
+        # metadata that the loop above silently drops, and whether a
+        # git-versioned script backs this node.
+        geometryParameters=wp.metadata.get("geometry_features"),
+        hasScript=bool(wp.metadata.get("script_node_id")),
     )
 
 
@@ -654,6 +660,48 @@ async def get_version_history(node_id: UUID) -> WorkProductVersionHistory:
     if wp is None:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
     return VersionService.get_history(wp)
+
+
+@router.get("/nodes/{node_id}/script", response_model=TwinNodeScriptResponse)
+async def get_node_script(node_id: UUID) -> TwinNodeScriptResponse:
+    """The current git-versioned generation script for a CAD_MODEL node (MET-630).
+
+    Lets a dashboard parameter panel seed a regeneration proposal with the
+    script as it stands today, rather than the user retyping it from scratch.
+    404 when the node has no linked script (imported geometry, or the git
+    backend isn't configured).
+    """
+    from api_gateway.twin.git_repo_registry import get_git_registry
+
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+
+    script_node_id = wp.metadata.get("script_node_id")
+    git_commit_sha = wp.metadata.get("git_commit_sha")
+    git_path = wp.metadata.get("git_path")
+    if not (script_node_id and git_commit_sha and git_path):
+        raise HTTPException(status_code=404, detail=f"Node {node_id} has no versioned script")
+
+    registry = get_git_registry()
+    if registry is None:
+        raise HTTPException(status_code=503, detail="Git versioning backend is not configured")
+
+    project_id = str(wp.project_id) if wp.project_id else None
+    engine = registry.for_project(project_id)
+    script_source = await engine.read_file(git_commit_sha, git_path)
+    if script_source is None:
+        raise HTTPException(
+            status_code=404, detail=f"Script content not found at {git_path}@{git_commit_sha}"
+        )
+
+    return TwinNodeScriptResponse(
+        node_id=str(node_id),
+        script_node_id=str(script_node_id),
+        script_source=script_source,
+        git_commit_sha=str(git_commit_sha),
+        git_path=str(git_path),
+    )
 
 
 @router.post("/nodes/{node_id}/iterate", response_model=WorkProductRevision, status_code=201)

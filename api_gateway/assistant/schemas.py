@@ -104,6 +104,29 @@ class ApprovalDecision(BaseModel):
     )
 
 
+class CreateProposalRequest(BaseModel):
+    """Body for ``POST /api/v1/assistant/proposals`` (MET-630).
+
+    Lets a human create a design-change proposal directly from the
+    dashboard (e.g. a parameter-panel "Regenerate" button) — previously
+    proposals could only be created by an agent calling the
+    ``twin.propose_change`` MCP tool.
+    """
+
+    agent_code: str = Field(
+        default="human",
+        min_length=1,
+        description="Code identifying who/what is proposing the change",
+    )
+    description: str = Field(min_length=1, description="What the change does")
+    diff: dict[str, Any] = Field(
+        default_factory=dict, description="Structured diff (e.g. {'action': 'regenerate_geometry'})"
+    )
+    work_products_affected: list[UUID] = Field(default_factory=list)
+    project_id: str | None = None
+    session_id: UUID | None = None
+
+
 # ---------------------------------------------------------------------------
 # Response / event schemas
 # ---------------------------------------------------------------------------

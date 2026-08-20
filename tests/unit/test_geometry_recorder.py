@@ -258,6 +258,85 @@ class TestScriptAndGeometryFeatures:
         )
         assert result2["git_commit_sha"] != result["git_commit_sha"]
 
+    async def test_regenerating_same_name_links_supersedes_chain(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.models.enums import EdgeType
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+        project_id = "22222222-2222-2222-2222-222222222222"
+
+        from uuid import UUID
+
+        v1 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(10)\n",
+        )
+        v2 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(15)\n",
+        )
+
+        assert v2["supersedes_node_id"] == v1["node_id"]
+        assert "supersedes_node_id" not in v1
+
+        step_edges = await twin.graph.get_edges(
+            UUID(v2["node_id"]), direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert len(step_edges) == 1
+        assert step_edges[0].target_id == UUID(v1["node_id"])
+
+        script_edges = await twin.graph.get_edges(
+            UUID(v2["script_node_id"]), direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert len(script_edges) == 1
+        assert script_edges[0].target_id == UUID(v1["script_node_id"])
+
+        # A third generation supersedes the second, not the first — the
+        # chain always points at the current tip, mirroring get_current_datasheet.
+        v3 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(20)\n",
+        )
+        assert v3["supersedes_node_id"] == v2["node_id"]
+
+    async def test_different_name_does_not_link_supersedes(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+        project_id = "33333333-3333-3333-3333-333333333333"
+
+        await record(
+            step_base64=_STEP_B64, name="Bracket", project_id=project_id, script_source="a\n"
+        )
+        v2 = await record(
+            step_base64=_STEP_B64, name="Bolt", project_id=project_id, script_source="b\n"
+        )
+        assert "supersedes_node_id" not in v2
+
+    async def test_no_project_id_never_links_supersedes(self, patched_blob_store: dict) -> None:
+        twin = _FakeTwin()
+        record = make_geometry_recorder(twin, None)
+
+        await record(step_base64=_STEP_B64, name="Bracket")
+        v2 = await record(step_base64=_STEP_B64, name="Bracket")
+        assert "supersedes_node_id" not in v2
+
     async def test_script_commit_failure_does_not_block_step_node(
         self, patched_blob_store: dict
     ) -> None:

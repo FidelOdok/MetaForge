@@ -1,5 +1,10 @@
 export type TwinNodeType = 'work_product' | 'constraint' | 'relationship' | 'version';
 
+export interface GeometryFeatures {
+  parameters: Record<string, unknown>;
+  properties: Record<string, unknown>;
+}
+
 export interface TwinNode {
   id: string;
   name: string;
@@ -8,6 +13,13 @@ export interface TwinNode {
   status: string;
   properties: Record<string, string | number | boolean>;
   updatedAt: string;
+  // MET-630: structured geometry parameters/properties, kept separate from
+  // `properties` above (which is scalar-only). Undefined for non-CAD nodes
+  // or CAD nodes with no recorded geometry_features.
+  geometryParameters?: GeometryFeatures;
+  // MET-630: whether a git-versioned generation script backs this node
+  // (fetchable via GET /twin/nodes/{id}/script).
+  hasScript?: boolean;
 }
 
 export interface TwinRelationship {

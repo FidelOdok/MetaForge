@@ -31,13 +31,21 @@ class Version(NodeBase):
 class WorkProductChange(BaseModel):
     """A single work_product change between two versions."""
 
-    work_product_id: UUID
+    # Optional: GitVersionEngine can only recover a work_product_id when the
+    # changed git path follows its default `work_products/<uuid>` layout.
+    # A stable custom path (e.g. `mechanical/cad_src/bracket.py`, used so
+    # regenerations with fresh ids still accumulate history — see
+    # GitVersionEngine.commit's `paths` arg) has no single id across
+    # commits, so `path` below is the reliable identifier in that case.
+    work_product_id: UUID | None = None
     change_type: str  # "added", "modified", "deleted"
     old_content_hash: str | None = None
     new_content_hash: str | None = None
     # Real unified diff text, populated only when GitVersionEngine has
     # actual file content to diff (not just opaque content hashes).
     patch: str | None = None
+    # The git-tracked path that changed. Only set by GitVersionEngine.
+    path: str | None = None
 
 
 class VersionDiff(BaseModel):
