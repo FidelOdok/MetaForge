@@ -3,9 +3,9 @@
 When a human approves a ``twin.propose_change`` proposal, this runs its
 structured ``diff`` against the twin via the existing recorders — closing the
 gated loop: prompt → propose → approve → **apply** → twin updated
-(``CHANGE_APPLIED``). Vertical slice: ``record_decision`` is fully wired;
-``regenerate_geometry`` / ``update_properties`` return an explicit
-"unsupported" so approval never silently no-ops (they're the next slice).
+(``CHANGE_APPLIED``). ``record_decision`` and ``regenerate_geometry`` (MET-630)
+are fully wired; any other action returns an explicit "unsupported" so
+approval never silently no-ops.
 """
 
 from __future__ import annotations
@@ -22,8 +22,17 @@ logger = structlog.get_logger(__name__)
 ApplyExecutor = Callable[[DesignChangeProposal], Awaitable[dict[str, Any]]]
 
 
-def make_apply_executor(decision_recorder: Any) -> ApplyExecutor:
-    """Return an ``apply(proposal)`` that executes the proposal's diff action."""
+def make_apply_executor(
+    decision_recorder: Any,
+    mcp_bridge: Any = None,
+    geometry_recorder: Any = None,
+) -> ApplyExecutor:
+    """Return an ``apply(proposal)`` that executes the proposal's diff action.
+
+    Args:
+        mcp_bridge: Optional ``McpBridge`` (MET-630) — required alongside
+            ``geometry_recorder`` to apply ``regenerate_geometry`` actions.
+    """
 
     async def apply(proposal: DesignChangeProposal) -> dict[str, Any]:
         diff = proposal.diff or {}
@@ -39,6 +48,13 @@ def make_apply_executor(decision_recorder: Any) -> ApplyExecutor:
             )
             return {"applied": True, "action": action, **(result or {})}
 
+        if (
+            action == "regenerate_geometry"
+            and mcp_bridge is not None
+            and geometry_recorder is not None
+        ):
+            return await _apply_regenerate_geometry(proposal, diff, mcp_bridge, geometry_recorder)
+
         logger.info(
             "proposal_apply_unsupported_action",
             action=action or "(none)",
@@ -51,3 +67,45 @@ def make_apply_executor(decision_recorder: Any) -> ApplyExecutor:
         }
 
     return apply
+
+
+async def _apply_regenerate_geometry(
+    proposal: DesignChangeProposal,
+    diff: dict[str, Any],
+    mcp_bridge: Any,
+    geometry_recorder: Any,
+) -> dict[str, Any]:
+    from api_gateway.twin.regenerate_geometry import (
+        RegenerateGeometryError,
+        perform_regenerate_geometry,
+    )
+
+    script_source = diff.get("script_source")
+    if not script_source or not isinstance(script_source, str):
+        return {
+            "applied": False,
+            "action": "regenerate_geometry",
+            "reason": "diff.script_source is required to regenerate geometry",
+        }
+    name = str(diff.get("name") or proposal.description)
+    parameters = diff.get("parameters") if isinstance(diff.get("parameters"), dict) else None
+
+    try:
+        result = await perform_regenerate_geometry(
+            bridge=mcp_bridge,
+            recorder=geometry_recorder,
+            script_source=script_source,
+            name=name,
+            project_id=proposal.project_id,
+            domain=str(diff.get("domain") or "mechanical"),
+            parameters=parameters,
+        )
+    except RegenerateGeometryError as exc:
+        logger.warning(
+            "proposal_apply_regenerate_failed",
+            change_id=str(proposal.change_id),
+            error=str(exc),
+        )
+        return {"applied": False, "action": "regenerate_geometry", "reason": str(exc)}
+
+    return {"applied": True, "action": "regenerate_geometry", **(result or {})}

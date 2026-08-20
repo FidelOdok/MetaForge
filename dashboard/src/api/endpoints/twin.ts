@@ -16,6 +16,24 @@ interface TwinNodeApiResponse {
   status: string;
   properties: Record<string, string | number | boolean>;
   updatedAt: string;
+  geometryParameters?: { parameters: Record<string, unknown>; properties: Record<string, unknown> } | null;
+  hasScript?: boolean;
+}
+
+export interface TwinNodeScript {
+  nodeId: string;
+  scriptNodeId: string;
+  scriptSource: string;
+  gitCommitSha: string | null;
+  gitPath: string | null;
+}
+
+interface TwinNodeScriptApiResponse {
+  node_id: string;
+  script_node_id: string;
+  script_source: string;
+  git_commit_sha: string | null;
+  git_path: string | null;
 }
 
 interface TwinNodeListApiResponse {
@@ -35,6 +53,8 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     status: node.status,
     properties: node.properties,
     updatedAt: node.updatedAt,
+    geometryParameters: node.geometryParameters ?? undefined,
+    hasScript: node.hasScript,
   }));
 }
 
@@ -50,6 +70,29 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       status: node.status,
       properties: node.properties,
       updatedAt: node.updatedAt,
+      geometryParameters: node.geometryParameters ?? undefined,
+      hasScript: node.hasScript,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+// MET-630: the current git-versioned generation script for a CAD_MODEL
+// node, used to seed a regeneration proposal's textarea. Undefined when
+// the node has no linked script (imported geometry, or the git backend
+// isn't configured) — callers should treat that as "not available", not
+// an error.
+export async function getNodeScript(id: string): Promise<TwinNodeScript | undefined> {
+  try {
+    const response = await apiClient.get<TwinNodeScriptApiResponse>(`/twin/nodes/${id}/script`);
+    const s = response.data;
+    return {
+      nodeId: s.node_id,
+      scriptNodeId: s.script_node_id,
+      scriptSource: s.script_source,
+      gitCommitSha: s.git_commit_sha,
+      gitPath: s.git_path,
     };
   } catch {
     return undefined;

@@ -190,6 +190,169 @@ class _WarnBackend:
         return SimpleNamespace(work_products=[SimpleNamespace(type=t) for t in self._types])
 
 
+# --------------------------------------------------------------------------
+# Script-as-SSOT + graph geometry features (MET-630)
+# --------------------------------------------------------------------------
+
+
+class TestScriptAndGeometryFeatures:
+    async def test_parameters_and_properties_stored_on_node(self, patched_blob_store: dict) -> None:
+        twin = _FakeTwin()
+        record = make_geometry_recorder(twin, None)
+
+        await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            parameters={"pad_length_mm": 15, "hole_diameter_mm": 6},
+            properties={"volume_mm3": 12345.6, "bounding_box": [10, 20, 30]},
+        )
+
+        wp = twin.created[0]
+        features = wp.metadata["geometry_features"]
+        assert features["parameters"] == {"pad_length_mm": 15, "hole_diameter_mm": 6}
+        assert features["properties"]["volume_mm3"] == 12345.6
+
+    async def test_script_source_commits_to_git_and_links_provenance(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.models.enums import EdgeType, WorkProductType
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+
+        result = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id="11111111-1111-1111-1111-111111111111",
+            script_source="pad(10)\n",
+        )
+
+        assert result["script_node_id"] is not None
+        assert result["git_commit_sha"] is not None
+
+        from uuid import UUID
+
+        step_wp = await twin.get_work_product(UUID(result["node_id"]))
+        assert step_wp.metadata["git_commit_sha"] == result["git_commit_sha"]
+        assert step_wp.metadata["git_path"] == "mechanical/cad_src/bracket.py"
+
+        script_wp = await twin.get_work_product(UUID(result["script_node_id"]))
+        assert script_wp.type == WorkProductType.CAD_SOURCE_SCRIPT
+
+        edges = await twin.graph.get_edges(
+            UUID(result["script_node_id"]), direction="outgoing", edge_type=EdgeType.PARENT_OF
+        )
+        assert len(edges) == 1
+        assert edges[0].target_id == step_wp.id
+
+        # A second commit on the same project reuses the "main" branch
+        # instead of raising on the already-exists branch.
+        result2 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id="11111111-1111-1111-1111-111111111111",
+            script_source="pad(15)\n",
+        )
+        assert result2["git_commit_sha"] != result["git_commit_sha"]
+
+    async def test_regenerating_same_name_links_supersedes_chain(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.models.enums import EdgeType
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+        project_id = "22222222-2222-2222-2222-222222222222"
+
+        from uuid import UUID
+
+        v1 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(10)\n",
+        )
+        v2 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(15)\n",
+        )
+
+        assert v2["supersedes_node_id"] == v1["node_id"]
+        assert "supersedes_node_id" not in v1
+
+        step_edges = await twin.graph.get_edges(
+            UUID(v2["node_id"]), direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert len(step_edges) == 1
+        assert step_edges[0].target_id == UUID(v1["node_id"])
+
+        script_edges = await twin.graph.get_edges(
+            UUID(v2["script_node_id"]), direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert len(script_edges) == 1
+        assert script_edges[0].target_id == UUID(v1["script_node_id"])
+
+        # A third generation supersedes the second, not the first — the
+        # chain always points at the current tip, mirroring get_current_datasheet.
+        v3 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(20)\n",
+        )
+        assert v3["supersedes_node_id"] == v2["node_id"]
+
+    async def test_different_name_does_not_link_supersedes(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+        project_id = "33333333-3333-3333-3333-333333333333"
+
+        await record(
+            step_base64=_STEP_B64, name="Bracket", project_id=project_id, script_source="a\n"
+        )
+        v2 = await record(
+            step_base64=_STEP_B64, name="Bolt", project_id=project_id, script_source="b\n"
+        )
+        assert "supersedes_node_id" not in v2
+
+    async def test_no_project_id_never_links_supersedes(self, patched_blob_store: dict) -> None:
+        twin = _FakeTwin()
+        record = make_geometry_recorder(twin, None)
+
+        await record(step_base64=_STEP_B64, name="Bracket")
+        v2 = await record(step_base64=_STEP_B64, name="Bracket")
+        assert "supersedes_node_id" not in v2
+
+    async def test_script_commit_failure_does_not_block_step_node(
+        self, patched_blob_store: dict
+    ) -> None:
+        class _BoomRegistry:
+            def for_project(self, project_id):  # type: ignore[no-untyped-def]
+                raise RuntimeError("git unavailable")
+
+        twin = _FakeTwin()
+        record = make_geometry_recorder(twin, None, _BoomRegistry())
+
+        result = await record(step_base64=_STEP_B64, name="Bracket", script_source="pad(10)\n")
+
+        assert len(twin.created) == 1
+        assert "script_node_id" not in result
+
+
 @pytest.mark.asyncio
 async def test_unconstrained_warning_paths() -> None:
     from api_gateway.twin.geometry_recorder import _unconstrained_warning

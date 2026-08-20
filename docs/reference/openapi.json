@@ -440,6 +440,76 @@
         "title": "BomListResponse",
         "type": "object"
       },
+      "BooleanCutRequest": {
+        "description": "Real boolean CSG operation between two committed CAD work products (MET-612).",
+        "properties": {
+          "cutter_node_id": {
+            "minLength": 1,
+            "title": "Cutter Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "default": "subtract",
+            "enum": [
+              "subtract",
+              "union",
+              "intersect"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "result_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Name"
+          },
+          "target_node_id": {
+            "minLength": 1,
+            "title": "Target Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_node_id",
+          "cutter_node_id"
+        ],
+        "title": "BooleanCutRequest",
+        "type": "object"
+      },
+      "BooleanCutResponse": {
+        "description": "The newly-committed result node of a boolean-cut operation.",
+        "properties": {
+          "node": {
+            "$ref": "#/components/schemas/TwinNodeResponse"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "result_area_mm2": {
+            "title": "Result Area Mm2",
+            "type": "number"
+          },
+          "result_volume_mm3": {
+            "title": "Result Volume Mm3",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node",
+          "operation",
+          "result_volume_mm3",
+          "result_area_mm2"
+        ],
+        "title": "BooleanCutResponse",
+        "type": "object"
+      },
       "ChangeStatus": {
         "description": "Lifecycle states for a design-change proposal.",
         "enum": [
@@ -1096,7 +1166,7 @@
         "type": "object"
       },
       "DeltaTransform": {
-        "description": "Translation delta of a dragged group, in world units (mm).",
+        "description": "Delta of a dragged group: translation (mm), or \u2014 additively, MET-611 \u2014\na single-axis rotation or scale. Exactly one kind is populated per request,\nmatching whichever gizmo mode produced it on the client.",
         "properties": {
           "dx": {
             "default": 0.0,
@@ -1112,6 +1182,26 @@
             "default": 0.0,
             "title": "Dz",
             "type": "number"
+          },
+          "rotation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RotationDelta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScaleDelta"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "DeltaTransform",
@@ -2860,6 +2950,30 @@
         "title": "RevisionDiff",
         "type": "object"
       },
+      "RotationDelta": {
+        "description": "Single-axis rotation delta of a dragged group (MET-611).",
+        "properties": {
+          "angle_deg": {
+            "title": "Angle Deg",
+            "type": "number"
+          },
+          "axis": {
+            "enum": [
+              "x",
+              "y",
+              "z"
+            ],
+            "title": "Axis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "axis",
+          "angle_deg"
+        ],
+        "title": "RotationDelta",
+        "type": "object"
+      },
       "RunListResponse": {
         "description": "Body for ``GET /v1/runs``.",
         "properties": {
@@ -2991,6 +3105,30 @@
           "status"
         ],
         "title": "RunStatusResponse",
+        "type": "object"
+      },
+      "ScaleDelta": {
+        "description": "Single-axis scale delta of a dragged group (MET-611).",
+        "properties": {
+          "axis": {
+            "enum": [
+              "x",
+              "y",
+              "z"
+            ],
+            "title": "Axis",
+            "type": "string"
+          },
+          "factor": {
+            "title": "Factor",
+            "type": "number"
+          }
+        },
+        "required": [
+          "axis",
+          "factor"
+        ],
+        "title": "ScaleDelta",
         "type": "object"
       },
       "SearchResponse": {
@@ -4086,6 +4224,27 @@
         "title": "UpdateProjectRequest",
         "type": "object"
       },
+      "UpdateThreadScopeRequest": {
+        "description": "Body for ``PATCH /api/v1/chat/threads/{id}/scope`` (MET-580).\n\nRescopes an EXISTING thread in place, preserving its conversation \u2014 unlike\n``CreateThreadRequest``, which always starts a fresh thread.",
+        "properties": {
+          "scope_entity_id": {
+            "description": "ID of the scoped entity",
+            "title": "Scope Entity Id",
+            "type": "string"
+          },
+          "scope_kind": {
+            "description": "Scope type (session, approval, project, ...)",
+            "title": "Scope Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_kind",
+          "scope_entity_id"
+        ],
+        "title": "UpdateThreadScopeRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -5174,6 +5333,59 @@
           }
         },
         "summary": "Send Message",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/v1/chat/threads/{thread_id}/scope": {
+      "patch": {
+        "description": "Rescope an EXISTING thread in place (MET-580).\n\nUnlike ``POST /threads``, this preserves the conversation \u2014 the same\nthread continues, and its next turn's project brief (if scoped to a\nproject) reflects the new scope. The agent-callable ``chat.set_project_scope``\nnative tool goes through the same ``apply_thread_scope`` helper, so a human\nhitting this endpoint and the agent switching scope mid-turn behave\nidentically and both broadcast the same ``scope.changed`` SSE event.",
+        "operationId": "update_thread_scope_v1_chat_threads__thread_id__scope_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateThreadScopeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Thread Scope",
         "tags": [
           "chat"
         ]
@@ -7252,6 +7464,48 @@
           }
         },
         "summary": "List Twin Nodes",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/boolean-cut": {
+      "post": {
+        "description": "Real CSG boolean-cut between two committed STEP work products (MET-612).\n\nA direct-commit endpoint, not the ``twin.propose_change``/apply HITL\npipeline \u2014 a human cutting their own open model is not meaningfully\ndifferent from clicking Save (same rationale as ``twin.record_document``,\nwhose apply executor doesn't fit this action either). Drives the\ncontainerized CadQuery adapter via the shared MCP bridge, then commits the\nresult through the geometry recorder with provenance edges to both inputs.",
+        "operationId": "boolean_cut_nodes_v1_twin_nodes_boolean_cut_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BooleanCutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BooleanCutResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Boolean Cut Nodes",
         "tags": [
           "twin"
         ]

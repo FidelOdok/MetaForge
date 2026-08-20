@@ -8,7 +8,7 @@ vi.mock('../../client', () => ({
 }));
 
 import apiClient from '../../client';
-import { getProposals, decideProposal } from '../assistant';
+import { getProposals, decideProposal, createProposal } from '../assistant';
 
 const mockGet = vi.mocked(apiClient.get);
 const mockPost = vi.mocked(apiClient.post);
@@ -18,6 +18,28 @@ describe('getProposals', () => {
     mockGet.mockResolvedValueOnce({ data: { proposals: [], total: 0 } });
     const result = await getProposals();
     expect(result.total).toBe(0);
+  });
+});
+
+describe('createProposal', () => {
+  it('posts a human-created proposal', async () => {
+    mockPost.mockResolvedValueOnce({
+      data: { change_id: 'c2', status: 'pending', agent_code: 'human' },
+    });
+    const result = await createProposal({
+      description: 'Widen the bracket pad',
+      diff: { action: 'regenerate_geometry', script_source: 'pad(20)\n' },
+      projectId: 'proj-1',
+    });
+    expect(mockPost).toHaveBeenCalledWith(
+      '/assistant/proposals',
+      expect.objectContaining({
+        description: 'Widen the bracket pad',
+        diff: { action: 'regenerate_geometry', script_source: 'pad(20)\n' },
+        project_id: 'proj-1',
+      }),
+    );
+    expect(result.change_id).toBe('c2');
   });
 });
 

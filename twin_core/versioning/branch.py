@@ -44,11 +44,25 @@ class VersionEngine(ABC):
         message: str,
         work_product_ids: list[UUID],
         author: str,
+        content: dict[UUID, bytes] | None = None,
+        paths: dict[UUID, str] | None = None,
     ) -> Version:
         """Create a new version on the given branch.
 
         Captures a snapshot of all tracked work_products, overlaying changes
         from the provided work_product_ids.
+
+        Args:
+            content: Optional real file bytes per work_product_id (e.g. a
+                CadQuery/FreeCAD generation script). Implementations that
+                can store actual content (``GitVersionEngine``) use it to
+                produce real diffs; implementations that only track
+                content hashes (``InMemoryVersionEngine``) ignore it.
+            paths: Optional explicit storage path per work_product_id, so a
+                stable identity (e.g. a part's name) rather than its
+                ephemeral id determines where content lands — only
+                meaningful to ``GitVersionEngine``, which needs the *same*
+                path across regenerations to accumulate real history.
 
         Returns:
             The newly created Version node.
@@ -164,6 +178,8 @@ class InMemoryVersionEngine(VersionEngine):
         message: str,
         work_product_ids: list[UUID],
         author: str,
+        content: dict[UUID, bytes] | None = None,
+        paths: dict[UUID, str] | None = None,
     ) -> Version:
         if branch not in self._branches:
             raise KeyError(f"Branch '{branch}' does not exist")
