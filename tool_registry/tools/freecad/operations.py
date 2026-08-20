@@ -565,6 +565,42 @@ class FreecadOperations:
                 props["bounding_box"] = self._bbox_dict(shape.BoundBox)
             return {"file": input_file, "properties": props}
 
+    def describe_step_file(self, input_file: str) -> dict[str, Any]:
+        """Per-component breakdown of a (possibly multipart) CAD assembly file.
+
+        ``get_properties`` reads the file as one flattened ``Part.Shape`` --
+        it can report "3 solids, 6,080,000 mm3 total" but not "Tabletop (1
+        solid, 4.8M mm3), LegA, LegB." This loads the file into a document via
+        ``Import`` (preserves STEP PRODUCT names as object Labels -- see
+        MET-534/MET-535) so each named component's own geometry is visible.
+        For a multipart STEP export the result typically includes both each
+        named leaf part AND a top-level assembly/product compound whose
+        volume equals the sum of the parts -- compare volumes/solid_count to
+        tell them apart (the tool doesn't guess which is which).
+        """
+        self._require_freecad()
+        with tracer.start_as_current_span("freecad.describe_step_file"):
+            doc = FreeCAD.newDocument()
+            try:
+                Import.insert(input_file, doc.Name)
+                components = []
+                for obj in doc.Objects:
+                    shape = getattr(obj, "Shape", None)
+                    if shape is None or not shape.Solids:
+                        continue
+                    components.append(
+                        {
+                            "label": obj.Label,
+                            "solid_count": len(shape.Solids),
+                            "volume": round(shape.Volume, 2),
+                            "area": round(shape.Area, 2),
+                            "bounding_box": self._bbox_dict(shape.BoundBox),
+                        }
+                    )
+                return {"file": input_file, "components": components}
+            finally:
+                FreeCAD.closeDocument(doc.Name)
+
     # ------------------------------------------------------------------
     # Stateful authoring ops (MET-528) — operate on a live session document.
     # Each builds and returns a live FreeCAD object; the adapter registers it

@@ -153,13 +153,13 @@ class TestBootstrapToolRegistry:
     async def test_bootstrap_tool_count(self):
         """Verify total tool count across all adapters.
 
-        Grows as adapters gain tools; freecad reached 40 with the profile-part
-        generator (MET-541), bringing the cross-adapter total to 57.
+        Grows as adapters gain tools; freecad reached 44 with
+        describe_step_file (MET-629), bringing the cross-adapter total to 61.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 60
+        assert len(tools) == 61
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

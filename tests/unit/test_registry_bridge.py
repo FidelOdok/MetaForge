@@ -31,12 +31,12 @@ class TestRegistryMcpBridge:
     async def test_list_tools_all(self):
         """List all tools returns expected count.
 
-        Grows as adapters gain tools; freecad reached 43 with the session
-        boolean op (MET-10), bringing the cross-adapter total to 60.
+        Grows as adapters gain tools; freecad reached 44 with
+        describe_step_file (MET-629), bringing the cross-adapter total to 61.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 60
+        assert len(tools) == 61
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

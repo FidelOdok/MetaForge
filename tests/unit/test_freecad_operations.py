@@ -288,6 +288,96 @@ class TestGetProperties:
         }
 
 
+class _FakeDocObject:
+    def __init__(self, label: str, shape: _FakeShape | None = None) -> None:
+        self.Label = label
+        if shape is not None:
+            self.Shape = shape
+
+
+class _FakeDoc:
+    def __init__(self, name: str) -> None:
+        self.Name = name
+        self.Objects: list[_FakeDocObject] = []
+
+
+class _FakeFreeCADMulti:
+    """Fakes the two FreeCAD entry points describe_step_file needs."""
+
+    def __init__(self) -> None:
+        self.closed: list[str] = []
+        self.doc: _FakeDoc | None = None
+
+    def newDocument(self) -> _FakeDoc:
+        self.doc = _FakeDoc("doc1")
+        return self.doc
+
+    def closeDocument(self, name: str) -> None:
+        self.closed.append(name)
+
+
+class _FakeImport:
+    """Fakes ``Import.insert`` by populating the already-open fake document."""
+
+    def __init__(self, freecad: _FakeFreeCADMulti, objects: list[_FakeDocObject]) -> None:
+        self._freecad = freecad
+        self._objects = objects
+
+    def insert(self, path: str, docname: str) -> None:
+        assert self._freecad.doc is not None
+        self._freecad.doc.Objects.extend(self._objects)
+
+
+class TestDescribeStepFile:
+    """freecad.describe_step_file — per-component breakdown (MET-629).
+
+    Regression coverage for the gap where a multipart assembly's individual
+    named parts (volume/area/bbox per part) were unreachable over MCP:
+    freecad.get_properties only reads the file as one flattened Part.Shape,
+    and freecad.execute_code's sandbox blocks any code containing the word
+    "open" (e.g. ``Import.open(...)``), which is how an agent naturally
+    tried to load the file for a manual per-part inspection.
+    """
+
+    def test_returns_named_components_and_skips_shapeless_objects(self) -> None:
+        ops = FreecadOperations()
+        bbox = _FakeBoundBox()
+        tabletop = _FakeDocObject("Tabletop", _FakeShape())
+        tabletop.Shape.Solids = [object()]
+        tabletop.Shape.Volume = 4_800_000.0
+        tabletop.Shape.Area = 480_000.0
+        tabletop.Shape.BoundBox = bbox
+        leg_a = _FakeDocObject("LegA", _FakeShape())
+        leg_a.Shape.Solids = [object()]
+        leg_a.Shape.Volume = 640_000.0
+        leg_a.Shape.Area = 87_200.0
+        leg_a.Shape.BoundBox = bbox
+        origin = _FakeDocObject("Origin")  # no Shape attribute at all
+
+        freecad = _FakeFreeCADMulti()
+        fake_import = _FakeImport(freecad, [tabletop, leg_a, origin])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", freecad),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            result = ops.describe_step_file("/workspace/part.step")
+
+        assert result["file"] == "/workspace/part.step"
+        labels = [c["label"] for c in result["components"]]
+        assert labels == ["Tabletop", "LegA"]
+        assert result["components"][0]["volume"] == 4_800_000.0
+        assert result["components"][0]["solid_count"] == 1
+        assert freecad.closed == ["doc1"]
+
+    def test_raises_when_unavailable(self) -> None:
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.describe_step_file("/workspace/part.step")
+
+
 class TestExecuteCodeSandbox:
     """execute_code source-level guarding is validated before any FreeCAD call,
     so the sandbox policy is testable without FreeCAD bindings (MET-527)."""
