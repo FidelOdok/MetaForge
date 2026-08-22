@@ -368,7 +368,6 @@ fi
 
 # ── 7. Build + start the stack ───────────────────────────────────────
 if [ "$MODE" = "usage" ]; then
-  log "Building images (production mode — this can take a few minutes on first run)"
   SERVICES=(postgres neo4j minio gateway dashboard)
   # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
   # they start regardless, because `gateway` has a hard `depends_on:
@@ -379,8 +378,33 @@ if [ "$MODE" = "usage" ]; then
   # -f pins to docker-compose.yml only, skipping the auto-merged dev override
   # (hot-reload bind mounts + Vite dashboard).
   COMPOSE_BASE=("${DC[@]}" -f docker-compose.yml --profile prod)
-  if ! "${COMPOSE_BASE[@]}" up -d --build "${SERVICES[@]}"; then
+
+  # Gateway is published to GHCR (MET-638) — pull it instead of building from
+  # source. Everything else (dashboard, adapters) still builds locally; only
+  # gateway has an `image:` in docker-compose.yml for compose to pull.
+  log "Pulling the gateway image from GHCR"
+  GATEWAY_PULLED=0
+  if "${COMPOSE_BASE[@]}" pull gateway; then
+    ok "Pulled gateway image"
+    GATEWAY_PULLED=1
+  else
+    warn "Couldn't pull the gateway image (offline, or no image published for this ref yet) — building it locally instead."
+  fi
+
+  BUILD_SERVICES=()
+  for s in "${SERVICES[@]}"; do
+    [ "$s" = "gateway" ] && [ "$GATEWAY_PULLED" -eq 1 ] && continue
+    BUILD_SERVICES+=("$s")
+  done
+
+  log "Building remaining images and starting the stack (this can take a few minutes on first run)"
+  if ! "${COMPOSE_BASE[@]}" up -d --build "${BUILD_SERVICES[@]}"; then
     warn "docker compose up reported an error — often just service_healthy ordering timing out on a slow first boot. Continuing to health checks."
+  fi
+  # gateway wasn't in BUILD_SERVICES when the pull succeeded — start it
+  # (and anything it depends on that isn't already up) from the pulled image.
+  if [ "$GATEWAY_PULLED" -eq 1 ]; then
+    "${COMPOSE_BASE[@]}" up -d gateway || warn "docker compose up gateway reported an error — continuing to health checks."
   fi
 else
   log "Starting dev containers (hot-reload override auto-applied)"
@@ -539,7 +563,8 @@ else
   echo "docs/runbooks/cloudflare-mcp-tunnel.md for the tunnel this repo already uses."
   echo
   echo "To update later:"
-  echo "  cd '$ROOT_DIR' && git pull && ${COMPOSE_BASE[*]} up -d --build ${SERVICES[*]}"
+  echo "  cd '$ROOT_DIR' && git pull"
+  echo "  ${COMPOSE_BASE[*]} pull gateway && ${COMPOSE_BASE[*]} up -d --build ${BUILD_SERVICES[*]} && ${COMPOSE_BASE[*]} up -d gateway"
 fi
 echo
 echo "Docs: $ROOT_DIR/docs/getting-started.md · docs/cli-reference.md · docs/troubleshooting.md"

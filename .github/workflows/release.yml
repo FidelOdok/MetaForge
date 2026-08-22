@@ -175,3 +175,54 @@ jobs:
           files: artifacts/**/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  docker-publish:
+    # Publishes the gateway image to GHCR so `onboarding.sh` (usage mode) and
+    # docker-compose.yml's `image:` reference can pull instead of building
+    # from source (MET-638). Runs on every push to main (tags `:latest`) and
+    # additionally tags the resolved version when this run is release-worthy,
+    # so a `git pull && docker compose pull gateway` always has something to
+    # fetch even on commits that don't bump the version (docs/chore/etc).
+    name: publish gateway image
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute tags
+        id: tags
+        env:
+          SHOULD_RELEASE: ${{ needs.version.outputs.should_release }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          image="ghcr.io/fidelodok/metaforge-gateway"
+          tags="${image}:latest"
+          [ "$SHOULD_RELEASE" = "true" ] && tags="${tags}
+          ${image}:${VERSION}"
+          {
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
