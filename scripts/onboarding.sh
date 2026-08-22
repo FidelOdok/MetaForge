@@ -35,6 +35,10 @@ EXTRAS="dev,knowledge,cadquery"
 SKIP_CLI=0
 NON_INTERACTIVE=0
 FULL_STACK=0
+WITH_KICAD=0
+WITH_CALCULIX=0
+WITH_CADQUERY=0
+WITH_FREECAD=0
 HEALTH_TIMEOUT=240
 REPO_URL="https://github.com/FidelOdok/MetaForge.git"
 
@@ -55,15 +59,22 @@ Usage: onboarding.sh [options]
   --ref <git-ref>        branch or tag to install (default: main)
   --extras <list>        develop mode only: pip extras (default:
                          dev,knowledge,cadquery)
+  --llm-provider <name>  skip the interactive menu, use this provider
+                         (anthropic | openai | openrouter | ...)
   --llm-api-key <key>    skip the interactive prompt, use this key
   --skip-cli             don't install the `forge` CLI binary
-  --full                 also start the CAD/FEA/EDA tool adapters
-                         (kicad/calculix/cadquery/freecad) — everything
-                         else (Postgres/Neo4j/MinIO/Kafka/Temporal/OCCT)
-                         always starts, since the gateway requires them
-                         healthy before it will start itself
+  --with-kicad           start the KiCad adapter (schematic/PCB ERC+DRC+BOM)
+  --with-calculix        start the CalculiX adapter (FEA/thermal)
+  --with-cadquery        start the CadQuery adapter (parametric CAD)
+  --with-freecad         start the FreeCAD adapter (CAD authoring)
+  --full                 shorthand for all four --with-* adapter flags
+                         (Postgres/Neo4j/MinIO/Kafka/Temporal/OCCT always
+                         start regardless — the gateway requires them
+                         healthy before it will start itself)
   --yes                  non-interactive: never prompt (defaults to
-                         usage mode, no project name/idea prompts)
+                         usage mode, no adapters, no project name/idea
+                         prompts — pass --full and/or --with-* to still
+                         get adapters non-interactively)
   -h, --help             show this help
 EOF
 }
@@ -78,9 +89,15 @@ while [ $# -gt 0 ]; do
     --ref=*) GIT_REF="${1#*=}"; shift ;;
     --extras) EXTRAS="$2"; shift 2 ;;
     --extras=*) EXTRAS="${1#*=}"; shift ;;
+    --llm-provider) LLM_PROVIDER="$2"; shift 2 ;;
+    --llm-provider=*) LLM_PROVIDER="${1#*=}"; shift ;;
     --llm-api-key) LLM_API_KEY="$2"; shift 2 ;;
     --llm-api-key=*) LLM_API_KEY="${1#*=}"; shift ;;
     --skip-cli) SKIP_CLI=1; shift ;;
+    --with-kicad) WITH_KICAD=1; shift ;;
+    --with-calculix) WITH_CALCULIX=1; shift ;;
+    --with-cadquery) WITH_CADQUERY=1; shift ;;
+    --with-freecad) WITH_FREECAD=1; shift ;;
     --full) FULL_STACK=1; shift ;;
     --yes) NON_INTERACTIVE=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -150,6 +167,47 @@ if [ -z "$MODE" ]; then
 fi
 ok "Mode: $MODE"
 
+# ── 1b. Tool adapters ────────────────────────────────────────────────
+# Each CAD/FEA/EDA adapter is a separate container nothing else depends on
+# (unlike Postgres/Neo4j/Kafka/Temporal/OCCT, which the gateway hard-requires
+# healthy before it starts) — so these are the one thing worth walking the
+# user through individually rather than bundling into "the stack."
+if [ "$FULL_STACK" -eq 1 ]; then
+  WITH_KICAD=1; WITH_CALCULIX=1; WITH_CADQUERY=1; WITH_FREECAD=1
+elif [ "$WITH_KICAD" -eq 0 ] && [ "$WITH_CALCULIX" -eq 0 ] \
+     && [ "$WITH_CADQUERY" -eq 0 ] && [ "$WITH_FREECAD" -eq 0 ] && interactive; then
+  bold "Which CAD/FEA/EDA tool adapters do you want running?"
+  echo "  Each is a separate container MetaForge drives over MCP. Skip anything"
+  echo "  you don't need now — re-run this script later to add one."
+  ask_yn() {
+    local __var="$1" __prompt="$2" __ans=""
+    ask __ans "  ${__prompt} [y/N]: " || true
+    case "${__ans,,}" in y|yes) printf -v "$__var" 1 ;; *) printf -v "$__var" 0 ;; esac
+  }
+  ask_yn WITH_KICAD    "KiCad — schematic/PCB ERC+DRC+BOM (read-only in Phase 1)"
+  ask_yn WITH_CALCULIX "CalculiX — FEA/thermal analysis"
+  ask_yn WITH_CADQUERY "CadQuery — parametric CAD kernel"
+  ask_yn WITH_FREECAD  "FreeCAD — CAD authoring, enclosures, assemblies"
+fi
+# (non-interactive with no --with-*/--full: all four stay 0 — core platform only)
+
+ADAPTER_SERVICES=()
+[ "$WITH_KICAD" -eq 1 ] && ADAPTER_SERVICES+=(kicad-adapter)
+[ "$WITH_CALCULIX" -eq 1 ] && ADAPTER_SERVICES+=(calculix-adapter)
+[ "$WITH_CADQUERY" -eq 1 ] && ADAPTER_SERVICES+=(cadquery-adapter)
+[ "$WITH_FREECAD" -eq 1 ] && ADAPTER_SERVICES+=(freecad-adapter)
+if [ "${#ADAPTER_SERVICES[@]}" -gt 0 ]; then
+  ok "Tool adapters: ${ADAPTER_SERVICES[*]}"
+else
+  ok "Tool adapters: none (core platform only)"
+fi
+
+ADAPTER_PORTS=""
+[ "$WITH_CALCULIX" -eq 1 ] && ADAPTER_PORTS="${ADAPTER_PORTS}, 8200 (calculix)"
+[ "$WITH_CADQUERY" -eq 1 ] && ADAPTER_PORTS="${ADAPTER_PORTS}, 8101 (cadquery)"
+[ "$WITH_FREECAD" -eq 1 ] && ADAPTER_PORTS="${ADAPTER_PORTS}, 8102 (freecad)"
+# kicad-adapter publishes no host port.
+
 bold "What you'll need:"
 cat <<'REQS'
   1. Docker Desktop (or Docker Engine + the Compose plugin)
@@ -158,8 +216,10 @@ cat <<'REQS'
      just the gateway/dashboard: Postgres, Neo4j, MinIO, Kafka + Zookeeper,
      Temporal + its Postgres, and an internal STEP/GLB converter service are
      all hard startup dependencies of the gateway, not optional extras.
-  3. These ports free: 8000 (gateway), 3000 (dashboard), 7474 + 7687 (neo4j),
-     9000 + 9001 (minio), 9092 (kafka), 7233 (temporal), 8100 (occt-converter)
+REQS
+echo "  3. These ports free: 8000 (gateway), 3000 (dashboard), 7474 + 7687 (neo4j),"
+echo "     9000 + 9001 (minio), 9092 (kafka), 7233 (temporal), 8100 (occt-converter)${ADAPTER_PORTS}"
+cat <<'REQS'
   4. An API key from ONE model provider, so the chat/assistant layer can
      actually talk to an LLM:
        - Anthropic (recommended): https://console.anthropic.com/settings/keys
@@ -229,20 +289,41 @@ if [ -z "$LLM_API_KEY" ]; then
   LLM_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${OPENROUTER_API_KEY:-}}}"
   [ -n "$LLM_API_KEY" ] && ok "Found an API key already in your environment"
 fi
+
 if [ -z "$LLM_API_KEY" ]; then
   if interactive; then
-    echo "  Paste an API key to enable chat now, or press Enter to configure it later."
-    echo "  (Anthropic keys start with sk-ant-, OpenRouter keys with sk-or-, OpenAI keys with sk-)"
-    ask_hidden LLM_API_KEY "  API key: " || true
-    [ -z "$LLM_API_KEY" ] && warn "Skipping — the assistant/chat layer will be unavailable until you set METAFORGE_LLM_API_KEY later."
+    bold "Which LLM provider do you want to use?"
+    echo "  1) Anthropic  [recommended]  — https://console.anthropic.com/settings/keys"
+    echo "  2) OpenAI                    — https://platform.openai.com/api-keys"
+    echo "  3) OpenRouter (many models)  — https://openrouter.ai/keys"
+    echo "  4) Skip for now — configure later"
+    ask provider_choice "  Choose [1]: " || true
+    case "$provider_choice" in
+      2) LLM_PROVIDER="openai" ;;
+      3) LLM_PROVIDER="openrouter" ;;
+      4) LLM_PROVIDER="" ;;
+      *) LLM_PROVIDER="anthropic" ;;
+    esac
+    if [ -n "$LLM_PROVIDER" ]; then
+      ask_hidden LLM_API_KEY "  Paste your $LLM_PROVIDER API key: " || true
+      if [ -z "$LLM_API_KEY" ]; then
+        warn "No key entered — skipping. The assistant/chat layer will be unavailable until you set METAFORGE_LLM_API_KEY later."
+        LLM_PROVIDER=""
+      fi
+    else
+      warn "Skipping — the assistant/chat layer will be unavailable until you set METAFORGE_LLM_API_KEY later."
+    fi
   else
     warn "No API key provided — continuing without one. The assistant/chat layer will be unavailable until you set METAFORGE_LLM_API_KEY later."
   fi
 fi
-if [ -n "$LLM_API_KEY" ]; then
-  # Check the more specific prefixes first — OpenRouter keys (sk-or-...) would
-  # otherwise match a naive "starts with sk-" catch-all for OpenAI and get
-  # pointed at the wrong base URL entirely.
+
+# Keys from the environment, --llm-api-key, or --llm-provider skip the menu
+# above, so infer the provider from the key's prefix when it wasn't given
+# explicitly. Check the more specific prefixes first — an OpenRouter key
+# (sk-or-...) would otherwise match a naive "starts with sk-" catch-all for
+# OpenAI and get pointed at the wrong base URL entirely.
+if [ -n "$LLM_API_KEY" ] && [ -z "$LLM_PROVIDER" ]; then
   case "$LLM_API_KEY" in
     sk-ant-*) LLM_PROVIDER="anthropic" ;;
     sk-or-*) LLM_PROVIDER="openrouter" ;;
@@ -371,10 +452,11 @@ if [ "$MODE" = "usage" ]; then
   SERVICES=(postgres neo4j minio gateway dashboard)
   # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
   # they start regardless, because `gateway` has a hard `depends_on:
-  # condition: service_healthy` on all of them in docker-compose.yml. --full
-  # only controls the tool adapters, which really are optional (nothing
-  # depends_on them).
-  [ "$FULL_STACK" -eq 1 ] && SERVICES+=(kicad-adapter calculix-adapter cadquery-adapter freecad-adapter)
+  # condition: service_healthy` on all of them in docker-compose.yml.
+  # ADAPTER_SERVICES (chosen via the walkthrough / --with-*/--full above) adds
+  # only the tool adapters, which really are optional (nothing depends_on
+  # them).
+  SERVICES+=("${ADAPTER_SERVICES[@]}")
   # -f pins to docker-compose.yml only, skipping the auto-merged dev override
   # (hot-reload bind mounts + Vite dashboard).
   COMPOSE_BASE=("${DC[@]}" -f docker-compose.yml --profile prod)
@@ -411,10 +493,11 @@ else
   SERVICES=(postgres neo4j minio gateway dashboard-dev)
   # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
   # they start regardless, because `gateway` has a hard `depends_on:
-  # condition: service_healthy` on all of them in docker-compose.yml. --full
-  # only controls the tool adapters, which really are optional (nothing
-  # depends_on them).
-  [ "$FULL_STACK" -eq 1 ] && SERVICES+=(kicad-adapter calculix-adapter cadquery-adapter freecad-adapter)
+  # condition: service_healthy` on all of them in docker-compose.yml.
+  # ADAPTER_SERVICES (chosen via the walkthrough / --with-*/--full above) adds
+  # only the tool adapters, which really are optional (nothing depends_on
+  # them).
+  SERVICES+=("${ADAPTER_SERVICES[@]}")
   COMPOSE_BASE=("${DC[@]}")
   if ! "${COMPOSE_BASE[@]}" up -d "${SERVICES[@]}"; then
     warn "docker compose up reported an error — often just service_healthy ordering timing out on a slow first boot. Continuing to health checks."
