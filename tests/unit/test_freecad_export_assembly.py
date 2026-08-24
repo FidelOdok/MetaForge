@@ -19,6 +19,7 @@ duck-typed fakes (no FreeCAD, no `Part`, no `Import`).
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -118,6 +119,20 @@ class _FakeImport:
             fh.write(self._written)
 
 
+class _FakeReadShape:
+    """Stand-in for ``Part.Shape()`` used by the post-export roundtrip read."""
+
+    def __init__(self, solid_count: int) -> None:
+        self.Solids = [object()] * solid_count
+
+    def read(self, path: str) -> None:  # noqa: ARG002 -- path unused, path presence is the point
+        pass
+
+
+def _fake_part(solid_count: int) -> SimpleNamespace:
+    return SimpleNamespace(Shape=lambda: _FakeReadShape(solid_count))
+
+
 class TestExportObjectStepBytes:
     """MET-616: export must go through the object-list ``Import`` module, not a
     raw ``Shape.exportStep()`` on a flattened compound — the raw shape writer
@@ -151,6 +166,7 @@ class TestExportObjectStepBytes:
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
             patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(1)),
         ):
             result = ops.export_object_step_bytes(assembly)
 
@@ -165,6 +181,7 @@ class TestExportObjectStepBytes:
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
             patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(1)),
         ):
             ops.export_object_step_bytes(leaf)
 
@@ -185,6 +202,46 @@ class TestExportObjectStepBytes:
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
             patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
+
+    def test_marker_present_but_roundtrip_read_finds_no_solids_raises(
+        self, ops: FreecadOperations
+    ) -> None:
+        """MET-652 (reopened): live re-caught the gap after the regex fix
+        shipped -- a 23,361-byte STEP that matched _STEP_SOLID_MARKER_RE (a
+        MANIFOLD_SOLID_BREP entity was present in the DATA section) yet
+        opened with zero solids, because the geometry that entity referenced
+        was itself dangling/undefined. The regex alone cannot catch this;
+        reading the file back through the kernel and counting real solids is
+        the only authoritative check."""
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(written=b"STEP;dangling-ref;MANIFOLD_SOLID_BREP")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(0)),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
+
+    def test_roundtrip_read_failure_is_treated_as_no_solids(self, ops: FreecadOperations) -> None:
+        """A STEP file so malformed the kernel can't even open it is exactly
+        as unusable as one with zero solids -- must not be swallowed as a
+        false "success"."""
+
+        class _BrokenPart:
+            @staticmethod
+            def Shape() -> Any:
+                raise RuntimeError("corrupt STEP")
+
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(written=b"STEP;fake-export;MANIFOLD_SOLID_BREP")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _BrokenPart),
         ):
             with pytest.raises(ValueError, match="no exportable geometry"):
                 ops.export_object_step_bytes(leaf)
