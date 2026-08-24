@@ -416,8 +416,28 @@ class UnifiedMcpServer:
         # blob. Explicit step_base64 always wins.
         if tool_id == "twin.commit_geometry":
             args = params.get("arguments")
-            if isinstance(args, dict) and self._geom_stash.fill(args):
-                logger.info("geometry_commit_by_reference", obj_id=args.get("obj_id"))
+            if isinstance(args, dict):
+                had_explicit_blob = bool(args.get("step_base64"))
+                filled = self._geom_stash.fill(args)
+                # MET-642 S4 finding: a commit-by-reference miss (no matching
+                # prior export for this session_id/obj_id, and no explicit
+                # step_base64 either) previously surfaced only as
+                # commit_geometry's generic "no geometry" error, with no way
+                # to tell from logs whether the ids just never matched a real
+                # export_model call. Logging the attempt either way closes
+                # that gap. Not a "miss" if the caller passed step_base64
+                # directly -- fill() correctly no-ops in that case.
+                if not had_explicit_blob:
+                    event = (
+                        "geometry_commit_by_reference"
+                        if filled
+                        else "geometry_commit_by_reference_miss"
+                    )
+                    logger.info(
+                        event,
+                        session_id=args.get("session_id"),
+                        obj_id=args.get("obj_id"),
+                    )
 
         # Delegate to the adapter's own JSON-RPC dispatcher so its
         # per-tool error handling, timing, and structlog records all
@@ -449,7 +469,15 @@ class UnifiedMcpServer:
         if tool_id == "freecad.export_model":
             args = params.get("arguments")
             if isinstance(args, dict) and isinstance(result, dict):
-                self._geom_stash.remember(args, result)
+                remembered = self._geom_stash.remember(args, result)
+                event = (
+                    "geometry_export_remembered" if remembered else "geometry_export_not_remembered"
+                )
+                logger.info(
+                    event,
+                    session_id=args.get("session_id"),
+                    obj_id=args.get("obj_id"),
+                )
         return result
 
     async def _health_check(self) -> dict[str, Any]:

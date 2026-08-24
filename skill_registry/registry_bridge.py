@@ -56,7 +56,25 @@ class RegistryMcpBridge(McpBridge):
 
         # Fill a commit-by-reference geometry commit from the last export.
         if tool_id == "twin.commit_geometry":
-            self._geom_stash.fill(params)
+            had_explicit_blob = bool(params.get("step_base64"))
+            filled = self._geom_stash.fill(params)
+            # MET-642 S4 finding: this is the chat harness's actual dispatch
+            # seam (unlike metaforge/mcp/server.py's, which is the standalone
+            # sidecar used by external MCP clients) -- a miss here previously
+            # surfaced only as commit_geometry's generic "no geometry" error,
+            # with no way to tell whether the (session_id, obj_id) pair ever
+            # matched a real export_model call.
+            if not had_explicit_blob:
+                event = (
+                    "geometry_commit_by_reference"
+                    if filled
+                    else "geometry_commit_by_reference_miss"
+                )
+                logger.info(
+                    event,
+                    session_id=params.get("session_id"),
+                    obj_id=params.get("obj_id"),
+                )
 
         request = ToolCallRequest(
             tool_id=tool_id,
@@ -74,7 +92,12 @@ class RegistryMcpBridge(McpBridge):
 
         # Remember an export's STEP so a later commit can reference it.
         if tool_id == "freecad.export_model" and isinstance(result.data, dict):
-            self._geom_stash.remember(params, result.data)
+            remembered = self._geom_stash.remember(params, result.data)
+            logger.info(
+                "geometry_export_remembered" if remembered else "geometry_export_not_remembered",
+                session_id=params.get("session_id"),
+                obj_id=params.get("obj_id"),
+            )
 
         return result.data
 

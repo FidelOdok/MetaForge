@@ -25,13 +25,16 @@ class GeometryStash:
         self._cache: OrderedDict[tuple[str, str], str] = OrderedDict()
         self._max = max_entries
 
-    def remember(self, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+    def remember(self, arguments: dict[str, Any], result: dict[str, Any]) -> bool:
         """Cache the STEP from a ``freecad.export_model`` result.
 
         Handles both the raw handler return and the ``result["data"]`` envelope.
+        Returns True if a blob was actually cached, so callers can log a miss
+        (e.g. the export returned no step_base64, or session_id/obj_id was
+        missing) instead of it silently vanishing -- see MET-642 S4 finding.
         """
         if not isinstance(result, dict):
-            return
+            return False
         data = result.get("data")
         payload = data if isinstance(data, dict) else result
         sid, oid = arguments.get("session_id"), arguments.get("obj_id")
@@ -42,6 +45,8 @@ class GeometryStash:
             self._cache.move_to_end(key)
             while len(self._cache) > self._max:
                 self._cache.popitem(last=False)
+            return True
+        return False
 
     def fill(self, arguments: dict[str, Any]) -> bool:
         """Fill a commit_geometry call's ``step_base64`` from a prior export.
