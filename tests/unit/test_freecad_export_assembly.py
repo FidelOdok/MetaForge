@@ -108,13 +108,14 @@ class _FakeImport:
     """Records the object list `Import.export` was called with and writes a
     marker file, so tests can assert on both without real FreeCAD."""
 
-    def __init__(self) -> None:
+    def __init__(self, written: bytes = b"STEP;fake-export;MANIFOLD_SOLID_BREP") -> None:
         self.calls: list[list[object]] = []
+        self._written = written
 
     def export(self, objs: list[object], path: str) -> None:
         self.calls.append(objs)
         with open(path, "wb") as fh:
-            fh.write(b"STEP;fake-export")
+            fh.write(self._written)
 
 
 class TestExportObjectStepBytes:
@@ -154,7 +155,7 @@ class TestExportObjectStepBytes:
             result = ops.export_object_step_bytes(assembly)
 
         assert fake_import.calls == [[assembly]]  # the container, not its leaves
-        assert result == b"STEP;fake-export"
+        assert result == b"STEP;fake-export;MANIFOLD_SOLID_BREP"
 
     def test_single_leaf_object_also_goes_through_import_export(
         self, ops: FreecadOperations
@@ -168,3 +169,22 @@ class TestExportObjectStepBytes:
             ops.export_object_step_bytes(leaf)
 
         assert fake_import.calls == [[leaf]]
+
+    def test_written_step_with_no_solid_geometry_raises(self, ops: FreecadOperations) -> None:
+        """MET-652: live-caught a case where the source object's .Shape
+        looked valid (so the pre-export _shape_leaves check passed), but
+        Import.export wrote a STEP with only placement/context boilerplate --
+        a dangling SHAPE_REPRESENTATION referencing entities that were never
+        defined, no MANIFOLD_SOLID_BREP anywhere. That file was accepted as a
+        "successful" export and later broke every attempt to view it. The
+        written bytes must be checked too, not just the source object."""
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(
+            written=b"ISO-10303-21;HEADER;...no solids here...END-ISO-10303-21;"
+        )
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
