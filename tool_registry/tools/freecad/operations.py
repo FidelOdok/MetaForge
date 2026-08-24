@@ -133,6 +133,7 @@ _SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the names
 # first attempt. All three are plain geometry value types, not a sandbox
 # relaxation.
 _SANDBOX_CONVENIENCE_NAMES = {"Vector", "Rotation", "Placement", "Matrix"}
+import ast as _ast  # noqa: E402
 import re as _re  # noqa: E402
 
 _IMPORT_RE = _re.compile(
@@ -166,6 +167,67 @@ def _strip_sandbox_imports(script: str) -> str:
             continue
         out.append(line)
     return "\n".join(out)
+
+
+def _find_shared_compound_shape_reuse(code: str) -> str | None:
+    """Detect the exact pattern proven to crash the FreeCAD/OCCT process
+    outright (MET-643, confirmed by direct live repro): a shape passed into
+    ``Part.makeCompound([...])`` is later assigned, unmodified, as a SECOND
+    document object's ``.Shape`` -- e.g.::
+
+        compound = Part.makeCompound([tube, plate, boss])
+        ...
+        arm_obj.Shape = tube  # `tube` already lives inside `compound`
+
+    This is a native crash, not a catchable Python exception, so it cannot be
+    guarded from inside the script itself -- it has to be rejected before
+    ``exec()`` ever runs. Returns the offending variable name if found, else
+    ``None``. Best-effort/heuristic (a static AST pass, not a data-flow
+    analysis): it only recognizes the direct-name-reuse shape reproduced
+    live, and un-flags a name once it sees a ``.copy()`` call bind a new
+    value to it. It cannot see through aliasing, so this is a safety net for
+    the known-dangerous pattern, not a guarantee against every possible
+    variant.
+    """
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        return None  # exec() will raise its own clear error
+
+    compounded: set[str] = set()
+
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Assign):
+            value = node.value
+            if (
+                isinstance(value, _ast.Call)
+                and isinstance(value.func, _ast.Attribute)
+                and value.func.attr == "makeCompound"
+                and value.args
+                and isinstance(value.args[0], (_ast.List, _ast.Tuple))
+            ):
+                for elt in value.args[0].elts:
+                    if isinstance(elt, _ast.Name):
+                        compounded.add(elt.id)
+            # A `.copy()` call reassigned to the same name makes it safe again.
+            if (
+                isinstance(value, _ast.Call)
+                and isinstance(value.func, _ast.Attribute)
+                and value.func.attr == "copy"
+            ):
+                for target in node.targets:
+                    if isinstance(target, _ast.Name):
+                        compounded.discard(target.id)
+            # `obj.Shape = <name>` where <name> was already compounded.
+            for target in node.targets:
+                if (
+                    isinstance(target, _ast.Attribute)
+                    and target.attr == "Shape"
+                    and isinstance(value, _ast.Name)
+                    and value.id in compounded
+                ):
+                    return value.id
+    return None
 
 
 def _sandboxed_import(
@@ -1029,6 +1091,15 @@ class FreecadOperations:
         for blocked in _BLOCKED_NAMES:
             if _re.search(r"\b" + _re.escape(blocked) + r"\b", code):
                 raise ScriptSandboxError(f"Script contains blocked name: {blocked!r}")
+        reused = _find_shared_compound_shape_reuse(code)
+        if reused is not None:
+            raise ScriptSandboxError(
+                f"Script reassigns {reused!r} (already used inside Part.makeCompound(...)) "
+                "to another object's .Shape -- this crashes the FreeCAD process outright "
+                f"(MET-643, confirmed by live repro). Call {reused}.copy() before the second "
+                "assignment if you need both an assembly-level compound and a per-part "
+                "representation."
+            )
         code = _strip_sandbox_imports(code)
 
         self._require_freecad()

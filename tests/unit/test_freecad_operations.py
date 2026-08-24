@@ -397,6 +397,68 @@ class TestExecuteCodeSandbox:
         with pytest.raises(ScriptSandboxError, match="exceeds"):
             ops.execute_code(None, "\n".join(f"a{i} = {i}" for i in range(201)), max_lines=200)
 
+    def test_blocks_shared_compound_shape_reuse(self) -> None:
+        """MET-643: live-caught, then directly repro'd against the real
+        adapter (container RestartCount incremented on this exact script) --
+        assigning a shape already inside Part.makeCompound(...) to a second
+        object's .Shape crashes the FreeCAD/OCCT process outright. Since
+        that's a native crash, not a catchable Python exception, it must be
+        rejected before exec() ever runs."""
+        from tool_registry.tools.freecad.operations import FreecadOperations, ScriptSandboxError
+
+        ops = FreecadOperations()
+        code = (
+            "tube = Part.makeCylinder(5, 20)\n"
+            "plate = Part.makeBox(20, 20, 2)\n"
+            "boss = Part.makeCylinder(3, 5)\n"
+            "compound = Part.makeCompound([tube, plate, boss])\n"
+            "compound_obj = doc.addObject('Part::Feature', 'assembly_compound')\n"
+            "compound_obj.Shape = compound\n"
+            "arm_obj = doc.addObject('Part::Feature', 'arm')\n"
+            "arm_obj.Shape = tube\n"
+        )
+        with pytest.raises(ScriptSandboxError, match="tube.*makeCompound"):
+            ops.execute_code(None, code)
+
+    def test_allows_compound_reuse_after_explicit_copy(self) -> None:
+        """The documented safe pattern (MET-643's tool-description guidance):
+        calling .copy() before the second assignment must not be flagged."""
+        from tool_registry.tools.freecad.operations import FreecadOperations
+
+        ops = FreecadOperations()
+        code = (
+            "tube = Part.makeCylinder(5, 20)\n"
+            "compound = Part.makeCompound([tube])\n"
+            "compound_obj = doc.addObject('Part::Feature', 'assembly_compound')\n"
+            "compound_obj.Shape = compound\n"
+            "tube = tube.copy()\n"
+            "arm_obj = doc.addObject('Part::Feature', 'arm')\n"
+            "arm_obj.Shape = tube\n"
+        )
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+            # Past the sandbox guard, execute_code hits the (expected) missing-
+            # FreeCAD error -- proving the compound-reuse check did NOT fire.
+            with pytest.raises(FreecadNotAvailableError):
+                ops.execute_code(None, code)
+
+    def test_does_not_flag_unrelated_shape_assignments(self) -> None:
+        """Ordinary .Shape assignments with no compound involvement are untouched."""
+        from tool_registry.tools.freecad.operations import FreecadOperations
+
+        ops = FreecadOperations()
+        code = (
+            "box = Part.makeBox(1, 1, 1)\n"
+            "obj = doc.addObject('Part::Feature', 'box')\n"
+            "obj.Shape = box\n"
+        )
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+            with pytest.raises(FreecadNotAvailableError):
+                ops.execute_code(None, code)
+
 
 class _FakeVector:
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
