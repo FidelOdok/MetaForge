@@ -887,9 +887,14 @@ class TwinServer(McpToolServer):
                     "product: stores the STEP blob in MinIO, creates a twin node, "
                     "and links it to a project so it renders in the 3D viewer. "
                     "PREFER commit-by-reference: after freecad.export_model, call "
-                    "this with the SAME session_id and obj_id (plus name) and the "
+                    "this with the SAME session_id AND obj_id (plus name) and the "
                     "server fills the STEP itself — you do NOT need to copy the "
-                    "large base64 string. (Passing step_base64 directly also works.)"
+                    "large base64 string. BOTH session_id and obj_id are required "
+                    "together on every call, including retries — obj_id alone is "
+                    "NOT unique (it's a per-session counter, not a global id), so "
+                    "omitting session_id will not match your prior export even "
+                    "though obj_id is correct. (Passing step_base64 directly also "
+                    "works and needs neither id.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -962,20 +967,31 @@ class TwinServer(McpToolServer):
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
         if not step_base64 or not isinstance(step_base64, str):
-            # MET-642 S4 finding: this failure was reproduced live with no
-            # way to tell from logs whether the caller's (session_id, obj_id)
-            # simply never matched a prior export_model call (a model-side
-            # sequencing mistake) or the commit-by-reference stash itself
-            # failed to fill (a real bug) -- neither dispatch seam
-            # (metaforge/mcp/server.py, skill_registry/registry_bridge.py)
-            # logs the arguments it received. Logging them here closes that
-            # gap without needing to touch both call sites.
+            # MET-642 S4 finding: reproduced live TWICE with the identical
+            # mechanism -- the model retried commit_geometry with obj_id but
+            # WITHOUT session_id (confirmed via the new geometry_stash logging
+            # below: "session_id": null). The stash keys on (session_id,
+            # obj_id) together -- not obj_id alone -- because obj_id is a
+            # per-session sequential counter (f"{kind}_{n}", see
+            # FreecadSessionStore.register_object), not a globally-unique id;
+            # dropping session_id from the lookup would risk a cross-session
+            # collision, so the fix is a sharper error, not a looser stash.
+            given_obj_id = arguments.get("obj_id")
+            given_session_id = arguments.get("session_id")
             logger.warning(
                 "commit_geometry_missing_step_base64",
-                session_id=arguments.get("session_id"),
-                obj_id=arguments.get("obj_id"),
+                session_id=given_session_id,
+                obj_id=given_obj_id,
                 name=name,
             )
+            if given_obj_id and not given_session_id:
+                raise ValueError(
+                    "twin.commit_geometry: you passed obj_id but no session_id -- "
+                    "commit-by-reference requires BOTH, exactly as given to the "
+                    "freecad.export_model call that produced this obj_id (obj_id "
+                    "alone is not unique across sessions). Re-call with the same "
+                    "session_id you used for export_model, or pass step_base64 directly."
+                )
             raise ValueError(
                 "twin.commit_geometry: no geometry to commit — call freecad.export_model "
                 "first, then commit with the same session_id + obj_id (or pass step_base64)."

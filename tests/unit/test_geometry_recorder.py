@@ -166,6 +166,22 @@ class TestCommitGeometryAdapter:
         with pytest.raises(ValueError, match="name"):
             await server.commit_geometry({"step_base64": _STEP_B64})
 
+    async def test_obj_id_without_session_id_gets_a_specific_error(self) -> None:
+        """MET-650 finding: reproduced live TWICE (S4) -- the model retried
+        commit_geometry with obj_id but dropped session_id, and the generic
+        "no geometry to commit" error gave it nothing to self-correct from,
+        so it just repeated the same mistake until the turn exhausted its
+        context window. obj_id alone can never match (it's a per-session
+        counter, not a globally-unique id), so this exact shape gets its own
+        actionable message instead of the generic one."""
+        from tool_registry.tools.twin.adapter import TwinServer
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
+        with pytest.raises(ValueError, match="you passed obj_id but no session_id"):
+            await server.commit_geometry({"obj_id": "assembly_8", "name": "x"})
+
 
 # --------------------------------------------------------------------------
 # Unconstrained-project soft warning (MET-584)
