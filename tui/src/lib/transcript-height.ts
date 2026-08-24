@@ -43,3 +43,45 @@ export function messageHeight(m: ChatMessage, cols: number): number {
 export function transcriptHeight(messages: ChatMessage[], cols: number): number {
   return messages.reduce((n, m) => n + messageHeight(m, cols), 0);
 }
+
+/** Shape of `useChat`'s `pending` (kept local so this stays a pure, dependency-free lib). */
+export interface PendingLike {
+  text: string;
+  steps: { tool?: string; thought?: string }[];
+  thinking?: string;
+  startedAction?: string;
+}
+
+/**
+ * Rows the live in-flight turn occupies right now, mirroring <Chat>'s live
+ * region JSX (MET-641): the "thinking" block (steps + thinking preview +
+ * started-action line) plus either the streamed answer or the idle spinner.
+ *
+ * Without this, the bottom-pin spacer in the transcript layout is sized only
+ * from *finalized* messages, so as a turn's tool trace grows the live region
+ * silently outgrows its reserved space — the frame's total height jumps at
+ * the moment growing content first exceeds the stale reservation. Feeding
+ * this estimate into that calculation keeps the reservation shrinking in
+ * step with `pending`'s growth instead.
+ */
+export function pendingHeight(pending: PendingLike | null, cols: number, busy: boolean): number {
+  if (!pending) return 0;
+  const wrapW = Math.max(1, cols - 2); // Box has paddingX={1}
+  let rows = 1; // marginTop
+  const hasTrace = pending.steps.length > 0 || !!pending.thinking || !!pending.startedAction;
+  if (hasTrace) {
+    rows += 1; // "· thinking [~N tok]"
+    for (let i = 0; i < pending.steps.length; i++) {
+      rows += Math.max(1, Math.ceil(110 / Math.max(1, wrapW - 1))); // marginLeft={1}
+    }
+    if (pending.thinking) rows += wrappedLines(pending.thinking.slice(-600), wrapW - 1);
+    if (pending.startedAction) rows += 1;
+  }
+  if (pending.text) {
+    rows += 1; // "◆ assistant"
+    rows += wrappedLines(pending.text, wrapW);
+  } else if (busy) {
+    rows += 1; // spinner line
+  }
+  return rows;
+}
