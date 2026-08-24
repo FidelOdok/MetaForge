@@ -200,7 +200,15 @@ class ModelPolicy:
                 # the trailing summary field survives instead of being
                 # chopped off by a blind character slice mid-array.
                 obs = truncate_observation_value(s.error or s.observation, _MAX_OBS_CHARS)
-                lines.append(f"- called {s.tool_call.name} -> {obs}")
+                # MET-650: the arguments a PRIOR call was made with were never
+                # shown back to the model on later turns — only the tool name
+                # and its result. Live-caught on a commit-by-reference retry:
+                # once freecad.export_model scrolled past the current turn,
+                # the model had no way to recall the session_id it had just
+                # used (export_model's own result doesn't echo it back) and
+                # fabricated a plausible-looking placeholder instead.
+                args = truncate_observation_value(s.tool_call.arguments, _MAX_OBS_CHARS)
+                lines.append(f"- called {s.tool_call.name}({args}) -> {obs}")
         return "\n".join(lines) or "(no tool calls yet)"
 
     async def next_action(self, goal: str, steps: list[ReActStep]) -> ReActAction:

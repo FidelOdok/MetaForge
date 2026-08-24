@@ -251,9 +251,9 @@ async def test_policy_compresses_long_trace_into_synopsis() -> None:
     await policy.next_action("the goal", steps)
     content = seen["content"]
     assert "earlier steps compressed" in content  # synopsis present
-    assert "- called tool_0 ->" not in content  # oldest step line folded away
+    assert "- called tool_0(" not in content  # oldest step line folded away
     assert "tool_0×1" in content  # …but still named in the synopsis tally
-    assert "- called tool_11 ->" in content  # recent kept verbatim
+    assert "- called tool_11(" in content  # recent kept verbatim, args included (MET-650)
 
 
 @pytest.mark.asyncio

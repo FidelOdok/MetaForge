@@ -602,6 +602,10 @@ class TestStatefulAuthoring:
         assert result["size_bytes"] == len(b"ISO-10303-21;\nfake-step\n")
         assert base64.b64decode(result["step_base64"]) == b"ISO-10303-21;\nfake-step\n"
         assert result["volume_mm3"] == 1000.0
+        # MET-650: echoed back so a later commit-by-reference call can be
+        # built from this result alone, without needing to recall the
+        # arguments this call was originally made with.
+        assert result["session_id"] == sid
 
     async def test_create_primitive_passes_document_and_kind(
         self, authoring_server: FreecadServer

@@ -1545,6 +1545,10 @@ class FreecadServer(McpToolServer):
         obj = self._sessions.get_object(session_id, obj_id)
         step_bytes = self._ops.export_object_step_bytes(obj)
         return {
+            # MET-650: echoed back so a later twin.commit_geometry call (by
+            # reference) can be built directly from this result even if the
+            # arguments that produced it are no longer in view.
+            "session_id": session_id,
             "obj_id": obj_id,
             "format": "step",
             "size_bytes": len(step_bytes),
