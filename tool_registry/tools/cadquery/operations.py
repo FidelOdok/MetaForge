@@ -89,6 +89,24 @@ _SAFE_BUILTINS = {
     "tuple",
     "type",
     "zip",
+    # Exception types: pure classes, no capability to catch/raise them --
+    # unlike open/eval/exec/__import__ these were never a security boundary,
+    # just an oversight. A script wrapping its own logic in try/except (a
+    # completely normal Python pattern) crashed with "name 'Exception' is
+    # not defined" without these (found live during the MET-642 S3 eval,
+    # in the sibling FreeCAD adapter -- ported here for consistency).
+    "Exception",
+    "BaseException",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "IndexError",
+    "AttributeError",
+    "RuntimeError",
+    "StopIteration",
+    "ZeroDivisionError",
+    "ArithmeticError",
+    "NotImplementedError",
 }
 
 # Blocked names in script source

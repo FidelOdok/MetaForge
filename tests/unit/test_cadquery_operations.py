@@ -322,3 +322,20 @@ class TestExecuteScriptSandboxedImport:
         ):
             with pytest.raises(RuntimeError, match="import of 'json' is not permitted"):
                 ops.execute_script("import json\nresult = json.dumps({})", str(tmp_path / "o.step"))
+
+
+class TestExecuteScriptExceptionTypes:
+    """Ported from the FreeCAD fix (found live during the MET-642 S3 eval):
+    exception types were entirely missing from _SAFE_BUILTINS here too."""
+
+    def test_try_except_exception_no_longer_crashes(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script(
+                "try:\n    raise ValueError('x')\nexcept Exception:\n    result = cq.Workplane()\n",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")
