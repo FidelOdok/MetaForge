@@ -396,3 +396,69 @@ class TestExecuteCodeSandbox:
         ops = FreecadOperations()
         with pytest.raises(ScriptSandboxError, match="exceeds"):
             ops.execute_code(None, "\n".join(f"a{i} = {i}" for i in range(201)), max_lines=200)
+
+
+class _FakeVector:
+    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
+        self.x, self.y, self.z = x, y, z
+
+
+class _FakeFreeCADModule:
+    """Minimal fake exposing exactly what execute_code's namespace needs."""
+
+    Vector = _FakeVector
+    Rotation = object
+    Placement = object
+    Matrix = object
+
+
+class _FakeDocForExec:
+    def __init__(self) -> None:
+        self.recomputed = False
+
+    def recompute(self) -> None:
+        self.recomputed = True
+
+
+class TestExecuteCodeNamespaceConvenienceNames:
+    """MET-645: bare Vector/Rotation/Placement/Matrict must be pre-bound so a
+    model doesn't need to know to write FreeCAD.Vector -- the exact failure
+    ("name 'Vector' is not defined") observed live during the MET-642 eval."""
+
+    def test_bare_vector_is_pre_bound(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "result = Vector(1, 2, 3)")
+        assert isinstance(result, _FakeVector)
+        assert (result.x, result.y, result.z) == (1, 2, 3)
+        assert doc.recomputed is True
+
+    def test_bare_rotation_placement_matrix_are_pre_bound(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "result = (Rotation, Placement, Matrix)\nresult = 'ok'")
+        assert result == "ok"
+
+    def test_missing_convenience_attr_is_skipped_not_a_crash(self) -> None:
+        """A FreeCAD binding lacking one of these names must not break every
+        execute_code call -- degrade gracefully rather than AttributeError."""
+
+        class _BareFreeCAD:
+            pass
+
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _BareFreeCAD()),
+        ):
+            result = ops.execute_code(doc, "result = 'still works'")
+        assert result == "still works"

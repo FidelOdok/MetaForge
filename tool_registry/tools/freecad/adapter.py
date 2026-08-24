@@ -61,7 +61,10 @@ class FreecadServer(McpToolServer):
         self._ops = FreecadOperations(
             work_dir=self.config.work_dir, timeout=float(self.config.max_operation_time)
         )
-        self._sessions = FreecadSessionStore()
+        self._sessions = FreecadSessionStore(
+            ttl_seconds=self.config.session_ttl_seconds,
+            max_sessions=self.config.max_sessions,
+        )
         self._register_tools()
         self._register_authoring_tools()
 
@@ -955,7 +958,11 @@ class FreecadServer(McpToolServer):
             (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
-                "(escape hatch; assign `result` to surface an object)",
+                "(escape hatch; assign `result` to surface an object). Namespace "
+                "provides: FreeCAD (alias App), Part, math, doc, and the bare "
+                "geometry types Vector/Rotation/Placement/Matrix (no import needed, "
+                "no FreeCAD. prefix required). Blocked anywhere in the script: "
+                "open, __import__, os, sys, subprocess, eval, exec, compile.",
                 "cad_scripting",
                 obj_schema(
                     {"session_id": sid, "code": {"type": "string"}},

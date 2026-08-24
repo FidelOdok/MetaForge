@@ -110,6 +110,12 @@ _SAFE_BUILTINS = {
 }
 _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
 _SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the namespace
+# MET-645: FreeCAD scripts overwhelmingly reach for these bare (not
+# FreeCAD.Vector-qualified) -- binding them directly avoids a
+# NameError-then-fallback-to-raw-primitives round trip on the model's very
+# first attempt. All three are plain geometry value types, not a sandbox
+# relaxation.
+_SANDBOX_CONVENIENCE_NAMES = {"Vector", "Rotation", "Placement", "Matrix"}
 import re as _re  # noqa: E402
 
 _IMPORT_RE = _re.compile(
@@ -940,10 +946,16 @@ class FreecadOperations:
     ) -> Any:
         """Run a sandboxed FreeCAD Python script against the session ``doc``.
 
-        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``math`` and
-        the active ``doc``. Assign the object to surface to a variable named
-        ``result`` (it gets registered + returned). Source-level guarding mirrors
-        cadquery.execute_script; the real isolation boundary is the container.
+        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``math``,
+        the active ``doc``, and the geometry value types ``Vector``,
+        ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
+        ``FreeCAD.Vector``, though that also works). Assign the object to
+        surface to a variable named ``result`` (it gets registered + returned).
+        Blocked names (cannot appear anywhere in the script, including in
+        strings/comments): ``open``, ``__import__``, ``os``, ``sys``,
+        ``subprocess``, ``eval``, ``exec``, ``compile``. Source-level guarding
+        mirrors cadquery.execute_script; the real isolation boundary is the
+        container.
         """
         # Sandbox policy is validated first (no FreeCAD needed) so it's unit-testable.
         lines = code.strip().splitlines()
@@ -970,6 +982,11 @@ class FreecadOperations:
             "Part": Part,
             "math": math,
             "doc": document,
+            **{
+                name: getattr(FreeCAD, name)
+                for name in _SANDBOX_CONVENIENCE_NAMES
+                if hasattr(FreeCAD, name)
+            },
         }
 
         is_main = threading.current_thread() is threading.main_thread()

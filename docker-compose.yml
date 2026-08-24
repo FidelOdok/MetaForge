@@ -447,10 +447,16 @@ services:
       - FREECAD_HTTP_PORT=8102
       - QT_QPA_PLATFORM=offscreen
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # MET-643: unconfirmed OOM suspected in a container restart that wiped
+      # live sessions mid-turn -- up to max_sessions (32 by default) live
+      # FreeCAD documents can be held in memory at once, which is tight
+      # against the previous 2G limit. Raised as a defensive mitigation.
+      - FREECAD_MAX_SESSIONS=${FREECAD_MAX_SESSIONS:-32}
+      - FREECAD_SESSION_TTL_SECONDS=${FREECAD_SESSION_TTL_SECONDS:-1800}
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
           cpus: '4'
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/health')"]
