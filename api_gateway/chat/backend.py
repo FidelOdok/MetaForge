@@ -380,6 +380,25 @@ class PgChatBackend(ChatBackend):
         async with get_session() as session:
             await self._repo.update_thread_timestamp(session, thread_id, timestamp)
 
+    async def update_thread_scope(
+        self,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None:
+        from api_gateway.db.engine import get_session
+
+        async with get_session() as session:
+            return await self._repo.update_thread_scope(
+                session,
+                thread_id,
+                channel_id=channel_id,
+                scope_kind=scope_kind,
+                scope_entity_id=scope_entity_id,
+            )
+
 
 # ---------------------------------------------------------------------------
 # Factory
