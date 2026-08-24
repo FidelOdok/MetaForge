@@ -60,7 +60,10 @@ Usage: onboarding.sh [options]
   --extras <list>        develop mode only: pip extras (default:
                          dev,knowledge,cadquery)
   --llm-provider <name>  skip the interactive menu, use this provider
-                         (anthropic | openai | openrouter | ...)
+                         (anthropic | openai | openrouter | openai-codex | ...)
+                         "openai-codex" logs in via ChatGPT/Codex OAuth
+                         instead of an API key (browser flow, run once the
+                         stack is up — no --llm-api-key needed for it)
   --llm-api-key <key>    skip the interactive prompt, use this key
   --skip-cli             don't install the `forge` CLI binary
   --with-kicad           start the KiCad adapter (schematic/PCB ERC+DRC+BOM)
@@ -285,26 +288,36 @@ fi
 # ── 3. LLM API key ───────────────────────────────────────────────────
 log "Setting up your LLM provider"
 
-if [ -z "$LLM_API_KEY" ]; then
+CODEX_OAUTH_REQUESTED=0
+[ "$LLM_PROVIDER" = "openai-codex" ] && CODEX_OAUTH_REQUESTED=1
+
+if [ "$CODEX_OAUTH_REQUESTED" -eq 0 ] && [ -z "$LLM_API_KEY" ]; then
   LLM_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${OPENROUTER_API_KEY:-}}}"
   [ -n "$LLM_API_KEY" ] && ok "Found an API key already in your environment"
 fi
 
-if [ -z "$LLM_API_KEY" ]; then
+if [ "$CODEX_OAUTH_REQUESTED" -eq 0 ] && [ -z "$LLM_API_KEY" ]; then
   if interactive; then
     bold "Which LLM provider do you want to use?"
     echo "  1) Anthropic  [recommended]  — https://console.anthropic.com/settings/keys"
     echo "  2) OpenAI                    — https://platform.openai.com/api-keys"
     echo "  3) OpenRouter (many models)  — https://openrouter.ai/keys"
-    echo "  4) Skip for now — configure later"
+    echo "  4) ChatGPT / Codex subscription — OAuth, no key to paste"
+    echo "  5) Skip for now — configure later"
     ask provider_choice "  Choose [1]: " || true
     case "$provider_choice" in
       2) LLM_PROVIDER="openai" ;;
       3) LLM_PROVIDER="openrouter" ;;
-      4) LLM_PROVIDER="" ;;
+      4) LLM_PROVIDER="openai-codex" ;;
+      5) LLM_PROVIDER="" ;;
       *) LLM_PROVIDER="anthropic" ;;
     esac
-    if [ -n "$LLM_PROVIDER" ]; then
+    if [ "$LLM_PROVIDER" = "openai-codex" ]; then
+      # No key to paste — the actual browser OAuth login can only run once the
+      # gateway is up and `forge` is installed, so it's deferred to step 9b.
+      CODEX_OAUTH_REQUESTED=1
+      ok "Will log in with your ChatGPT/Codex subscription once the stack is up."
+    elif [ -n "$LLM_PROVIDER" ]; then
       ask_hidden LLM_API_KEY "  Paste your $LLM_PROVIDER API key: " || true
       if [ -z "$LLM_API_KEY" ]; then
         warn "No key entered — skipping. The assistant/chat layer will be unavailable until you set METAFORGE_LLM_API_KEY later."
@@ -428,6 +441,11 @@ if [ -n "$LLM_API_KEY" ]; then
   set_if_blank METAFORGE_LLM_PROVIDER "$LLM_PROVIDER"
   set_if_blank METAFORGE_LLM_API_KEY "$LLM_API_KEY"
   ok "Configured LLM provider: $LLM_PROVIDER"
+elif [ "$CODEX_OAUTH_REQUESTED" -eq 1 ]; then
+  # No API key for OAuth — the actual credential lands in the gateway's
+  # auth store once step 9b's login succeeds. This env var is only the
+  # lowest-priority fallback default (see api_gateway/harness/routes.py).
+  set_if_blank METAFORGE_LLM_PROVIDER "openai-codex"
 fi
 
 # ── 6. Python environment (develop mode only) ────────────────────────
@@ -572,6 +590,31 @@ else
   warn "forge CLI not found on PATH — open a new shell (it was just added to your profile) or re-run scripts/install.sh"
 fi
 
+# ── 9b. Codex OAuth login ─────────────────────────────────────────────
+# Deferred from step 3: `forge auth login` pushes the credential to the
+# gateway over HTTP, so it can only run once both `forge` and the gateway
+# exist — which is right here, not back when the provider was chosen.
+CODEX_LOGIN_OK=0
+if [ "$CODEX_OAUTH_REQUESTED" -eq 1 ]; then
+  if [ "$HAVE_FORGE" -eq 1 ] && [ "$gateway_ok" -eq 1 ]; then
+    log "Logging in with your ChatGPT/Codex subscription"
+    echo "  A browser window should open to authorize. On a headless box, Ctrl-C"
+    echo "  and run instead: forge auth login --provider openai-codex --method oauth --no-browser"
+    if forge auth login --provider openai-codex --method oauth --no-activate; then
+      if forge auth use openai-codex; then
+        ok "Codex OAuth login complete — active provider: openai-codex"
+        CODEX_LOGIN_OK=1
+      else
+        warn "Logged in but couldn't set openai-codex as active — run: forge auth use openai-codex"
+      fi
+    else
+      warn "Codex OAuth login didn't complete — run later: forge auth login --provider openai-codex --method oauth"
+    fi
+  else
+    warn "Skipping Codex OAuth login — forge CLI or the gateway isn't available. Run later: forge auth login --provider openai-codex --method oauth"
+  fi
+fi
+
 # ── 10. First project walkthrough ────────────────────────────────────
 if [ "$gateway_ok" -eq 1 ]; then
   log "Let's create your first project"
@@ -597,7 +640,7 @@ if [ "$gateway_ok" -eq 1 ]; then
 
   if [ -n "$PROJECT_ID" ]; then
     ok "Created project '$PROJECT_NAME' (id: $PROJECT_ID)"
-    if [ "$HAVE_FORGE" -eq 1 ] && [ -n "$LLM_API_KEY" ]; then
+    if [ "$HAVE_FORGE" -eq 1 ] && { [ -n "$LLM_API_KEY" ] || [ "$CODEX_LOGIN_OK" -eq 1 ]; }; then
       log "Asking the assistant about it (project-scoped chat)"
       msg="Introduce yourself in one sentence and say what you can help me build for this project."
       [ -n "$PROJECT_IDEA" ] && msg="I'm building: $PROJECT_IDEA. $msg"
@@ -608,8 +651,8 @@ if [ "$gateway_ok" -eq 1 ]; then
       else
         warn "No reply from the assistant — check: forge auth list, and gateway logs."
       fi
-    elif [ -z "$LLM_API_KEY" ]; then
-      warn "No LLM key configured — skipping the chat demo. Set one, then run: forge chat --project $PROJECT_ID -m \"...\""
+    elif [ -z "$LLM_API_KEY" ] && [ "$CODEX_LOGIN_OK" -eq 0 ]; then
+      warn "No LLM provider configured — skipping the chat demo. Set one, then run: forge chat --project $PROJECT_ID -m \"...\""
     fi
     echo "  Dashboard: http://localhost:${DASHBOARD_PORT}/projects/${PROJECT_ID}"
   else
