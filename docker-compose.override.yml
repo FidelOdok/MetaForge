@@ -78,6 +78,7 @@ services:
     environment:
       - METAFORGE_ENV=docker
       - NEO4J_URI=bolt://neo4j:7687
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Credentials sourced from .env — same vars the gateway service uses.
       # No literal fallbacks: secret scanners treat a hardcoded user/pass
       # pair in a connection string as a credential leak even for dev defaults.
