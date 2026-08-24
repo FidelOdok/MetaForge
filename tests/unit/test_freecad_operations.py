@@ -447,6 +447,25 @@ class TestExecuteCodeNamespaceConvenienceNames:
             result = ops.execute_code(doc, "result = (Rotation, Placement, Matrix)\nresult = 'ok'")
         assert result == "ok"
 
+    def test_logs_script_before_running_it(self) -> None:
+        """MET-643: a native crash inside exec() kills the adapter process
+        with no Python traceback ever logged, leaving no way to tell what
+        script provoked it. The script must be logged BEFORE exec runs (a
+        log emitted after a crash would never be reached)."""
+        import structlog.testing
+
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+            structlog.testing.capture_logs() as logs,
+        ):
+            ops.execute_code(doc, "result = 'ok'")
+        events = [entry for entry in logs if entry.get("event") == "freecad_execute_code_running"]
+        assert len(events) == 1
+        assert events[0]["code"] == "result = 'ok'"
+
     def test_missing_convenience_attr_is_skipped_not_a_crash(self) -> None:
         """A FreeCAD binding lacking one of these names must not break every
         execute_code call -- degrade gracefully rather than AttributeError."""
