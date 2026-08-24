@@ -8,6 +8,7 @@ real CadQuery installation.
 
 from __future__ import annotations
 
+import base64
 import math
 import os
 import re
@@ -115,6 +116,12 @@ def _strip_sandbox_imports(script: str) -> str:
     Only top-level import lines whose root module is in ``_SANDBOX_MODULES``
     are removed.  Unknown imports are left in place so they correctly fail
     against the sandbox policy.
+
+    Best-effort only -- ``_IMPORT_RE`` requires a bare module name, so a
+    dotted submodule import or a comma-separated import list passes through
+    untouched. ``_sandboxed_import`` below is the real enforcement point
+    (mirrors the identical fix in ``tool_registry/tools/freecad/operations.py``
+    MET-645 follow-up).
     """
     out_lines: list[str] = []
     for line in script.splitlines():
@@ -126,6 +133,30 @@ def _strip_sandbox_imports(script: str) -> str:
                 continue  # drop this import line
         out_lines.append(line)
     return "\n".join(out_lines)
+
+
+def _sandboxed_import(
+    name: str,
+    globals: dict[str, Any] | None = None,  # noqa: A002
+    locals: dict[str, Any] | None = None,  # noqa: A002
+    fromlist: tuple[str, ...] = (),
+    level: int = 0,
+) -> Any:
+    """Restricted ``__import__`` for execute_script's namespace (MET-645 follow-up).
+
+    Only the already-injected sandbox modules (cadquery/cq/math) may be
+    imported -- via any syntax (dotted submodules, from-import, aliasing) --
+    since ``_strip_sandbox_imports`` only catches the plain ``import X`` /
+    ``from X import Y`` forms textually. Resolves to the SAME objects already
+    bound in the namespace rather than performing a real import, so it grants
+    no capability beyond what's already pre-bound. Anything else raises
+    ImportError, same as a genuinely missing module.
+    """
+    top_level = name.split(".", 1)[0]
+    if top_level not in _SANDBOX_MODULES:
+        raise ImportError(f"import of {name!r} is not permitted in this sandbox")
+    resolved = {"cadquery": cq, "cq": cq, "math": math}[top_level]
+    return resolved
 
 
 # Shape dimension defaults per shape type
@@ -516,6 +547,10 @@ class CadqueryOperations:
             for k in _SAFE_BUILTINS:
                 if hasattr(_builtins_module, k):
                     safe_builtins[k] = getattr(_builtins_module, k)
+            # MET-645 follow-up: a restricted __import__ so any import/from-
+            # import syntax _strip_sandbox_imports' regex doesn't catch
+            # (dotted submodules, unusual formatting) still resolves safely.
+            safe_builtins["__import__"] = _sandboxed_import
 
             namespace: dict[str, Any] = {
                 "__builtins__": safe_builtins,
@@ -586,11 +621,22 @@ class CadqueryOperations:
                 duration_s=round(elapsed, 3),
             )
 
-            return {
+            result: dict[str, Any] = {
                 "cad_file": output_path,
                 "script_text": script,
                 **props,
             }
+            # MET-648: without step_base64, CadQuery output had no path into
+            # twin.commit_geometry at all (unlike freecad.export_model, which
+            # already returns step_base64) -- the model would generate correct
+            # geometry via CadQuery and then have nothing valid to commit,
+            # silently falling back to committing an earlier, worse attempt
+            # from a different tool. Only populate it for an actual STEP
+            # export -- commit_geometry's step_base64 is STEP-specific.
+            if output_path.lower().endswith((".step", ".stp")):
+                with open(output_path, "rb") as f:  # noqa: PTH123
+                    result["step_base64"] = base64.b64encode(f.read()).decode("ascii")
+            return result
 
     def create_assembly(
         self,
