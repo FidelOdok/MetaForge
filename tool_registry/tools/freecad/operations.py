@@ -139,6 +139,13 @@ _IMPORT_RE = _re.compile(
     r"^(?:import\s+(?P<mod>\w+)(?:\s+as\s+\w+)?|from\s+(?P<from_mod>\w+)\s+import\s+.+)$"
 )
 
+# MET-652: any STEP with real solid geometry has at least one of these AP214
+# entities. A file with only placement/context boilerplate (no solids) is
+# exactly the "successful export, empty file" failure this guards against.
+_STEP_SOLID_MARKER_RE = _re.compile(
+    rb"MANIFOLD_SOLID_BREP|BREP_WITH_VOIDS|SHELL_BASED_SURFACE_MODEL"
+)
+
 
 def _strip_sandbox_imports(script: str) -> str:
     """Drop top-level import lines for modules already injected (FreeCAD/App/Part).
@@ -1640,12 +1647,22 @@ class FreecadOperations:
             tmp_path = tmp.name
         try:
             Import.export([obj], tmp_path)
-            return Path(tmp_path).read_bytes()
+            step_bytes = Path(tmp_path).read_bytes()
         finally:
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
+        # MET-652: the pre-export _shape_leaves check above validates the
+        # SOURCE object's .Shape, not what Import.export actually wrote --
+        # live-caught a case where the source check passed but the written
+        # STEP had no solid entities at all (a dangling SHAPE_REPRESENTATION
+        # referencing geometry that was never defined), so a "successful"
+        # commit silently stored an unusable file. Checking the written
+        # bytes closes that gap regardless of which step produced it.
+        if not _STEP_SOLID_MARKER_RE.search(step_bytes):
+            self._raise_empty_geometry(obj)
+        return step_bytes
 
     @staticmethod
     def _bbox_dict(bb: Any) -> dict[str, float]:
