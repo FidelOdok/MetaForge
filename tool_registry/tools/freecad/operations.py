@@ -107,6 +107,23 @@ _SAFE_BUILTINS = {
     "tuple",
     "type",
     "zip",
+    # Exception types: pure classes, no capability to catch/raise them --
+    # unlike open/eval/exec/__import__ these were never a security boundary,
+    # just an oversight. A script wrapping its own logic in try/except (a
+    # completely normal Python pattern) crashed with "name 'Exception' is
+    # not defined" without these (found live during the MET-642 S3 eval).
+    "Exception",
+    "BaseException",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "IndexError",
+    "AttributeError",
+    "RuntimeError",
+    "StopIteration",
+    "ZeroDivisionError",
+    "ArithmeticError",
+    "NotImplementedError",
 }
 _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
 _SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the namespace

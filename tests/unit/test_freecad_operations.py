@@ -518,3 +518,38 @@ class TestExecuteCodeSandboxedImport:
         ops = FreecadOperations()
         with pytest.raises(ScriptSandboxError, match="__import__"):
             ops.execute_code(None, "result = __import__('math')")
+
+
+class TestExecuteCodeExceptionTypes:
+    """Exception types were entirely missing from _SAFE_BUILTINS -- a pure
+    oversight (unlike open/eval/__import__, catching/raising a builtin
+    exception type grants no capability). A script wrapping its own logic in
+    try/except (a completely normal pattern) crashed with "name 'Exception'
+    is not defined" -- found live during the MET-642 S3 eval."""
+
+    def test_try_except_exception_no_longer_crashes(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(
+                doc,
+                "try:\n    raise ValueError('x')\nexcept Exception as e:\n    result = str(e)\n",
+            )
+        assert result == "x"
+
+    def test_common_exception_types_available(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(
+                doc,
+                "result = (Exception, ValueError, TypeError, KeyError, "
+                "IndexError, AttributeError, RuntimeError)\nresult = 'ok'",
+            )
+        assert result == "ok"
