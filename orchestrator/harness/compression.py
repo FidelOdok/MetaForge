@@ -69,6 +69,27 @@ def _summarize(older: Sequence[ReActStep]) -> str:
     return f"[{len(older)} earlier steps compressed — tools: {tool_desc}; errors: {errors}]"
 
 
+def summarize_trajectory(steps: Sequence[ReActStep]) -> str:
+    """A hand-off summary of what a loop attempted before stopping without a
+    real answer (step cap / wall-clock timeout) — production-harness audit
+    follow-up. Replaces a bare "I couldn't converge" string, which threw away
+    the full trajectory even though it was sitting right there in memory.
+    """
+    if not steps:
+        return "I ran out of turns before I could take any actions."
+    lines = ["I ran out of turns before finishing. Here's what I did:"]
+    for i, step in enumerate(steps, 1):
+        if step.tool_call is None:
+            continue
+        name = step.tool_call.name
+        if step.error is not None:
+            lines.append(f"{i}. {name} — failed: {step.error}")
+        else:
+            lines.append(f"{i}. {name} — succeeded")
+    lines.append("Ask me to continue and I'll pick up from here.")
+    return "\n".join(lines)
+
+
 def _render_all(goal: str, synopsis: str | None, steps: Sequence[ReActStep]) -> str:
     lines = [f"goal: {goal}"]
     if synopsis is not None:

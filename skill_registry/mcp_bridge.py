@@ -75,6 +75,7 @@ class InMemoryMcpBridge(McpBridge):
         self._responses: dict[str, dict[str, Any]] = {}
         self._available: set[str] = set()
         self._tools: list[dict[str, Any]] = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def register_tool_response(self, tool_id: str, response: dict[str, Any]) -> None:
         """Register a mock response for a tool."""
@@ -110,6 +111,7 @@ class InMemoryMcpBridge(McpBridge):
         params: dict[str, Any],
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        self.calls.append((tool_id, params))
         if tool_id not in self._responses:
             raise McpToolError(tool_id, f"No mock response registered for {tool_id}")
         return self._responses[tool_id]

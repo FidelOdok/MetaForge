@@ -19,6 +19,7 @@ from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.bom.routes import router as bom_router
 from api_gateway.cad.routes import router as cad_router
 from api_gateway.chat.routes import router as chat_router
+from api_gateway.chat.tool_approvals import router as tool_approvals_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
@@ -748,7 +749,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.bom.routes import init_twin as init_bom_twin
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.context_adapter import init_context_assembler
-    from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
+    from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_metrics, init_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
     from api_gateway.twin.routes import init_twin as init_twin_viewer
@@ -776,6 +777,24 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Wire the active bridge and twin into chat routes and projects routes
     init_mcp_bridge(active_bridge)
     init_twin(twin)
+    # Production-harness audit follow-up: give the chat harness loop the
+    # gateway's real MetricsCollector (was previously never wired at all).
+    init_metrics(_collector)
+    # Production-harness audit follow-up: the /v1/runs store was always
+    # process-local despite a real SQLite ledger existing for exactly this
+    # ("persistence lands in Phase 4" — never actually connected). Disabled
+    # via METAFORGE_RUNS_LEDGER_DISABLE for tests/environments that don't
+    # want a file touched.
+    if (os.environ.get("METAFORGE_RUNS_LEDGER_DISABLE", "").strip().lower()) not in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        from api_gateway.runs.routes import init_run_ledger
+        from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
+
+        init_run_ledger(SqliteRunLedger(str(default_ledger_path())))
     # MET-566: chat-turn context assembly (knowledge fragments with
     # attribution/staleness/conflicts). No-op when LightRAG isn't configured.
     init_context_assembler(
@@ -1047,6 +1066,7 @@ def create_app(
     app.include_router(sessions_router)
     app.include_router(projects_router)
     app.include_router(runs_router)
+    app.include_router(tool_approvals_router)
     app.include_router(cad_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)

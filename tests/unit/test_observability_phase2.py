@@ -265,7 +265,8 @@ class TestAllMetricsCombined:
         # 4 gateway + 5 agent + 2 skill + 5 kafka + 7 datastore + 5 telemetry
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
-        assert len(MetricsRegistry.all_metrics()) == 45
+        # + 5 harness (production-harness audit follow-up)
+        assert len(MetricsRegistry.all_metrics()) == 50
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -280,6 +281,7 @@ class TestAllMetricsCombined:
             + len(MetricsRegistry.knowledge_metrics())
             + len(MetricsRegistry.twin_metrics())
             + len(MetricsRegistry.consolidation_metrics())
+            + len(MetricsRegistry.harness_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

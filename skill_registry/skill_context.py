@@ -67,7 +67,7 @@ def cards_for_domains(cards: list[SkillCard], domains: tuple[str, ...]) -> list[
     return [c for c in cards if c.domain in wanted]
 
 
-def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 12000) -> str:
+def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 18000) -> str:
     """Concatenate the cards' SKILL.md into a procedural reference block, trimmed
     to ``budget_chars`` so a phase with many skills can't blow the context."""
     if not cards:

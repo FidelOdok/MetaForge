@@ -60,6 +60,7 @@ from api_gateway.chat.streaming import (
     notify_agent_typing,
     notify_context_stats,
     notify_message_delta,
+    notify_tool_approval_requested,
     stream_manager,
     stream_thread,
 )
@@ -77,6 +78,7 @@ from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
     run_agent,
 )
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 from orchestrator.harness.compression import budget_history, summarize_turns
 from skill_registry.mcp_bridge import InMemoryMcpBridge, McpBridge
@@ -157,6 +159,18 @@ store = _backend
 
 _twin = InMemoryTwinAPI.create()
 _mcp_bridge: McpBridge = InMemoryMcpBridge()
+_metrics: MetricsCollector | None = None
+
+
+def init_metrics(collector: MetricsCollector | None) -> None:
+    """Wire the gateway's real MetricsCollector into the harness path
+    (production-harness audit follow-up — the harness loop had zero metrics
+    of its own). Called by the API Gateway lifespan; None (the default,
+    matching every existing test) keeps this a no-op.
+    """
+    global _metrics  # noqa: PLW0603
+    _metrics = collector
+    logger.info("chat_metrics_initialized", enabled=collector is not None)
 
 
 def init_mcp_bridge(bridge: McpBridge) -> None:
@@ -385,6 +399,13 @@ async def _invoke_agent(
                 async def _on_context(stats: dict[str, object]) -> None:
                     await notify_context_stats(thread.id, stats)
 
+                async def _on_approval_request(
+                    run_id: str, tool: str, arguments: dict[str, object]
+                ) -> None:
+                    # Production-harness audit follow-up: best-effort — a
+                    # broadcast failure must never block the paused tool call.
+                    await notify_tool_approval_requested(thread.id, run_id, tool, arguments)
+
                 await notify_agent_typing(thread.id, "harness-agent")
                 # Project-scoped threads carry a project brief so the agent
                 # reasons over the digital thread and scopes new work to it;
@@ -411,6 +432,7 @@ async def _invoke_agent(
                     on_thinking=_on_thinking,
                     on_action_started=_on_action_started,
                     on_context=_on_context,
+                    on_approval_request=_on_approval_request,
                     session_id=thread.id,
                     mcp_bridge=_mcp_bridge,
                     provider=provider,
@@ -421,6 +443,7 @@ async def _invoke_agent(
                     project_brief=brief,
                     context_block=context_block,
                     chat_backend=_backend,
+                    twin=_twin,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(

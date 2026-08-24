@@ -72,6 +72,7 @@ class TestMechanicalAgent:
             "generate_mesh",
             "generate_cad",
             "generate_cad_script",
+            "generate_cad_ir",
             "full_validation",
             "design_workflow",
         }

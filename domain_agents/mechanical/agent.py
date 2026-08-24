@@ -43,6 +43,12 @@ from domain_agents.mechanical.skills.generate_cad.handler import (
 from domain_agents.mechanical.skills.generate_cad.schema import (
     GenerateCadInput,
 )
+from domain_agents.mechanical.skills.generate_cad_ir.handler import (
+    GenerateCadIrHandler,
+)
+from domain_agents.mechanical.skills.generate_cad_ir.schema import (
+    GenerateCadIrInput,
+)
 from domain_agents.mechanical.skills.generate_cad_script.handler import (
     GenerateCadScriptHandler,
 )
@@ -143,9 +149,15 @@ CalculiX. Provide mesh_file_path, load_case, and stress constraints.
 FreeCAD/Netgen. Provide cad_file path and meshing parameters.
 - **check_tolerance**: Check dimensional tolerances against manufacturing \
 process capabilities. Provide tolerance specs and manufacturing process details.
-- **generate_cad_script**: Generate a CadQuery Python script from a natural \
-language description, then execute it to produce a 3D CAD model (STEP file). \
-Provide a description of the desired geometry and optional constraints.
+- **generate_cad_script**: Generate a CadQuery or FreeCAD Python script from a \
+natural language description, then execute it to produce a 3D CAD model (STEP \
+file). Provide a description, the script itself, and which backend it targets. \
+No editable feature tree afterward, just a script that can be re-run.
+- **generate_cad_ir**: Generate CAD geometry from a structured Design IR \
+feature tree (FreeCAD only) -- a list of typed, id-addressed entities \
+(create_body, sketch, pad, fillet_edges, ...) instead of a script. Prefer this \
+when the user is likely to want to edit a specific feature later, since each \
+entity stays independently addressable by its own id.
 
 Given a user request, determine which tools to call and in what order. \
 Analyze the results and provide a clear engineering assessment with pass/fail \
@@ -353,13 +365,35 @@ def _get_or_create_pydantic_agent() -> Any:
     async def generate_cad_script(
         ctx: RunContext[AgentDependencies],
         description: str,
+        script: str = "",
+        backend: str = "cadquery",
         constraints: dict[str, Any] | None = None,
         material: str = "aluminum_6061",
     ) -> dict[str, Any]:
-        """Generate a CadQuery script from a natural language description and execute it.
+        """Generate a CAD script from a natural language description and execute it.
+
+        Write ``script`` yourself as real, executable Python in whichever
+        dialect ``backend`` selects -- do not leave it empty for anything
+        beyond a plain box. The script must assign its final solid to a
+        variable named ``result``, e.g. for ``backend="cadquery"``::
+
+            import cadquery as cq
+            result = cq.Workplane("XY").box(50, 30, 20).faces(">Z").hole(6)
+
+        For ``backend="freecad"``, write real Python against the session
+        document (``doc``, ``FreeCAD``/``App``, ``Part`` are available),
+        assigned to ``result`` the same way. Prefer ``PartDesign``/``Sketcher``
+        constructs over raw ``Part`` primitives whenever the result should
+        stay editable as a feature tree.
 
         Args:
             description: Natural language description of the desired 3D model.
+            script: The Python script to execute. Leave empty only for a
+                trivial box, in which case a deterministic fallback CadQuery
+                script is built from ``constraints`` instead.
+            backend: Which CAD kernel to run ``script`` against, ``"cadquery"``
+                (default) or ``"freecad"``. Falls back to the other backend if
+                the preferred one is unavailable.
             constraints: Optional design constraints (dimensions, wall thickness, etc.).
             material: Material name for metadata.
         """
@@ -373,6 +407,8 @@ def _get_or_create_pydantic_agent() -> Any:
 
         skill_input = GenerateCadScriptInput(
             description=description,
+            script=script,
+            backend=backend,
             constraints=constraints or {},
             material=material,
         )
@@ -391,6 +427,71 @@ def _get_or_create_pydantic_agent() -> Any:
             "script_text": output.script_text,
             "volume_mm3": output.volume_mm3,
             "surface_area_mm2": output.surface_area_mm2,
+        }
+
+    # -- Tool: generate_cad_ir -------------------------------------------------
+
+    @agent.tool
+    async def generate_cad_ir(
+        ctx: RunContext[AgentDependencies],
+        entities: list[dict[str, Any]],
+        material: str = "aluminum_6061",
+    ) -> dict[str, Any]:
+        """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
+
+        Use this instead of generate_cad_script whenever the result should stay
+        editable as a real feature tree, one entity per feature, rather than an
+        opaque script. Prefer this over generate_cad/generate_cad_script when the
+        user talks about editing a specific feature later ("make the fillet
+        bigger", "add another hole"), since each entity here is independently
+        addressable by its own id.
+
+        Each entity is a dict with an ``"id"`` (a short string you assign,
+        e.g. ``"body1"``, ``"sol1"``, referenced by later entities) and an
+        ``"op"``. Common ops, in the order a simple part usually needs them::
+
+            {"id": "body1", "op": "create_body"}
+            {"id": "sk1", "op": "sketch", "body_ref": "body1", "plane": "XY",
+             "elements": [{"type": "rectangle", "origin": [0, 0], "width": 40, "height": 20}]}
+            {"id": "sol1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 10}
+            {"id": "sol2", "op": "fillet_edges", "body_ref": "body1", "radius": 2}
+
+        Limitations (v1): FreeCAD only, no ``create_parametric`` entity, the
+        document's last entity must be a real solid (not a bare body/sketch/
+        assembly), no rotation on ``transform`` / orientation on ``place``, no
+        incremental re-lowering yet (resubmit the whole edited entity list to
+        change something).
+
+        Args:
+            entities: The Design IR entity list, ordered so every ``*_ref``
+                points to an entity earlier in this same list.
+            material: Material name for metadata.
+        """
+        skill_ctx = SkillContext(
+            twin=ctx.deps.twin,
+            mcp=ctx.deps.mcp_bridge,
+            logger=logger,
+            session_id=UUID(ctx.deps.session_id),
+            branch=ctx.deps.branch,
+        )
+
+        skill_input = GenerateCadIrInput(entities=entities, material=material)
+
+        handler = GenerateCadIrHandler(skill_ctx)
+        result = await handler.run(skill_input)
+
+        if not result.success:
+            return {"skill": "generate_cad_ir", "success": False, "errors": result.errors}
+
+        output = result.data
+        return {
+            "skill": "generate_cad_ir",
+            "success": True,
+            "cad_file": output.cad_file,
+            "entity_count": output.entity_count,
+            "volume_mm3": output.volume_mm3,
+            "surface_area_mm2": output.surface_area_mm2,
+            "obj_id_map": output.obj_id_map,
         }
 
     _pydantic_agent = agent
@@ -429,6 +530,7 @@ class MechanicalAgent:
         "generate_mesh",
         "generate_cad",
         "generate_cad_script",
+        "generate_cad_ir",
         "full_validation",
         "design_workflow",
     }
@@ -649,6 +751,7 @@ class MechanicalAgent:
             "generate_mesh": self._run_generate_mesh,
             "generate_cad": self._run_generate_cad,
             "generate_cad_script": self._run_generate_cad_script,
+            "generate_cad_ir": self._run_generate_cad_ir,
             "full_validation": self._run_full_validation,
             "design_workflow": self._run_design_workflow,
         }
@@ -1004,6 +1107,8 @@ class MechanicalAgent:
         skill_input = GenerateCadScriptInput(
             work_product_id=request.work_product_id,
             description=description,
+            script=request.parameters.get("script", ""),
+            backend=request.parameters.get("backend", "cadquery"),
             constraints=request.parameters.get("constraints", {}),
             material=request.parameters.get("material", "aluminum_6061"),
             output_format=request.parameters.get("output_format", "step"),
@@ -1052,6 +1157,79 @@ class MechanicalAgent:
                 await link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
         except Exception as exc:
             self.logger.warning("writeback_cad_script_failed", error=str(exc))
+
+        return TaskResult(
+            task_type=request.task_type,
+            work_product_id=request.work_product_id,
+            success=True,
+            skill_results=[skill_result_dict],
+        )
+
+    async def _run_generate_cad_ir(self, request: TaskRequest) -> TaskResult:
+        """Run CAD generation from a Design IR document using the generate_cad_ir skill."""
+        ctx = self._create_skill_context(request.branch)
+
+        entities = request.parameters.get("entities")
+        if not entities:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=["Missing required parameter: entities"],
+            )
+
+        skill_input = GenerateCadIrInput(
+            work_product_id=request.work_product_id,
+            entities=entities,
+            material=request.parameters.get("material", "aluminum_6061"),
+            project_id=request.parameters.get("project_id"),
+        )
+
+        handler = GenerateCadIrHandler(ctx)
+        result = await handler.run(skill_input)
+
+        if not result.success:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=result.errors,
+            )
+
+        output = result.data
+        skill_result_dict: dict[str, Any] = {
+            "skill": "generate_cad_ir",
+            "cad_file": output.cad_file,
+            "entity_count": output.entity_count,
+            "volume_mm3": output.volume_mm3,
+            "surface_area_mm2": output.surface_area_mm2,
+            "bounding_box": output.bounding_box.model_dump(),
+            "material": output.material,
+        }
+
+        # Writeback: create a new CAD_MODEL WorkProduct
+        src_wp = None
+        if request.work_product_id is not None:
+            src_wp = await self.twin.get_work_product(
+                request.work_product_id, branch=request.branch
+            )
+        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
+        pid = pid or request.parameters.get("project_id", "")
+        try:
+            wb = await writeback_cad(
+                self.twin,
+                self.session_id,
+                request.branch,
+                skill_result_dict,
+                project_id=pid,
+            )
+            skill_result_dict["work_product_id"] = str(wb.id)
+            if pid:
+                from api_gateway.projects.routes import link_work_product_to_project
+
+                await link_work_product_to_project(pid, str(wb.id), wb.name, wb.type.value)
+        except Exception as exc:
+            self.logger.warning("writeback_cad_ir_failed", error=str(exc))
 
         return TaskResult(
             task_type=request.task_type,

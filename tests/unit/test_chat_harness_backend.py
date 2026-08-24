@@ -63,14 +63,18 @@ async def test_run_chat_turn_returns_final(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.asyncio
 async def test_run_chat_turn_exhaustion_message(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
-    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # asserts ReAct "couldn't converge"
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # asserts ReAct exhaustion path
 
     async def never_final(spec: ProviderSpec, request: object) -> dict:
         # Always proposes a (nonexistent) tool, never finalizes -> exhaust.
         return {"text": '{"tool": "noop", "arguments": {}}', "model": spec.model}
 
     out = await run_chat_turn("loop forever", invoke=never_final, max_steps=2)
-    assert "couldn't converge" in out
+    # Production-harness audit follow-up: a step-cap exhaustion now returns a
+    # real trajectory summary (what was attempted) instead of a bare
+    # "couldn't converge" non-answer that threw away the full trace.
+    assert "ran out of turns" in out
+    assert "noop" in out
 
 
 @pytest.mark.asyncio

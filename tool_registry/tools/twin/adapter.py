@@ -818,7 +818,13 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Structured change. Include an 'action' "
                                 "(e.g. 'record_decision' | 'regenerate_geometry' | "
-                                "'update_properties') plus its parameters."
+                                "'update_properties') plus its parameters. For "
+                                "'regenerate_geometry': 'script_source' (required — the "
+                                "full edited script text), 'name', 'parameters' (optional "
+                                "structured values, purely informational), and 'cad_tool' "
+                                "('cadquery', the default, or 'freecad' — state which "
+                                "dialect script_source is written in; they are not "
+                                "interchangeable and this is never auto-detected)."
                             ),
                         },
                         "work_products_affected": {
