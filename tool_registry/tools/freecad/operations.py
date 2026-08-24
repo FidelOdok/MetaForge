@@ -1648,21 +1648,66 @@ class FreecadOperations:
         try:
             Import.export([obj], tmp_path)
             step_bytes = Path(tmp_path).read_bytes()
+            # MET-652: the pre-export _shape_leaves check above validates the
+            # SOURCE object's .Shape, not what Import.export actually wrote --
+            # live-caught a case where the source check passed but the written
+            # STEP had no solid entities at all (a dangling SHAPE_REPRESENTATION
+            # referencing geometry that was never defined), so a "successful"
+            # commit silently stored an unusable file. The regex is a cheap
+            # fast-reject; it cannot be the whole check.
+            if not _STEP_SOLID_MARKER_RE.search(step_bytes):
+                self._log_export_geometry_gap(obj, step_bytes, reason="no_solid_marker")
+                self._raise_empty_geometry(obj)
+            # MET-652 (reopened): the regex alone is not sufficient -- a
+            # MANIFOLD_SOLID_BREP entity can appear in the DATA section
+            # syntactically (satisfying the regex) while the geometry it
+            # references is itself dangling/undefined, so the file still has
+            # zero real solids to any actual reader. Live-caught a 23,361-byte
+            # STEP that matched the marker regex yet opened with no solids.
+            # Reading the file back through the same kernel a downstream
+            # consumer (viewer, converter) will use is the only authoritative
+            # check.
+            solid_count = self._read_back_solid_count(tmp_path)
+            if solid_count == 0:
+                self._log_export_geometry_gap(obj, step_bytes, reason="roundtrip_zero_solids")
+                self._raise_empty_geometry(obj)
         finally:
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-        # MET-652: the pre-export _shape_leaves check above validates the
-        # SOURCE object's .Shape, not what Import.export actually wrote --
-        # live-caught a case where the source check passed but the written
-        # STEP had no solid entities at all (a dangling SHAPE_REPRESENTATION
-        # referencing geometry that was never defined), so a "successful"
-        # commit silently stored an unusable file. Checking the written
-        # bytes closes that gap regardless of which step produced it.
-        if not _STEP_SOLID_MARKER_RE.search(step_bytes):
-            self._raise_empty_geometry(obj)
         return step_bytes
+
+    @staticmethod
+    def _read_back_solid_count(step_path: str) -> int:
+        """Read a just-written STEP file back through the geometry kernel and
+        count real solids -- the authoritative check. A ``MANIFOLD_SOLID_BREP``
+        entity can be present in the file syntactically while the geometry it
+        references is dangling (MET-652), so scanning the raw bytes for entity
+        names is not sufficient on its own."""
+        try:
+            shape = Part.Shape()
+            shape.read(step_path)
+            return len(shape.Solids)
+        except Exception:  # noqa: BLE001 -- any read failure means no usable solids
+            logger.warning("freecad_export_roundtrip_read_failed", step_path=step_path)
+            return 0
+
+    def _log_export_geometry_gap(self, obj: Any, step_bytes: bytes, *, reason: str) -> None:
+        """MET-652: forensic context for whoever hits the next occurrence of
+        an export that looked successful but carried no real geometry --
+        capture the source object's structure so it's diagnosable without
+        needing to reproduce it live."""
+        leaves = self._shape_leaves(obj)
+        logger.warning(
+            "freecad_export_empty_geometry_detected",
+            reason=reason,
+            object_type_id=getattr(obj, "TypeId", type(obj).__name__),
+            object_label=getattr(obj, "Label", getattr(obj, "Name", None)),
+            leaf_count=len(leaves),
+            leaf_shapes_null=[s.isNull() for s in leaves],
+            step_byte_length=len(step_bytes),
+        )
 
     @staticmethod
     def _bbox_dict(bb: Any) -> dict[str, float]:
