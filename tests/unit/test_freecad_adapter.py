@@ -125,6 +125,14 @@ class TestFreecadConfig:
         assert cfg.supported_import_formats == ["step", "stp", "stl", "iges", "igs", "brep"]
         assert cfg.supported_export_formats == ["step", "stp", "stl", "obj", "brep"]
         assert cfg.default_mesh_algorithm == "netgen"
+        # MET-644: session lifecycle knobs, operator-tunable without a code change.
+        assert cfg.session_ttl_seconds == 1800.0
+        assert cfg.max_sessions == 32
+
+    def test_custom_session_lifecycle_config(self) -> None:
+        cfg = FreecadConfig(session_ttl_seconds=600.0, max_sessions=8)
+        assert cfg.session_ttl_seconds == 600.0
+        assert cfg.max_sessions == 8
 
     def test_custom_config(self) -> None:
         cfg = FreecadConfig(
@@ -166,6 +174,15 @@ class TestFreecadConfig:
 class TestFreecadServer:
     def test_server_adapter_id(self, server: FreecadServer) -> None:
         assert server.adapter_id == "freecad"
+
+    def test_session_store_uses_configured_lifecycle_values(self) -> None:
+        """MET-644: config values must actually reach the session store, not
+        just exist on the dataclass -- the previous default was hardcoded."""
+        server = FreecadServer(config=FreecadConfig(session_ttl_seconds=42.0, max_sessions=3))
+        # _ttl/_max are the SessionStore's private fields (session.py); reaching
+        # into them here is the only way to prove the constructor arg landed.
+        assert server._sessions._ttl == 42.0  # noqa: SLF001
+        assert server._sessions._max == 3  # noqa: SLF001
 
     def test_server_version(self, server: FreecadServer) -> None:
         assert server.version == "0.2.0"

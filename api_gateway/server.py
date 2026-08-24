@@ -942,6 +942,13 @@ def _reattach_otel_log_handler() -> None:
     Uvicorn's ``configure_logging()`` calls ``dictConfig`` which clears the
     root logger handlers.  We re-attach the handler so structlog events
     (which flow through stdlib ``LoggerFactory``) reach the OTLP exporter.
+
+    This runs after ``configure_logging()`` (observability/logging.py), which
+    has already called ``ensure_console_handler()`` -- so a stdout sink exists
+    regardless of what happens here. MET-646: previously this OTel handler was
+    the *only* sink, so a down/unreachable collector meant every application
+    log vanished (not in ``docker logs``, not in Loki, nowhere), which is
+    exactly what happened on fidel-dev during the MET-642 eval.
     """
     import logging as _logging
 

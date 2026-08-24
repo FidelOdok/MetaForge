@@ -10,6 +10,8 @@ event dict through unchanged without crashing.
 
 from __future__ import annotations
 
+import logging
+import sys
 from typing import Any
 
 import structlog
@@ -81,13 +83,52 @@ def add_trace_context(
 # ---- configure structlog ---------------------------------------------------
 
 
+class _ConsoleHandler(logging.StreamHandler):
+    """Marker subclass so ``ensure_console_handler`` stays idempotent.
+
+    Distinguishing this from an OTel ``LoggingHandler`` (or any other handler
+    a caller may have attached) lets repeated ``configure_logging()`` calls
+    (e.g. across ``uvicorn --reload`` cycles) avoid stacking duplicate
+    handlers on the root logger.
+    """
+
+
+def ensure_console_handler() -> None:
+    """Guarantee the root logger always has a working stdout sink (MET-646).
+
+    Every structlog event in this codebase flows through
+    ``structlog.stdlib.LoggerFactory()`` into the stdlib root logger. The only
+    handler ever conditionally attached there is the OTel export handler
+    (``observability/bootstrap.py`` / ``api_gateway/server.py``'s
+    ``_reattach_otel_log_handler``) -- and uvicorn's own ``configure_logging()``
+    clears root's handlers on every startup. Net effect, confirmed live on
+    fidel-dev: whenever OTel logging is disabled, or its collector is simply
+    unreachable (as found in MET-647), essentially every application log
+    emitted after startup vanishes -- not in ``docker logs``, not in Loki,
+    nowhere -- because OTel export is the *only* sink and it fails silently
+    on the network call, not at attach time. A local stdout sink must not
+    depend on a remote collector being up.
+    """
+    root = logging.getLogger()
+    if any(isinstance(h, _ConsoleHandler) for h in root.handlers):
+        return
+    handler = _ConsoleHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    root.addHandler(handler)
+    if root.level > logging.INFO:
+        root.setLevel(logging.INFO)
+
+
 def configure_logging(config: ObservabilityConfig) -> None:
     """Configure structlog with JSON rendering and optional trace context.
 
     The processor chain always includes timestamping, log-level addition,
     and JSON rendering.  When OTel is available (and ``config.enable_logs``
     is True) the ``add_trace_context`` processor is inserted so every log
-    event carries correlation IDs.
+    event carries correlation IDs. Always attaches a console handler to the
+    root logger (see ``ensure_console_handler``) so output reaches
+    stdout/``docker logs`` regardless of OTel availability -- OTel export is
+    a supplementary sink, never a substitute for local visibility.
     """
 
     processors: list[Any] = [
@@ -112,3 +153,4 @@ def configure_logging(config: ObservabilityConfig) -> None:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+    ensure_console_handler()
