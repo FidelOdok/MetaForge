@@ -962,6 +962,20 @@ class TwinServer(McpToolServer):
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
         if not step_base64 or not isinstance(step_base64, str):
+            # MET-642 S4 finding: this failure was reproduced live with no
+            # way to tell from logs whether the caller's (session_id, obj_id)
+            # simply never matched a prior export_model call (a model-side
+            # sequencing mistake) or the commit-by-reference stash itself
+            # failed to fill (a real bug) -- neither dispatch seam
+            # (metaforge/mcp/server.py, skill_registry/registry_bridge.py)
+            # logs the arguments it received. Logging them here closes that
+            # gap without needing to touch both call sites.
+            logger.warning(
+                "commit_geometry_missing_step_base64",
+                session_id=arguments.get("session_id"),
+                obj_id=arguments.get("obj_id"),
+                name=name,
+            )
             raise ValueError(
                 "twin.commit_geometry: no geometry to commit — call freecad.export_model "
                 "first, then commit with the same session_id + obj_id (or pass step_base64)."
