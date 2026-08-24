@@ -962,7 +962,13 @@ class FreecadServer(McpToolServer):
                 "provides: FreeCAD (alias App), Part, math, doc, and the bare "
                 "geometry types Vector/Rotation/Placement/Matrix (no import needed, "
                 "no FreeCAD. prefix required). Blocked anywhere in the script: "
-                "open, __import__, os, sys, subprocess, eval, exec, compile.",
+                "open, __import__, os, sys, subprocess, eval, exec, compile. "
+                "IMPORTANT: never assign the same Shape object to more than one "
+                "document object's .Shape (e.g. once into an assembly compound "
+                "AND again onto its own per-part object) -- this has caused the "
+                "adapter process to crash outright (MET-643). Call shape.copy() "
+                "before each additional assignment if you need both an "
+                "assembly-level compound and per-part representations.",
                 "cad_scripting",
                 obj_schema(
                     {"session_id": sid, "code": {"type": "string"}},

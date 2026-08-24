@@ -1070,7 +1070,7 @@ class FreecadOperations:
         # provoked it. Logging BEFORE exec (not after, which a crash would
         # never reach) means the script survives in the container's stdout
         # even when the process dies mid-call.
-        logger.info("freecad_execute_code_running", code=code[:2000], code_length=len(code))
+        logger.info("freecad_execute_code_running", code=code[:8000], code_length=len(code))
 
         with tracer.start_as_current_span("freecad.execute_code"):
             try:
