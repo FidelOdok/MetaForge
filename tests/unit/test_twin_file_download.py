@@ -154,6 +154,32 @@ async def test_node_model_uses_minio_blob_when_local_missing(monkeypatch) -> Non
     assert result["metadata"]["parts"][0]["name"] == "Part_1"
 
 
+async def test_node_model_conversion_rejection_returns_422_not_500(monkeypatch) -> None:
+    """MET-652: the OCCT converter rejecting a STEP with no exportable solids
+    (e.g. "Can't export empty scenes!") is a client-facing content problem,
+    not a server fault -- must not surface as an unhandled 500."""
+    from api_gateway.convert.service import ConversionError
+
+    node_id = await _seed(
+        _wp(
+            file_path="/root/.metaforge/work_products/x/empty.step",
+            metadata={"minio_object_key": "work-products/x/empty.step"},
+            fmt="step",
+        )
+    )
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: b"ISO-10303-21; empty")
+
+    def _fake_convert(self, content, filename, quality):  # noqa: ANN001
+        raise ConversionError(500, '{"error": "Can\'t export empty scenes!"}')
+
+    monkeypatch.setattr("api_gateway.convert.service.ConversionService.convert", _fake_convert)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.get_node_model(node_id)
+    assert exc_info.value.status_code == 422
+    assert "empty scenes" in str(exc_info.value.detail)
+
+
 # ---------------------------------------------------------------------------
 # Content-type mapping
 # ---------------------------------------------------------------------------

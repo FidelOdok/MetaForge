@@ -254,6 +254,21 @@ class TestConversionService:
             assert result["metadata"]["converter_unavailable"] is True
             assert result["metadata"]["parts"][0]["name"] == "bracket"
 
+    def test_occt_rejection_raises_conversion_error(self, service: ConversionService) -> None:
+        """MET-652: a non-200 OCCT response raises the typed ConversionError
+        (not a bare RuntimeError), carrying the status code and body so
+        callers can distinguish "bad content" from "server crashed"."""
+        from api_gateway.convert.service import ConversionError
+
+        with patch("api_gateway.convert.service.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(
+                status_code=500, text='{"error": "Can\'t export empty scenes!"}'
+            )
+            with pytest.raises(ConversionError) as exc_info:
+                service.convert(STEP_CONTENT, "empty.step", "standard")
+            assert exc_info.value.status_code == 500
+            assert "empty scenes" in exc_info.value.body
+
 
 # ---------------------------------------------------------------------------
 # Route endpoint tests — POST /v1/convert
