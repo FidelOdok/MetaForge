@@ -239,7 +239,11 @@ class CadqueryServer(McpToolServer):
                 name="Execute Script",
                 description=(
                     "Execute a sandboxed CadQuery Python script. The script must assign "
-                    "its final result to a variable named 'result' (a CadQuery Workplane)."
+                    "its final result to a variable named 'result' (a CadQuery Workplane). "
+                    "The response includes step_base64 (when the export is STEP format) -- "
+                    "pass that directly as twin.commit_geometry's step_base64 argument to "
+                    "commit this result. There is no session/obj_id concept here (unlike "
+                    "freecad.*): step_base64 is the only path to commit CadQuery output."
                 ),
                 capability="cad_scripting",
                 input_schema={
@@ -265,6 +269,13 @@ class CadqueryServer(McpToolServer):
                     "properties": {
                         "cad_file": {"type": "string"},
                         "script_text": {"type": "string"},
+                        "step_base64": {
+                            "type": "string",
+                            "description": (
+                                "Base64 STEP bytes, present when the export is STEP "
+                                "format -- pass to twin.commit_geometry's step_base64."
+                            ),
+                        },
                         "volume_mm3": {"type": "number"},
                         "surface_area_mm2": {"type": "number"},
                         "bounding_box": {"type": "object"},

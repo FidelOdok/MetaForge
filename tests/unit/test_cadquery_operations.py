@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from tool_registry.tools.cadquery.operations import (
@@ -228,3 +231,94 @@ class TestCadqueryOperationsWithCadquery:
         assert "volume_mm3" in result["properties"]
         assert "surface_area_mm2" in result["properties"]
         assert "bounding_box" in result["properties"]
+
+
+class _FakeBoundBox:
+    xmin = ymin = zmin = 0.0
+    xmax = ymax = zmax = 10.0
+
+
+class _FakeSolid:
+    def BoundingBox(self):  # noqa: N802
+        return _FakeBoundBox()
+
+    def Volume(self):  # noqa: N802
+        return 1000.0
+
+    def Area(self):  # noqa: N802
+        return 600.0
+
+
+class _FakeExporters:
+    @staticmethod
+    def export(_obj, output_path):
+        with open(output_path, "wb") as f:  # noqa: PTH123
+            f.write(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+
+class _FakeCq:
+    exporters = _FakeExporters()
+    Vector = object
+
+    @staticmethod
+    def Workplane(*_args, **_kwargs):  # noqa: N802
+        return _FakeSolid()
+
+
+class TestExecuteScriptStepBase64:
+    """MET-648: CadQuery output had no path into twin.commit_geometry --
+    unlike freecad.export_model, execute_script never returned base64 STEP
+    bytes, so the model would generate correct geometry via CadQuery and
+    then have nothing valid to hand to commit_geometry's step_base64 arg."""
+
+    def test_step_output_includes_step_base64(self, tmp_path):
+        import base64
+
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "out.step")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script("result = cq.Workplane()", output_path)
+        assert "step_base64" in result
+        decoded = base64.b64decode(result["step_base64"])
+        assert decoded == Path(output_path).read_bytes()
+
+    def test_non_step_output_omits_step_base64(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "out.stl")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script("result = cq.Workplane()", output_path)
+        assert "step_base64" not in result
+
+
+class TestExecuteScriptSandboxedImport:
+    """MET-645 follow-up, duplicated here: the identical bug exists in the
+    CadQuery adapter (same _strip_sandbox_imports pattern, same missing
+    __import__). A dotted submodule import or comma-separated import list
+    bypasses the regex and previously crashed with "__import__ not found"."""
+
+    def test_dotted_submodule_import_no_longer_crashes(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script(
+                "import cadquery.occ_impl\nresult = cq.Workplane()",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")
+
+    def test_import_of_disallowed_module_raises(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            with pytest.raises(RuntimeError, match="import of 'json' is not permitted"):
+                ops.execute_script("import json\nresult = json.dumps({})", str(tmp_path / "o.step"))
