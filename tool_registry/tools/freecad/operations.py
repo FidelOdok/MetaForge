@@ -124,7 +124,17 @@ _IMPORT_RE = _re.compile(
 
 
 def _strip_sandbox_imports(script: str) -> str:
-    """Drop top-level import lines for modules already injected (FreeCAD/App/Part)."""
+    """Drop top-level import lines for modules already injected (FreeCAD/App/Part).
+
+    Best-effort only -- ``_IMPORT_RE`` requires a bare module name, so a dotted
+    submodule import (``import FreeCAD.Base``) or any other syntax variant it
+    doesn't recognize passes through untouched. ``_sandboxed_import`` below is
+    the actual enforcement point: any import line this misses still resolves
+    safely (or fails safely) at exec time rather than crashing with a bare
+    ``__import__ not found`` NameError (MET-645 follow-up, found live during
+    the MET-642 re-eval: a model-written ``import`` statement bypassed this
+    regex and the restricted namespace had no ``__import__` at all).
+    """
     out = []
     for line in script.splitlines():
         m = _IMPORT_RE.match(line.strip())
@@ -132,6 +142,37 @@ def _strip_sandbox_imports(script: str) -> str:
             continue
         out.append(line)
     return "\n".join(out)
+
+
+def _sandboxed_import(
+    name: str,
+    globals: dict[str, Any] | None = None,  # noqa: A002
+    locals: dict[str, Any] | None = None,  # noqa: A002
+    fromlist: tuple[str, ...] = (),
+    level: int = 0,
+) -> Any:
+    """Restricted ``__import__`` for execute_code's namespace (MET-645 follow-up).
+
+    Only the already-injected sandbox modules (FreeCAD/App/Part/math) may be
+    imported -- via any syntax (``import X``, ``import X.Y``, ``from X import
+    Y``, aliasing) -- since ``_strip_sandbox_imports`` only catches the plain
+    ``import X`` / ``from X import Y`` forms textually. This resolves to the
+    SAME objects already bound in the namespace rather than performing a real
+    import, so it grants no capability beyond what's already pre-bound.
+    Anything else raises ImportError, same as a genuinely missing module.
+    """
+    import math as _math_module
+
+    top_level = name.split(".", 1)[0]
+    if top_level not in _SANDBOX_MODULES:
+        raise ImportError(f"import of {name!r} is not permitted in this sandbox")
+    resolved = {"FreeCAD": FreeCAD, "App": FreeCAD, "Part": Part, "math": _math_module}[top_level]
+    # Bare `import FreeCAD.Base` (no fromlist) and `from FreeCAD import Base`
+    # (fromlist=("Base",)) both resolve to the same already-injected object --
+    # this sandbox doesn't model real submodule attribute access, it just
+    # hands back what's already bound, matching the pre-MET-645 behavior for
+    # the plain `import X` case that `_strip_sandbox_imports` already covers.
+    return resolved
 
 
 class FreecadNotAvailableError(RuntimeError):
@@ -975,6 +1016,11 @@ class FreecadOperations:
         safe_builtins = {
             k: getattr(_builtins_module, k) for k in _SAFE_BUILTINS if hasattr(_builtins_module, k)
         }
+        # MET-645 follow-up: a restricted __import__ so any `import`/`from...
+        # import` syntax the line-based _strip_sandbox_imports doesn't catch
+        # (dotted submodules, unusual formatting) still resolves safely
+        # instead of crashing with "__import__ not found".
+        safe_builtins["__import__"] = _sandboxed_import
         namespace: dict[str, Any] = {
             "__builtins__": safe_builtins,
             "FreeCAD": FreeCAD,

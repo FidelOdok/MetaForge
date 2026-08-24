@@ -462,3 +462,59 @@ class TestExecuteCodeNamespaceConvenienceNames:
         ):
             result = ops.execute_code(doc, "result = 'still works'")
         assert result == "still works"
+
+
+class TestExecuteCodeSandboxedImport:
+    """MET-645 follow-up: found live during the MET-642 re-eval -- a
+    model-written import statement using a syntax variant
+    _strip_sandbox_imports' regex doesn't recognize (e.g. a dotted submodule)
+    reached exec() untouched and crashed with "__import__ not found" because
+    the restricted __builtins__ never had one. A real, restricted __import__
+    now backs any import/from-import syntax, resolving only to the
+    already-injected sandbox modules."""
+
+    def test_dotted_submodule_import_no_longer_crashes(self) -> None:
+        """The exact failure mode observed live: `import FreeCAD.Base` isn't
+        matched by _IMPORT_RE (its \\w+ group can't contain a dot), so
+        previously this reached exec() with no __import__ available."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "import FreeCAD.Base\nresult = 'ok'")
+        assert result == "ok"
+
+    def test_comma_separated_import_line_resolves(self) -> None:
+        """`import Part, math` isn't matched by _IMPORT_RE (it expects a single
+        bare \\w+, not a comma list), so this line also reaches exec()
+        untouched -- another real syntax variant the regex misses."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "import Part, math\nresult = math.pi")
+        assert result == pytest.approx(3.141592653589793)
+
+    def test_import_of_disallowed_module_raises_import_error(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            with pytest.raises(RuntimeError, match="import of 'json' is not permitted"):
+                ops.execute_code(doc, "import json\nresult = json.dumps({})")
+
+    def test_explicit_dunder_import_call_still_blocked_pre_exec(self) -> None:
+        """The restricted __import__ backs implicit import statements only --
+        an explicit literal __import__(...) call is still caught by the
+        pre-exec sandbox-policy check, same as before this fix."""
+        from tool_registry.tools.freecad.operations import ScriptSandboxError
+
+        ops = FreecadOperations()
+        with pytest.raises(ScriptSandboxError, match="__import__"):
+            ops.execute_code(None, "result = __import__('math')")
