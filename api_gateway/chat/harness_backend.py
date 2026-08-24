@@ -782,6 +782,16 @@ _MODEL_WINDOWS: tuple[tuple[str, int], ...] = (
     ("gpt-4", 8_192),
 )
 _DEFAULT_WINDOW = 128_000
+# MET-655: live-caught the `openai-codex` provider rejecting a 137k-token
+# request with "input exceeds the context window" while the harness's own
+# budget (derived from the raw model's advertised window below) thought it
+# had 240k of headroom to work with. `context_window_for` matches on MODEL
+# only, so "gpt-5.5" always resolved to the raw API's 400k figure even
+# through this provider's own, apparently much smaller, effective limit.
+# 100k is a conservative placeholder comfortably under the observed failure
+# point (137k) -- not a confirmed number from OpenAI Codex docs, since none
+# were found; tighten once the real limit is known.
+_PROVIDER_WINDOWS: tuple[tuple[str, int], ...] = (("codex", 100_000),)
 _BRIEF_MARKER = "[project context]"
 _CONTEXT_MARKER = "[retrieved context]"
 
@@ -790,11 +800,17 @@ def context_window_for(provider: str | None, model: str | None) -> int:
     """Best-effort context-window size (tokens) for a provider/model.
 
     ``METAFORGE_CONTEXT_WINDOW`` overrides everything (for local/unknown models);
-    otherwise the first matching model-id substring wins, else a safe default.
+    otherwise a provider-specific override wins (a provider can enforce a
+    materially smaller real limit than the underlying model's advertised
+    window), then the first matching model-id substring, else a safe default.
     """
     override = os.getenv("METAFORGE_CONTEXT_WINDOW", "").strip()
     if override.isdigit():
         return int(override)
+    p = (provider or "").lower()
+    for key, window in _PROVIDER_WINDOWS:
+        if key in p:
+            return window
     m = (model or "").lower()
     for key, window in _MODEL_WINDOWS:
         if key in m:
