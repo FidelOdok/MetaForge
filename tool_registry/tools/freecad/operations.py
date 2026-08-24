@@ -1058,6 +1058,13 @@ class FreecadOperations:
         def _timeout(_signum: int, _frame: Any) -> None:
             raise ScriptTimeoutError(f"Script exceeded {timeout}s")
 
+        # MET-643: a native crash inside exec() below kills the process with
+        # no Python traceback ever logged, leaving no way to tell what script
+        # provoked it. Logging BEFORE exec (not after, which a crash would
+        # never reach) means the script survives in the container's stdout
+        # even when the process dies mid-call.
+        logger.info("freecad_execute_code_running", code=code[:2000], code_length=len(code))
+
         with tracer.start_as_current_span("freecad.execute_code"):
             try:
                 if is_main and hasattr(signal, "SIGALRM"):
