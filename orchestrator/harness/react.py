@@ -12,15 +12,18 @@ wraps :meth:`HarnessRuntime.complete` to ask a model for the next action.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
+from observability.tracing import get_tracer
 from orchestrator.harness.runtime import HarnessRuntime
 
 logger = structlog.get_logger(__name__)
+tracer = get_tracer("orchestrator.harness.react")
 
 # MET-590: live step observer — called as each step lands, (step, index).
 OnStep = Callable[["ReActStep", int], Awaitable[None]]
@@ -70,6 +73,14 @@ class ReActResult:
     # MET-596: summed provider-reported token usage across the turn's model
     # calls ({input_tokens, output_tokens}); None when no call reported usage.
     usage: dict[str, int] | None = None
+    # Why the loop actually stopped: "done" | "max_steps" | "timeout" | "error".
+    # `status` stays for back-compat ("completed"/"exhausted" only distinguish
+    # done-vs-not on the ReAct path, and `run_native_tools` used to report
+    # "completed" even when it hit the step cap and force-answered without
+    # tools — a caller couldn't tell real convergence from running out of
+    # turns). `stop_reason` is the honest, unambiguous signal both loops set
+    # on every return path.
+    stop_reason: str = "unknown"
 
 
 class ReActParseError(Exception):
@@ -98,13 +109,18 @@ async def run_react(
     *,
     max_steps: int = 8,
     on_step: OnStep | None = None,
+    deadline: float | None = None,
 ) -> ReActResult:
-    """Drive the reason/act/observe loop until final or the step cap.
+    """Drive the reason/act/observe loop until final, the step cap, or ``deadline``.
 
     A tool error, or a policy reply that fails the ReAct protocol
     (``ReActParseError``), is fed back as an observation (``error`` set) and
     the loop continues, so the policy can recover or give up — neither is
     fatal to the turn.
+
+    ``deadline`` is an absolute ``time.monotonic()`` value (not a duration —
+    matches the ``clock`` seam convention in ``runtime.py``), checked before
+    every step. ``None`` keeps the historical unbounded behavior.
     """
     steps: list[ReActStep] = []
 
@@ -117,44 +133,63 @@ async def run_react(
         except Exception as exc:  # noqa: BLE001 - observer is best-effort
             logger.warning("react_on_step_failed", error=str(exc))
 
-    for step_no in range(1, max_steps + 1):
-        try:
-            action = await policy.next_action(goal, steps)
-        except ReActParseError as exc:
-            # No tool_call was ever decided — a synthetic marker lets this
-            # render through the same "- called X -> error" trace line the
-            # model already sees for a real tool failure, and keeps it
-            # visible to ``ModelPolicy._render_trace`` (which only renders
-            # steps that have a ``tool_call``).
-            steps.append(
-                ReActStep(
-                    thought="(malformed reply)",
-                    tool_call=ToolCall("(invalid_reply)", {}),
-                    error=str(exc),
+    with tracer.start_as_current_span("harness.react_loop") as span:
+        for step_no in range(1, max_steps + 1):
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.info("react_timeout", goal=goal, steps=len(steps))
+                span.set_attribute("steps", len(steps))
+                span.set_attribute("stop_reason", "timeout")
+                return ReActResult(
+                    status="exhausted", output=None, steps=steps, stop_reason="timeout"
                 )
-            )
-            await _emit(steps[-1])
-            logger.warning("react_parse_error", goal=goal, step=step_no, error=str(exc))
-            continue
+            try:
+                action = await policy.next_action(goal, steps)
+            except ReActParseError as exc:
+                # No tool_call was ever decided — a synthetic marker lets this
+                # render through the same "- called X -> error" trace line the
+                # model already sees for a real tool failure, and keeps it
+                # visible to ``ModelPolicy._render_trace`` (which only renders
+                # steps that have a ``tool_call``).
+                steps.append(
+                    ReActStep(
+                        thought="(malformed reply)",
+                        tool_call=ToolCall("(invalid_reply)", {}),
+                        error=str(exc),
+                    )
+                )
+                await _emit(steps[-1])
+                logger.warning("react_parse_error", goal=goal, step=step_no, error=str(exc))
+                continue
 
-        if action.is_final:
-            steps.append(
-                ReActStep(thought=action.thought, tool_call=None, observation=action.final_output)
-            )
-            await _emit(steps[-1])
-            logger.info("react_completed", goal=goal, steps=step_no)
-            return ReActResult(status="completed", output=action.final_output, steps=steps)
+            if action.is_final:
+                steps.append(
+                    ReActStep(
+                        thought=action.thought, tool_call=None, observation=action.final_output
+                    )
+                )
+                await _emit(steps[-1])
+                logger.info("react_completed", goal=goal, steps=step_no)
+                span.set_attribute("steps", step_no)
+                span.set_attribute("stop_reason", "done")
+                return ReActResult(
+                    status="completed",
+                    output=action.final_output,
+                    steps=steps,
+                    stop_reason="done",
+                )
 
-        call = action.tool_call
-        assert call is not None  # not is_final => tool_call set
-        try:
-            observation = await runtime.call_tool(call.name, call.arguments)
-            steps.append(ReActStep(action.thought, call, observation=observation))
-            await _emit(steps[-1])
-        except Exception as exc:  # noqa: BLE001 - surface tool failure to the policy, don't abort
-            steps.append(ReActStep(action.thought, call, error=str(exc)))
-            await _emit(steps[-1])
-            logger.warning("react_tool_error", tool=call.name, error=str(exc))
+            call = action.tool_call
+            assert call is not None  # not is_final => tool_call set
+            try:
+                observation = await runtime.call_tool(call.name, call.arguments)
+                steps.append(ReActStep(action.thought, call, observation=observation))
+                await _emit(steps[-1])
+            except Exception as exc:  # noqa: BLE001 - surface tool failure to the policy, don't abort
+                steps.append(ReActStep(action.thought, call, error=str(exc)))
+                await _emit(steps[-1])
+                logger.warning("react_tool_error", tool=call.name, error=str(exc))
 
-    logger.info("react_exhausted", goal=goal, steps=max_steps)
-    return ReActResult(status="exhausted", output=None, steps=steps)
+        logger.info("react_exhausted", goal=goal, steps=max_steps)
+        span.set_attribute("steps", max_steps)
+        span.set_attribute("stop_reason", "max_steps")
+        return ReActResult(status="exhausted", output=None, steps=steps, stop_reason="max_steps")

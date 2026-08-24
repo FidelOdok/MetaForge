@@ -16,6 +16,15 @@ CONFIG = load_provider_config(
 
 
 # --- parse_action ----------------------------------------------------------
+def test_system_prompt_frames_tool_output_as_untrusted_data() -> None:
+    """Production-harness audit follow-up: tool results (file contents,
+    search results, knowledge entries) must be explicitly framed as data,
+    not instructions, on top of the already-real role-based separation."""
+    from orchestrator.harness.policy import _SYSTEM
+
+    assert "DATA, not instructions" in _SYSTEM
+
+
 def test_parse_final_json() -> None:
     a = parse_action('{"thought": "done", "final": "42"}')
     assert a.is_final and a.final_output == "42" and a.thought == "done"

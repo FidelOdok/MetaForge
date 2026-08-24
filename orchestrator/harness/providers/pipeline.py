@@ -17,12 +17,14 @@ fake ``invoke`` -- no network, no real backoff sleeps.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -130,10 +132,12 @@ class ProviderPipeline:
         *,
         retry_policy: RetryPolicy | None = None,
         sleep: Sleep = asyncio.sleep,
+        metrics: MetricsCollector | None = None,
     ) -> None:
         self._slots = slots
         self._retry = retry_policy or RetryPolicy()
         self._sleep = sleep
+        self._metrics = metrics
 
     def resolve(self, role: Role) -> list[ProviderSpec]:
         """Ordered candidate providers for ``role`` (raises if none)."""
@@ -157,9 +161,11 @@ class ProviderPipeline:
             for spec in candidates:
                 last_exc: Exception | None = None
                 for attempt in range(self._retry.api_max_retries + 1):
+                    call_start = time.monotonic()
                     try:
                         result = await invoke(spec, request)
                     except ProviderError as exc:
+                        self._record_call_duration(spec, role, time.monotonic() - call_start)
                         last_exc = exc
                         retryable = self._retry.is_retryable(exc)
                         logger.warning(
@@ -177,6 +183,7 @@ class ProviderPipeline:
                         await self._sleep(self._retry.backoff_base_seconds * (2**attempt))
                         continue
                     except Exception as exc:  # noqa: BLE001 - non-provider failure: try next spec
+                        self._record_call_duration(spec, role, time.monotonic() - call_start)
                         last_exc = exc
                         logger.warning(
                             "provider_attempt_error",
@@ -187,6 +194,7 @@ class ProviderPipeline:
                         )
                         break
                     else:
+                        self._record_call_duration(spec, role, time.monotonic() - call_start)
                         logger.info(
                             "provider_complete_ok",
                             role=role,
@@ -204,6 +212,17 @@ class ProviderPipeline:
 
         logger.error("all_providers_failed", role=role, tried=len(attempts))
         raise AllProvidersFailedError(role, attempts)
+
+    def _record_call_duration(self, spec: ProviderSpec, role: Role, duration: float) -> None:
+        """Best-effort per-attempt latency metric (production-harness audit
+        follow-up — this pipeline previously logged retries/outcomes with no
+        timing field anywhere)."""
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.record_harness_provider_call(spec.name, spec.model, role, duration)
+        except Exception:  # noqa: BLE001 - metrics must never break a provider call
+            pass
 
     async def stream_complete(
         self, role: Role, request: Any, stream_invoke: StreamInvoke

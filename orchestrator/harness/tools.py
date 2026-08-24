@@ -61,6 +61,23 @@ class GateBlockedError(PermissionError):
         super().__init__(f"tool '{tool}' blocked: gate '{gate}' not satisfied")
 
 
+class ApprovalDeniedError(PermissionError):
+    """A tool requiring human approval was not approved before invocation.
+
+    Production-harness audit follow-up: distinct from :class:`GateBlockedError`
+    (a static precondition) — this is a THIRD permission tier, ``ask``, that
+    pauses for an interactive decision rather than checking a boolean. Raised
+    on an explicit rejection, on timeout (deny-by-default — never silently
+    proceeds), or when the tool requires approval but no approval mechanism
+    is wired at all (fail safe, same discipline as an unevaluated gate).
+    """
+
+    def __init__(self, tool: str, reason: str) -> None:
+        self.tool = tool
+        self.reason = reason
+        super().__init__(f"tool '{tool}' not approved: {reason}")
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """One registered tool the harness can call."""
@@ -72,6 +89,12 @@ class ToolSpec:
     handler: Handler
     # Gate names that must be satisfied before this tool may be invoked.
     required_gates: tuple[str, ...] = ()
+    # Three-tier permissions (production-harness audit follow-up): a plain
+    # tool is auto-allow; one with required_gates is never/gated on a static
+    # precondition; one with requires_approval=True is "ask" — it pauses for
+    # an interactive human decision each time it's called, handled in
+    # HarnessRuntime.call_tool, not here (this registry only declares tools).
+    requires_approval: bool = False
 
 
 class ToolRegistry:
@@ -100,6 +123,7 @@ class ToolRegistry:
         input_schema: dict[str, Any],
         handler: Handler,
         required_gates: Sequence[str] = (),
+        requires_approval: bool = False,
     ) -> ToolSpec:
         return self._add(
             ToolSpec(
@@ -109,6 +133,7 @@ class ToolRegistry:
                 origin=NATIVE,
                 handler=handler,
                 required_gates=tuple(required_gates),
+                requires_approval=requires_approval,
             )
         )
 
@@ -121,6 +146,7 @@ class ToolRegistry:
         input_schema: dict[str, Any],
         handler: Handler,
         required_gates: Sequence[str] = (),
+        requires_approval: bool = False,
     ) -> ToolSpec:
         return self._add(
             ToolSpec(
@@ -130,6 +156,7 @@ class ToolRegistry:
                 origin=server,
                 handler=handler,
                 required_gates=tuple(required_gates),
+                requires_approval=requires_approval,
             )
         )
 

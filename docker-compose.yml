@@ -43,11 +43,32 @@ services:
       # registry incl. openrouter/codex). Without this, chat falls back to the
       # legacy openai/anthropic-only path and ignores other providers.
       - METAFORGE_CHAT_HARNESS=${METAFORGE_CHAT_HARNESS:-off}
+      # Expose skill-layer tools (generate_cad_ir, etc.) to the harness loop,
+      # alongside its existing raw MCP/adapter tools. Independent of
+      # METAFORGE_CHAT_HARNESS above -- newer, less-tested code that touches
+      # the Digital Twin directly, so it stays separately toggleable.
+      - METAFORGE_CHAT_SKILLS=${METAFORGE_CHAT_SKILLS:-off}
       # Tool-call budget for one chat turn (harness_backend.chat_max_steps,
       # default 24). Was never actually forwarded here — a multi-part CAD
       # assembly (5 primitives + holes + assembly + export + commit, plus any
       # retries) can genuinely need more than 24 real tool calls.
       - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
+      # Hard wall-clock budget (seconds) for one chat turn's tool loop
+      # (harness_backend.chat_wall_clock_seconds). Production-harness audit
+      # follow-up: only step-count and context-size were ever bounded before
+      # this. Unset (dev default) keeps the historical unbounded behavior.
+      - METAFORGE_CHAT_WALL_CLOCK_SECONDS=${METAFORGE_CHAT_WALL_CLOCK_SECONDS:-}
+      # Hard dollar-spend budget for one chat turn (native-tools path only —
+      # see orchestrator/harness/providers/pricing.py). Unset (dev default)
+      # keeps the historical unbounded behavior.
+      - METAFORGE_CHAT_MAX_COST_USD=${METAFORGE_CHAT_MAX_COST_USD:-}
+      # Durable /v1/runs ledger (production-harness audit follow-up — the
+      # run store was always process-local despite a real SQLite ledger
+      # existing for exactly this). Path defaults to ~/.metaforge/runs_ledger.db
+      # inside the container; set _DISABLE=on to keep the historical
+      # process-local-only behavior (e.g. ephemeral CI containers).
+      - METAFORGE_RUNS_LEDGER_PATH=${METAFORGE_RUNS_LEDGER_PATH:-}
+      - METAFORGE_RUNS_LEDGER_DISABLE=${METAFORGE_RUNS_LEDGER_DISABLE:-off}
       # Gates the credential-write endpoints (POST/DELETE /v1/harness/credentials,
       # PUT /v1/harness/selection — see api_gateway/harness/routes.py::_require_admin).
       # Unset (dev default) leaves them open with a logged warning; set this on

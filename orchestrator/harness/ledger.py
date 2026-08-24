@@ -13,10 +13,12 @@ path. ``:memory:`` is the default for tests.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -24,6 +26,16 @@ import structlog
 from orchestrator.harness.runs import Run
 
 logger = structlog.get_logger(__name__)
+
+
+def default_ledger_path() -> Path:
+    """Where the run ledger lives by default (``METAFORGE_RUNS_LEDGER_PATH``
+    override, else ``~/.metaforge/runs_ledger.db`` — same convention as
+    ``providers.credentials.default_credentials_path``)."""
+    override = os.environ.get("METAFORGE_RUNS_LEDGER_PATH", "").strip()
+    if override:
+        return Path(override)
+    return Path.home() / ".metaforge" / "runs_ledger.db"
 
 
 def _fts5_available(conn: sqlite3.Connection) -> bool:
@@ -50,7 +62,18 @@ class SqliteRunLedger:
 
     def __init__(self, path: str = ":memory:", *, clock: Callable[[], float] = time.time) -> None:
         self._clock = clock
-        self._conn = sqlite3.connect(path)
+        if path != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False: this connection is constructed once (e.g.
+        # in the gateway's async lifespan startup) but real ASGI request
+        # handling doesn't guarantee every call happens on that exact same
+        # thread (confirmed live via TestClient, which runs the app in its
+        # own portal thread) -- sqlite3's default same-thread check raised
+        # "SQLite objects created in a thread can only be used in that same
+        # thread" on every write. Access here is still effectively
+        # serialized (one connection, no concurrent writers), just not
+        # guaranteed same-thread.
+        self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._fts = _fts5_available(self._conn)
         self._init_schema()
@@ -127,10 +150,8 @@ class SqliteRunLedger:
         self._conn.commit()
         return LedgerEvent(run_id=run_id, ts=ts, kind=kind, detail=detail)
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-        if row is None:
-            return None
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"],
             "status": row["status"],
@@ -140,6 +161,27 @@ class SqliteRunLedger:
             "result": json.loads(row["result"]) if row["result"] is not None else None,
             "error": row["error"],
         }
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_runs(self, *, statuses: set[str] | None = None) -> list[dict[str, Any]]:
+        """All persisted run rows, optionally filtered by ``status``.
+
+        Production-harness audit follow-up: used to rehydrate an
+        :class:`~orchestrator.harness.runs.InMemoryRunStore`'s in-flight runs
+        after a process restart (``run_events`` history isn't persisted here,
+        only the run's own state — an accepted degradation for restored
+        runs, since resume logic keys off ``status``, not event history).
+        """
+        rows = self._conn.execute("SELECT * FROM runs").fetchall()
+        results = [self._row_to_dict(r) for r in rows]
+        if statuses is not None:
+            results = [r for r in results if r["status"] in statuses]
+        return results
 
     def events(self, run_id: str) -> list[LedgerEvent]:
         rows = self._conn.execute(

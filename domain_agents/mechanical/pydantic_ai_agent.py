@@ -41,6 +41,18 @@ from domain_agents.mechanical.skills.generate_cad.handler import (
 from domain_agents.mechanical.skills.generate_cad.schema import (
     GenerateCadInput,
 )
+from domain_agents.mechanical.skills.generate_cad_ir.handler import (
+    GenerateCadIrHandler,
+)
+from domain_agents.mechanical.skills.generate_cad_ir.schema import (
+    GenerateCadIrInput,
+)
+from domain_agents.mechanical.skills.generate_cad_script.handler import (
+    GenerateCadScriptHandler,
+)
+from domain_agents.mechanical.skills.generate_cad_script.schema import (
+    GenerateCadScriptInput,
+)
 from domain_agents.mechanical.skills.generate_mesh.handler import (
     GenerateMeshHandler,
 )
@@ -127,16 +139,28 @@ FreeCAD/Netgen. Provide cad_file path and meshing parameters.
 - **check_tolerance**: Check dimensional tolerances against manufacturing \
 process capabilities. Provide tolerance specs and manufacturing process details.
 - **generate_cad**: Generate a CAD model from parametric specifications. \
-Provide shape_type, dimensions, and material.
+Provide shape_type, dimensions, and material. Only covers box/plate/enclosure/cylinder.
+- **generate_cad_script**: Generate a CAD model from a natural language \
+description by writing a real script yourself, CadQuery or FreeCAD. Use this \
+for anything generate_cad's fixed shape set can't express (holes, brackets, \
+custom profiles, non-trivial features) when the result doesn't need to stay \
+editable as separately addressable features.
+- **generate_cad_ir**: Generate a CAD model from a structured Design IR \
+feature tree (FreeCAD only), one entity per feature (create_body, sketch, \
+pad, fillet_edges, ...), each independently addressable by its own id. Prefer \
+this over generate_cad_script when the user is likely to want to edit a \
+specific feature later ("make the fillet bigger", "add another hole").
 
 Given a user request, determine which tools to call and in what order. \
 Analyze the results and provide a clear engineering assessment with pass/fail \
 status, safety factors, and recommendations.
 
-IMPORTANT: For generative tasks (generate_cad), you MUST call the generate_cad \
-tool even when no work_product_id is provided. Generative tasks CREATE new \
-work products — they do not require an existing one. Use the description/prompt \
-from the user request as the basis for the shape_type and dimensions.
+IMPORTANT: For generative tasks (generate_cad, generate_cad_script, or \
+generate_cad_ir), you MUST call one of them even when no work_product_id is \
+provided. Generative tasks CREATE new work products — they do not require an \
+existing one. Use the description/prompt from the user request as the basis \
+for the shape_type and dimensions, the script when using generate_cad_script, \
+or the entity list when using generate_cad_ir.
 
 For validation tasks (validate_stress, check_tolerance, generate_mesh), validate \
 that required parameters like mesh_file_path are available before calling the tool. \
@@ -391,6 +415,159 @@ def create_mechanical_agent(
                 "shape_type": output.shape_type,
                 "volume_mm3": output.volume_mm3,
                 "surface_area_mm2": output.surface_area_mm2,
+            }
+
+    # -- Tool: generate_cad_script ---------------------------------------------
+
+    @agent.tool
+    async def generate_cad_script(
+        ctx: RunContext[MechanicalAgentDeps],
+        description: str,
+        script: str = "",
+        backend: str = "cadquery",
+        constraints: dict[str, Any] | None = None,
+        material: str = "aluminum_6061",
+    ) -> dict[str, Any]:
+        """Generate a CAD script from a natural language description and execute it.
+
+        Use this instead of generate_cad whenever the request doesn't map \
+        cleanly onto generate_cad's fixed shape_type set (box/plate/enclosure/ \
+        cylinder) -- e.g. brackets with hole patterns, non-trivial profiles, \
+        or anything with a shape-specific feature.
+
+        Write ``script`` yourself as real, executable Python in whichever \
+        dialect ``backend`` selects -- do not leave it empty for anything \
+        beyond a plain box. The script must assign its final solid to a \
+        variable named ``result``, e.g. for ``backend="cadquery"``::
+
+            import cadquery as cq
+            result = cq.Workplane("XY").box(50, 30, 20).faces(">Z").hole(6)
+
+        For ``backend="freecad"``, write real Python against the session \
+        document (``doc``, ``FreeCAD``/``App``, ``Part`` are available), \
+        assigned to ``result`` the same way. Prefer ``PartDesign``/``Sketcher`` \
+        constructs over raw ``Part`` primitives whenever the result should \
+        stay editable as a feature tree.
+
+        Args:
+            description: Natural language description of the desired 3D model.
+            script: The Python script to execute. Leave empty only for a
+                trivial box, in which case a deterministic fallback CadQuery
+                script is built from ``constraints`` instead.
+            backend: Which CAD kernel to run ``script`` against, ``"cadquery"``
+                (default) or ``"freecad"``. Falls back to the other backend if
+                the preferred one is unavailable.
+            constraints: Optional design constraints (dimensions, wall thickness, etc.).
+            material: Material name for metadata.
+        """
+        with tracer.start_as_current_span("tool.generate_cad_script") as span:
+            span.set_attribute("description_length", len(description))
+            logger.info("Generating CAD script", description_length=len(description))
+
+            skill_ctx = SkillContext(
+                twin=ctx.deps.twin,
+                mcp=ctx.deps.mcp_bridge,
+                logger=logger,
+                session_id=UUID(ctx.deps.session_id) if ctx.deps.session_id else UUID(int=0),
+                branch=ctx.deps.branch,
+            )
+
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
+            skill_input = GenerateCadScriptInput(
+                work_product_id=_wp_id,
+                description=description,
+                script=script,
+                backend=backend,
+                constraints=constraints or {},
+                material=material,
+            )
+
+            handler = GenerateCadScriptHandler(skill_ctx)
+            result = await handler.run(skill_input)
+
+            if not result.success:
+                return {"skill": "generate_cad_script", "success": False, "errors": result.errors}
+
+            output = result.data
+            return {
+                "skill": "generate_cad_script",
+                "success": True,
+                "cad_file": output.cad_file,
+                "script_text": output.script_text,
+                "volume_mm3": output.volume_mm3,
+                "surface_area_mm2": output.surface_area_mm2,
+            }
+
+    # -- Tool: generate_cad_ir --------------------------------------------------
+
+    @agent.tool
+    async def generate_cad_ir(
+        ctx: RunContext[MechanicalAgentDeps],
+        entities: list[dict[str, Any]],
+        material: str = "aluminum_6061",
+    ) -> dict[str, Any]:
+        """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
+
+        Use this instead of generate_cad_script whenever the result should stay
+        editable as a real feature tree, one entity per feature, rather than an
+        opaque script. Prefer this over generate_cad/generate_cad_script when the
+        user is likely to want to edit a specific feature later ("make the fillet
+        bigger", "add another hole"), since each entity here is independently
+        addressable by its own id.
+
+        Each entity is a dict with an ``"id"`` (a short string you assign,
+        e.g. ``"body1"``, ``"sol1"``, referenced by later entities) and an
+        ``"op"``. Common ops, in the order a simple part usually needs them::
+
+            {"id": "body1", "op": "create_body"}
+            {"id": "sk1", "op": "sketch", "body_ref": "body1", "plane": "XY",
+             "elements": [{"type": "rectangle", "origin": [0, 0], "width": 40, "height": 20}]}
+            {"id": "sol1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 10}
+            {"id": "sol2", "op": "fillet_edges", "body_ref": "body1", "radius": 2}
+
+        Limitations (v1): FreeCAD only, no ``create_parametric`` entity, the
+        document's last entity must be a real solid (not a bare body/sketch/
+        assembly), no rotation on ``transform`` / orientation on ``place``, no
+        incremental re-lowering yet (resubmit the whole edited entity list to
+        change something).
+
+        Args:
+            entities: The Design IR entity list, ordered so every ``*_ref``
+                points to an entity earlier in this same list.
+            material: Material name for metadata.
+        """
+        with tracer.start_as_current_span("tool.generate_cad_ir") as span:
+            span.set_attribute("entity_count", len(entities))
+            logger.info("Generating CAD from Design IR", entity_count=len(entities))
+
+            skill_ctx = SkillContext(
+                twin=ctx.deps.twin,
+                mcp=ctx.deps.mcp_bridge,
+                logger=logger,
+                session_id=UUID(ctx.deps.session_id) if ctx.deps.session_id else UUID(int=0),
+                branch=ctx.deps.branch,
+            )
+
+            _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
+            skill_input = GenerateCadIrInput(
+                work_product_id=_wp_id, entities=entities, material=material
+            )
+
+            handler = GenerateCadIrHandler(skill_ctx)
+            result = await handler.run(skill_input)
+
+            if not result.success:
+                return {"skill": "generate_cad_ir", "success": False, "errors": result.errors}
+
+            output = result.data
+            return {
+                "skill": "generate_cad_ir",
+                "success": True,
+                "cad_file": output.cad_file,
+                "entity_count": output.entity_count,
+                "volume_mm3": output.volume_mm3,
+                "surface_area_mm2": output.surface_area_mm2,
+                "obj_id_map": output.obj_id_map,
             }
 
     logger.debug("mechanical_pydantic_ai_agent_created")

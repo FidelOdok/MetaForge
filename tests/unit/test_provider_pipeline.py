@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from observability.metrics import MetricsCollector
 from orchestrator.harness.providers import (
     AllProvidersFailedError,
     ProviderError,
@@ -27,6 +28,54 @@ def _pipeline(*specs: ProviderSpec, retries: int = 2) -> tuple[ProviderPipeline,
     slots = RoleModelSlots(slots={"generator": list(specs)})
     policy = RetryPolicy(api_max_retries=retries, backoff_base_seconds=0.5)
     return ProviderPipeline(slots, retry_policy=policy, sleep=fake_sleep), slept
+
+
+class _FakeMetrics(MetricsCollector):
+    """Records calls without a real OTel meter (production-harness audit
+    follow-up: this pipeline previously had no duration field anywhere)."""
+
+    def __init__(self) -> None:
+        super().__init__()  # no meter -- the base class's own no-op instruments
+        self.calls: list[tuple[str, str, str]] = []
+
+    def record_harness_provider_call(
+        self, provider: str, model: str, role: str, duration: float
+    ) -> None:
+        self.calls.append((provider, model, role))
+
+
+@pytest.mark.asyncio
+async def test_records_provider_call_duration_on_success() -> None:
+    metrics = _FakeMetrics()
+    slots = RoleModelSlots(slots={"generator": [PRIMARY]})
+    pipeline = ProviderPipeline(slots, metrics=metrics)
+
+    async def invoke(spec: ProviderSpec, request: object) -> str:
+        return "ok"
+
+    await pipeline.complete("generator", {}, invoke)
+    assert metrics.calls == [("anthropic", "claude-opus-4-8", "generator")]
+
+
+@pytest.mark.asyncio
+async def test_records_provider_call_duration_per_attempt_including_failures() -> None:
+    metrics = _FakeMetrics()
+    pipeline, _ = _pipeline(PRIMARY, FALLBACK, retries=0)
+    pipeline._metrics = metrics  # noqa: SLF001 - _pipeline() helper doesn't take metrics
+
+    calls = {"n": 0}
+
+    async def invoke(spec: ProviderSpec, request: object) -> str:
+        calls["n"] += 1
+        if spec is PRIMARY:
+            raise ProviderError("down", status_code=500, retryable=False)
+        return "ok"
+
+    await pipeline.complete("generator", {}, invoke)
+    assert metrics.calls == [
+        ("anthropic", "claude-opus-4-8", "generator"),
+        ("openai", "gpt-5", "generator"),
+    ]
 
 
 def test_resolve_returns_ordered_candidates() -> None:

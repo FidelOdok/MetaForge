@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -24,8 +25,11 @@ import structlog
 
 from api_gateway.chat.backend import ChatBackend
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
+from api_gateway.chat.skill_tools import skill_tools_from_registry
+from api_gateway.chat.tool_approvals import get_approval_store
+from observability.metrics import MetricsCollector
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
-from orchestrator.harness.compression import default_token_count
+from orchestrator.harness.compression import default_token_count, summarize_trajectory
 from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
@@ -45,6 +49,7 @@ from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
 from orchestrator.harness.react import run_react
+from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import Handler
 from skill_registry.mcp_bridge import McpBridge
 
@@ -140,6 +145,24 @@ def make_set_project_scope_tool(thread_id: str, backend: ChatBackend) -> NativeT
     )
 
 
+# Three-tier permissions, "ask" (production-harness audit follow-up): a
+# starter, conservative set of tool ids that mutate persistent state outside
+# the ephemeral adapter workspace. Everything else stays auto-allow. Deliberately
+# narrow for v1 -- expanding tier assignment to more tools (or to skill-layer
+# tools, which currently bypass this since they call twin.commit_geometry
+# internally rather than as a separately model-callable step) is flagged as
+# a real, known gap, not silently dropped.
+_REQUIRES_APPROVAL_TOOL_IDS = frozenset(
+    {
+        "twin.commit_geometry",
+        "twin.record_decision",
+        "project.create",
+        "project.update",
+        "project.delete",
+    }
+)
+
+
 async def mcp_tools_from_bridge(
     bridge: McpBridge, enabled: set[str] | None = None
 ) -> list[tuple[str, NativeToolDef]]:
@@ -195,6 +218,7 @@ async def mcp_tools_from_bridge(
                     description=description,
                     input_schema=input_schema,
                     handler=_make_handler(tool_id),
+                    requires_approval=tool_id in _REQUIRES_APPROVAL_TOOL_IDS,
                 ),
             )
         )
@@ -231,6 +255,17 @@ def chat_harness_enabled() -> bool:
     return os.environ.get("METAFORGE_CHAT_HARNESS", "").strip().lower() in _TRUTHY
 
 
+def chat_skills_enabled() -> bool:
+    """True when skill-layer tools (generate_cad_ir, etc.) are exposed to the
+    harness loop, alongside its existing raw MCP/adapter tools (env flag).
+
+    Independent of ``chat_harness_enabled`` -- this is newer, less-tested code
+    that touches the Digital Twin directly, so it must be separately
+    toggleable/rollback-able without disabling the harness entirely.
+    """
+    return os.environ.get("METAFORGE_CHAT_SKILLS", "").strip().lower() in _TRUTHY
+
+
 _DEFAULT_CHAT_MAX_STEPS = 24
 
 
@@ -255,6 +290,52 @@ def chat_max_steps() -> int:
     if raw.isdigit() and int(raw) > 0:
         return int(raw)
     return _DEFAULT_CHAT_MAX_STEPS
+
+
+def chat_wall_clock_seconds() -> float | None:
+    """Hard wall-clock budget for a chat turn (``METAFORGE_CHAT_WALL_CLOCK_SECONDS``).
+
+    Production-harness audit follow-up: only step-count and context-size were
+    ever bounded — a turn stuck in slow-but-not-erroring calls had no ceiling
+    at all. ``None`` (the default) keeps the historical unbounded behavior;
+    this is opt-in, not a surprise behavior change for existing deployments.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_WALL_CLOCK_SECONDS") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def chat_max_cost_usd() -> float | None:
+    """Hard dollar-spend budget for a chat turn (``METAFORGE_CHAT_MAX_COST_USD``).
+
+    Production-harness audit follow-up. Only enforced on the native-tools
+    path (the default for Anthropic/OpenAI-family providers) — ``run_react``
+    never tallies provider-reported token usage at all today, a separate,
+    pre-existing gap this doesn't fix. Priced against
+    ``orchestrator.harness.providers.pricing.DEFAULT_PRICING`` (illustrative,
+    not authoritative — see that module). ``None`` (the default) keeps the
+    historical unbounded behavior.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_MAX_COST_USD") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _cost_target(ctx: AgentContext) -> tuple[str, str]:
+    """The (provider, model) this turn's primary candidate resolves to, for
+    spend-cap pricing lookup. A mid-turn provider fallback would be priced
+    against this same pair — a documented approximation, not exact billing."""
+    try:
+        primary = ctx.runtime.providers.resolve("generator")[0]
+    except (KeyError, IndexError):
+        return "", ""
+    return primary.name, primary.model
 
 
 def rotation_strategy_from_env() -> RotationStrategy:
@@ -463,6 +544,9 @@ async def _build_context(
     model: str | None = None,
     enabled_tools: list[str] | None = None,
     chat_backend: ChatBackend | None = None,
+    twin: Any = None,
+    metrics: MetricsCollector | None = None,
+    on_approval_request: OnApprovalRequest | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -472,12 +556,25 @@ async def _build_context(
     ``chat.set_project_scope`` (MET-580) closed over THIS turn's ``session_id`` —
     which is the live chat thread's id — so the agent can rescope its own
     thread on a clear user request without ever being trusted to supply (or
-    possibly mis-supply) which thread that is."""
+    possibly mis-supply) which thread that is. ``twin``, when given and
+    ``chat_skills_enabled()``, also registers the mechanical skill-layer tools
+    (``generate_cad_ir``, etc. — MET-548 follow-up) alongside the MCP tools.
+    ``metrics``, when given, instruments every model/tool call the resulting
+    runtime makes (production-harness audit follow-up). The resulting
+    runtime always shares the process-level tool-approval store
+    (``get_approval_store()``) so a `requires_approval` tool call can be
+    resolved by a separate ``POST /v1/chat/tool_approvals/{run_id}`` request;
+    ``on_approval_request``, when given, is notified the moment such a call
+    pauses."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
     mcp_tools = await mcp_tools_from_bridge(mcp_bridge, enabled) if mcp_bridge is not None else []
     native_tools = (
         [make_set_project_scope_tool(session_id, chat_backend)] if chat_backend is not None else []
     )
+    if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
+        native_tools = native_tools + await skill_tools_from_registry(
+            twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
+        )
     return build_agent_runtime(
         provider_config_from_env(provider=provider, model=model),
         credentials=store,
@@ -485,6 +582,9 @@ async def _build_context(
         rotation_strategy=rotation_strategy_from_env(),
         native_tools=native_tools,
         mcp_tools=mcp_tools,
+        metrics=metrics,
+        runs=get_approval_store(),
+        on_approval_request=on_approval_request,
     )
 
 
@@ -503,6 +603,9 @@ async def run_chat_turn(
     project_brief: str | None = None,
     context_block: str | None = None,
     chat_backend: ChatBackend | None = None,
+    twin: Any = None,
+    metrics: MetricsCollector | None = None,
+    wall_clock_seconds: float | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -514,10 +617,16 @@ async def run_chat_turn(
     ``history`` is the prior conversation so multi-turn chats keep context.
     ``project_brief`` / ``context_block`` are placed per path (MET-566) — see
     ``_apply_turn_context``. ``chat_backend``, when given, registers
-    ``chat.set_project_scope`` (MET-580).
+    ``chat.set_project_scope`` (MET-580). ``twin``, when given, also registers
+    the skill-layer tools when ``chat_skills_enabled()`` (MET-548 follow-up).
+    ``metrics``, when given, records a turn-duration metric. ``wall_clock_seconds``
+    (defaults to :func:`chat_wall_clock_seconds`) hard-bounds the loop.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
+    turn_start = time.monotonic()
+    wall_clock = wall_clock_seconds if wall_clock_seconds is not None else chat_wall_clock_seconds()
+    deadline = turn_start + wall_clock if wall_clock is not None else None
     ctx = await _build_context(
         session_id,
         store,
@@ -526,6 +635,8 @@ async def run_chat_turn(
         model=model,
         enabled_tools=enabled_tools,
         chat_backend=chat_backend,
+        twin=twin,
+        metrics=metrics,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
@@ -538,6 +649,7 @@ async def run_chat_turn(
         context_block=context_block,
     )
     if native:
+        cost_provider, cost_model = _cost_target(ctx)
         result = await run_native_tools(
             ctx.runtime,
             user_content,
@@ -549,6 +661,10 @@ async def run_chat_turn(
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
+            deadline=deadline,
+            max_cost_usd=chat_max_cost_usd(),
+            cost_provider=cost_provider,
+            cost_model=cost_model,
         )
     else:
         policy = ModelPolicy(
@@ -558,11 +674,27 @@ async def run_chat_turn(
             history=full_history,
             trace_token_budget=trace_token_budget(provider, model),
         )
-        result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
-    logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
-    if result.status == "completed":
+        result = await run_react(
+            ctx.runtime, policy, user_content, max_steps=steps, deadline=deadline
+        )
+    logger.info(
+        "chat_harness_turn",
+        status=result.status,
+        steps=len(result.steps),
+        stop_reason=result.stop_reason,
+    )
+    if metrics is not None:
+        try:
+            metrics.record_harness_turn(
+                "native" if native else "react", result.stop_reason, time.monotonic() - turn_start
+            )
+        except Exception:  # noqa: BLE001 - metrics must never break a turn
+            pass
+    if result.output:
         return str(result.output)
-    return "I couldn't converge on an answer within the step budget."
+    if result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
+        return summarize_trajectory(result.steps)
+    return _FALLBACK_ANSWER
 
 
 _FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
@@ -793,6 +925,7 @@ async def run_chat_turn_streaming(
     on_thinking: Callable[[str, str], Awaitable[None]] | None = None,
     on_action_started: Callable[[str], Awaitable[None]] | None = None,
     on_context: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_approval_request: OnApprovalRequest | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
     max_steps: int | None = None,
@@ -807,6 +940,9 @@ async def run_chat_turn_streaming(
     project_brief: str | None = None,
     context_block: str | None = None,
     chat_backend: ChatBackend | None = None,
+    twin: Any = None,
+    metrics: MetricsCollector | None = None,
+    wall_clock_seconds: float | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -824,10 +960,20 @@ async def run_chat_turn_streaming(
     on the native path (history-pair fallback on ReAct); retrieved context is
     a trailing history pair on both. ``chat_backend``, when given, registers
     ``chat.set_project_scope`` (MET-580) so the agent can rescope THIS thread
-    on a clear user request.
+    on a clear user request. ``twin``, when given, also registers the
+    skill-layer tools when ``chat_skills_enabled()`` (MET-548 follow-up).
+    ``metrics``, when given, records a turn-duration metric.
+    ``wall_clock_seconds`` (defaults to :func:`chat_wall_clock_seconds`)
+    hard-bounds the loop. ``on_approval_request`` (production-harness audit
+    follow-up), when given, is notified ``(run_id, tool, arguments)`` the
+    moment a `requires_approval` tool call pauses — resolved by a separate
+    ``POST /v1/chat/tool_approvals/{run_id}`` request, never by this turn.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
+    turn_start = time.monotonic()
+    wall_clock = wall_clock_seconds if wall_clock_seconds is not None else chat_wall_clock_seconds()
+    deadline = turn_start + wall_clock if wall_clock is not None else None
     ctx = await _build_context(
         session_id,
         store,
@@ -836,6 +982,9 @@ async def run_chat_turn_streaming(
         model=model,
         enabled_tools=enabled_tools,
         chat_backend=chat_backend,
+        twin=twin,
+        metrics=metrics,
+        on_approval_request=on_approval_request,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
@@ -869,6 +1018,10 @@ async def run_chat_turn_streaming(
                 project_brief=project_brief,
                 context_block=context_block,
             )
+            # Production-harness audit follow-up: this was only ever pushed
+            # live over SSE — if no client was listening, it was computed and
+            # thrown away. Logging it means the data survives regardless.
+            logger.info("chat_context_stats", phase="pre", **stats)
             await on_context(stats)
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_failed", error=str(exc))
@@ -903,6 +1056,7 @@ async def run_chat_turn_streaming(
                 logger.warning("chat_step_emit_failed", index=index, error=str(exc))
 
     if native:
+        cost_provider, cost_model = _cost_target(ctx)
         result = await run_native_tools(
             ctx.runtime,
             user_content,
@@ -920,6 +1074,10 @@ async def run_chat_turn_streaming(
             # providers only; others fall back to the non-streaming invoke).
             on_stream_event=stream_event_cb,
             stream_events=default_stream_events if stream_event_cb is not None else None,
+            deadline=deadline,
+            max_cost_usd=chat_max_cost_usd(),
+            cost_provider=cost_provider,
+            cost_model=cost_model,
         )
     else:
         policy = ModelPolicy(
@@ -930,9 +1088,21 @@ async def run_chat_turn_streaming(
             trace_token_budget=trace_token_budget(provider, model),
         )
         result = await run_react(
-            ctx.runtime, policy, user_content, max_steps=steps, on_step=live_step
+            ctx.runtime, policy, user_content, max_steps=steps, on_step=live_step, deadline=deadline
         )
-    logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
+    logger.info(
+        "chat_harness_stream_turn",
+        status=result.status,
+        steps=len(result.steps),
+        stop_reason=result.stop_reason,
+    )
+    if metrics is not None:
+        try:
+            metrics.record_harness_turn(
+                "native" if native else "react", result.stop_reason, time.monotonic() - turn_start
+            )
+        except Exception:  # noqa: BLE001 - metrics must never break a turn
+            pass
 
     # MET-568: re-emit context stats AFTER the loop so the meter reflects what
     # the turn actually consumed (the pre-loop snapshot can't see tool-result
@@ -965,6 +1135,9 @@ async def run_chat_turn_streaming(
             final_stats["available"] = max(
                 0, int(final_stats.get("window", 0)) - int(final_stats["used"])
             )
+            # Production-harness audit follow-up: persist this even when no
+            # SSE client is listening (see the pre-loop stats block above).
+            logger.info("chat_context_stats", **final_stats)
             await on_context(final_stats)
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_final_failed", error=str(exc))
@@ -972,16 +1145,20 @@ async def run_chat_turn_streaming(
     # MET-590: steps were already streamed live during the loop (live_step),
     # so no post-loop re-emit — duplicates would double-render the timeline.
 
-    if result.status != "completed":
-        await on_delta(_FALLBACK_ANSWER)
-        return _FALLBACK_ANSWER
-
-    answer = str(result.output).strip()
+    answer = str(result.output or "").strip()
     # Never stream an empty answer — a completed turn with no final text (weak
-    # model, or an empty `final`) must still say something, not render blank.
+    # model, or an empty `final`), or one that hit the step cap / wall-clock
+    # deadline without ever producing output, must still say something real
+    # rather than a bare non-answer (production-harness audit follow-up: this
+    # used to throw away the full trajectory even though it was in memory).
     if not answer:
-        await on_delta(_FALLBACK_ANSWER)
-        return _FALLBACK_ANSWER
+        answer = (
+            summarize_trajectory(result.steps)
+            if result.stop_reason in ("max_steps", "timeout", "budget_exceeded")
+            else _FALLBACK_ANSWER
+        )
+        await on_delta(answer)
+        return answer
     # Emit the loop's own answer as chunked deltas. This used to re-generate
     # the final text with a second, context-free model call (no history, no
     # tool results), and stream THAT — which could drift from or hallucinate

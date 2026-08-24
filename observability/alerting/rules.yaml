@@ -83,6 +83,30 @@ groups:
           summary: "Design oscillation detected"
           description: "Agent feedback loop detected for {{ $labels.node_type }}."
 
+      - alert: HarnessTurnAbnormalStopRateHigh
+        expr: |
+          sum(rate(metaforge_harness_turn_total{stop_reason=~"max_steps|timeout|error"}[15m]))
+          /
+          sum(rate(metaforge_harness_turn_total[15m])) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chat harness turns are failing to converge"
+          description: ">20% of chat-harness turns over 15m ended via max_steps/timeout/error instead of a real answer (production-harness audit follow-up)."
+
+      - alert: HarnessToolCallErrorRateHigh
+        expr: |
+          sum(rate(metaforge_harness_tool_call_total{status="error"}[10m])) by (tool_name)
+          /
+          sum(rate(metaforge_harness_tool_call_total[10m])) by (tool_name) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High harness tool-call failure rate for {{ $labels.tool_name }}"
+          description: "Tool {{ $labels.tool_name }} has >30% error rate over 10 minutes in the chat harness loop."
+
   - name: metaforge_fleet_alerts
     rules:
       # Device has not sent telemetry for > N minutes (configurable per device type).

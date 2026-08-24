@@ -719,22 +719,37 @@ ENTRYPOINT ["python", "server.py"]
 | `calculix.run_thermal` | `thermal_analysis` | Thermal analysis (steady-state and transient) |
 | `calculix.validate_mesh` | `mesh_validation` | Validate mesh quality (aspect ratio, element types) |
 
-### FreeCAD Adapter (`tool_registry/tools/freecad/`)
+### CadQuery Adapter (`tool_registry/tools/cadquery/`)
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/adapter-freecad:0.1` |
-| Base Image | `python:3.11-slim` + FreeCAD headless |
+| Docker Image | `metaforge/cadquery-adapter` |
+| Base Image | `python:3.11-slim` (multi-stage) |
 | Transport | stdio |
-| Tools | `freecad.export_mesh`, `freecad.export_step`, `freecad.measure` |
+| Tools | `cadquery.create_parametric`, `cadquery.boolean_operation`, `cadquery.get_properties`, `cadquery.export_geometry`, `cadquery.execute_script`, `cadquery.create_assembly`, `cadquery.generate_enclosure` |
 
 **Tools provided**:
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
-| `freecad.export_mesh` | `mesh_generation` | Generate FEA-ready mesh from CAD geometry |
-| `freecad.export_step` | `cad_export` | Export to STEP/STL/IGES formats |
-| `freecad.measure` | `geometry_measurement` | Measure distances, angles, volumes |
+| `cadquery.create_parametric` | `cad_generation` | Generate parametric CAD geometry from shape type and dimensions |
+| `cadquery.boolean_operation` | `cad_operations` | CSG boolean operations (union, subtract, intersect) |
+| `cadquery.get_properties` | `cad_analysis` | Geometric properties (volume, area, center of mass, bounding box, inertia) |
+| `cadquery.export_geometry` | `cad_export` | Export to STEP/STL/OBJ/BREP/AMF/SVG |
+| `cadquery.execute_script` | `cad_scripting` | Execute a sandboxed CadQuery Python script |
+| `cadquery.create_assembly` | `cad_assembly` | Multi-part assembly from STEP files with constraints |
+| `cadquery.generate_enclosure` | `cad_enclosure` | PCB enclosure from board dimensions and connector cutouts |
+
+### FreeCAD Adapter (`tool_registry/tools/freecad/`)
+
+| Property | Details |
+|----------|---------|
+| Docker Image | `metaforge/freecad-adapter` |
+| Base Image | Debian system Python 3 (FreeCAD's compiled extension requires it, not a python.org image) |
+| Transport | stdio |
+| Tools | Stateful session API (`open_session`, `create_body`, `create_sketch`, `pad_sketch`, `execute_code`, `measure`, `export_model`, assembly joints, and more — 27 tools) plus a separate stateless legacy file-based surface (`export_geometry`, `generate_mesh`, `boolean_operation`, `get_properties`, `describe_step_file`, `create_parametric` — 6 tools) |
+
+Corrected from a stale table that listed `freecad.export_mesh`/`freecad.export_step`/`freecad.measure` — those tool ids don't exist in the current adapter. See [`capability-matrix.md`](capability-matrix.md#cad-kernel-capability-contract) for the 5-capability contract shared with CadQuery, and `tool_registry/tools/freecad/adapter.py` for the full tool list; it's large enough (33 tools across both surfaces) that duplicating it here would drift again.
 
 ### KiCad Adapter (`tool_registry/tools/kicad/`)
 

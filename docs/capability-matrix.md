@@ -91,6 +91,39 @@ external MCP client like Claude Code.
 |---|---|---|
 | `chat.set_project_scope` | Rescope the CURRENT chat thread to a project (id/name/substring, or `none` to leave) — in place, preserving the conversation (MET-580) | see [`cli-reference.md`](cli-reference.md#project-scoped-chat) |
 
+### CAD kernel capability contract
+
+The `cadquery` and `freecad` adapters both implement 5 shared capability
+tags. Mechanical skills (`generate_cad`, `generate_cad_script`) resolve a
+backend at runtime via `mcp.list_tools(capability=...)`
+(`domain_agents/shared/cad_backend.py`'s `resolve_cad_backend`) rather than
+hardcoding a tool id per backend — a new adapter becomes a valid candidate
+for every skill that calls this helper the moment it registers a tool under
+one of these tags, no skill code changes required.
+
+| Capability | `cadquery` tool | `freecad` tool | Guaranteed fields (both backends) | Backend-only extras |
+|---|---|---|---|---|
+| `cad_generation` | `create_parametric` | `create_parametric` | `shape_type` ∈ {bracket, plate, enclosure, cylinder}, `parameters`, `material`, `output_path` → `cad_file`, `volume_mm3`, `surface_area_mm2`, `bounding_box`, `parameters_used` | — (field-for-field identical) |
+| `cad_operations` | `boolean_operation` | `boolean_operation` | `input_file_a`, `input_file_b`, `operation` ∈ {union, subtract, intersect}, `output_path` → `output_file`, `result_volume`, `result_area` | — (field-for-field identical) |
+| `cad_analysis` | `get_properties` | `get_properties` | `input_file` → `volume`, `area`, `center_of_mass`, `bounding_box` | CadQuery adds `inertia`; FreeCAD's does not return it |
+| `cad_export` | `export_geometry` | `export_geometry` | `input_file`, `output_format`, `output_path` → `output_file`, `file_size_bytes`, `format` | CadQuery supports `step/stl/obj/brep/amf/svg`; FreeCAD supports only `step/stl/obj/brep` (no `amf`/`svg`) |
+| `cad_scripting` | `execute_script` | `execute_code` | Script assigns its result to a variable named `result` | Different call shape: CadQuery is stateless (`{script, output_path}` → one file); FreeCAD is session-based (`{session_id, code}` against a live document → `obj_id`, needs a separate `open_session`/`measure`/`export_model`/`close_session` sequence, see `generate_cad_script`'s `_run_freecad_code`) |
+
+**A verification step (or anything else consuming this contract) should rely
+on the guaranteed-fields column above, not assume full identity** — e.g. a
+measurement check shouldn't require `inertia` unless it knows it's routed to
+CadQuery specifically.
+
+**Adding a new kernel**: register its tools under these same 5 capability
+tags with input/output shapes matching the guaranteed-fields column, and
+`resolve_cad_backend` (plus every skill that calls it) picks it up
+automatically. Capabilities outside this table (FreeCAD's `PartDesign`/
+`Sketcher` feature-tree tools, assembly joints, `generate_gear`/
+`fastener_hole`/`generate_ic_package`/`lattice_perforation`; CadQuery's
+`create_assembly`/`generate_enclosure`) are intentionally kernel-specific and
+not part of this uniform contract — FreeCAD's session/feature-tree model is a
+categorically different, stateful capability CadQuery cannot replicate.
+
 ## Dashboard routes (11)
 
 Served by Vite under `dashboard/` — boot with

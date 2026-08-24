@@ -84,14 +84,15 @@ class TestAlertingRules:
         assert "metaforge_warning" in group_names
 
     def test_total_alert_rules_count(self) -> None:
-        # 21 total: 8 original + 5 anomaly + 2 retrieval-quality
+        # 23 total: 8 original + 5 anomaly + 2 retrieval-quality
         # + 1 latency-SLO + 1 twin-orphans (MET-439)
         # + 1 consolidation-contradictions (MET-455)
         # + 3 KB storage (MinIO bucket size / write latency / access errors,
-        #   MET-476).
+        #   MET-476)
+        # + 2 harness (production-harness audit follow-up).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 21
+        assert len(rules) == 23
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -116,15 +117,16 @@ class TestAlertingRules:
         assert len(critical) == 6
 
     def test_seven_warning_rules(self) -> None:
-        # 15 warning: 5 original + 2 fleet + 2 retrieval-quality
+        # 17 warning: 5 original + 2 fleet + 2 retrieval-quality
         # + 1 latency-SLO + 1 twin-orphans (MET-439)
         # + 1 consolidation-contradictions (MET-455)
         # + 3 KB-storage (MinIO bucket size / write latency / access errors,
-        #   MET-476).
+        #   MET-476)
+        # + 2 harness (production-harness audit follow-up).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 15
+        assert len(warnings) == 17
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -153,6 +155,8 @@ class TestAlertingRules:
                 "ContextTruncationSpike",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
+                "HarnessToolCallErrorRateHigh",
+                "HarnessTurnAbnormalStopRateHigh",
                 "HighAgentFailureRate",
                 "KafkaConsumerLagHigh",
                 "KnowledgeSearchLatencySLO",
