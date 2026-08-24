@@ -61,6 +61,39 @@ Full inventory: **[`docs/capability-matrix.md`](docs/capability-matrix.md)**.
 
 ## Quickstart
 
+The fastest path — one script handles Docker, secrets, the `forge`
+CLI, and your first project:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/onboarding.sh | bash
+```
+
+### High-level flow
+
+```mermaid
+flowchart TD
+    mode{Usage or<br/>Develop mode?} --> adapters[Pick tool adapters<br/>KiCad · CalculiX · CadQuery · FreeCAD<br/>— skip any you don't need]
+    adapters --> llm{LLM provider?}
+    llm -->|API key| key[Anthropic · OpenAI · OpenRouter]
+    llm -->|Subscription| oauth[ChatGPT / Codex — OAuth,<br/>no key to paste]
+    llm -->|Skip| later[Configure later]
+    key --> stack[Pull the gateway image from GHCR<br/>build the rest, start the stack]
+    oauth --> stack
+    later --> stack
+    stack --> health[Wait for Postgres/Neo4j/Kafka/<br/>Temporal/OCCT/gateway healthy]
+    health --> cli[Install the forge CLI]
+    cli --> codexlogin[Finish Codex OAuth login,<br/>if chosen]
+    codexlogin --> project[Create your first project<br/>+ a demo chat turn]
+```
+
+Non-interactive / scripted installs, adapter and provider flags, and
+`--develop` mode (editable source, hot-reload) are documented in
+`onboarding.sh --help`.
+
+### Manual install
+
+Prefer to do it by hand, or already have a checkout:
+
 ```bash
 git clone https://github.com/FidelOdok/MetaForge.git
 cd MetaForge

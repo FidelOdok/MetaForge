@@ -17,6 +17,11 @@
 services:
   # ── MetaForge Gateway ────────────────────────────────────────────
   gateway:
+    # Prebuilt on every push to main (MET-638) — `docker compose pull gateway`
+    # fetches this instead of building locally. `build:` stays so `--develop`
+    # mode and `docker compose up --build` still work for contributors editing
+    # source; Compose only builds when no local image matches this tag.
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
