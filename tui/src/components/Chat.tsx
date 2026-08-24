@@ -6,7 +6,7 @@ import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ThreadSummary } from "../api/client.js";
 import { describeThread, pickerCandidates } from "../lib/resume.js";
-import { transcriptHeight } from "../lib/transcript-height.js";
+import { pendingHeight, transcriptHeight } from "../lib/transcript-height.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
@@ -380,10 +380,19 @@ export function Chat({
   // (Ink can't measure scrollback). Clamped at 0, so drift is a slightly
   // short gap at worst — and once the transcript exceeds one screen the
   // spacer is 0 and this is exactly the old content-flow behavior.
+  //
+  // MET-641: the reservation also shrinks by the in-flight turn's own
+  // estimated height. Without that, `pinHeight` stays fixed at the size of
+  // the *finalized* transcript while `pending` (steps/thinking/text) grows
+  // underneath it — the live region silently outgrows a stale minHeight, so
+  // the frame's total height jumps the moment a streaming turn's trace first
+  // exceeds the reservation. Shrinking the reservation in step with
+  // `pending`'s growth keeps the total frame height roughly constant instead.
   const FOOTER_ROWS = 2;
   const staticEstimate =
     welcomeHeight(cols, client.baseUrl()) + transcriptHeight(messages, cols);
-  const pinHeight = Math.max(0, termRows - staticEstimate - FOOTER_ROWS - 1);
+  const liveEstimate = pendingHeight(pending, cols, busy);
+  const pinHeight = Math.max(0, termRows - staticEstimate - FOOTER_ROWS - 1 - liveEstimate);
   return (
     <Box flexDirection="column" flexGrow={1}>
       {staticContent}
