@@ -122,7 +122,14 @@ services:
       - ./observability:/app/observability
       - ./metaforge:/app/metaforge
       - ./pyproject.toml:/app/pyproject.toml:ro
-      - adapter-workspace:/workspace:ro
+      # Read-write (MET-618 follow-up): twin.stage_work_product_file and
+      # MET-612's boolean-cut staging both write into this shared workspace
+      # so any adapter can load the result — the gateway's own mount above
+      # was already read-write for the same reason; this one was never
+      # updated to match, so any write-needing tool exposed through this
+      # standalone sidecar (used by external MCP clients) failed with
+      # "Read-only file system" no matter which work product it targeted.
+      - adapter-workspace:/workspace
     # Override the gateway image's baked-in HEALTHCHECK (it probes :8000,
     # the gateway's port) — this sidecar serves on :8765, so without this
     # the container reports "unhealthy" forever while working fine.

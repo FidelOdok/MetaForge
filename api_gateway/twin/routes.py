@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
-from api_gateway.convert.service import ConversionService
+from api_gateway.convert.service import ConversionError, ConversionService
 from api_gateway.twin.boolean_ops import (
     BooleanOpError,
     InvalidFormatError,
@@ -305,7 +305,22 @@ async def get_node_model(
         content, filename = _resolve_blob(wp)
         span.set_attribute("model.filename", filename)
 
-        result = ConversionService().convert(content, filename, quality)
+        try:
+            result = ConversionService().convert(content, filename, quality)
+        except ConversionError as exc:
+            # MET-652: this is a client-facing "this content can't be
+            # converted" case (e.g. a STEP with no exportable solids), not a
+            # server fault — previously an unhandled 500 with a full stack
+            # trace on every request for this node.
+            span.record_exception(exc)
+            logger.warning(
+                "node_model_conversion_rejected",
+                node_id=node_id,
+                filename=filename,
+                occt_status=exc.status_code,
+                occt_body=exc.body,
+            )
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.info(
             "node_model_converted",
             node_id=node_id,

@@ -25,6 +25,22 @@ _DEFAULT_CACHE_DIR = Path(os.getenv("CONVERT_CACHE_DIR", "/tmp/metaforge-convert
 _OCCT_URL = os.getenv("OCCT_CONVERTER_URL", "http://localhost:8100")
 
 
+class ConversionError(RuntimeError):
+    """The OCCT converter rejected the file (bad request, not a server crash).
+
+    MET-652: previously a bare ``RuntimeError``, which the route handler
+    never caught -- every rejection (e.g. "Can't export empty scenes!" for a
+    STEP with no exportable solids) surfaced as an unhandled 500 with a full
+    stack trace, even though it's a client-facing "this content can't be
+    converted" case, not a server fault.
+    """
+
+    def __init__(self, status_code: int, body: str) -> None:
+        self.status_code = status_code
+        self.body = body
+        super().__init__(f"OCCT converter returned {status_code}: {body}")
+
+
 class ConversionService:
     """Manages STEP/IGES → GLB conversion with content-hash caching.
 
@@ -148,8 +164,7 @@ class ConversionService:
             return
 
         if resp.status_code != 200:
-            body = resp.text
-            raise RuntimeError(f"OCCT converter returned {resp.status_code}: {body}")
+            raise ConversionError(resp.status_code, resp.text)
 
         result = resp.json()
 
