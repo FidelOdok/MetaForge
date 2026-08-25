@@ -758,6 +758,13 @@ export function TwinViewerPage() {
                   maxWidth: 420,
                   textAlign: 'center',
                   pointerEvents: 'none',
+                  // MET-683: an opaque backdrop so this overlay fully covers
+                  // R3FViewer's own "Upload a STEP file..." placeholder text
+                  // underneath instead of visually overlapping it.
+                  background: KC.surface,
+                  border: `1px solid ${KC.border}`,
+                  borderRadius: 6,
+                  padding: '20px 24px',
                 }}
               >
                 <span
