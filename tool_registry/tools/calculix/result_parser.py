@@ -89,11 +89,13 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
 def _extract_stress(lines: list[str]) -> dict[str, Any]:
     """Extract von Mises stress data from .frd lines.
 
-    In .frd format, stress blocks are identified by a ``100C`` header line
-    containing ``STRESS``. Subsequent ``100C`` lines (e.g. column headers)
-    are part of the same block. Each node's stress is on a ``-1`` line with
-    6 components (SXX, SYY, SZZ, SXY, SXZ, SYZ). Von Mises is computed
-    from these components. The block ends at a ``-3`` line.
+    In real ccx output, a result block is named on its ``-4`` header line
+    (e.g. ``-4  STRESS      6    1``) -- NOT on the preceding generic
+    ``100CL`` step-metadata line, which is identical across DISP/STRESS/
+    ERROR blocks and carries no result-type name. Each node's stress is on
+    a ``-1`` line with 6 components (SXX, SYY, SZZ, SXY, SYZ, SZX). Von
+    Mises is computed from these components. The block ends at a ``-3``
+    line (or a new ``-4`` line, if a solver ever omits the ``-3``).
 
     Returns:
         Dict with keys: nodes (dict[node_id, von_mises]), max, min, avg.
@@ -104,21 +106,9 @@ def _extract_stress(lines: list[str]) -> dict[str, Any]:
     for line in lines:
         stripped = line.strip()
 
-        # Detect stress result block header (e.g. "100CL  101STRESS")
-        if stripped.startswith("100C") and "STRESS" in line.upper():
-            in_stress_block = True
-            continue
-
-        # 100C lines within the block are column headers -- skip them
-        if in_stress_block and stripped.startswith("100C"):
-            continue
-
-        # A new 2C header means a new result block -- exit stress block
-        if in_stress_block and stripped.startswith("2C"):
-            in_stress_block = False
-            # Check if this new block is also STRESS (unlikely but safe)
-            if "STRESS" in line.upper():
-                in_stress_block = True
+        # Detect a result block header and whether it's the stress block.
+        if stripped.startswith("-4"):
+            in_stress_block = "STRESS" in line.upper()
             continue
 
         # End of data block
@@ -143,10 +133,10 @@ def _extract_stress(lines: list[str]) -> dict[str, Any]:
 def _extract_displacement(lines: list[str]) -> dict[str, Any]:
     """Extract displacement data from .frd lines.
 
-    Displacement blocks are identified by ``DISP`` in a ``100C`` header.
-    Subsequent ``100C`` lines are column headers within the same block.
-    Each node has 3 components (DX, DY, DZ). Magnitude is sqrt(dx^2+dy^2+dz^2).
-    The block ends at a ``-3`` line.
+    Displacement blocks are named on their ``-4`` header line (e.g.
+    ``-4  DISP        4    1``), not on the preceding generic ``100CL``
+    step-metadata line. Each node has 3 components (DX, DY, DZ).
+    Magnitude is sqrt(dx^2+dy^2+dz^2). The block ends at a ``-3`` line.
 
     Returns:
         Dict with keys: nodes (dict[node_id, magnitude]), max, min, avg.
@@ -157,17 +147,8 @@ def _extract_displacement(lines: list[str]) -> dict[str, Any]:
     for line in lines:
         stripped = line.strip()
 
-        if stripped.startswith("100C") and "DISP" in line.upper():
-            in_disp_block = True
-            continue
-
-        if in_disp_block and stripped.startswith("100C"):
-            continue
-
-        if in_disp_block and stripped.startswith("2C"):
-            in_disp_block = False
-            if "DISP" in line.upper():
-                in_disp_block = True
+        if stripped.startswith("-4"):
+            in_disp_block = "DISP" in line.upper()
             continue
 
         if in_disp_block and stripped.startswith("-3"):
