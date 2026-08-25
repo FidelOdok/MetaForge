@@ -121,6 +121,109 @@ class TestHappyPath:
         assert calls["freecad.fillet_edges"]["body_id"] == "body_1"
         assert calls["freecad.fillet_edges"]["edges"] == ["Edge3"]
 
+    async def test_sketch_elements_translated_to_the_flat_shape_the_adapter_expects(self):
+        # Regression (MET-682): the pre-fix code dumped each IR sketch-element
+        # model as-is (el.model_dump()) straight into "elements" -- IR field
+        # names (center/radius, origin, start/end tuples) don't match what
+        # tool_registry.tools.freecad.operations.FreecadOperations
+        # ._add_sketch_element actually reads (flat cx/cy/r, x/y, x1/y1/x2/y2).
+        # A real InMemoryMcpBridge test double can't catch this -- it returns
+        # a canned response regardless of what's sent -- so this test asserts
+        # on the *outgoing* call payload directly, which is what a real
+        # FreeCAD adapter would have KeyError'd on.
+        mcp = _bracket_bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [
+                        {"type": "rectangle", "origin": (1.0, 2.0), "width": 40.0, "height": 20.0},
+                        {"type": "circle", "center": (5.0, 6.0), "radius": 3.0},
+                        {"type": "line", "start": (0.0, 0.0), "end": (10.0, 10.0)},
+                    ],
+                },
+                {
+                    "id": "sol1",
+                    "op": "pad",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk1",
+                    "depth": 10.0,
+                },
+            ]
+        )
+
+        await lower_design_ir_freecad(mcp, doc)
+
+        calls = dict(mcp.calls)
+        elements = calls["freecad.create_sketch"]["elements"]
+        assert elements[0] == {
+            "type": "rectangle",
+            "x": 1.0,
+            "y": 2.0,
+            "width": 40.0,
+            "height": 20.0,
+        }
+        assert elements[1] == {"type": "circle", "cx": 5.0, "cy": 6.0, "r": 3.0}
+        assert elements[2] == {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 10.0}
+
+    async def test_document_ending_in_joint_picks_the_last_real_shape_as_terminal(self):
+        # Regression (MET-682): freecad.add_assembly_joint registers its
+        # obj_id against a Python None (a joint is pure kinematics metadata,
+        # not a FreeCAD object with a .Shape). The pre-fix _NO_SHAPE_OPS
+        # didn't exclude "joint", so a document assembled part -> part ->
+        # joint (the natural shape of an assembly script, confirmed live via
+        # a real text-to-CAD eval run) picked the joint as terminal and
+        # freecad.measure/export_model failed with "nothing to export: None
+        # has no exportable geometry" against a real FreeCAD adapter. A real
+        # InMemoryMcpBridge test double can't catch this on its own -- it
+        # returns a canned response regardless of what's sent -- so this
+        # test asserts on which obj_id ends up as the *terminal* (the one
+        # sent to freecad.measure/export_model), not just that lowering
+        # doesn't raise.
+        mcp = InMemoryMcpBridge()
+        _register(mcp, "freecad.open_session", {"session_id": "sess-1"})
+        _register(mcp, "freecad.create_primitive", {"obj_id": "prim_1"})
+        _register(mcp, "freecad.create_assembly", {"obj_id": "asm_1"})
+        _register(mcp, "freecad.add_part_to_assembly", {})
+        _register(mcp, "freecad.add_assembly_joint", {"obj_id": "joint_1"})
+        _register(
+            mcp,
+            "freecad.measure",
+            {"volume_mm3": 500.0, "surface_area_mm2": 300.0, "bounding_box": {}},
+        )
+        _register(
+            mcp,
+            "freecad.export_model",
+            {"step_base64": base64.b64encode(b"STEP").decode("ascii")},
+        )
+        _register(mcp, "freecad.close_session", {})
+
+        doc = DesignIR(
+            entities=[
+                {"id": "p1", "op": "create_primitive", "kind": "box"},
+                {"id": "asm", "op": "create_assembly"},
+                {"id": "place1", "op": "place", "assembly_ref": "asm", "part_ref": "p1"},
+                {
+                    "id": "j1",
+                    "op": "joint",
+                    "assembly_ref": "asm",
+                    "part_a_ref": "p1",
+                    "part_b_ref": "p1",
+                    "joint_type": "fixed",
+                },
+            ]
+        )
+        result = await lower_design_ir_freecad(mcp, doc)
+
+        assert result.terminal_entity_id == "place1"
+        calls = dict(mcp.calls)
+        assert calls["freecad.measure"]["obj_id"] == "prim_1"
+        assert calls["freecad.export_model"]["obj_id"] == "prim_1"
+
     async def test_transform_mutates_in_place_no_new_obj_id(self):
         mcp = InMemoryMcpBridge()
         _register(mcp, "freecad.open_session", {"session_id": "sess-1"})

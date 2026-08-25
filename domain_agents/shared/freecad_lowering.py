@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 
@@ -59,7 +60,11 @@ from twin_core.design_ir.models import (
     PolarPatternEntity,
     RevolveEntity,
     ShellEntity,
+    SketchCircle,
+    SketchElement,
     SketchEntity,
+    SketchLine,
+    SketchRectangle,
     SweepEntity,
     TransformEntity,
 )
@@ -68,12 +73,52 @@ from twin_core.design_ir.validation import validate_design_ir
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("domain_agents.shared.freecad_lowering")
 
-_NO_SHAPE_OPS = frozenset({"create_body", "create_sketch", "create_assembly"})
+_NO_SHAPE_OPS = frozenset({"create_body", "create_sketch", "create_assembly", "joint"})
 _UNSUPPORTED_OPS = frozenset({"create_parametric"})
 
 
 class LoweringError(Exception):
     """The Design IR document could not be lowered against FreeCAD."""
+
+
+def _lower_sketch_element(el: SketchElement) -> dict[str, Any]:
+    """Translate one Design IR sketch element into the flat shape
+    ``tool_registry.tools.freecad.operations.FreecadOperations._add_sketch_element``
+    actually expects.
+
+    The two schemas were never reconciled: the IR uses ``center``/``radius``
+    (circle), ``origin`` (rectangle), and ``start``/``end`` tuples (line),
+    while the FreeCAD adapter's element parser expects flat ``cx``/``cy``/``r``,
+    ``x``/``y``, and ``x1``/``y1``/``x2``/``y2`` keys respectively. Dumping the
+    IR model as-is (the pre-fix behavior, plain ``el.model_dump()``) sent the
+    adapter a dict with none of the keys it looks up, raising a bare
+    ``KeyError`` (e.g. ``'cx'``) on the very first circle -- confirmed live
+    via a real text-to-CAD eval run where every ``generate_cad_ir`` attempt
+    involving a sketch failed this way (MET-682).
+    """
+    if isinstance(el, SketchCircle):
+        return {"type": "circle", "cx": el.center[0], "cy": el.center[1], "r": el.radius}
+    if isinstance(el, SketchRectangle):
+        return {
+            "type": "rectangle",
+            "x": el.origin[0],
+            "y": el.origin[1],
+            "width": el.width,
+            "height": el.height,
+        }
+    if isinstance(el, SketchLine):
+        return {
+            "type": "line",
+            "x1": el.start[0],
+            "y1": el.start[1],
+            "x2": el.end[0],
+            "y2": el.end[1],
+        }
+    # SketchArc: _add_sketch_element has no arc branch at all yet -- pass the
+    # IR shape through unchanged so its existing "Unsupported sketch element"
+    # ValueError fires with a clear message, rather than pretending arcs are
+    # supported by guessing a translation for a code path that doesn't exist.
+    return el.model_dump()
 
 
 @dataclass
@@ -94,15 +139,24 @@ def _find_terminal_entity(doc: DesignIR) -> IREntity:
     ``create_body``/``create_sketch``/``create_assembly`` don't have a
     standalone shape at the point they're created, so a document ending in
     one of those has nothing to export -- raise rather than guess which
-    earlier entity was "really" the result.
+    earlier entity was "really" the result. ``joint`` is excluded for the
+    same reason: ``add_assembly_joint`` registers its obj_id against a
+    Python ``None`` (a joint is pure kinematics metadata, not a FreeCAD
+    object with a ``.Shape``) -- confirmed live via a real text-to-CAD eval
+    run where a document ending in a ``joint`` entity (the natural last step
+    of an assembly) made ``freecad.measure``/``freecad.export_model`` fail
+    with "nothing to export: None has no exportable geometry" (MET-682).
+    ``place`` is deliberately NOT excluded: it returns the real placed
+    part's own obj_id (already-existing geometry), which is legitimately
+    exportable.
     """
     for entity in reversed(doc.entities):
         if entity.op not in _NO_SHAPE_OPS:
             return entity
     raise LoweringError(
         "no exportable terminal entity: the document is empty, or ends in "
-        "create_body/create_sketch/create_assembly, none of which have a "
-        "standalone shape to measure or export"
+        "create_body/create_sketch/create_assembly/joint, none of which have "
+        "a standalone shape to measure or export"
     )
 
 
@@ -218,7 +272,7 @@ async def _lower_one(
                 "body_id": obj_ids[entity.body_ref],
                 "plane": entity.plane,
                 "offset": entity.offset,
-                "elements": [el.model_dump() for el in entity.elements],
+                "elements": [_lower_sketch_element(el) for el in entity.elements],
             },
         )
         return str(result["obj_id"])
