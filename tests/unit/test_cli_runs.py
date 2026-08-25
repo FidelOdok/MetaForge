@@ -67,6 +67,21 @@ def test_list_table(capsys: pytest.CaptureFixture[str]) -> None:
     assert "run_1" in out and "running" in out
 
 
+def test_list_table_formats_epoch_timestamps_as_human_readable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Regression: /v1/runs returns created_at/updated_at as raw Unix seconds
+    # (matching the dashboard's own numeric HarnessRun.createdAt, which the
+    # dashboard formats client-side) -- `forge runs list` printed the bare
+    # float (e.g. "1.0") straight into the table instead of formatting it,
+    # unlike every other CLI list command whose date columns are already
+    # ISO strings from the backend.
+    handle_runs(_args(runs_command="list"), FakeClient())  # type: ignore[arg-type]
+    out = capsys.readouterr().out
+    assert "1970-01-01 00:00:01 UTC" in out
+    assert "1.0" not in out
+
+
 def test_get(capsys: pytest.CaptureFixture[str]) -> None:
     handle_runs(_args(runs_command="get", run_id="run_1"), FakeClient())  # type: ignore[arg-type]
     assert "run_1" in capsys.readouterr().out
