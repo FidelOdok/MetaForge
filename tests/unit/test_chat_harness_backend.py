@@ -33,7 +33,10 @@ def test_provider_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = provider_config_from_env()
     specs = cfg.slots.candidates("generator")
     assert specs[0] == ProviderSpec(
-        name="anthropic", model="claude-opus-4-8", api_key_env="METAFORGE_LLM_API_KEY"
+        name="anthropic",
+        model="claude-opus-4-8",
+        api_key_env="METAFORGE_LLM_API_KEY",
+        max_context_tokens=200_000,  # MET-655 remainder: now populated for every candidate
     )
 
 

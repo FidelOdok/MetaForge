@@ -38,18 +38,38 @@ _RETRYABLE_NAMES = frozenset(
     {"RateLimitError", "APITimeoutError", "APIConnectionError", "InternalServerError"}
 )
 
+# Substrings (lowercased) that SDKs across providers use for "the prompt is
+# too big for this model's context window" -- a request-size failure, not a
+# transient one, so it's never retryable and (MET-655 remainder) lets the
+# pipeline skip any later candidate whose window is provably too small too.
+_CONTEXT_LENGTH_MARKERS = (
+    "context length",
+    "context_length_exceeded",
+    "context window",
+    "maximum context",
+    "too many tokens",
+    "exceeds the context",
+)
+
 
 def _classify_error(exc: Exception) -> ProviderError:
     """Map an SDK exception to a ProviderError with retry semantics."""
     status = getattr(exc, "status_code", None)
     if not isinstance(status, int):
         status = None
-    retryable = (
+    message = str(exc) or type(exc).__name__
+    context_length_exceeded = any(marker in message.lower() for marker in _CONTEXT_LENGTH_MARKERS)
+    retryable = not context_length_exceeded and (
         type(exc).__name__ in _RETRYABLE_NAMES
         or status == 429
         or (status is not None and status >= 500)
     )
-    return ProviderError(str(exc) or type(exc).__name__, status_code=status, retryable=retryable)
+    return ProviderError(
+        message,
+        status_code=status,
+        retryable=retryable,
+        context_length_exceeded=context_length_exceeded,
+    )
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 8192

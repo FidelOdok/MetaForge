@@ -89,6 +89,87 @@ def test_unknown_role_raises() -> None:
         pipeline.resolve("evaluator")
 
 
+# ---------------------------------------------------------------------------
+# MET-655 remainder: context-window-aware fallback. Live-caught: openai-codex
+# rejected a 137k-token request as too long, and the pipeline blindly fell
+# through to openrouter/gpt-4o (128k window) -- smaller than the window that
+# JUST rejected the same request, guaranteed to fail identically.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_skips_fallback_whose_window_is_no_larger_than_a_failed_one() -> None:
+    big = ProviderSpec(name="openai-codex", model="gpt-5.5", max_context_tokens=100_000)
+    smaller = ProviderSpec(name="openrouter", model="gpt-4o", max_context_tokens=80_000)
+    pipeline, _ = _pipeline(big, smaller, retries=0)
+
+    calls: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: object) -> str:
+        calls.append(spec.name)
+        raise ProviderError("prompt exceeds the context window", context_length_exceeded=True)
+
+    with pytest.raises(AllProvidersFailedError) as excinfo:
+        await pipeline.complete("generator", {}, invoke)
+
+    # The smaller fallback was never actually invoked -- only the first was.
+    assert calls == ["openai-codex"]
+    skipped_spec, skipped_err = excinfo.value.attempts[1]
+    assert skipped_spec is smaller
+    assert isinstance(skipped_err, ProviderError)
+    assert skipped_err.context_length_exceeded is True
+
+
+@pytest.mark.asyncio
+async def test_still_tries_a_fallback_with_a_larger_window() -> None:
+    small = ProviderSpec(name="openai-codex", model="gpt-5.5", max_context_tokens=100_000)
+    bigger = ProviderSpec(name="anthropic", model="claude-opus-4-8", max_context_tokens=200_000)
+    pipeline, _ = _pipeline(small, bigger, retries=0)
+
+    calls: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: object) -> str:
+        calls.append(spec.name)
+        if spec is small:
+            raise ProviderError("context_length_exceeded", context_length_exceeded=True)
+        return "ok"
+
+    result = await pipeline.complete("generator", {}, invoke)
+    assert result == "ok"
+    assert calls == ["openai-codex", "anthropic"]  # the larger-window fallback WAS tried
+
+
+@pytest.mark.asyncio
+async def test_unset_max_context_tokens_never_skips_anything() -> None:
+    """Default (no caller opted in): behavior is completely unchanged."""
+    pipeline, _ = _pipeline(PRIMARY, FALLBACK, retries=0)
+    calls: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: object) -> str:
+        calls.append(spec.name)
+        if spec is PRIMARY:
+            raise ProviderError("context length exceeded", context_length_exceeded=True)
+        return "ok"
+
+    result = await pipeline.complete("generator", {}, invoke)
+    assert result == "ok"
+    assert calls == ["anthropic", "openai"]  # fallback was invoked, not skipped
+
+
+def test_context_length_marker_is_not_retryable() -> None:
+    """adapters._classify_error: a context-length rejection must never be
+    retried against the SAME provider -- the same oversized request will
+    fail again identically."""
+    from orchestrator.harness.providers.adapters import _classify_error
+
+    class _FakeSdkError(Exception):
+        status_code = 400
+
+    err = _classify_error(_FakeSdkError("This model's maximum context length is 128000 tokens"))
+    assert err.context_length_exceeded is True
+    assert err.retryable is False
+
+
 @pytest.mark.asyncio
 async def test_first_provider_success() -> None:
     pipeline, slept = _pipeline(PRIMARY, FALLBACK)
