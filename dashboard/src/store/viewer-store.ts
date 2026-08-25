@@ -54,6 +54,11 @@ interface ViewerState {
   setModelBounds: (bounds: ModelBounds | null) => void;
 
   loadModel: (glbUrl: string, manifest: ModelManifest) => void;
+  /** MET-683: clear the loaded model WITHOUT leaving 3D view mode (unlike
+   * `reset`, which also flips viewMode back to 'graph') -- used before
+   * loading a newly-selected node so a failed load doesn't leave the
+   * PREVIOUS node's geometry on screen under the new node's breadcrumb. */
+  clearModel: () => void;
   selectPart: (meshName: string | null) => void;
   toggleVisibility: (meshName: string) => void;
   setExplodeFactor: (factor: number) => void;
@@ -106,6 +111,16 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       hiddenMeshes: new Set(),
       explodeFactor: 0,
       viewMode: '3d',
+      modelBounds: null,
+    }),
+
+  clearModel: () =>
+    set({
+      glbUrl: null,
+      manifest: null,
+      selectedMeshName: null,
+      hiddenMeshes: new Set(),
+      explodeFactor: 0,
       modelBounds: null,
     }),
 

@@ -576,6 +576,7 @@ export function TwinViewerPage() {
   const selectPart = useViewerStore((s) => s.selectPart);
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const loadModel = useViewerStore((s) => s.loadModel);
+  const clearModel = useViewerStore((s) => s.clearModel);
 
   const uploadMutation = useUploadAndConvert();
 
@@ -614,6 +615,13 @@ export function TwinViewerPage() {
     const n = selectedNode;
     if (!n || n.properties.wp_type !== 'cad_model') return;
     if (loadedModelNodeId === n.id) return;
+    // MET-683: clear any PREVIOUS node's geometry before attempting this
+    // node's load -- otherwise a failed load left the prior node's model on
+    // screen under the new node's breadcrumb, with no error overlay (it was
+    // gated on `!glbUrl`, which a stale-but-present model kept satisfying as
+    // false), silently misleading the user rather than showing nothing/an
+    // error for the node they actually just selected.
+    clearModel();
     let cancelled = false;
     (async () => {
       try {
@@ -649,7 +657,7 @@ export function TwinViewerPage() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, selectedNode, loadedModelNodeId, loadModel]);
+  }, [viewMode, selectedNode, loadedModelNodeId, loadModel, clearModel]);
 
   useEffect(() => {
     if (!uploadMutation.isPending) {
