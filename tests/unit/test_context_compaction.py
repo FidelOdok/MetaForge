@@ -92,10 +92,37 @@ def test_bare_list_shrinks_and_notes_omitted_count() -> None:
     assert len(parsed) - 1 < 200  # kept fewer real items than the original 200
 
 
-def test_no_list_field_falls_back_to_blind_slice() -> None:
+def test_no_list_field_omits_the_oversized_string_field() -> None:
+    """MET-10: this used to fall through to a blind character slice on the
+    whole rendered dict, landing mid-string. Live-caught: a real
+    cadquery.execute_script result's step_base64 got sliced mid-base64 by
+    this exact path, and the model reused the corrupted value verbatim in a
+    later twin.commit_geometry call, which failed with "not valid base64"
+    instead of an honest "this was too large" signal. Dropping the whole
+    field with an explicit marker is safer than any partial prefix."""
     payload = {"huge_blob": "x" * 5000}
     out = truncate_observation_value(payload, max_chars=1000)
-    assert "[truncated" in out  # ordinary marker — nothing structural to shrink
+    assert len(out) <= 1000
+    assert "x" * 100 not in out  # no partial prefix of the corrupted value survives
+    assert "omitted" in out and "5000 chars" in out
+
+
+def test_step_base64_field_is_omitted_not_corrupted() -> None:
+    """Direct reproduction of the live-caught shape: a tool result dict with
+    other small fields plus one oversized base64 blob."""
+    import json
+
+    payload = {
+        "cad_file": "/tmp/out.step",
+        "step_base64": "QUJD" * 20_000,  # valid base64 repeated -- ~80,000 chars
+        "volume_mm3": 1234.5,
+    }
+    out = truncate_observation_value(payload, max_chars=2000, render=json.dumps)
+    parsed = json.loads(out)  # must be valid, complete JSON
+    assert parsed["cad_file"] == "/tmp/out.step"  # small fields survive untouched
+    assert parsed["volume_mm3"] == 1234.5
+    assert "QUJD" * 100 not in parsed["step_base64"]  # no long corrupted prefix
+    assert "omitted" in parsed["step_base64"]
 
 
 def test_non_dict_non_list_value_behaves_like_before() -> None:
