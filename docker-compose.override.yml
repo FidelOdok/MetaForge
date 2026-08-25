@@ -93,6 +93,9 @@ services:
       # this sidecar, which has no kicad-cli binary, so every real call
       # failed with -32001 even though tools/list looked healthy.
       - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
+      # MET-658 follow-up: same gap as kicad -- the ccx solver binary isn't
+      # installed in this sidecar image, only in calculix-adapter's own.
+      - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can

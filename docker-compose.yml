@@ -42,6 +42,11 @@ services:
       # this image, which has no kicad-cli binary, so every real call failed
       # with -32001 even though tools/list looked healthy.
       - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
+      # MET-658 follow-up: same gap as kicad -- calculix-adapter's entrypoint
+      # is already HTTP-only, but nothing pointed gateway/mcp-http at it, so
+      # calculix.* ran in-process here where the ccx solver binary isn't
+      # installed (only calculix-adapter's own image bundles it).
+      - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
