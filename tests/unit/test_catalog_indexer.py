@@ -66,7 +66,11 @@ async def test_all_required_fields_present_gives_indexed_status():
     store = _FakeStore()
 
     outcome = await index_component(
-        twin, mpn="MP2459", manufacturer="MPS", category="buck_converter", store=store,
+        twin,
+        mpn="MP2459",
+        manufacturer="MPS",
+        category="buck_converter",
+        store=store,
     )
 
     assert outcome.status == "indexed"
@@ -91,7 +95,11 @@ async def test_missing_required_field_gives_partial_but_still_upserts():
     store = _FakeStore()
 
     outcome = await index_component(
-        twin, mpn="MP2459", manufacturer="MPS", category="buck_converter", store=store,
+        twin,
+        mpn="MP2459",
+        manufacturer="MPS",
+        category="buck_converter",
+        store=store,
     )
 
     assert outcome.status == "partial"
@@ -107,7 +115,11 @@ async def test_mpn_not_found_gives_failed_and_writes_nothing():
     store = _FakeStore()
 
     outcome = await index_component(
-        twin, mpn="UNKNOWN-MPN", manufacturer="ACME", category="buck_converter", store=store,
+        twin,
+        mpn="UNKNOWN-MPN",
+        manufacturer="ACME",
+        category="buck_converter",
+        store=store,
     )
 
     assert outcome.status == "failed"
@@ -126,7 +138,11 @@ async def test_unrecognized_unit_is_recorded_as_error_and_treated_as_missing():
     store = _FakeStore()
 
     outcome = await index_component(
-        twin, mpn="MP2459", manufacturer="MPS", category="buck_converter", store=store,
+        twin,
+        mpn="MP2459",
+        manufacturer="MPS",
+        category="buck_converter",
+        store=store,
     )
 
     assert outcome.status == "partial"
@@ -142,7 +158,11 @@ async def test_unknown_category_raises_keyerror():
     store = _FakeStore()
     with pytest.raises(KeyError):
         await index_component(
-            twin, mpn="X", manufacturer="Y", category="not_a_real_category", store=store,
+            twin,
+            mpn="X",
+            manufacturer="Y",
+            category="not_a_real_category",
+            store=store,
         )
 
 
@@ -152,7 +172,11 @@ async def test_datasheet_url_falls_back_to_extracted_source_path():
     store = _FakeStore()
 
     await index_component(
-        twin, mpn="MP2459", manufacturer="MPS", category="buck_converter", store=store,
+        twin,
+        mpn="MP2459",
+        manufacturer="MPS",
+        category="buck_converter",
+        store=store,
     )
 
     assert store.upserted[0].datasheet_url == "datasheets/fake.pdf"
@@ -164,7 +188,11 @@ async def test_explicit_datasheet_url_overrides_extracted_source_path():
     store = _FakeStore()
 
     await index_component(
-        twin, mpn="MP2459", manufacturer="MPS", category="buck_converter", store=store,
+        twin,
+        mpn="MP2459",
+        manufacturer="MPS",
+        category="buck_converter",
+        store=store,
         datasheet_url="https://example.com/explicit.pdf",
     )
 

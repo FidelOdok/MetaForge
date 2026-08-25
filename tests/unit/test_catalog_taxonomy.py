@@ -14,18 +14,49 @@ from digital_twin.catalog.taxonomy import (
 )
 
 EXPECTED_CATEGORIES = {
-    "buck_converter", "boost_converter", "ldo", "battery_charger",
-    "battery_protection", "power_mux",
-    "resistor", "capacitor_ceramic", "capacitor_electrolytic", "inductor", "ferrite_bead",
-    "microcontroller", "microprocessor", "fpga", "memory",
-    "imu", "pressure", "temperature", "current_sense", "optical",
-    "board_to_board", "wire_to_board", "usb", "rf_connector",
-    "wifi_module", "ble_module", "gps_module", "rf_amplifier",
-    "motor_driver", "esc", "servo",
-    "tvs_diode", "fuse", "esd_protection",
-    "level_shifter", "mux_demux", "gate_driver",
-    "mosfet", "bjt", "diode_rectifier",
-    "flight_controller", "telemetry_radio", "osd_module",
+    "buck_converter",
+    "boost_converter",
+    "ldo",
+    "battery_charger",
+    "battery_protection",
+    "power_mux",
+    "resistor",
+    "capacitor_ceramic",
+    "capacitor_electrolytic",
+    "inductor",
+    "ferrite_bead",
+    "microcontroller",
+    "microprocessor",
+    "fpga",
+    "memory",
+    "imu",
+    "pressure",
+    "temperature",
+    "current_sense",
+    "optical",
+    "board_to_board",
+    "wire_to_board",
+    "usb",
+    "rf_connector",
+    "wifi_module",
+    "ble_module",
+    "gps_module",
+    "rf_amplifier",
+    "motor_driver",
+    "esc",
+    "servo",
+    "tvs_diode",
+    "fuse",
+    "esd_protection",
+    "level_shifter",
+    "mux_demux",
+    "gate_driver",
+    "mosfet",
+    "bjt",
+    "diode_rectifier",
+    "flight_controller",
+    "telemetry_radio",
+    "osd_module",
 }
 
 
@@ -92,8 +123,12 @@ def test_is_indexed_defaults_to_queryable():
 def test_spec_model_generates_working_pydantic_model():
     model = spec_model("buck_converter")
     instance = model(
-        v_in_min=4.5, v_in_max=28.0, v_out=5.0, i_out_max=2.0,
-        efficiency=0.92, package="QFN-24",
+        v_in_min=4.5,
+        v_in_max=28.0,
+        v_out=5.0,
+        i_out_max=2.0,
+        efficiency=0.92,
+        package="QFN-24",
     )
     assert instance.v_out == 5.0
     assert instance.package == "QFN-24"
@@ -144,8 +179,10 @@ def test_register_rejects_duplicate_category():
 def test_register_rejects_duplicate_field_name():
     with pytest.raises(ValueError):
         _register(
-            "_test_only_dup_field", "discrete_part",
-            sf("x", "float"), sf("x", "int"),
+            "_test_only_dup_field",
+            "discrete_part",
+            sf("x", "float"),
+            sf("x", "int"),
         )
     CATEGORY_REGISTRY.pop("_test_only_dup_field", None)  # never actually registered, but be safe
 

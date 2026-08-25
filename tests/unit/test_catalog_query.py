@@ -40,8 +40,12 @@ def test_category_scoped_specs_filter():
 @pytest.mark.parametrize(
     "op,expected_sql_fragment",
     [
-        ("==", "= $"), ("!=", "<> $"), (">=", ">= $"), ("<=", "<= $"),
-        (">", "> $"), ("<", "< $"),
+        ("==", "= $"),
+        ("!=", "<> $"),
+        (">=", ">= $"),
+        ("<=", "<= $"),
+        (">", "> $"),
+        ("<", "< $"),
     ],
 )
 def test_comparison_ops_compile(op, expected_sql_fragment):
@@ -202,9 +206,17 @@ def test_mpns_dedups_preserving_order():
 
     def row(mpn: str) -> ComponentCatalogRow:
         return ComponentCatalogRow(
-            id=uuid4(), mpn=mpn, manufacturer="ACME", category="resistor",
-            purchase_unit="discrete_part", cost_usd=0.01, lifecycle="active",
-            datasheet_url="", specs={}, extraction_meta={}, schema_version=1,
+            id=uuid4(),
+            mpn=mpn,
+            manufacturer="ACME",
+            category="resistor",
+            purchase_unit="discrete_part",
+            cost_usd=0.01,
+            lifecycle="active",
+            datasheet_url="",
+            specs={},
+            extraction_meta={},
+            schema_version=1,
         )
 
     result = CatalogQueryResult(rows=[row("A"), row("B"), row("A")], query_time_ms=1.0)
