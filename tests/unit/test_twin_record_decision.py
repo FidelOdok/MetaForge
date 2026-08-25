@@ -127,7 +127,8 @@ class TestRecorder:
         assert len([d for d in decisions if d.content_hash == first["content_hash"]]) == 1
 
     async def test_supersedes_bypasses_dedup(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A superseding record is deliberate — never deduplicated."""
+        """A record with a new supersedes value renders different content —
+        naturally not deduplicated against the thing it supersedes."""
         _patch_blob(monkeypatch)
         twin = InMemoryTwinAPI.create()
         record = make_decision_recorder(twin, None)
@@ -135,6 +136,32 @@ class TestRecorder:
         again = await record(title="D", rationale="r", supersedes=first["node_id"])
         assert again["deduplicated"] is False
         assert again["node_id"] != first["node_id"]
+
+    async def test_repeated_identical_supersedes_call_is_deduplicated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MET-506 follow-up: the original real-world duplicates all carried
+        an identical ``supersedes`` value across retries -- the dedup check
+        used to bypass entirely whenever supersedes was set, so this exact
+        scenario (retry of the same superseding call) still produced
+        duplicates after the first MET-506 fix. Same content + same
+        supersedes must dedupe just like the plain case."""
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+
+        prior = await record(title="Prior decision", rationale="r0", project_id=pid)
+        first = await record(title="D", rationale="r", project_id=pid, supersedes=prior["node_id"])
+        second = await record(title="D", rationale="r", project_id=pid, supersedes=prior["node_id"])
+
+        assert first["deduplicated"] is False
+        assert second["deduplicated"] is True
+        assert second["node_id"] == first["node_id"]
+        decisions = await twin.list_work_products(
+            work_product_type=WorkProductType.DESIGN_DECISION, project_id=UUID(pid)
+        )
+        assert len([d for d in decisions if d.content_hash == first["content_hash"]]) == 1
 
     async def test_blob_failure_degrades_gracefully(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_blob(monkeypatch, fail=True)
