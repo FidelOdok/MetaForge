@@ -15,6 +15,7 @@ from __future__ import annotations
 import structlog
 
 from api_gateway.chat.harness_backend import run_chat_turn
+from api_gateway.chat.routes import get_metrics
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
 from skill_registry.mcp_bridge import McpBridge
@@ -123,6 +124,7 @@ class ReActPhaseBrain:
             max_steps=self._max_steps,
             provider=self._provider,
             model=self._model,
+            metrics=get_metrics(),
         )
         # run_chat_turn returns a fallback sentence when the loop doesn't converge.
         status = "exhausted" if summary.startswith("I couldn't converge") else "completed"

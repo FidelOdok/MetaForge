@@ -173,6 +173,16 @@ def init_metrics(collector: MetricsCollector | None) -> None:
     logger.info("chat_metrics_initialized", enabled=collector is not None)
 
 
+def get_metrics() -> MetricsCollector | None:
+    """The gateway's configured MetricsCollector, if any (MET-659 follow-up).
+
+    Lets other call sites of ``run_chat_turn`` (e.g. the design-flow-phase
+    handlers under ``api_gateway/runs/``) thread the same collector this
+    module uses, instead of each needing its own wiring.
+    """
+    return _metrics
+
+
 def init_mcp_bridge(bridge: McpBridge) -> None:
     """Replace the default InMemoryMcpBridge with a real bridge.
 
