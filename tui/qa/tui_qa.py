@@ -186,7 +186,7 @@ def _fmt(turn: dict | None) -> str:
 # shows the nav-key hint. Counting each across a scrollback-inclusive capture is
 # how we detect a stranded/duplicated frame.
 INPUT_PLACEHOLDER = "message  (/model"
-FOOTER_FINGERPRINT = "^T/^R"
+FOOTER_FINGERPRINT = "Ctrl+T/R"  # nav hint in App's footer (MET-606 labels)
 
 
 def max_blank_run(text: str) -> int:
@@ -347,6 +347,39 @@ def run_scenarios(tui: Tmux, log_path: str, rep: Report, stub: bool, gateway: st
             "wedge_recovers_without_agent_done",
             bool(turn) and recovered and shows_reply,
             f"turn={_fmt(turn)}, not_thinking={recovered}, reply_shown={shows_reply}",
+        )
+
+        # 4d. A LONG agentic turn (many steps + a multi-screen streamed answer)
+        #     must not glitch while thinking. Ink can only repaint a dynamic
+        #     frame that fits the viewport; before the live region was bounded,
+        #     a long in-flight turn outgrew the terminal and every repaint
+        #     stranded duplicate frames into scrollback — and the POST-resolve
+        #     fallback truncated turns whose stream outlived the 2.5s grace.
+        #     Assert the full answer and full step trace land exactly ONCE, with
+        #     exactly one input box + footer across the whole scrollback.
+        prev = len(read_turns(log_path))
+        tui.type("__long_turn__ design the bracket")
+        tui.key("Enter")
+        turn = wait_for_new_turn(tui, log_path, prev, timeout=45)
+        time.sleep(1.5)  # let the finalize frame settle
+        full = tui.capture_full(scrollback=1000)
+        first_line = full.count("- line 00:")
+        last_line = full.count("- line 39:")
+        steps = full.count("⏺ freecad.op_")
+        inputs = full.count(INPUT_PLACEHOLDER)
+        footers = full.count(FOOTER_FINGERPRINT)
+        complete = bool(turn and turn.get("deltas") == 40 and not turn.get("reason"))
+        tui.snap("after long agentic turn")
+        rep.add(
+            "long_turn_no_thinking_glitch",
+            first_line == 1
+            and last_line == 1
+            and steps == 12
+            and inputs == 1
+            and footers == 1
+            and complete,
+            f"answer_first/last={first_line}/{last_line} (want 1/1), step_lines={steps} "
+            f"(want 12), input_boxes={inputs}, footers={footers}, turn={_fmt(turn)}",
         )
 
     # 4c. Project scope: the footer must report the *thread's* scope, and

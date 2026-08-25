@@ -6,6 +6,7 @@ import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ThreadSummary } from "../api/client.js";
 import { describeThread, pickerCandidates } from "../lib/resume.js";
+import { stepRows, tailLines } from "../lib/live-tail.js";
 import { pendingHeight, transcriptHeight } from "../lib/transcript-height.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
@@ -260,10 +261,33 @@ export function Chat({
   // The live region — the only part that repaints during a turn: the streaming
   // in-flight answer, transient banners, and the input box. Shared by both the
   // launch layout and the Static transcript layout.
+  //
+  // INVARIANT: this region must always fit the viewport. Ink repaints the
+  // dynamic frame in place, which only works while the frame is shorter than
+  // the terminal — once it overflows, Ink cannot erase the previous paint and
+  // every repaint (spinner tick, stream flush) strands a duplicate copy into
+  // scrollback ("glitching while thinking"). A long agentic turn (20+ steps,
+  // multi-screen streamed answer) WILL outgrow any terminal, so we render only
+  // a viewport-sized TAIL of the in-flight turn here: the last few steps and
+  // the last rows of the streaming text. The full step trace and full answer
+  // land in <Static> when the turn finalizes, so nothing is lost.
+  //
+  // Budget: rows available to the pending block after the fixed chrome around
+  // it — input box (3), App footer (2), context meter + alert (2), pending
+  // headers/margins (~4) — plus slack for estimation drift in tailLines.
+  const LIVE_CHROME = 14;
+  const liveBudget = Math.max(5, termRows - LIVE_CHROME);
+  const perStep = stepRows(cols);
+  // Steps get up to a third of the budget; the streaming text gets the rest.
+  const maxSteps = Math.max(1, Math.floor(liveBudget / 3 / perStep));
+  const liveSteps = pending ? pending.steps.slice(-maxSteps) : [];
+  const hiddenSteps = pending ? pending.steps.length - liveSteps.length : 0;
+  const textBudget = Math.max(3, liveBudget - liveSteps.length * perStep - (hiddenSteps ? 1 : 0));
+  const liveText = pending ? tailLines(pending.text, Math.max(1, cols - 2), textBudget) : "";
   const liveRegion = (
     <>
-      {/* Live in-flight turn: streams here, then moves into <Static> on
-          completion. */}
+      {/* Live in-flight turn: a bounded tail streams here, and the full turn
+          moves into <Static> on completion. */}
       {pending ? (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
           {pending.steps.length || pending.thinking || pending.startedAction ? (
@@ -273,9 +297,11 @@ export function Chat({
                 {pending.thinking || pending.text
                   ? ` · ~${Math.max(1, Math.round(((pending.thinking?.length ?? 0) + pending.text.length) / 4))} tok`
                   : ""}
+                {hiddenSteps > 0 ? ` · ${pending.steps.length} steps` : ""}
               </Text>
               <Box marginLeft={1} flexDirection="column">
-                {pending.steps.length ? <StepTrace steps={pending.steps} /> : null}
+                {hiddenSteps > 0 ? <Text dimColor>… {hiddenSteps} earlier steps</Text> : null}
+                {liveSteps.length ? <StepTrace steps={liveSteps} /> : null}
                 {pending.thinking ? (
                   <Text dimColor wrap="truncate-end">
                     {pending.thinking.slice(-600)}
@@ -290,10 +316,10 @@ export function Chat({
           {pending.text ? (
             <>
               <Text color="magenta" bold>
-                ◆ assistant
+                ◆ assistant{liveText.startsWith("…") ? <Text dimColor> (streaming — full reply follows)</Text> : null}
               </Text>
               <Text>
-                {pending.text}
+                {liveText}
                 {busy ? <Text color="yellow">▌</Text> : null}
               </Text>
             </>
@@ -382,16 +408,28 @@ export function Chat({
   // spacer is 0 and this is exactly the old content-flow behavior.
   //
   // MET-641: the reservation also shrinks by the in-flight turn's own
-  // estimated height. Without that, `pinHeight` stays fixed at the size of
-  // the *finalized* transcript while `pending` (steps/thinking/text) grows
-  // underneath it — the live region silently outgrows a stale minHeight, so
-  // the frame's total height jumps the moment a streaming turn's trace first
-  // exceeds the reservation. Shrinking the reservation in step with
-  // `pending`'s growth keeps the total frame height roughly constant instead.
+  // rendered height. Without that, `pinHeight` stays fixed at the size of
+  // the *finalized* transcript while the live region grows underneath it —
+  // it silently outgrows a stale minHeight, so the frame's total height
+  // jumps the moment a streaming turn's trace first exceeds the reservation.
+  // Shrinking the reservation in step with the live region's growth keeps the
+  // total frame height roughly constant instead. Uses the SAME clipped
+  // `liveSteps`/`liveText`/`hiddenSteps` MET-617 computed above (what's
+  // actually on screen, viewport-bounded), not the raw unbounded `pending` —
+  // otherwise this would overestimate a long turn's height and the
+  // reservation would collapse to 0 well before the (bounded) live region
+  // does.
   const FOOTER_ROWS = 2;
   const staticEstimate =
     welcomeHeight(cols, client.baseUrl()) + transcriptHeight(messages, cols);
-  const liveEstimate = pendingHeight(pending, cols, busy);
+  const liveEstimate = pending
+    ? pendingHeight(
+        { text: liveText, steps: liveSteps, thinking: pending.thinking, startedAction: pending.startedAction },
+        cols,
+        busy,
+        hiddenSteps > 0 ? 1 : 0,
+      )
+    : 0;
   const pinHeight = Math.max(0, termRows - staticEstimate - FOOTER_ROWS - 1 - liveEstimate);
   return (
     <Box flexDirection="column" flexGrow={1}>
