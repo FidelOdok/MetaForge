@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { useCreateRun, useRuns } from '../hooks/use-runs';
+import { useRuns } from '../hooks/use-runs';
 import type { HarnessRun } from '../types/run';
 
 const KC = {
@@ -10,7 +10,6 @@ const KC = {
   surfaceBorder: 'rgba(65,72,90,0.2)',
   onSurface: '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
-  running: '#e67e22',
 } as const;
 
 const glassPanel: React.CSSProperties = {
@@ -98,43 +97,17 @@ function RunRow({ run }: { run: HarnessRun }) {
 
 export function RunsPage() {
   const { data: runs, isLoading } = useRuns();
-  const createRun = useCreateRun();
   const items = runs ?? [];
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 500, color: KC.onSurface, lineHeight: 1.2 }}>
-            Harness Runs
-          </h1>
-          <span style={{ fontFamily: 'Roboto Mono, monospace', fontSize: 12, color: KC.onSurfaceVariant }}>
-            {items.length} run{items.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <button
-          onClick={() => createRun.mutate({ request: { goal: 'demo run' } })}
-          disabled={createRun.isPending}
-          style={{
-            height: 30,
-            padding: '0 12px',
-            background: KC.running,
-            border: 'none',
-            borderRadius: 4,
-            cursor: 'pointer',
-            fontSize: 11,
-            color: '#fff',
-            fontFamily: 'inherit',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
-            add
-          </span>
-          New run
-        </button>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 500, color: KC.onSurface, lineHeight: 1.2 }}>
+          Harness Runs
+        </h1>
+        <span style={{ fontFamily: 'Roboto Mono, monospace', fontSize: 12, color: KC.onSurfaceVariant }}>
+          {items.length} run{items.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       <div style={{ ...glassPanel }}>
@@ -147,7 +120,8 @@ export function RunsPage() {
           </div>
         ) : items.length === 0 ? (
           <div style={{ padding: 16, fontSize: 13, color: KC.onSurfaceVariant }}>
-            No runs yet. Create one to drive the harness.
+            No runs yet. Runs are launched by driving the harness via the CLI (`forge chat`) or
+            an MCP client with a design flow — this page observes them live.
           </div>
         ) : (
           items.map((run) => <RunRow key={run.id} run={run} />)
