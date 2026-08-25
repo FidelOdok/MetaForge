@@ -102,10 +102,60 @@ REAL_CCX_FRD = """\
 """
 
 
+REAL_CCX_THERMAL_FRD = """\
+    1C
+    1UUSER
+    1UDATE              25.august.2026
+    1UTIME              04:21:21
+    1UHOST
+    1UPGM               CalculiX
+    1UVERSION           Version 2.20
+    1UCOMPILETIME       Sun Jul 31 18:08:37 CEST 2022
+    1UDIR
+    1UDBN
+    1UMAT    1STEEL
+    2C                             8                                     1
+ -1         1 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         2 1.00000E+01 0.00000E+00 0.00000E+00
+ -1         3 1.00000E+01 1.00000E+01 0.00000E+00
+ -1         4 0.00000E+00 1.00000E+01 0.00000E+00
+ -1         5 0.00000E+00 0.00000E+00 1.00000E+01
+ -1         6 1.00000E+01 0.00000E+00 1.00000E+01
+ -1         7 1.00000E+01 1.00000E+01 1.00000E+01
+ -1         8 0.00000E+00 1.00000E+01 1.00000E+01
+ -3
+    3C                             1                                     1
+ -1         1    1    0    1
+ -2         1         2         3         4         5         6         7         8
+ -3
+    1PSTEP                         1           1           1
+  100CL  101 1.000000000           8                     0    1           1
+ -4  NDTEMP      1    1
+ -5  T           1    1    0    0
+ -1         1 2.00000E+01
+ -1         2 2.00000E+01
+ -1         3 2.00000E+01
+ -1         4 2.00000E+01
+ -1         5 1.00000E+02
+ -1         6 1.00000E+02
+ -1         7 1.00000E+02
+ -1         8 1.00000E+02
+ -3
+ 9999
+"""
+
+
 @pytest.fixture
 def real_frd_path(tmp_path: Path) -> str:
     path = tmp_path / "test_cube.frd"
     path.write_text(REAL_CCX_FRD, encoding="utf-8")
+    return str(path)
+
+
+@pytest.fixture
+def real_thermal_frd_path(tmp_path: Path) -> str:
+    path = tmp_path / "test_thermal.frd"
+    path.write_text(REAL_CCX_THERMAL_FRD, encoding="utf-8")
     return str(path)
 
 
@@ -148,6 +198,29 @@ class TestParseFrdFileRealCcxOutput:
         result = extract_results(real_frd_path)
         assert result["displacement"]["nodes"]
         assert result["stress"]["nodes"]
+
+
+class TestParseFrdFileRealThermalOutput:
+    """MET-661 follow-up: same -4/100C block-detection bug applies to the
+    NDTEMP block used by calculix.run_thermal (adapter.py previously never
+    parsed this at all -- it returned hardcoded zeros unconditionally)."""
+
+    def test_extracts_nonzero_nodal_temperatures(self, real_thermal_frd_path: str) -> None:
+        result = parse_frd_file(real_thermal_frd_path)
+
+        temperature = result["temperature"]
+        assert temperature["nodes"], "NDTEMP block must be found and parsed"
+        assert temperature["nodes"][1] == pytest.approx(20.0)
+        assert temperature["nodes"][5] == pytest.approx(100.0)
+        assert temperature["max"] == pytest.approx(100.0)
+        assert temperature["min"] == pytest.approx(20.0)
+
+    def test_temperature_does_not_leak_into_stress_or_displacement(
+        self, real_thermal_frd_path: str
+    ) -> None:
+        result = parse_frd_file(real_thermal_frd_path)
+        assert result["stress"]["nodes"] == {}
+        assert result["displacement"]["nodes"] == {}
 
 
 class TestParseFrdFileErrors:
