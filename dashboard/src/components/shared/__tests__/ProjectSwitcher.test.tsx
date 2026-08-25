@@ -7,7 +7,13 @@ vi.mock('../../../hooks/use-projects', () => ({
   useProjects: () => mockUseProjects(),
 }));
 
+const mockUseBom = vi.fn();
+vi.mock('../../../hooks/use-bom', () => ({
+  useBom: (projectId?: string) => mockUseBom(projectId),
+}));
+
 import { ProjectSwitcher } from '../ProjectSwitcher';
+import { BomPage } from '../../../pages/BomPage';
 
 const PROJECTS = [
   {
@@ -72,5 +78,49 @@ describe('ProjectSwitcher', () => {
     render(<ProjectSwitcher />);
     const select = screen.getByLabelText(/active project/i) as HTMLSelectElement;
     expect(select.value).toBe('p-old');
+  });
+
+  // MET-653: the above tests only prove the STORE value changes on switch —
+  // not that an already-mounted consumer page actually re-renders with the
+  // new project's content. Mount a real page alongside the switcher, sharing
+  // the real store (only its data hook is mocked), and switch while mounted.
+  describe('propagation to an already-mounted consumer page', () => {
+    beforeEach(() => {
+      mockUseBom.mockImplementation((projectId?: string) => ({
+        data: [
+          {
+            designator: projectId ?? 'none',
+            partNumber: 'PN-1',
+            description: 'd',
+            manufacturer: 'm',
+            quantity: 1,
+            unitPrice: 1,
+            status: 'valid',
+          },
+        ],
+        isLoading: false,
+      }));
+    });
+
+    it('switching the active project re-renders the mounted page with the new project scope', () => {
+      useProjectStore.setState({ activeProjectId: 'p-old', hasSelected: true });
+      render(
+        <>
+          <ProjectSwitcher />
+          <BomPage />
+        </>,
+      );
+
+      expect(mockUseBom).toHaveBeenLastCalledWith('p-old');
+      expect(screen.getByText('p-old')).toBeInTheDocument();
+      expect(screen.queryByText('p-new')).not.toBeInTheDocument();
+
+      const select = screen.getByLabelText(/active project/i) as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: 'p-new' } });
+
+      expect(mockUseBom).toHaveBeenLastCalledWith('p-new');
+      expect(screen.getByText('p-new')).toBeInTheDocument();
+      expect(screen.queryByText('p-old')).not.toBeInTheDocument();
+    });
   });
 });

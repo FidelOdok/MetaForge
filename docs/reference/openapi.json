@@ -6326,7 +6326,7 @@
     },
     "/v1/knowledge/search": {
       "get": {
-        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents`` (MET-390).",
+        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents`` (MET-390).\n\n``project_id`` (MET-670) mirrors the ``projectId`` filter already\non ``/sources`` and ``/ingest``: without it, ``KnowledgeService.search``\nfalls back to the ``default`` tenant, so a project-scoped ingest was\nnever searchable from a project-scoped UI \u2014 the search box silently\nreturned whatever unrelated content happened to live under\n``default`` instead of the active project's own sources.",
         "operationId": "search_knowledge_v1_knowledge_search_get",
         "parameters": [
           {
@@ -6357,6 +6357,25 @@
               ],
               "description": "Filter by knowledge type",
               "title": "Knowledgetype"
+            }
+          },
+          {
+            "description": "Scope search to a project UUID",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Scope search to a project UUID",
+              "title": "Projectid"
             }
           },
           {
@@ -8365,8 +8384,26 @@
     },
     "/v1/twin/relationships": {
       "get": {
-        "description": "List all edges in the Digital Twin graph.",
+        "description": "List edges in the Digital Twin graph.\n\n``project_id`` scopes the view to a single project (MET-491), matching\n``list_twin_nodes``. Omitted or empty returns every edge (including\nunscoped legacy nodes) \u2014 preserving the prior global behaviour.",
         "operationId": "list_twin_relationships_v1_twin_relationships_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8377,6 +8414,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Twin Relationships",
