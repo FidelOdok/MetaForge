@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api_gateway.chat.backend import InMemoryChatBackend
-from api_gateway.chat.routes import init_chat_backend, router
+from api_gateway.chat.routes import init_chat_backend, init_metrics, router
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -303,3 +303,34 @@ class TestHarnessBypassesLegacyGate:
         assert len(messages) == 2  # user + harness agent reply
         assert messages[1]["actor_kind"] == "agent"
         assert messages[1]["content"] == "harness reply"
+
+    @patch("api_gateway.chat.routes.chat_harness_enabled", return_value=True)
+    @patch("api_gateway.chat.routes.is_llm_available", return_value=False)
+    @patch(
+        "api_gateway.chat.routes.run_chat_turn_streaming",
+        new_callable=AsyncMock,
+        return_value="harness reply",
+    )
+    def test_harness_call_threads_the_configured_metrics_collector(
+        self,
+        mock_stream: AsyncMock,
+        _mock_llm: object,
+        _mock_harness: object,
+        client: TestClient,
+    ) -> None:
+        """Regression: init_metrics(collector) sets routes._metrics at gateway
+        startup, but the actual run_chat_turn_streaming() call site never
+        passed metrics=_metrics through -- every harness_turn_duration /
+        harness_tool_call_duration metric (production-harness audit Phase A)
+        was silently never recorded in any deployment, confirmed live via
+        an empty Prometheus __name__ query on fidel-dev despite the pipeline
+        itself being healthy."""
+        sentinel_collector = object()
+        init_metrics(sentinel_collector)  # type: ignore[arg-type]
+        try:
+            thread = _create_thread(client)
+            _send_user_message(client, thread["id"])
+        finally:
+            init_metrics(None)
+
+        assert mock_stream.call_args.kwargs["metrics"] is sentinel_collector
