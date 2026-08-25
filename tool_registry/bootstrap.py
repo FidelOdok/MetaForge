@@ -75,6 +75,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.kicad.config",
         "config_class": "KicadConfig",
     },
+    # MET-634: opt-in like freecad/kicad above -- needs the 'omniverse-usd'
+    # extra (usd-core, trimesh, scipy; plain PyPI wheels, no GPU/conda).
+    # Adapter registers regardless so tools/list is stable; handlers raise
+    # UsdConversionError with a clear install hint if the extra is missing.
+    "omniverse_usd": {
+        "module": "tool_registry.tools.omniverse_usd.adapter",
+        "class": "OmniverseUsdServer",
+        "config_module": "tool_registry.tools.omniverse_usd.config",
+        "config_class": "OmniverseUsdConfig",
+    },
 }
 
 # Adapters with no static factory above -- each is registered by its own

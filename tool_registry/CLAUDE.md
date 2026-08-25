@@ -22,6 +22,7 @@ MCP-based tool access layer. Manages containerized tool adapters (KiCad, FreeCAD
   - `freecad/` -- CAD operations (FreeCAD)
   - `kicad/` -- PCB/schematic validation (KiCad, read-only in Phase 1)
   - `spice/` -- Circuit simulation (ngspice)
+  - `omniverse_usd/` -- GLB -> OpenUSD conversion (usd-core/trimesh, opt-in, pip-installable no GPU)
   - `digikey/`, `mouser/`, `nexar/`, `distributors/` -- Component distributor APIs
 
 ## Testing
