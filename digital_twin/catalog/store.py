@@ -108,9 +108,20 @@ def schema_statements(taxonomy: dict[str, CategorySpec] | None = None) -> list[s
                 raise ValueError(f"unsafe field name for DDL: {f.name!r}")
             cast = _CAST_SQL.get(f.type, "")
             idx_name = _index_name(category, f.name)
+            # Postgres quirk: CREATE INDEX's expression-list parser rejects
+            # a cast expression wrapped in only one paren pair — e.g.
+            # `((specs->>'x')::double precision)` is a syntax error
+            # ("syntax error at or near \"::\"", confirmed against a real
+            # server), but the *same* expression wrapped in one more pair
+            # — `(((specs->>'x')::double precision))` — parses fine. Most
+            # visible with multi-word type names like "double precision".
+            # Always double-wrap (harmless when cast is "" too — Postgres
+            # accepts arbitrarily nested redundant parens around a single
+            # expression) rather than special-casing per type.
+            index_expr = f"(specs->>'{f.name}'){cast}"
             statements.append(
                 f"CREATE INDEX IF NOT EXISTS {idx_name} ON component_catalog "
-                f"((specs->>'{f.name}'){cast}) WHERE category = {_sql_literal(category)}"
+                f"(({index_expr})) WHERE category = {_sql_literal(category)}"
             )
     return statements
 
