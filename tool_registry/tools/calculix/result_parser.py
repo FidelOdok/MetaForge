@@ -57,16 +57,19 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
 
         stress_data = _extract_stress(lines)
         displacement_data = _extract_displacement(lines)
+        temperature_data = _extract_temperature(lines)
 
         node_count = max(
             len(stress_data.get("nodes", {})),
             len(displacement_data.get("nodes", {})),
+            len(temperature_data.get("nodes", {})),
         )
         span.set_attribute("calculix.node_count", node_count)
 
         result: dict[str, Any] = {
             "stress": stress_data,
             "displacement": displacement_data,
+            "temperature": temperature_data,
             "node_count": node_count,
             "metadata": {
                 "file": frd_path,
@@ -81,6 +84,7 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
             node_count=node_count,
             has_stress=bool(stress_data.get("nodes")),
             has_displacement=bool(displacement_data.get("nodes")),
+            has_temperature=bool(temperature_data.get("nodes")),
         )
 
         return result
@@ -166,6 +170,39 @@ def _extract_displacement(lines: list[str]) -> dict[str, Any]:
     return _build_stats(nodes, "magnitude_mm")
 
 
+def _extract_temperature(lines: list[str]) -> dict[str, Any]:
+    """Extract nodal temperature data from .frd lines.
+
+    Temperature blocks (written via ``*NODE FILE / NT``) are named
+    ``NDTEMP`` on their ``-4`` header line (e.g. ``-4  NDTEMP      1    1``)
+    with a single component (``T``). The block ends at a ``-3`` line.
+
+    Returns:
+        Dict with keys: nodes (dict[node_id, temperature]), max, min, avg.
+    """
+    nodes: dict[int, float] = {}
+    in_temp_block = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("-4"):
+            in_temp_block = "NDTEMP" in line.upper()
+            continue
+
+        if in_temp_block and stripped.startswith("-3"):
+            in_temp_block = False
+            continue
+
+        if in_temp_block and line.startswith(" -1"):
+            values = _parse_node_data_line(line)
+            if values is not None and len(values) >= 2:
+                node_id = int(values[0])
+                nodes[node_id] = round(values[1], 4)
+
+    return _build_stats(nodes, "celsius")
+
+
 def _parse_node_data_line(line: str) -> list[float] | None:
     """Parse a -1 data line from .frd format.
 
@@ -234,7 +271,7 @@ def extract_results(frd_path: str, include_node_data: bool = True) -> dict[str, 
 
     if not include_node_data:
         # Strip per-node data to reduce payload size
-        for field in ("stress", "displacement"):
+        for field in ("stress", "displacement", "temperature"):
             if field in result and "nodes" in result[field]:
                 node_count = len(result[field]["nodes"])
                 result[field]["nodes"] = {}
