@@ -1,8 +1,15 @@
-"""Gateway ingest must forward project_id to the service (MET-485).
+"""Gateway ingest/search must forward project_id to the service (MET-485, MET-670).
 
 Regression: `/v1/knowledge/ingest` and `/documents` previously dropped
 project scope, so every ingest landed in the `default` tenant and
-project-scoped views (KnowledgePage) came back empty.
+project-scoped views (KnowledgePage) came back empty (MET-485).
+
+`/v1/knowledge/search` had the same bug on the read side (MET-670): it
+never accepted or forwarded a `projectId` param at all, so
+`KnowledgeService.search()` always fell back to the `default` tenant
+regardless of which project was active in the dashboard — the search
+box silently returned unrelated `default`-tenant content instead of
+the active project's own ingested sources.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ PROJECT = "259d9bb0-1407-42e5-918a-0f1ac5ee33fb"
 class _RecordingService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.search_calls: list[dict] = []
 
     async def ingest(
         self,
@@ -35,6 +43,17 @@ class _RecordingService:
     ):
         self.calls.append({"source_path": source_path, "project_id": project_id})
         return SimpleNamespace(entry_ids=[uuid4()], chunks_indexed=1, source_path=source_path)
+
+    async def search(
+        self,
+        *,
+        query: str,
+        top_k: int = 5,
+        knowledge_type: object | None = None,
+        project_id: UUID | None = None,
+    ):
+        self.search_calls.append({"query": query, "project_id": project_id})
+        return []
 
 
 @pytest.fixture
@@ -88,3 +107,20 @@ def test_document_ingest_forwards_project_id(client_and_service) -> None:
     )
     assert resp.status_code == 201, resp.text
     assert svc.calls[0]["project_id"] == UUID(PROJECT)
+
+
+def test_search_forwards_project_id(client_and_service) -> None:
+    client, svc = client_and_service
+    resp = client.get(
+        "/v1/knowledge/search",
+        params={"query": "nrf52840", "projectId": PROJECT},
+    )
+    assert resp.status_code == 200, resp.text
+    assert svc.search_calls[0]["project_id"] == UUID(PROJECT)
+
+
+def test_search_without_project_id_is_default(client_and_service) -> None:
+    client, svc = client_and_service
+    resp = client.get("/v1/knowledge/search", params={"query": "nrf52840"})
+    assert resp.status_code == 200, resp.text
+    assert svc.search_calls[0]["project_id"] is None
