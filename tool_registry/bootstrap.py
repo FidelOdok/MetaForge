@@ -56,12 +56,19 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
     # tests/integration/test_mcp_e2e/test_vertical_electronics.py
     # was forced to skip steps 3-6 (run_erc / run_drc / export_bom /
     # export_gerber). Wiring KiCad here surfaces all 6 kicad.* tools
-    # in the unified server. Production deploys still need the kicad
-    # CLI binary in PATH for the tools to execute; without it the
-    # adapter registers (tools/list contains them) but each handler
-    # raises KicadCliNotFoundError, which the dispatcher surfaces as
-    # -32001 TOOL_EXECUTION_ERROR — the EE vertical's _attempt() helper
-    # already treats that as an acceptable outcome.
+    # in the unified server as an in-process fallback for local/dev use
+    # (no kicad-cli needed there).
+    #
+    # MET-478 follow-up: this in-process path has no kicad-cli binary in
+    # PATH, so every real deployment that relied on it alone had kicad.*
+    # register successfully (tools/list looked healthy) but fail every
+    # actual call with -32001. Production/dev-compose deployments should
+    # set METAFORGE_ADAPTER_KICAD_URL to the kicad-adapter container
+    # (which bundles kicad-cli and serves HTTP like cadquery/freecad,
+    # MET-532) so _create_remote_adapter is used instead of this
+    # in-process entry; the in-process path remains the fallback when
+    # that URL is unset or unreachable (see
+    # test_remote_url_unreachable_falls_back_to_in_process).
     "kicad": {
         "module": "tool_registry.tools.kicad.adapter",
         "class": "KicadServer",
