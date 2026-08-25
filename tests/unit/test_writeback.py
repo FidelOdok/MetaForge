@@ -89,6 +89,31 @@ class TestWritebackCad:
         assert fetched is not None
         assert fetched.id == wp.id
 
+    async def test_sets_project_id_field_visible_to_project_scoped_list(
+        self, twin: InMemoryTwinAPI, session_id
+    ):  # type: ignore[no-untyped-def]
+        # Regression (MET-676): a node created via generate_cad/generate_cad_script
+        # only had project_id stashed in metadata, never on the WorkProduct's own
+        # project_id field -- the field GET /v1/twin/nodes?project_id= actually
+        # filters on. Such a node showed up in a project's work_products list
+        # (Postgres junction) but was invisible to the twin's project-scoped node
+        # list, a live-confirmed data-integrity split between the two views.
+        project_id = uuid4()
+        skill_output = {"cad_file": "/out/bracket.step", "shape_type": "bracket"}
+
+        wp = await writeback_cad(twin, session_id, "main", skill_output, project_id=str(project_id))
+
+        assert wp.project_id == project_id
+        scoped = await twin.list_work_products(branch="main", project_id=project_id)
+        assert any(w.id == wp.id for w in scoped)
+
+    async def test_no_project_id_leaves_field_unset(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
+        skill_output = {"cad_file": "/out/plate.step", "shape_type": "plate"}
+
+        wp = await writeback_cad(twin, session_id, "main", skill_output)
+
+        assert wp.project_id is None
+
 
 # ---------------------------------------------------------------------------
 # writeback_mesh
@@ -132,6 +157,21 @@ class TestWritebackMesh:
 
         assert wp.metadata["session_id"] == str(session_id)
         assert "timestamp" in wp.metadata
+
+    async def test_sets_project_id_field_visible_to_project_scoped_list(
+        self, twin: InMemoryTwinAPI, session_id
+    ):  # type: ignore[no-untyped-def]
+        # Regression (MET-676): same gap as writeback_cad.
+        project_id = uuid4()
+        skill_output = {"mesh_file": "/out/m.inp", "algorithm_used": "gmsh"}
+
+        wp = await writeback_mesh(
+            twin, session_id, "main", skill_output, project_id=str(project_id)
+        )
+
+        assert wp.project_id == project_id
+        scoped = await twin.list_work_products(branch="main", project_id=project_id)
+        assert any(w.id == wp.id for w in scoped)
 
 
 # ---------------------------------------------------------------------------

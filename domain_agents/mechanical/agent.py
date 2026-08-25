@@ -1065,7 +1065,19 @@ class MechanicalAgent:
             src_wp = await self.twin.get_work_product(
                 request.work_product_id, branch=request.branch
             )
-        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
+        # MET-676: prefer the source WorkProduct's real project_id field
+        # (the field the twin's node-list filter actually keys on) over its
+        # metadata copy -- the metadata fallback exists only to inherit a
+        # project from an older node created before that field was reliably
+        # set on write.
+        src_project_id = getattr(src_wp, "project_id", None) if src_wp else None
+        pid = (
+            str(src_project_id)
+            if src_project_id
+            else (getattr(src_wp, "metadata", {}) or {}).get("project_id", "")
+            if src_wp
+            else ""
+        )
         # Also check request parameters for project_id (from assistant form)
         pid = pid or request.parameters.get("project_id", "")
         try:
@@ -1140,7 +1152,19 @@ class MechanicalAgent:
             src_wp = await self.twin.get_work_product(
                 request.work_product_id, branch=request.branch
             )
-        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
+        # MET-676: prefer the source WorkProduct's real project_id field
+        # (the field the twin's node-list filter actually keys on) over its
+        # metadata copy -- the metadata fallback exists only to inherit a
+        # project from an older node created before that field was reliably
+        # set on write.
+        src_project_id = getattr(src_wp, "project_id", None) if src_wp else None
+        pid = (
+            str(src_project_id)
+            if src_project_id
+            else (getattr(src_wp, "metadata", {}) or {}).get("project_id", "")
+            if src_wp
+            else ""
+        )
         pid = pid or request.parameters.get("project_id", "")
         try:
             wb = await writeback_cad(
@@ -1213,7 +1237,19 @@ class MechanicalAgent:
             src_wp = await self.twin.get_work_product(
                 request.work_product_id, branch=request.branch
             )
-        pid = (getattr(src_wp, "metadata", {}) or {}).get("project_id", "") if src_wp else ""
+        # MET-676: prefer the source WorkProduct's real project_id field
+        # (the field the twin's node-list filter actually keys on) over its
+        # metadata copy -- the metadata fallback exists only to inherit a
+        # project from an older node created before that field was reliably
+        # set on write.
+        src_project_id = getattr(src_wp, "project_id", None) if src_wp else None
+        pid = (
+            str(src_project_id)
+            if src_project_id
+            else (getattr(src_wp, "metadata", {}) or {}).get("project_id", "")
+            if src_wp
+            else ""
+        )
         pid = pid or request.parameters.get("project_id", "")
         try:
             wb = await writeback_cad(

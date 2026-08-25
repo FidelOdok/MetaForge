@@ -68,6 +68,12 @@ async def writeback_cad(
             content_hash="",
             format="step",
             metadata=metadata,
+            # MET-676: project_id must be set on the node itself, not just in
+            # metadata -- GET /v1/twin/nodes?project_id= filters on this real
+            # field, so a node with only metadata["project_id"] set is
+            # invisible to the project's node list even though it shows in
+            # the project's own work_products (Postgres-junction-backed).
+            project_id=project_id or None,
             created_at=now,
             updated_at=now,
             created_by=f"mechanical-agent:{session_id}",
@@ -134,6 +140,9 @@ async def writeback_mesh(
             if skill_output.get("mesh_file", "")
             else "inp",
             metadata=metadata,
+            # MET-676: see writeback_cad -- the list filter keys on this
+            # real field, not the metadata copy.
+            project_id=project_id or None,
             created_at=now,
             updated_at=now,
             created_by=f"mechanical-agent:{session_id}",
