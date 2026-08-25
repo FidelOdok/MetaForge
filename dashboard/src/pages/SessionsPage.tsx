@@ -52,6 +52,7 @@ function statusDotColor(status: AgentSession['status']): string {
 type DagNodeStatus = 'DONE' | 'RUNNING' | 'QUEUED';
 
 interface DagNode {
+  id: string;
   label: string;
   status: DagNodeStatus;
 }
@@ -189,6 +190,7 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
   const isRunning = runningSessions.length > 0;
 
   const nodes: DagNode[] = sessions.slice(0, 5).map((s) => ({
+    id: s.id,
     label: s.taskType.replace(/_/g, '-'),
     status: sessionToDagStatus(s.status),
   }));
@@ -274,7 +276,7 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
         }}
       >
         {nodes.map((node, i) => (
-          <div key={node.label} style={{ display: 'flex', alignItems: 'center', flex: i < nodes.length - 1 ? undefined : 0 }}>
+          <div key={node.id} style={{ display: 'flex', alignItems: 'center', flex: i < nodes.length - 1 ? undefined : 0 }}>
             <DagNodePill node={node} />
             {i < nodes.length - 1 && (
               <DagConnector from={node.status} to={nodes[i + 1]!.status} />
