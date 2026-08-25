@@ -91,6 +91,7 @@ async def _compile_to_spec(
     ``validate_assembly_spec``) so a dry run can surface those as warnings.
     """
     from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_metrics
 
     async def translate(prompt: str) -> str:
         # No tools: a single translation completion, not an agent tool loop.
@@ -101,6 +102,7 @@ async def _compile_to_spec(
             provider=provider,
             model=model,
             enabled_tools=[],
+            metrics=get_metrics(),
         )
 
     try:
