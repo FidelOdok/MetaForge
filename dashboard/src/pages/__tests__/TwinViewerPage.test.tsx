@@ -61,7 +61,8 @@ vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
 
 import { TwinViewerPage } from '../TwinViewerPage';
 import { useTwinNodes, useTwinNode, useNodeVersionHistory } from '../../hooks/use-twin';
-import { fireEvent } from '@testing-library/react';
+import { fireEvent, act } from '@testing-library/react';
+import { useProjectStore } from '../../store/project-store';
 
 const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
@@ -161,5 +162,53 @@ describe('TwinViewerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
 
     expect(screen.queryByText(/History ·/)).not.toBeInTheDocument();
+  });
+
+  it('clears the selected node (detail panel + breadcrumb) when the active project changes', () => {
+    // Regression (MET-674): switching the active project re-fetched the node
+    // list/canvas for the new project, but left `selectedId` -- and so the
+    // detail panel and the "Digital Twin > {name}" breadcrumb -- pointing at
+    // the PREVIOUS project's node indefinitely.
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    // Reactive mock: only "selected" (a truthy id) resolves to the node, so
+    // clearing selectedId is actually observable in this test.
+    mockUseTwinNode.mockImplementation(
+      (id?: string) =>
+        ({ data: id ? node : undefined, isLoading: false }) as unknown as ReturnType<typeof useTwinNode>,
+    );
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+
+    useProjectStore.setState({ activeProjectId: 'proj-a', hasSelected: true });
+    render(<TwinViewerPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+    // Selected: the node's name renders in the breadcrumb/detail panel on
+    // top of whatever static places it always renders (e.g. the list row and
+    // the scene dropdown's <option>).
+    const selectedCount = screen.getAllByText('bracket-v1.step').length;
+    expect(selectedCount).toBeGreaterThan(1);
+
+    act(() => {
+      useProjectStore.setState({ activeProjectId: 'proj-b', hasSelected: true });
+    });
+
+    // The breadcrumb/detail panel occurrences (derived from selectedId)
+    // disappear -- fewer occurrences than while a node was selected, even
+    // though the statically-mocked list/dropdown still render the name.
+    expect(screen.getAllByText('bracket-v1.step').length).toBeLessThan(selectedCount);
   });
 });

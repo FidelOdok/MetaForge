@@ -570,6 +570,20 @@ export function TwinViewerPage() {
     if (nodeParam) setSelectedId(nodeParam);
   }, [searchParams]);
 
+  // MET-674: clear the selected node (and its cached model) when the active
+  // project changes -- otherwise the detail panel and breadcrumb keep
+  // showing the PREVIOUS project's node after the node list/canvas has
+  // already updated to the new project. The ref guard skips the initial
+  // mount so this doesn't fight the ?node= deep-link effect above.
+  const prevProjectIdRef = useRef(activeProjectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current !== activeProjectId) {
+      setSelectedId(null);
+      setLoadedModelNodeId(null);
+    }
+    prevProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
   // MET-505: in MODEL view, auto-load the selected node's geometry. Previously
   // the viewer only loaded via the graph-mode "View in 3D" button, so picking a
   // CAD node from the scene dropdown left the "upload a STEP file" placeholder.
