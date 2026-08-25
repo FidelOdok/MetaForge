@@ -314,6 +314,18 @@ class KnowledgeServer(McpToolServer):
                                 "source_path / source_work_product_id / arbitrary keys."
                             ),
                         },
+                        "project_id": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "MET-679: scope the search to a project UUID. Without "
+                                "this, search falls back to whatever the active MCP "
+                                "call context carries (usually none, since the "
+                                "context is transport-stamped per-call, not bound by "
+                                "session.start) -- i.e. the 'default' tenant, not the "
+                                "project you're actually working in. Pass the id from "
+                                "project.list/project.get explicitly."
+                            ),
+                        },
                         "include_historical": {
                             "type": "boolean",
                             "default": False,
@@ -398,6 +410,16 @@ class KnowledgeServer(McpToolServer):
                         "metadata": {
                             "type": "object",
                             "description": "Arbitrary metadata round-tripped on search hits.",
+                        },
+                        "project_id": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "MET-679: scope the ingest to a project UUID (applies "
+                                "to every file in batch mode too). Without this it "
+                                "falls back to the ambient MCP call context, which "
+                                "session.start does NOT actually bind -- omitting it "
+                                "silently lands the ingest in the 'default' tenant."
+                            ),
                         },
                         "files": {
                             "type": "array",
@@ -859,8 +881,13 @@ class KnowledgeServer(McpToolServer):
             # falls back to "default tenant" when None); actor_id is an
             # attribution signal — it rides through as an OTel/log
             # attribute and never filters hits.
+            # MET-679: an explicit project_id argument wins over the
+            # ambient call-context value -- the context is only ever
+            # populated per-call from transport headers/env, not bound
+            # by session.start, so relying on it alone silently scopes
+            # every search to the "default" tenant for MCP clients.
             ctx = current_context()
-            project_id = ctx.project_id
+            project_id = self._coerce_uuid(arguments.get("project_id")) or ctx.project_id
             actor_id = _resolve_actor_id(ctx.actor_id)
             span.set_attribute("knowledge.query_length", len(query))
             span.set_attribute("knowledge.top_k", top_k)
@@ -1078,8 +1105,11 @@ class KnowledgeServer(McpToolServer):
             # the chunks to a tenant; actor_id is forwarded as both a
             # span attribute and per-chunk metadata so attribution
             # survives a round-trip through the store.
+            # MET-679: an explicit project_id argument wins over the
+            # ambient context (see handle_search for why relying on
+            # context alone silently mis-scopes MCP-driven ingests).
             ctx = current_context()
-            project_id = ctx.project_id
+            project_id = self._coerce_uuid(arguments.get("project_id")) or ctx.project_id
             actor_id = _resolve_actor_id(ctx.actor_id)
 
             span.set_attribute("knowledge.source_path", source_path)
@@ -1137,7 +1167,9 @@ class KnowledgeServer(McpToolServer):
                 }
 
             ctx = current_context()
-            project_id = ctx.project_id
+            # MET-679: see handle_search / _handle_ingest_single -- an
+            # explicit project_id argument wins over the ambient context.
+            project_id = self._coerce_uuid(arguments.get("project_id")) or ctx.project_id
             actor_id = _resolve_actor_id(ctx.actor_id)
             if project_id is not None:
                 span.set_attribute("knowledge.project_id", str(project_id))
