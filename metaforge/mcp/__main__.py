@@ -746,6 +746,69 @@ async def _close_knowledge_service(service: Any) -> None:
         logger.warning("mcp_knowledge_service_close_failed", error=str(exc))
 
 
+async def _build_component_catalog_store() -> Any:
+    """Construct + initialize the parametric component catalog (MET-436).
+
+    Mirrors ``_build_knowledge_service``: returns ``None`` when
+    ``DATABASE_URL`` is unset or init fails, so the rest of the MCP
+    surface stays usable without it — ``component.*`` just stays
+    unregistered (``component_mcp_adapter_skipped``) in that case.
+    """
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return None
+    try:
+        from digital_twin.catalog import ComponentCatalogStore
+
+        dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        store = ComponentCatalogStore(dsn=dsn)
+        await store.initialize()
+        logger.info("mcp_component_catalog_store_initialised")
+        return store
+    except Exception as exc:
+        logger.warning("mcp_component_catalog_store_init_failed", error=str(exc))
+        return None
+
+
+async def _close_component_catalog_store(store: Any) -> None:
+    """Best-effort teardown — mirrors ``_close_knowledge_service``."""
+    if store is None:
+        return
+    close = getattr(store, "close", None)
+    if close is None:
+        return
+    try:
+        await close()
+    except Exception as exc:
+        logger.warning("mcp_component_catalog_store_close_failed", error=str(exc))
+
+
+def _build_component_intent_llm() -> Any:
+    """Reuse the OpenRouter ``PropertyLLM`` client for intent translation (MET-436).
+
+    ``OpenRouterPropertyLLM`` already satisfies ``IntentLLM`` structurally
+    (both are a single ``async def complete(prompt: str) -> str``) — no
+    adapter class needed. Returns ``None`` (no ``OPEN_ROUTER_API_KEY``)
+    when unconfigured; ``component.search_intent`` just stays
+    unregistered in that case, same degrade-gracefully contract as
+    every other runtime-injected adapter.
+    """
+    if not os.environ.get("OPEN_ROUTER_API_KEY"):
+        return None
+    try:
+        from digital_twin.knowledge.openrouter_property_llm import (
+            OpenRouterPropertyConfig,
+            OpenRouterPropertyLLM,
+        )
+
+        cfg = OpenRouterPropertyConfig.from_env()
+        logger.info("mcp_component_intent_llm_initialised", model=cfg.primary_model)
+        return OpenRouterPropertyLLM(cfg)
+    except Exception as exc:
+        logger.warning("mcp_component_intent_llm_init_failed", error=str(exc))
+        return None
+
+
 async def _build_memory_client() -> tuple[Any, Any]:
     """Construct ``MemoryClient`` + experience store for the standalone MCP entrypoint.
 
@@ -872,17 +935,19 @@ async def _close_insight_store(store: Any) -> None:
 
 async def _bootstrap(
     args: argparse.Namespace,
-) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any, Any, Any]:
-    """Return the unified MCP server, the twin, knowledge service, memory store, insight store.
+) -> tuple[UnifiedMcpServer, InMemoryTwinAPI, Any, Any, Any, Any]:
+    """Return the unified MCP server, the twin, knowledge service, memory store,
+    insight store, and component catalog store.
 
     Callers must close the twin (``await twin.aclose()``), the
     knowledge service (``await _close_knowledge_service(svc)``), the
-    memory store (``await _close_memory_store(store)``), and the
-    insight store (``await _close_insight_store(store)``) when the
-    transport loop exits — otherwise the Neo4j driver, aiohttp
+    memory store (``await _close_memory_store(store)``), the
+    insight store (``await _close_insight_store(store)``), and the
+    component catalog store (``await _close_component_catalog_store(store)``)
+    when the transport loop exits — otherwise the Neo4j driver, aiohttp
     sessions, the LightRAG pgvector pool, the memory pgvector pool,
-    and the insight pgvector pool leak across subprocess restarts
-    (MET-425, MET-453, MET-477).
+    the insight pgvector pool, and the component catalog pgvector pool
+    leak across subprocess restarts (MET-425, MET-453, MET-477, MET-436).
     """
     from api_gateway.projects.backend import create_project_backend
     from twin_core.api import InMemoryTwinAPI
@@ -949,6 +1014,13 @@ async def _bootstrap(
         blob_stager = make_blob_stager(twin)
     except Exception as exc:  # noqa: BLE001 — degrade; stage_work_product_file just absent
         logger.warning("mcp_blob_stager_init_failed", error=str(exc))
+    # MET-436: the parametric component catalog + the intent-translation
+    # LLM. Both are None-able independently — component.* just stays
+    # unregistered (component_mcp_adapter_skipped) unless the catalog
+    # store, the LLM, AND knowledge_service (reused for the intent-search
+    # fuzzy fallback) are all available.
+    component_catalog_store = await _build_component_catalog_store()
+    component_intent_llm = _build_component_intent_llm()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,
@@ -963,8 +1035,10 @@ async def _bootstrap(
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder,
         blob_stager=blob_stager,
+        component_catalog_store=component_catalog_store,
+        component_intent_llm=component_intent_llm,
     )
-    return server, twin, knowledge_service, memory_store, insight_store
+    return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
 
 
 def _configure_logging_for_transport(transport: str) -> None:
@@ -1002,7 +1076,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.transport == "stdio":
 
         async def _stdio() -> None:
-            server, twin, knowledge_service, memory_store, insight_store = await _bootstrap(args)
+            (
+                server,
+                twin,
+                knowledge_service,
+                memory_store,
+                insight_store,
+                cc_store,
+            ) = await _bootstrap(args)
             try:
                 await run_stdio(server)
             finally:
@@ -1021,6 +1102,8 @@ def main(argv: list[str] | None = None) -> int:
                 await _close_memory_store(memory_store)
                 # MET-477 / G1: same hygiene for the insight pgvector pool.
                 await _close_insight_store(insight_store)
+                # MET-436: same hygiene for the component catalog pgvector pool.
+                await _close_component_catalog_store(cc_store)
 
         asyncio.run(_stdio())
     else:
@@ -1033,7 +1116,7 @@ def main(argv: list[str] | None = None) -> int:
         # failed with "another operation is in progress" because the
         # asyncpg pool was bound to a dead loop.
         async def _http_main() -> None:
-            server, twin, kb_svc, mem_store, ins_store = await _bootstrap(args)
+            server, twin, kb_svc, mem_store, ins_store, cc_store = await _bootstrap(args)
             try:
                 await serve_http_async(
                     server,
@@ -1048,6 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
                 await _close_knowledge_service(kb_svc)
                 await _close_memory_store(mem_store)
                 await _close_insight_store(ins_store)
+                await _close_component_catalog_store(cc_store)
 
         asyncio.run(_http_main())
     return 0

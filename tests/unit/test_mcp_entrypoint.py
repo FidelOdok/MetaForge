@@ -14,7 +14,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from metaforge.mcp.__main__ import (
+    _build_component_catalog_store,
+    _build_component_intent_llm,
     _build_knowledge_service,
+    _close_component_catalog_store,
     _close_knowledge_service,
     _parse_args,
 )
@@ -115,6 +118,100 @@ class TestCloseKnowledgeService:
         svc.close.side_effect = RuntimeError("driver already shut down")
         # Must not raise — teardown failures are best-effort.
         await _close_knowledge_service(svc)
+
+
+class TestBuildComponentCatalogStore:
+    """``_build_component_catalog_store`` (MET-436) — mirrors
+    ``TestBuildKnowledgeService``'s DATABASE_URL-gated construction contract."""
+
+    async def test_returns_none_when_database_url_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        assert await _build_component_catalog_store() is None
+
+    async def test_constructs_with_normalised_dsn_and_initializes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@db:5432/forge")
+
+        fake_store: Any = AsyncMock()
+        with patch(
+            "digital_twin.catalog.ComponentCatalogStore",
+            return_value=fake_store,
+        ) as mock_cls:
+            result = await _build_component_catalog_store()
+
+        assert result is fake_store
+        mock_cls.assert_called_once_with(dsn="postgresql://u:p@db:5432/forge")
+        fake_store.initialize.assert_awaited_once()
+
+    async def test_swallows_init_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failed init must not take down the rest of the MCP surface —
+        same degrade-gracefully contract as knowledge/memory/insight."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db/forge")
+
+        failing = AsyncMock()
+        failing.initialize.side_effect = RuntimeError("db unreachable")
+
+        with patch("digital_twin.catalog.ComponentCatalogStore", return_value=failing):
+            result = await _build_component_catalog_store()
+
+        assert result is None
+
+
+class TestCloseComponentCatalogStore:
+    async def test_noop_on_none(self) -> None:
+        await _close_component_catalog_store(None)
+
+    async def test_calls_close_when_present(self) -> None:
+        store = AsyncMock()
+        await _close_component_catalog_store(store)
+        store.close.assert_awaited_once()
+
+    async def test_swallows_close_failures(self) -> None:
+        store = AsyncMock()
+        store.close.side_effect = RuntimeError("pool already shut down")
+        await _close_component_catalog_store(store)
+
+
+class TestBuildComponentIntentLlm:
+    """``_build_component_intent_llm`` (MET-436) — reuses
+    ``OpenRouterPropertyLLM`` (structurally satisfies ``IntentLLM``,
+    same single ``async def complete(prompt) -> str`` shape)."""
+
+    def test_returns_none_when_api_key_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OPEN_ROUTER_API_KEY", raising=False)
+        assert _build_component_intent_llm() is None
+
+    def test_constructs_openrouter_client_when_api_key_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPEN_ROUTER_API_KEY", "fake-key")
+        fake_cfg = MagicMock(primary_model="fake-model")
+        fake_llm = MagicMock()
+        with (
+            patch(
+                "digital_twin.knowledge.openrouter_property_llm.OpenRouterPropertyConfig.from_env",
+                return_value=fake_cfg,
+            ),
+            patch(
+                "digital_twin.knowledge.openrouter_property_llm.OpenRouterPropertyLLM",
+                return_value=fake_llm,
+            ) as mock_cls,
+        ):
+            result = _build_component_intent_llm()
+
+        assert result is fake_llm
+        mock_cls.assert_called_once_with(fake_cfg)
+
+    def test_swallows_construction_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPEN_ROUTER_API_KEY", "fake-key")
+        with patch(
+            "digital_twin.knowledge.openrouter_property_llm.OpenRouterPropertyConfig.from_env",
+            side_effect=RuntimeError("bad config"),
+        ):
+            assert _build_component_intent_llm() is None
 
 
 class TestAllowTwinMutationsFlag:
