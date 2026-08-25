@@ -33,10 +33,11 @@ class TestRegistryMcpBridge:
 
         Grows as adapters gain tools; freecad reached 44 with
         describe_step_file (MET-629), bringing the cross-adapter total to 61.
+        MET-634 added the OpenUSD conversion adapter's 3 tools for 64.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 61
+        assert len(tools) == 64
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

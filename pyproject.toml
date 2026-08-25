@@ -113,6 +113,14 @@ knowledge = [
     # ``InMemoryKBStorage`` (tests, local dev).
     "minio>=7.2",
 ]
+omniverse-usd = [
+    # MET-634: GLB -> OpenUSD conversion. Plain PyPI wheels -- no conda,
+    # no GPU, no NVIDIA account, unlike pythonocc-core (STEP reading stays
+    # with occt-converter/cadquery, which own that responsibility).
+    "usd-core>=23.0",
+    "trimesh>=4.0",
+    "scipy>=1.11",
+]
 cadquery = [
     "cadquery>=2.4.0",
 ]
