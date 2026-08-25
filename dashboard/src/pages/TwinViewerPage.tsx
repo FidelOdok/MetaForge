@@ -18,6 +18,16 @@ import { getNodeModel, nodeFileUrl, fetchNodeFileText } from '../api/endpoints/t
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 
+// MET-683: same response.data.detail extraction pattern as
+// ProjectDetailPage.tsx's getErrorMessage, applied to a failed model load.
+function getModelLoadErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { data?: { detail?: string } } }).response;
+    if (typeof response?.data?.detail === 'string') return response.data.detail;
+  }
+  return 'This work product has no viewable 3D model yet.';
+}
+
 // ── KC tokens ────────────────────────────────────────────────────────────────
 const KC = {
   surface: '#111319',
@@ -538,6 +548,11 @@ export function TwinViewerPage() {
   }
   // Track which node's model is loaded so the auto-loader (MET-505) doesn't refetch.
   const [loadedModelNodeId, setLoadedModelNodeId] = useState<string | null>(null);
+  // MET-683: distinguish "nothing loaded yet" from "we tried and the backend
+  // rejected it" -- previously a failed conversion (e.g. an empty/invalid
+  // STEP) silently fell back to the generic upload placeholder with no
+  // indication a model was ever attempted, console.error only.
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   // Deep-link: /twin?node=<id> preselects a node (e.g. from a project's work
   // product list, MET-514).
   const [searchParams] = useSearchParams();
@@ -584,6 +599,13 @@ export function TwinViewerPage() {
     prevProjectIdRef.current = activeProjectId;
   }, [activeProjectId]);
 
+  // MET-683: a stale error from a previously-selected node must not linger
+  // once the user picks a different node (including a non-CAD one, which
+  // never re-enters the load effect below to clear it itself).
+  useEffect(() => {
+    setModelLoadError(null);
+  }, [selectedNode?.id]);
+
   // MET-505: in MODEL view, auto-load the selected node's geometry. Previously
   // the viewer only loaded via the graph-mode "View in 3D" button, so picking a
   // CAD node from the scene dropdown left the "upload a STEP file" placeholder.
@@ -611,9 +633,17 @@ export function TwinViewerPage() {
         const url = result.glb_url.startsWith('/v1/') ? `/api${result.glb_url}` : result.glb_url;
         loadModel(url, m);
         setLoadedModelNodeId(n.id);
+        setModelLoadError(null);
       } catch (err) {
-        // No GLB for this node yet — leave the placeholder, don't crash.
-        if (!cancelled) console.error('Failed to auto-load 3D model:', err);
+        // MET-683: this used to be swallowed to a console.error only, leaving
+        // the generic "Upload a STEP file..." placeholder up with no sign a
+        // load was ever attempted -- confirmed live against a real node whose
+        // STEP export was empty (OCCT 422 "Can't export empty scenes!"), the
+        // dashboard gave zero indication anything was wrong.
+        if (!cancelled) {
+          console.error('Failed to auto-load 3D model:', err);
+          setModelLoadError(getModelLoadErrorMessage(err));
+        }
       }
     })();
     return () => {
@@ -709,6 +739,33 @@ export function TwinViewerPage() {
           /* 3D model mode */
           <>
             <R3FViewer onPartClick={handlePartClick} onBooleanCutComplete={setSelectedId} />
+            {!glbUrl && modelLoadError && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 46,
+                  maxWidth: 420,
+                  textAlign: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                <span
+                  className="material-symbols-outlined"
+                  style={{ fontSize: 22, color: '#ffb4ab', display: 'block', marginBottom: 6 }}
+                >
+                  error
+                </span>
+                <p className="font-mono text-xs" style={{ color: '#ffb4ab', marginBottom: 4 }}>
+                  Model failed to load
+                </p>
+                <p className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+                  {modelLoadError}
+                </p>
+              </div>
+            )}
             {glbUrl && (
               <div
                 style={{
