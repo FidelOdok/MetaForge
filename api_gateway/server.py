@@ -984,6 +984,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     logger.info("gateway_stopping")
     await file_watcher.stop()
+    if hasattr(app.state, "tool_registry"):
+        await app.state.tool_registry.close_all()
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
     # Close LightRAG service if active

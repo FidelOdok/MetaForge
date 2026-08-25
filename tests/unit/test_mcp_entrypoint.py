@@ -161,3 +161,23 @@ class TestBuildUnifiedServerTwinMutations:
 
         _, kwargs = mock_boot.call_args
         assert kwargs["twin_allow_mutations"] is False
+
+
+class TestBuildUnifiedServerRegistryCleanup:
+    """The returned server must hold the registry so shutdown can call
+    close_all() and release remote adapters' aiohttp ClientSessions --
+    otherwise only reclaimed by GC, logging "Unclosed client session"."""
+
+    async def test_attaches_the_bootstrapped_registry(self) -> None:
+        from metaforge.mcp import server as server_mod
+
+        fake_registry = MagicMock()
+        fake_registry.list_adapter_servers.return_value = []
+        with patch.object(
+            server_mod,
+            "bootstrap_tool_registry",
+            AsyncMock(return_value=fake_registry),
+        ):
+            server = await server_mod.build_unified_server()
+
+        assert server.tool_registry is fake_registry
