@@ -444,6 +444,7 @@ async def _invoke_agent(
                     context_block=context_block,
                     chat_backend=_backend,
                     twin=_twin,
+                    metrics=_metrics,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(
