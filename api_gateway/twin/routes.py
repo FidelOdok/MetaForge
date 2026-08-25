@@ -154,10 +154,24 @@ async def list_twin_nodes(
 
 
 @router.get("/relationships", response_model=TwinRelationshipListResponse)
-async def list_twin_relationships() -> TwinRelationshipListResponse:
-    """List all edges in the Digital Twin graph."""
+async def list_twin_relationships(
+    project_id: str | None = None,
+) -> TwinRelationshipListResponse:
+    """List edges in the Digital Twin graph.
+
+    ``project_id`` scopes the view to a single project (MET-491), matching
+    ``list_twin_nodes``. Omitted or empty returns every edge (including
+    unscoped legacy nodes) — preserving the prior global behaviour.
+    """
     with tracer.start_as_current_span("twin.list_relationships") as span:
-        work_products = await _twin.list_work_products()
+        scoped_project: UUID | None = None
+        if project_id:
+            try:
+                scoped_project = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("twin.filter.project_id", project_id)
+        work_products = await _twin.list_work_products(project_id=scoped_project)
         edges = []
         seen: set[str] = set()
         for wp in work_products:
@@ -181,7 +195,7 @@ async def list_twin_relationships() -> TwinRelationshipListResponse:
                     )
                 )
         span.set_attribute("twin.relationships_count", len(edges))
-        logger.info("twin_relationships_listed", count=len(edges))
+        logger.info("twin_relationships_listed", count=len(edges), project_id=project_id)
         return TwinRelationshipListResponse(relationships=edges, total=len(edges))
 
 

@@ -550,7 +550,7 @@ export function TwinViewerPage() {
   // ── data ──
   const { data: nodes, isLoading, isFetching, dataUpdatedAt } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  const { data: relationships = [] } = useTwinRelationships();
+  const { data: relationships = [] } = useTwinRelationships(activeProjectId ?? undefined);
   const items = nodes ?? [];
 
   // ── viewer store ──

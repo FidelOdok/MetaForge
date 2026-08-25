@@ -4,7 +4,7 @@ import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory 
 export const twinKeys = {
   all: ['twin'] as const,
   node: (id: string) => [...twinKeys.all, id] as const,
-  relationships: ['twin', 'relationships'] as const,
+  relationships: (projectId?: string) => ['twin', 'relationships', projectId ?? ''] as const,
 };
 
 // MET-539: keep the Twin view live by polling. React Query only polls while the
@@ -37,10 +37,12 @@ export function useTwinNode(id: string | undefined) {
   });
 }
 
-export function useTwinRelationships() {
+export function useTwinRelationships(projectId?: string) {
   return useQuery({
-    queryKey: twinKeys.relationships,
-    queryFn: getTwinRelationships,
+    // MET-491/MET-653: project scope is part of the cache key so switching
+    // projects refetches the scoped relationship list (mirrors useTwinNodes).
+    queryKey: twinKeys.relationships(projectId),
+    queryFn: () => getTwinRelationships(projectId),
     staleTime: TWIN_RELATIONSHIPS_POLL_MS,
     refetchInterval: TWIN_RELATIONSHIPS_POLL_MS,
   });

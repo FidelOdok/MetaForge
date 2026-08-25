@@ -99,12 +99,15 @@ export async function getNodeScript(id: string): Promise<TwinNodeScript | undefi
   }
 }
 
-export async function getTwinRelationships(): Promise<TwinRelationship[]> {
+export async function getTwinRelationships(projectId?: string): Promise<TwinRelationship[]> {
   // Live edges from the twin graph (backend already returns camelCase fields
   // matching TwinRelationship). Falls back to mocks if the endpoint is absent.
+  // MET-491: scope to a project when one is selected; omit for all projects.
   try {
+    const params = projectId ? { project_id: projectId } : undefined;
     const response = await apiClient.get<{ relationships: TwinRelationship[] }>(
       '/twin/relationships',
+      { params },
     );
     return response.data.relationships ?? [];
   } catch {

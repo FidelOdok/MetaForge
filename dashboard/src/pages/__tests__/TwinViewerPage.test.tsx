@@ -60,12 +60,13 @@ vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
 }));
 
 import { TwinViewerPage } from '../TwinViewerPage';
-import { useTwinNodes, useTwinNode, useNodeVersionHistory } from '../../hooks/use-twin';
+import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../../hooks/use-twin';
 import { fireEvent, act } from '@testing-library/react';
 import { useProjectStore } from '../../store/project-store';
 
 const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
+const mockUseTwinRelationships = vi.mocked(useTwinRelationships);
 const mockUseNodeVersionHistory = vi.mocked(useNodeVersionHistory);
 
 describe('TwinViewerPage', () => {
@@ -74,6 +75,14 @@ describe('TwinViewerPage', () => {
     mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
     expect(screen.getByText('Digital Twin')).toBeInTheDocument();
+  });
+
+  it('scopes relationships to the active project (MET-677)', () => {
+    useProjectStore.setState({ activeProjectId: 'proj-active', hasSelected: true });
+    mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
+    render(<TwinViewerPage />);
+    expect(mockUseTwinRelationships).toHaveBeenCalledWith('proj-active');
   });
 
   it('shows graph view with empty state by default', () => {
