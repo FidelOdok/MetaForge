@@ -78,22 +78,24 @@ class TestBootstrapToolRegistry:
 
         Post-MET-478: KiCad joined cadquery/freecad/calculix in the
         bootstrap registry (cadquery=7, freecad=5, calculix=4,
-        kicad=6 = 22 tools across 4 adapters).
+        kicad=6 = 22 tools across 4 adapters). MET-633 added Gazebo
+        (3 tools, opt-in like freecad/kicad -- registers regardless
+        of whether a real `gz` binary is present) for 5 adapters.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 4
+        assert len(adapters) == 5
         adapter_ids = {a.adapter_id for a in adapters}
-        assert adapter_ids == {"cadquery", "freecad", "calculix", "kicad"}
+        assert adapter_ids == {"cadquery", "freecad", "calculix", "kicad", "gazebo"}
 
     async def test_bootstrap_with_existing_registry(self):
         """Bootstrap populates an existing registry instance."""
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 4
+        assert len(registry.list_adapters()) == 5
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -184,11 +186,13 @@ class TestBootstrapToolRegistry:
 
         Grows as adapters gain tools; freecad reached 44 with
         describe_step_file (MET-629), bringing the cross-adapter total to 61.
+        MET-633 added Gazebo's 3 tools (run_simulation, validate_world,
+        extract_results) for 64.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 61
+        assert len(tools) == 64
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

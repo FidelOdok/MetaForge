@@ -22,6 +22,7 @@ MCP-based tool access layer. Manages containerized tool adapters (KiCad, FreeCAD
   - `freecad/` -- CAD operations (FreeCAD)
   - `kicad/` -- PCB/schematic validation (KiCad, read-only in Phase 1)
   - `spice/` -- Circuit simulation (ngspice)
+  - `gazebo/` -- ROS-native physics/dynamics simulation (Gazebo Sim, opt-in)
   - `digikey/`, `mouser/`, `nexar/`, `distributors/` -- Component distributor APIs
 
 ## Testing

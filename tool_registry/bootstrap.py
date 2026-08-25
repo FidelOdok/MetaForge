@@ -75,6 +75,17 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.kicad.config",
         "config_class": "KicadConfig",
     },
+    # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
+    # (Gazebo Sim) in the container/host PATH to execute; the adapter
+    # registers regardless so tools/list is stable, but handlers raise
+    # SolverError if `gz` isn't found. Not in the documented default
+    # METAFORGE_ADAPTERS list.
+    "gazebo": {
+        "module": "tool_registry.tools.gazebo.adapter",
+        "class": "GazeboServer",
+        "config_module": "tool_registry.tools.gazebo.config",
+        "config_class": "GazeboConfig",
+    },
 }
 
 # Adapters with no static factory above -- each is registered by its own

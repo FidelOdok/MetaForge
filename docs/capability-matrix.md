@@ -8,13 +8,13 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (49 across 11 adapters)
+## MCP tools (52 across 12 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
-`knowledge,twin,constraint,cadquery,calculix` (19 tools). FreeCAD and
-KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
-(registered when the gateway supplies their backend).
+`knowledge,twin,constraint,cadquery,calculix` (19 tools). FreeCAD, KiCad,
+and Gazebo are opt-in; `project`, `memory`, and `session` are
+runtime-injected (registered when the gateway supplies their backend).
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
@@ -57,6 +57,9 @@ KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
 | `kicad` | `kicad.export_netlist` | Netlist export | _none yet_ |
 | `kicad` | `kicad.export_gerber` | Gerber set for fab | _none yet_ |
 | `kicad` | `kicad.get_pin_mapping` | Connector pinmap → JSON | _none yet_ |
+| `gazebo` (opt-in) | `gazebo.run_simulation` | Headless physics/dynamics simulation of an SDF/world file | _none yet_ |
+| `gazebo` | `gazebo.validate_world` | Validate an SDF/world file's basic structure before simulating | _none yet_ |
+| `gazebo` | `gazebo.extract_results` | Parse an existing Gazebo stats JSON file | _none yet_ |
 | `project` (injected) | `project.create` | Create a project (rejects a case-insensitive duplicate name) | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.list` | List projects the caller can see | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.get` | Fetch a project by id or name | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
