@@ -313,6 +313,20 @@ class ToolRegistry:
             results[adapter_id] = await self.check_health(adapter_id)
         return results
 
+    async def close_all(self) -> None:
+        """Disconnect every registered adapter's client (process shutdown).
+
+        Remote adapters (HttpTransport) hold an open aiohttp ClientSession
+        that is otherwise only reclaimed by GC at interpreter exit, logging
+        an "Unclosed client session" warning every time. A single client
+        failing to disconnect must not block closing the rest.
+        """
+        for adapter_id, client in list(self._clients.items()):
+            try:
+                await client.disconnect(adapter_id)
+            except Exception as exc:  # noqa: BLE001 — best-effort shutdown
+                logger.warning("adapter_disconnect_failed", adapter_id=adapter_id, error=str(exc))
+
     def get_client(self, adapter_id: str) -> McpClient | None:
         """Get the MCP client for a specific adapter. Used by ExecutionEngine."""
         return self._clients.get(adapter_id)

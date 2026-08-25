@@ -107,10 +107,15 @@ class UnifiedMcpServer:
         adapters: list[McpToolServer],
         version: str = "0.1.0",
         session_capture: SessionCapture | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._adapters = list(adapters)
         self._version = version
         self._start_time = datetime.now(UTC)
+        # Held only so the process shutdown path can call close_all() and
+        # release remote adapters' aiohttp ClientSessions -- unused by
+        # dispatch, which goes through _tool_index/_adapters below.
+        self.tool_registry = tool_registry
         # MET-496: when set, every tool call is recorded into the agent
         # session store as an action/error event. None = capture off.
         self._capture = session_capture
@@ -567,4 +572,6 @@ async def build_unified_server(
         if capture_sessions and agent_session_store is not None
         else None
     )
-    return UnifiedMcpServer(adapters=registry.list_adapter_servers(), session_capture=capture)
+    return UnifiedMcpServer(
+        adapters=registry.list_adapter_servers(), session_capture=capture, tool_registry=registry
+    )

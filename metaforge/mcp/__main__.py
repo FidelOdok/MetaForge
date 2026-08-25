@@ -1006,6 +1006,11 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 await run_stdio(server)
             finally:
+                # Release remote adapters' aiohttp ClientSessions -- otherwise
+                # only reclaimed by GC at interpreter exit, logging an
+                # "Unclosed client session" warning on every restart.
+                if server.tool_registry is not None:
+                    await server.tool_registry.close_all()
                 # MET-425: release the Neo4j driver / backing-store
                 # resources so subprocess respawns from the UAT harness
                 # don't see "address in use" or ResourceWarning leaks.
@@ -1037,6 +1042,8 @@ def main(argv: list[str] | None = None) -> int:
                     enable_sse=args.transport == "sse",
                 )
             finally:
+                if server.tool_registry is not None:
+                    await server.tool_registry.close_all()
                 await twin.aclose()
                 await _close_knowledge_service(kb_svc)
                 await _close_memory_store(mem_store)
