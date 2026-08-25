@@ -38,6 +38,10 @@ services:
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+      # MET-478 follow-up: without this, kicad.* tools ran in-process inside
+      # this image, which has no kicad-cli binary, so every real call failed
+      # with -32001 even though tools/list looked healthy.
+      - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -347,12 +351,14 @@ services:
       context: .
       dockerfile: tool_registry/tools/kicad/Dockerfile
     image: metaforge/kicad-adapter:latest
-    stdin_open: true
+    ports:
+      - "8103:8103"
     volumes:
       - adapter-workspace:/workspace
     environment:
       - METAFORGE_ENV=docker
       - KICAD_WORK_DIR=/workspace
+      - KICAD_HTTP_PORT=8103
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     deploy:
       resources:
@@ -360,7 +366,7 @@ services:
           memory: 1G
           cpus: '2'
     healthcheck:
-      test: ["CMD", "kicad-cli", "version"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8103/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
