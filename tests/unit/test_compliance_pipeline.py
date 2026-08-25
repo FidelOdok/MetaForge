@@ -626,7 +626,7 @@ class TestComplianceAPI:
         return TestClient(app)
 
     def test_get_checklist_single_market(self, client):
-        resp = client.get("/api/v1/compliance/proj-1/checklist?markets=UKCA")
+        resp = client.get("/v1/compliance/proj-1/checklist?markets=UKCA")
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == "proj-1"
@@ -634,7 +634,7 @@ class TestComplianceAPI:
         assert len(data["items"]) >= 15
 
     def test_get_checklist_multi_market(self, client):
-        resp = client.get("/api/v1/compliance/proj-2/checklist?markets=UKCA,CE")
+        resp = client.get("/v1/compliance/proj-2/checklist?markets=UKCA,CE")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_items"] > 0
@@ -642,15 +642,15 @@ class TestComplianceAPI:
         assert "CE" in data["target_markets"]
 
     def test_get_checklist_invalid_market(self, client):
-        resp = client.get("/api/v1/compliance/proj-3/checklist?markets=INVALID")
+        resp = client.get("/v1/compliance/proj-3/checklist?markets=INVALID")
         assert resp.status_code == 400
 
     def test_link_evidence_endpoint(self, client):
         # Generate checklist first
-        client.get("/api/v1/compliance/proj-ev/checklist?markets=UKCA")
+        client.get("/v1/compliance/proj-ev/checklist?markets=UKCA")
         # Link evidence
         resp = client.post(
-            "/api/v1/compliance/proj-ev/evidence",
+            "/v1/compliance/proj-ev/evidence",
             json={
                 "checklist_item_id": "UKCA-SAF-001",
                 "evidence_type": "TEST_REPORT",
@@ -666,30 +666,30 @@ class TestComplianceAPI:
 
     def test_get_evidence_endpoint(self, client):
         # Generate checklist and link evidence
-        client.get("/api/v1/compliance/proj-ge/checklist?markets=UKCA")
+        client.get("/v1/compliance/proj-ge/checklist?markets=UKCA")
         client.post(
-            "/api/v1/compliance/proj-ge/evidence",
+            "/v1/compliance/proj-ge/evidence",
             json={
                 "checklist_item_id": "UKCA-EMC-001",
                 "evidence_type": "TEST_REPORT",
                 "title": "EMC Report",
             },
         )
-        resp = client.get("/api/v1/compliance/proj-ge/evidence/UKCA-EMC-001")
+        resp = client.get("/v1/compliance/proj-ge/evidence/UKCA-EMC-001")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]["title"] == "EMC Report"
 
     def test_get_evidence_empty(self, client):
-        resp = client.get("/api/v1/compliance/proj-x/evidence/NONEXISTENT")
+        resp = client.get("/v1/compliance/proj-x/evidence/NONEXISTENT")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_get_coverage_endpoint(self, client):
         # Generate checklist
-        client.get("/api/v1/compliance/proj-cov/checklist?markets=PSTI")
-        resp = client.get("/api/v1/compliance/proj-cov/coverage")
+        client.get("/v1/compliance/proj-cov/checklist?markets=PSTI")
+        resp = client.get("/v1/compliance/proj-cov/coverage")
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == "proj-cov"
@@ -697,22 +697,22 @@ class TestComplianceAPI:
         assert data["coverage_percent"] == 0.0
 
     def test_get_coverage_no_checklist(self, client):
-        resp = client.get("/api/v1/compliance/nonexistent/coverage")
+        resp = client.get("/v1/compliance/nonexistent/coverage")
         assert resp.status_code == 404
 
     def test_coverage_increases_after_evidence(self, client):
         """Coverage should increase after evidence is linked."""
-        client.get("/api/v1/compliance/proj-inc/checklist?markets=PSTI")
+        client.get("/v1/compliance/proj-inc/checklist?markets=PSTI")
         # Link evidence to one item
         client.post(
-            "/api/v1/compliance/proj-inc/evidence",
+            "/v1/compliance/proj-inc/evidence",
             json={
                 "checklist_item_id": "PSTI-PWD-001",
                 "evidence_type": "TEST_REPORT",
                 "title": "Password Test",
             },
         )
-        resp = client.get("/api/v1/compliance/proj-inc/coverage")
+        resp = client.get("/v1/compliance/proj-inc/coverage")
         assert resp.status_code == 200
         data = resp.json()
         assert data["evidenced_items"] == 1

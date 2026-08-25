@@ -21,12 +21,22 @@ import logging
 import sys
 from pathlib import Path
 
+# `python scripts/gen_openapi.py` sets sys.path[0] to this script's own
+# directory (scripts/), not the repo root -- so `import api_gateway` falls
+# through to whatever else provides that name (e.g. a globally editable-
+# installed `pip install -e .` pointing at a *different* checkout, such as
+# the main repo when this script is actually run from a git worktree).
+# That silently generates the spec from the wrong tree's code with no
+# error. Prepending the repo root guarantees this checkout wins.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
 # Silence gateway startup logging so importing the app doesn't spam output.
 logging.disable(logging.CRITICAL)
 
 from api_gateway.server import create_app  # noqa: E402  (import after logging.disable)
 
-OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "reference" / "openapi.json"
+OUTPUT = REPO_ROOT / "docs" / "reference" / "openapi.json"
 
 
 def build_spec() -> dict:

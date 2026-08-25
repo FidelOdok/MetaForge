@@ -1101,6 +1101,66 @@
         "title": "CreateProjectRequest",
         "type": "object"
       },
+      "CreateProposalRequest": {
+        "description": "Body for ``POST /api/v1/assistant/proposals`` (MET-630).\n\nLets a human create a design-change proposal directly from the\ndashboard (e.g. a parameter-panel \"Regenerate\" button) \u2014 previously\nproposals could only be created by an agent calling the\n``twin.propose_change`` MCP tool.",
+        "properties": {
+          "agent_code": {
+            "default": "human",
+            "description": "Code identifying who/what is proposing the change",
+            "minLength": 1,
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "What the change does",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "diff": {
+            "additionalProperties": true,
+            "description": "Structured diff (e.g. {'action': 'regenerate_geometry'})",
+            "title": "Diff",
+            "type": "object"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "work_products_affected": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Work Products Affected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "CreateProposalRequest",
+        "type": "object"
+      },
       "CreateRunRequest": {
         "description": "Body for ``POST /v1/runs``.",
         "properties": {
@@ -4072,6 +4132,23 @@
             "title": "Domain",
             "type": "string"
           },
+          "geometryParameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometryparameters"
+          },
+          "hasScript": {
+            "default": false,
+            "title": "Hasscript",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4123,6 +4200,52 @@
           "updatedAt"
         ],
         "title": "TwinNodeResponse",
+        "type": "object"
+      },
+      "TwinNodeScriptResponse": {
+        "description": "The current generation script text for a CAD_MODEL node (MET-630).",
+        "properties": {
+          "git_commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit Sha"
+          },
+          "git_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Path"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "script_node_id": {
+            "title": "Script Node Id",
+            "type": "string"
+          },
+          "script_source": {
+            "title": "Script Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "script_node_id",
+          "script_source"
+        ],
+        "title": "TwinNodeScriptResponse",
         "type": "object"
       },
       "TwinRelationshipListResponse": {
@@ -4356,213 +4479,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/compliance/{project_id}/checklist": {
-      "get": {
-        "description": "Generate a compliance checklist for the given project and markets.\n\nMarkets are provided as a comma-separated query parameter, e.g.\n``?markets=UKCA,CE,FCC``.",
-        "operationId": "get_checklist_api_v1_compliance__project_id__checklist_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Comma-separated regime codes",
-            "in": "query",
-            "name": "markets",
-            "required": false,
-            "schema": {
-              "default": "UKCA,CE",
-              "description": "Comma-separated regime codes",
-              "title": "Markets",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChecklistResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Checklist",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
-    "/api/v1/compliance/{project_id}/coverage": {
-      "get": {
-        "description": "Get evidence coverage statistics for a project.",
-        "operationId": "get_coverage_api_v1_compliance__project_id__coverage_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CoverageResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Coverage",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
-    "/api/v1/compliance/{project_id}/evidence": {
-      "post": {
-        "description": "Link a piece of evidence to a compliance checklist item.",
-        "operationId": "link_evidence_api_v1_compliance__project_id__evidence_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinkEvidenceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EvidenceResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Link Evidence",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
-    "/api/v1/compliance/{project_id}/evidence/{item_id}": {
-      "get": {
-        "description": "Retrieve all evidence records for a checklist item.",
-        "operationId": "get_evidence_api_v1_compliance__project_id__evidence__item_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "item_id",
-            "required": true,
-            "schema": {
-              "title": "Item Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/EvidenceResponse"
-                  },
-                  "title": "Response Get Evidence Api V1 Compliance  Project Id  Evidence  Item Id  Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Evidence",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
     "/health": {
       "get": {
         "description": "Return the aggregated health of the gateway and its dependencies.",
@@ -4647,6 +4563,46 @@
           }
         },
         "summary": "List Proposals",
+        "tags": [
+          "assistant"
+        ]
+      },
+      "post": {
+        "description": "Create a design-change proposal directly from a human (MET-630).\n\nSame underlying ``ApprovalWorkflow.propose_change`` an agent's\n``twin.propose_change`` MCP call uses \u2014 a human (e.g. via a dashboard\nparameter panel) can submit one just as well, and it goes through the\nidentical review/apply pipeline (``decide`` \u2192 apply executor).",
+        "operationId": "create_proposal_v1_assistant_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignChangeProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Proposal",
         "tags": [
           "assistant"
         ]
@@ -5429,6 +5385,327 @@
         "summary": "Stream Thread Events",
         "tags": [
           "chat"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals": {
+      "get": {
+        "description": "All tool-call approvals currently awaiting a decision.",
+        "operationId": "list_pending_approvals_v1_chat_tool_approvals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Pending Approvals",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals/{run_id}": {
+      "get": {
+        "operationId": "get_approval_v1_chat_tool_approvals__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      },
+      "post": {
+        "operationId": "submit_tool_approval_v1_chat_tool_approvals__run_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Tool Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/checklist": {
+      "get": {
+        "description": "Generate a compliance checklist for the given project and markets.\n\nMarkets are provided as a comma-separated query parameter, e.g.\n``?markets=UKCA,CE,FCC``.",
+        "operationId": "get_checklist_v1_compliance__project_id__checklist_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated regime codes",
+            "in": "query",
+            "name": "markets",
+            "required": false,
+            "schema": {
+              "default": "UKCA,CE",
+              "description": "Comma-separated regime codes",
+              "title": "Markets",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Checklist",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/coverage": {
+      "get": {
+        "description": "Get evidence coverage statistics for a project.",
+        "operationId": "get_coverage_v1_compliance__project_id__coverage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Coverage",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/evidence": {
+      "post": {
+        "description": "Link a piece of evidence to a compliance checklist item.",
+        "operationId": "link_evidence_v1_compliance__project_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Evidence",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/evidence/{item_id}": {
+      "get": {
+        "description": "Retrieve all evidence records for a checklist item.",
+        "operationId": "get_evidence_v1_compliance__project_id__evidence__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceResponse"
+                  },
+                  "title": "Response Get Evidence V1 Compliance  Project Id  Evidence  Item Id  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evidence",
+        "tags": [
+          "compliance"
         ]
       }
     },
@@ -7948,6 +8225,50 @@
           }
         },
         "summary": "Get Node Model",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/script": {
+      "get": {
+        "description": "The current git-versioned generation script for a CAD_MODEL node (MET-630).\n\nLets a dashboard parameter panel seed a regeneration proposal with the\nscript as it stands today, rather than the user retyping it from scratch.\n404 when the node has no linked script (imported geometry, or the git\nbackend isn't configured).",
+        "operationId": "get_node_script_v1_twin_nodes__node_id__script_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinNodeScriptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Node Script",
         "tags": [
           "twin"
         ]
