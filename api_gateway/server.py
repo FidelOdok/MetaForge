@@ -289,6 +289,8 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     app.state.knowledge_reranker_enabled = reranker_enabled
 
     knowledge_service = None
+    component_catalog_store: Any = None
+    component_intent_llm: Any = None
     if db_url:
         try:
             dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -351,22 +353,45 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                     prop_llm = OpenRouterPropertyLLM(prop_cfg)
                     knowledge_service.set_property_llm(prop_llm)  # type: ignore[attr-defined]
                     property_llm_provider = prop_cfg.primary_model
+                    # MET-436: the same client satisfies component.search_intent's
+                    # IntentLLM Protocol structurally (both are a single
+                    # async def complete(prompt) -> str) — no second client.
+                    component_intent_llm = prop_llm
                 except Exception as prop_exc:  # noqa: BLE001
                     logger.warning(
                         "knowledge_service_property_llm_wiring_failed",
                         error=str(prop_exc),
                     )
 
+            # MET-436: the parametric component catalog. Same DATABASE_URL
+            # gating as knowledge_service above; failure here must not take
+            # down knowledge_service (already initialized) — component.*
+            # just stays unregistered (component_mcp_adapter_skipped).
+            try:
+                from digital_twin.catalog import ComponentCatalogStore
+
+                component_catalog_store = ComponentCatalogStore(dsn=dsn)
+                await component_catalog_store.initialize()
+            except Exception as cc_exc:  # noqa: BLE001
+                logger.warning(
+                    "component_catalog_store_init_failed",
+                    error=str(cc_exc),
+                )
+                component_catalog_store = None
+
             logger.info(
                 "knowledge_service_lightrag_initialized",
                 reranker_enabled=reranker_enabled,
                 llm_provider=llm_provider,
                 property_llm_provider=property_llm_provider,
+                component_catalog_store_active=component_catalog_store is not None,
             )
         except Exception as exc:
             logger.warning("knowledge_service_lightrag_failed", error=str(exc))
             knowledge_service = None
     app.state.knowledge_service = knowledge_service
+    app.state.component_catalog_store = component_catalog_store
+    app.state.component_intent_llm = component_intent_llm
 
     # ----- Legacy store (still consumed by skills + routes) ----------
     knowledge_store = None
@@ -713,6 +738,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # file (STEP, mesh, ...) by node id once its authoring session is
         # gone, unknown, or was never its own.
         blob_stager=make_blob_stager(twin),
+        # MET-436: the parametric component catalog + the intent-translation
+        # LLM (reused from the property-extraction Tier-2 wiring above).
+        # component.* registers only when both are supplied, together with
+        # knowledge_service (used for the intent-search fuzzy fallback).
+        component_catalog_store=getattr(app.state, "component_catalog_store", None),
+        component_intent_llm=getattr(app.state, "component_intent_llm", None),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -993,6 +1024,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             await app.state.knowledge_service.close()
             logger.info("knowledge_service_closed")
+        except Exception:
+            pass
+    # Close the component catalog store if active (MET-436)
+    if (
+        hasattr(app.state, "component_catalog_store")
+        and app.state.component_catalog_store is not None
+    ):
+        try:
+            await app.state.component_catalog_store.close()
+            logger.info("component_catalog_store_closed")
         except Exception:
             pass
     # Close PgVector knowledge store if active

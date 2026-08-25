@@ -91,6 +91,7 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
 _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     {"knowledge", "constraint", "twin", "project", "run", "session", "memory"}
     | {"digikey", "mouser", "nexar"}
+    | {"component", "offer_resolver"}
 )
 
 
@@ -217,6 +218,8 @@ async def bootstrap_tool_registry(
     run_launcher: Any = None,
     document_recorder: Any = None,
     blob_stager: Any = None,
+    component_catalog_store: Any = None,
+    component_intent_llm: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -245,6 +248,15 @@ async def bootstrap_tool_registry(
             shared adapter workspace so any CAD/FEA tool can load it by
             path even after its authoring session is gone. ``None``
             skips registration (same pattern as ``document_recorder``).
+        component_catalog_store: Optional ``ComponentCatalogStore`` instance
+            (MET-436). When supplied together with ``knowledge_service``
+            and ``component_intent_llm``, the ``component`` MCP adapter
+            (component.search_parametric + component.search_intent) is
+            registered. When any of the three is ``None``, skipped — same
+            runtime-injected pattern as ``knowledge``/``constraint``.
+        component_intent_llm: Optional ``IntentLLM`` instance (MET-436),
+            used only by ``component.search_intent`` to translate a
+            free-text goal into structured category/spec candidates.
 
     Returns:
         The populated ToolRegistry.
@@ -547,6 +559,56 @@ async def bootstrap_tool_registry(
                 ),
             )
 
+        # ----- Component MCP adapter (MET-436) -----
+        # Runtime-injected, same pattern as knowledge/constraint/memory:
+        # depends on three collaborators (the Postgres-backed parametric
+        # catalog store, the existing KnowledgeService for mode-2 fallback,
+        # and an intent-translation LLM client) rather than a static
+        # factory. All three must be present — a partially-wired component
+        # search (e.g. no fallback LLM) would silently degrade in ways
+        # that are worse than just not registering the tool.
+        if (
+            component_catalog_store is not None
+            and knowledge_service is not None
+            and component_intent_llm is not None
+            and _is_adapter_enabled("component")
+            and (not adapter_ids or "component" in adapter_ids)
+        ):
+            try:
+                from tool_registry.tools.components.adapter import ComponentServer
+
+                server = ComponentServer(
+                    search_store=component_catalog_store,
+                    knowledge_service=knowledge_service,
+                    llm=component_intent_llm,
+                )
+                await registry.register_adapter(server)
+                registered.append("component")
+                logger.info(
+                    "component_mcp_adapter_registered",
+                    store=type(component_catalog_store).__name__,
+                )
+            except Exception as exc:
+                logger.error("component_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("component")
+        else:
+            skipped.append("component")
+            logger.info(
+                "component_mcp_adapter_skipped",
+                reason=(
+                    "no component_catalog_store supplied"
+                    if component_catalog_store is None
+                    else "no knowledge_service supplied"
+                    if knowledge_service is None
+                    else "no component_intent_llm supplied"
+                    if component_intent_llm is None
+                    else "not in adapter_ids"
+                    if adapter_ids and "component" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
         # ----- Distributor MCP adapters (MET-434) -----
         # Self-constructing clients keyed on env vars. The HTTP code
         # lives in tool_registry/tools/{digikey,mouser,nexar}/adapter.py;
@@ -585,6 +647,12 @@ async def bootstrap_tool_registry(
             ("nexar", _make_nexar, "NEXAR_CLIENT_ID + NEXAR_CLIENT_SECRET"),
         )
 
+        # Populated as each distributor adapter constructs successfully,
+        # so the offer-resolver block below can fan out across whichever
+        # 0-3 distributors ended up available — it borrows these instances
+        # (does not own their HTTP/token lifecycle; see OfferResolverServer).
+        _available_distributor_adapters: list[DistributorAdapter] = []
+
         for distributor_id, factory, creds_hint in _DISTRIBUTOR_FACTORIES:
             if not _is_adapter_enabled(distributor_id):
                 skipped.append(distributor_id)
@@ -611,6 +679,7 @@ async def bootstrap_tool_registry(
                 server = DistributorMcpServer(adapter=adapter)
                 await registry.register_adapter(server)
                 registered.append(distributor_id)
+                _available_distributor_adapters.append(adapter)
                 logger.info(
                     f"{distributor_id}_mcp_adapter_registered",
                     distributor=adapter.name,
@@ -619,6 +688,45 @@ async def bootstrap_tool_registry(
                 logger.error(f"{distributor_id}_mcp_adapter_failed", error=str(exc))
                 span.record_exception(exc)
                 failed.append(distributor_id)
+
+        # ----- Offer Resolver MCP adapter (MET-436) -----
+        # Registered whenever selected (even with zero available distributor
+        # adapters) — "no offers found" is this tool's normal degraded
+        # response, not a missing-tool situation, so it shouldn't disappear
+        # just because no distributor credentials are configured. It has no
+        # required collaborator object (unlike knowledge/component/etc), so
+        # unlike those it's explicitly re-checked against ``adapter_ids``
+        # here — otherwise an explicit narrow ``adapter_ids=[...]`` request
+        # would always pull it in regardless of what was asked for.
+        if _is_adapter_enabled("offer_resolver") and (
+            not adapter_ids or "offer_resolver" in adapter_ids
+        ):
+            try:
+                from tool_registry.tools.distributors.offer_resolver import (
+                    OfferResolverServer,
+                )
+
+                server = OfferResolverServer(adapters=_available_distributor_adapters)
+                await registry.register_adapter(server)
+                registered.append("offer_resolver")
+                logger.info(
+                    "offer_resolver_mcp_adapter_registered",
+                    available_distributors=len(_available_distributor_adapters),
+                )
+            except Exception as exc:
+                logger.error("offer_resolver_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("offer_resolver")
+        else:
+            skipped.append("offer_resolver")
+            logger.info(
+                "offer_resolver_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "offer_resolver" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))

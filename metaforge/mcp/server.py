@@ -528,6 +528,8 @@ async def build_unified_server(
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
     blob_stager: Any = None,
+    component_catalog_store: Any = None,
+    component_intent_llm: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -552,6 +554,12 @@ async def build_unified_server(
     True *and* ``agent_session_store`` is supplied, every tool call is
     recorded as an action/error event in an agent session, so MCP/CLI work
     shows up in ``/sessions`` with no client cooperation.
+
+    ``component_catalog_store`` + ``component_intent_llm`` (MET-436):
+    the ``component`` adapter (component.search_parametric +
+    component.search_intent) registers only when both are supplied,
+    together with ``knowledge_service`` (reused for the intent-search
+    fuzzy fallback) — same runtime-injected pattern as ``knowledge``.
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -566,6 +574,8 @@ async def build_unified_server(
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder,
         blob_stager=blob_stager,
+        component_catalog_store=component_catalog_store,
+        component_intent_llm=component_intent_llm,
     )
     capture = (
         SessionCapture(agent_session_store)
