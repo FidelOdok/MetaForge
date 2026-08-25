@@ -509,6 +509,34 @@ class TestExecuteCodeNamespaceConvenienceNames:
             result = ops.execute_code(doc, "result = (Rotation, Placement, Matrix)\nresult = 'ok'")
         assert result == "ok"
 
+    def test_bare_math_functions_are_pre_bound(self) -> None:
+        """MET-649: `from math import sin, cos` is stripped by
+        _strip_sandbox_imports (math is a sandbox module) with nothing
+        rebinding the names -- the exact "name 'cos' is not defined" failure
+        observed live during the MET-642 S3 eval."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(
+                doc, "from math import sin, cos\nresult = (sin(0), cos(0), sqrt(4), pi)"
+            )
+        assert result == (0.0, 1.0, 2.0, pytest.approx(3.14159, rel=1e-3))
+
+    def test_show_object_is_a_noop(self) -> None:
+        """MET-649: show_object is a common CQ-editor/CQGI convention the
+        model sometimes hallucinates; it must not raise NameError."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "show_object(42)\nresult = 'ok'")
+        assert result == "ok"
+
     def test_logs_script_before_running_it(self) -> None:
         """MET-643: a native crash inside exec() kills the adapter process
         with no Python traceback ever logged, leaving no way to tell what
