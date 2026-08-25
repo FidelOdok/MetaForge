@@ -57,10 +57,17 @@ class ProviderError(Exception):
         *,
         status_code: int | None = None,
         retryable: bool = False,
+        context_length_exceeded: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retryable = retryable
+        # MET-655 remainder: set by a transport that recognized the SDK's
+        # "prompt exceeds context window" error shape, so the pipeline can
+        # skip any later candidate whose window is provably too small too
+        # (see ProviderSpec.max_context_tokens) instead of resending the
+        # same oversized request and getting the identical rejection.
+        self.context_length_exceeded = context_length_exceeded
 
 
 class AllProvidersFailedError(Exception):
@@ -90,6 +97,13 @@ class ProviderSpec:
     api_key: str | None = None
     weight: int = 1
     extra: Mapping[str, str] = field(default_factory=dict)
+    # MET-655 remainder: this provider+model's real context window in tokens,
+    # if the caller knows it (e.g. via api_gateway.chat.harness_backend's
+    # context_window_for). Optional and purely advisory -- when unset (the
+    # default), the pipeline behaves exactly as before. When set, it lets
+    # the pipeline skip a later candidate that is guaranteed to fail the
+    # same way a context-length rejection just did.
+    max_context_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -153,12 +167,27 @@ class ProviderPipeline:
         """
         candidates = self.resolve(role)
         attempts: list[tuple[ProviderSpec, Exception]] = []
+        known_insufficient_window: int | None = None
 
         with tracer.start_as_current_span("provider.complete") as span:
             span.set_attribute("provider.role", role)
             span.set_attribute("provider.candidate_count", len(candidates))
 
             for spec in candidates:
+                skip_reason = self._context_window_skip_reason(spec, known_insufficient_window)
+                if skip_reason is not None:
+                    logger.warning(
+                        "provider_skipped_context_window_too_small",
+                        role=role,
+                        provider=spec.name,
+                        model=spec.model,
+                        max_context_tokens=spec.max_context_tokens,
+                        known_insufficient_window=known_insufficient_window,
+                    )
+                    skip_err = ProviderError(skip_reason, context_length_exceeded=True)
+                    attempts.append((spec, skip_err))
+                    continue
+
                 last_exc: Exception | None = None
                 for attempt in range(self._retry.api_max_retries + 1):
                     call_start = time.monotonic()
@@ -167,6 +196,10 @@ class ProviderPipeline:
                     except ProviderError as exc:
                         self._record_call_duration(spec, role, time.monotonic() - call_start)
                         last_exc = exc
+                        if exc.context_length_exceeded and spec.max_context_tokens is not None:
+                            known_insufficient_window = max(
+                                known_insufficient_window or 0, spec.max_context_tokens
+                            )
                         retryable = self._retry.is_retryable(exc)
                         logger.warning(
                             "provider_attempt_failed",
@@ -176,6 +209,7 @@ class ProviderPipeline:
                             attempt=attempt,
                             status_code=exc.status_code,
                             retryable=retryable,
+                            context_length_exceeded=exc.context_length_exceeded,
                             error=str(exc),
                         )
                         if not retryable or attempt >= self._retry.api_max_retries:
@@ -213,6 +247,26 @@ class ProviderPipeline:
         logger.error("all_providers_failed", role=role, tried=len(attempts))
         raise AllProvidersFailedError(role, attempts)
 
+    @staticmethod
+    def _context_window_skip_reason(
+        spec: ProviderSpec, known_insufficient_window: int | None
+    ) -> str | None:
+        """MET-655 remainder: a reason string if ``spec`` is guaranteed to
+        fail the same way a prior candidate already failed -- its context
+        window is no larger than one that already rejected this exact
+        request for being too long. ``None`` when there's no such evidence
+        yet, or ``spec`` didn't declare a window (behavior unchanged)."""
+        if known_insufficient_window is None or spec.max_context_tokens is None:
+            return None
+        if spec.max_context_tokens > known_insufficient_window:
+            return None
+        return (
+            f"skipped {spec.name}:{spec.model} -- its context window "
+            f"({spec.max_context_tokens} tokens) is no larger than a window "
+            f"that already rejected this request as too long "
+            f"({known_insufficient_window} tokens)"
+        )
+
     def _record_call_duration(self, spec: ProviderSpec, role: Role, duration: float) -> None:
         """Best-effort per-attempt latency metric (production-harness audit
         follow-up — this pipeline previously logged retries/outcomes with no
@@ -238,8 +292,20 @@ class ProviderPipeline:
         """
         candidates = self.resolve(role)
         attempts: list[tuple[ProviderSpec, Exception]] = []
+        known_insufficient_window: int | None = None
 
         for spec in candidates:
+            skip_reason = self._context_window_skip_reason(spec, known_insufficient_window)
+            if skip_reason is not None:
+                logger.warning(
+                    "provider_skipped_context_window_too_small",
+                    role=role,
+                    provider=spec.name,
+                    model=spec.model,
+                )
+                attempts.append((spec, ProviderError(skip_reason, context_length_exceeded=True)))
+                continue
+
             last_exc: Exception | None = None
             for attempt in range(self._retry.api_max_retries + 1):
                 agen = stream_invoke(spec, request)
@@ -249,6 +315,10 @@ class ProviderPipeline:
                     return  # empty but successful stream
                 except ProviderError as exc:
                     last_exc = exc
+                    if exc.context_length_exceeded and spec.max_context_tokens is not None:
+                        known_insufficient_window = max(
+                            known_insufficient_window or 0, spec.max_context_tokens
+                        )
                     if not self._retry.is_retryable(exc) or attempt >= self._retry.api_max_retries:
                         break
                     await self._sleep(self._retry.backoff_base_seconds * (2**attempt))
@@ -283,8 +353,20 @@ class ProviderPipeline:
         """
         candidates = self.resolve(role)
         attempts: list[tuple[ProviderSpec, Exception]] = []
+        known_insufficient_window: int | None = None
 
         for spec in candidates:
+            skip_reason = self._context_window_skip_reason(spec, known_insufficient_window)
+            if skip_reason is not None:
+                logger.warning(
+                    "provider_skipped_context_window_too_small",
+                    role=role,
+                    provider=spec.name,
+                    model=spec.model,
+                )
+                attempts.append((spec, ProviderError(skip_reason, context_length_exceeded=True)))
+                continue
+
             last_exc: Exception | None = None
             for attempt in range(self._retry.api_max_retries + 1):
                 agen = stream_events(spec, request)
@@ -294,6 +376,10 @@ class ProviderPipeline:
                     return  # empty but successful stream
                 except ProviderError as exc:
                     last_exc = exc
+                    if exc.context_length_exceeded and spec.max_context_tokens is not None:
+                        known_insufficient_window = max(
+                            known_insufficient_window or 0, spec.max_context_tokens
+                        )
                     if not self._retry.is_retryable(exc) or attempt >= self._retry.api_max_retries:
                         break
                     await self._sleep(self._retry.backoff_base_seconds * (2**attempt))

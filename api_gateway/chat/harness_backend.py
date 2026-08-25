@@ -427,6 +427,10 @@ def provider_config_from_env(
         stored = store.get_credential(name)
         if stored is not None:
             spec = replace(spec, api_key=stored.api_key, base_url=stored.base_url or spec.base_url)
+        # MET-655 remainder: so the pipeline can skip a later fallback candidate
+        # whose window is provably too small too, instead of resending the same
+        # oversized request and getting an identical context-length rejection.
+        spec = replace(spec, max_context_tokens=context_window_for(name, model_))
         return spec
 
     candidates = [_spec_for(prov, mdl)]
