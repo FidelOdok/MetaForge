@@ -117,6 +117,12 @@ _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", 
 # being excluded from safe builtins.
 _SANDBOX_MODULES = {"cadquery", "cq", "math"}
 
+# MET-649: `_strip_sandbox_imports` drops `from math import sin, cos, ...`
+# entirely (math is a sandbox module, so the whole line matches and is
+# removed) but nothing rebinds `sin`/`cos` as bare names afterward, so a
+# script that wrote the from-import form got a NameError on first use.
+_MATH_CONVENIENCE_NAMES = ("sin", "cos", "tan", "atan2", "sqrt", "pi", "radians", "degrees")
+
 _IMPORT_RE = re.compile(
     r"^(?:import\s+(?P<mod>\w+)(?:\s+as\s+\w+)?|from\s+(?P<from_mod>\w+)\s+import\s+.+)$",
 )
@@ -576,6 +582,18 @@ class CadqueryOperations:
                 "cadquery": cq,
                 "math": math,
                 "reduce": functools.reduce,
+                # MET-649: a no-op stub for the common CQ-editor/CQGI
+                # `show_object(shape)` convention -- not part of this
+                # headless execution context, but common enough in
+                # model-generated scripts (hallucinated from generic
+                # CadQuery scripting knowledge) that silently accepting
+                # it beats a NameError.
+                "show_object": lambda *_a, **_k: None,
+                **{
+                    name: getattr(math, name)
+                    for name in _MATH_CONVENIENCE_NAMES
+                    if hasattr(math, name)
+                },
             }
 
             # Execute with timeout

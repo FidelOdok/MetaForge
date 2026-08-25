@@ -133,6 +133,12 @@ _SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the names
 # first attempt. All three are plain geometry value types, not a sandbox
 # relaxation.
 _SANDBOX_CONVENIENCE_NAMES = {"Vector", "Rotation", "Placement", "Matrix"}
+# MET-649: `_strip_sandbox_imports` drops `from math import sin, cos, ...`
+# entirely (math is a sandbox module, so the whole line matches and is
+# removed) but nothing rebinds `sin`/`cos` as bare names afterward, so a
+# script that wrote the from-import form got a NameError on first use. Same
+# convenience-binding pattern as MET-645's Vector/Rotation/Placement/Matrix.
+_MATH_CONVENIENCE_NAMES = ("sin", "cos", "tan", "atan2", "sqrt", "pi", "radians", "degrees")
 import ast as _ast  # noqa: E402
 import re as _re  # noqa: E402
 
@@ -1123,10 +1129,19 @@ class FreecadOperations:
             "Part": Part,
             "math": math,
             "doc": document,
+            # MET-649: a no-op stub for the common CQ-editor/CQGI
+            # `show_object(shape)` convention -- not part of this headless
+            # execution context, but common enough in model-generated
+            # scripts (hallucinated from generic CAD-scripting knowledge)
+            # that silently accepting it beats a NameError over dropping it.
+            "show_object": lambda *_a, **_k: None,
             **{
                 name: getattr(FreeCAD, name)
                 for name in _SANDBOX_CONVENIENCE_NAMES
                 if hasattr(FreeCAD, name)
+            },
+            **{
+                name: getattr(math, name) for name in _MATH_CONVENIENCE_NAMES if hasattr(math, name)
             },
         }
 

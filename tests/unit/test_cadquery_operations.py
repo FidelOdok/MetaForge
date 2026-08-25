@@ -339,3 +339,36 @@ class TestExecuteScriptExceptionTypes:
                 str(tmp_path / "out.step"),
             )
         assert result["cad_file"] == str(tmp_path / "out.step")
+
+
+class TestExecuteScriptSandboxConvenienceNames:
+    """MET-649: `from math import sin, cos` is stripped by
+    _strip_sandbox_imports (math is a sandbox module) with nothing rebinding
+    the names -- the exact "name 'cos' is not defined" failure observed live
+    during the MET-642 S3 eval. Also covers the show_object no-op stub."""
+
+    def test_bare_math_functions_are_pre_bound(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script(
+                "from math import sin, cos\n"
+                "assert (sin(0), cos(0), sqrt(4)) == (0.0, 1.0, 2.0)\n"
+                "result = cq.Workplane()",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")
+
+    def test_show_object_is_a_noop(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script(
+                "show_object(42)\nresult = cq.Workplane()",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")
