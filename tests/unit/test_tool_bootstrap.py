@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tool_registry.bootstrap import (
     _ADAPTER_REGISTRY,
@@ -119,6 +119,35 @@ class TestBootstrapToolRegistry:
         """Unknown adapter IDs are reported as failed, not crash."""
         registry = await bootstrap_tool_registry(adapter_ids=["nonexistent"])
         assert len(registry.list_adapters()) == 0
+
+    async def test_runtime_injected_adapter_id_in_adapter_ids_is_not_flagged_unknown(self):
+        """A runtime-injected adapter (knowledge/twin/memory/etc.) has no
+        static factory in _ADAPTER_REGISTRY -- it's registered by its own
+        dedicated block further down bootstrap_tool_registry(). When the
+        caller also lists it explicitly in ``adapter_ids`` (the normal case,
+        e.g. ``--adapters knowledge,twin,...``), the generic loop must not
+        log a false "Unknown adapter ID" warning or double-count it as
+        failed: the real fidel-dev bootstrap summary showed 'knowledge',
+        'memory', 'twin', 'project', 'constraint', and 'digikey' in BOTH
+        the failed list and the registered/skipped list on every restart."""
+        with patch("tool_registry.bootstrap.logger") as mock_logger:
+            registry = await bootstrap_tool_registry(
+                adapter_ids=["knowledge"], knowledge_service=MagicMock()
+            )
+
+        mock_logger.warning.assert_not_called()
+        assert "knowledge" in {a.adapter_id for a in registry.list_adapters()}
+
+    async def test_runtime_injected_adapter_id_without_its_dependency_is_not_flagged_unknown(
+        self,
+    ):
+        """Same false-warning bug, but for the case where the dependency
+        (knowledge_service) isn't supplied -- the dedicated block correctly
+        marks it 'skipped', and the generic loop must not also warn/fail it."""
+        with patch("tool_registry.bootstrap.logger") as mock_logger:
+            await bootstrap_tool_registry(adapter_ids=["knowledge"])
+
+        mock_logger.warning.assert_not_called()
 
     async def test_remote_url_unreachable_falls_back_to_in_process(self):
         """MET-477 G2: when ``METAFORGE_ADAPTER_<ID>_URL`` points at a

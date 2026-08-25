@@ -77,6 +77,22 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
     },
 }
 
+# Adapters with no static factory above -- each is registered by its own
+# dedicated, self-contained block further down in bootstrap_tool_registry()
+# (depends on a runtime-injected object like a KnowledgeService, or on
+# distributor API credentials read from the environment). Every one of
+# these blocks already appends to exactly one of registered/skipped/failed
+# on its own. When one of these ids is *also* explicitly passed in
+# ``adapter_ids`` (the common case -- e.g. ``--adapters knowledge,twin,...``),
+# the generic loop below must not treat it as unknown: doing so logged a
+# false "Unknown adapter ID" warning and appended it to ``failed``, so the
+# final summary showed the adapter in both ``failed`` and ``registered``/
+# ``skipped`` simultaneously, even though it registered successfully.
+_RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
+    {"knowledge", "constraint", "twin", "project", "run", "session", "memory"}
+    | {"digikey", "mouser", "nexar"}
+)
+
 
 def _is_adapter_enabled(adapter_id: str) -> bool:
     """Check if an adapter is enabled via environment variables."""
@@ -245,6 +261,10 @@ async def bootstrap_tool_registry(
         for adapter_id in ids_to_register:
             spec = _ADAPTER_REGISTRY.get(adapter_id)
             if spec is None:
+                if adapter_id in _RUNTIME_INJECTED_ADAPTER_IDS:
+                    # Handled by its own dedicated block below, which owns
+                    # this id's registered/skipped/failed outcome.
+                    continue
                 logger.warning("Unknown adapter ID", adapter_id=adapter_id)
                 failed.append(adapter_id)
                 continue
