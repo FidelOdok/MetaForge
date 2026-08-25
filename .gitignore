@@ -116,3 +116,6 @@ evals/reports/
 
 # Local scratch artifacts (architecture briefings, visual reports) — never committed
 .artifacts/
+
+# Local research dumps (downloaded papers, datasets) — never committed
+Research/
