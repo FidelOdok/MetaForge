@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '../../test/test-utils';
 
 vi.mock('../../hooks/use-twin', () => ({
@@ -62,6 +62,7 @@ vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
 import { TwinViewerPage } from '../TwinViewerPage';
 import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../../hooks/use-twin';
 import { fireEvent, act } from '@testing-library/react';
+import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../store/project-store';
 
 const mockUseTwinNodes = vi.mocked(useTwinNodes);
@@ -69,7 +70,27 @@ const mockUseTwinNode = vi.mocked(useTwinNode);
 const mockUseTwinRelationships = vi.mocked(useTwinRelationships);
 const mockUseNodeVersionHistory = vi.mocked(useNodeVersionHistory);
 
+// MET-686: a harness for simulating an in-SPA navigation that changes the
+// ?node= query string on the SAME /twin path -- react-router does not
+// remount TwinViewerPage for a query-only change (no :param in the route),
+// so a raw `window.history.pushState` (which react-router's BrowserRouter
+// instance never observes) can't reproduce it; a real `navigate()` call can.
+function TwinWithNavHarness() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => navigate('/twin')}>goto-twin-no-query</button>
+      <TwinViewerPage />
+    </>
+  );
+}
+
 describe('TwinViewerPage', () => {
+  beforeEach(() => {
+    window.history.pushState({}, '', '/twin');
+  });
+
+
   it('renders Digital Twin heading', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
     mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
@@ -218,6 +239,93 @@ describe('TwinViewerPage', () => {
     // The breadcrumb/detail panel occurrences (derived from selectedId)
     // disappear -- fewer occurrences than while a node was selected, even
     // though the statically-mocked list/dropdown still render the name.
+    expect(screen.getAllByText('bracket-v1.step').length).toBeLessThan(selectedCount);
+  });
+
+  it('clears the selected node when the ?node= query param disappears on the same /twin route (MET-686)', () => {
+    // Regression: the Sidebar's "Digital Twin" nav item links to the bare
+    // /twin (no query). Since /twin has no :param, react-router re-renders
+    // TwinViewerPage in place rather than remounting it, so the deep-link
+    // effect must actively clear selectedId when the param is gone -- it
+    // used to only ever set it, never clear it, leaving a stale selection.
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockImplementation(
+      (id?: string) =>
+        ({ data: id ? node : undefined, isLoading: false }) as unknown as ReturnType<typeof useTwinNode>,
+    );
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    useProjectStore.setState({ activeProjectId: 'proj-a', hasSelected: true });
+
+    window.history.pushState({}, '', '/twin?node=n1');
+    render(<TwinWithNavHarness />);
+
+    const selectedCount = screen.getAllByText('bracket-v1.step').length;
+    expect(selectedCount).toBeGreaterThan(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'goto-twin-no-query' }));
+
+    expect(screen.getAllByText('bracket-v1.step').length).toBeLessThan(selectedCount);
+  });
+
+  it('does not clear a deep-linked node when the active project auto-selects shortly after mount (MET-686)', () => {
+    // Regression: on a cold session (nothing persisted, hasSelected=false),
+    // useActiveProject's own "auto-select the newest project" effect can
+    // resolve a moment after mount and change activeProjectId from null to
+    // some project -- indistinguishable, at the naive project-change-clears-
+    // selection effect, from a real project switch. That wiped out the node
+    // the ?node= deep link had *just* selected.
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockImplementation(
+      (id?: string) =>
+        ({ data: id ? node : undefined, isLoading: false }) as unknown as ReturnType<typeof useTwinNode>,
+    );
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    useProjectStore.setState({ activeProjectId: null, hasSelected: false });
+
+    window.history.pushState({}, '', '/twin?node=n1');
+    render(<TwinViewerPage />);
+
+    const selectedCount = screen.getAllByText('bracket-v1.step').length;
+    expect(selectedCount).toBeGreaterThan(1);
+
+    // The cold-start auto-select landing (null -> a project) must not clear it.
+    act(() => {
+      useProjectStore.setState({ activeProjectId: 'proj-auto', hasSelected: true });
+    });
+    expect(screen.getAllByText('bracket-v1.step').length).toBe(selectedCount);
+
+    // A genuine subsequent switch away from an already-active project still must.
+    act(() => {
+      useProjectStore.setState({ activeProjectId: 'proj-other', hasSelected: true });
+    });
     expect(screen.getAllByText('bracket-v1.step').length).toBeLessThan(selectedCount);
   });
 });
