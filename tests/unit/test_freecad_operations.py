@@ -537,6 +537,67 @@ class TestExecuteCodeNamespaceConvenienceNames:
             result = ops.execute_code(doc, "show_object(42)\nresult = 'ok'")
         assert result == "ok"
 
+
+class _FakeExecCodeResultShape:
+    pass
+
+
+class _FakeFreecadObject:
+    def __init__(self, name: str) -> None:
+        self.Name = name
+        self.Shape = _FakeExecCodeResultShape()
+
+
+class TestExecuteCodeResultDictFallback:
+    """MET-687: a script writing ``result = {'obj_id': model.Name, ...}``
+    (a description of the object) instead of the object itself must still
+    resolve to a real, registerable object -- confirmed live: the adapter's
+    caller only registers a ``result`` with a ``.Shape`` attribute, so a
+    dict silently vanished, leaving a script-claimed obj_id nothing could
+    later commit-by-reference against."""
+
+    def test_dict_result_with_obj_id_resolves_to_the_real_object(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        doc.Objects = [_FakeFreecadObject("Kitchen_Table_v1_Modified")]
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(
+                doc,
+                "result = {'obj_id': 'Kitchen_Table_v1_Modified', 'leg_count': 6}",
+            )
+        assert result is doc.Objects[0]
+        assert hasattr(result, "Shape")
+
+    def test_dict_result_with_unresolvable_name_returns_dict_unchanged(self) -> None:
+        """No matching object -- fall through to the dict as-is (a genuinely
+        broken script) rather than raising or fabricating an object."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        doc.Objects = [_FakeFreecadObject("SomethingElse")]
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "result = {'obj_id': 'NoSuchObject'}")
+        assert result == {"obj_id": "NoSuchObject"}
+
+    def test_object_result_is_returned_unchanged(self) -> None:
+        """The documented, correct contract (result IS the object) must keep
+        working exactly as before -- this fallback is additive only."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        doc.Objects = []
+        obj = _FakeFreecadObject("Direct")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            namespace_result = ops._resolve_execute_code_result(doc, obj)
+        assert namespace_result is obj
+
     def test_logs_script_before_running_it(self) -> None:
         """MET-643: a native crash inside exec() kills the adapter process
         with no Python traceback ever logged, leaving no way to tell what

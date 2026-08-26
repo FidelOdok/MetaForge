@@ -1069,6 +1069,33 @@ class FreecadOperations:
         document.recompute()
         return mir
 
+    @staticmethod
+    def _resolve_execute_code_result(document: Any, raw_result: Any) -> Any:
+        """Recover a usable FreeCAD object from ``execute_code``'s ``result``
+        variable when the script assigned a *description* of the object
+        (a dict with an id/name field) instead of the object itself.
+
+        Confirmed live (MET-687): scripts repeatedly write
+        ``result = {'obj_id': model.Name, ...}`` -- a plain dict has no
+        ``.Shape``, so the caller's ``hasattr(result, "Shape")`` registration
+        check silently drops it, leaving the script's own claimed ``obj_id``
+        unusable for a later commit-by-reference. If ``raw_result`` already
+        has a ``.Shape`` (the documented, correct contract), it's returned
+        unchanged -- this only kicks in for the dict-shaped mistake.
+        """
+        if raw_result is None or hasattr(raw_result, "Shape"):
+            return raw_result
+        if not isinstance(raw_result, dict):
+            return raw_result
+        for key in ("obj_id", "obj_name", "name", "model_name", "Name"):
+            candidate = raw_result.get(key)
+            if not isinstance(candidate, str):
+                continue
+            for obj in document.Objects:
+                if getattr(obj, "Name", None) == candidate and hasattr(obj, "Shape"):
+                    return obj
+        return raw_result
+
     def execute_code(
         self,
         document: Any,
@@ -1084,6 +1111,9 @@ class FreecadOperations:
         ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
         ``FreeCAD.Vector``, though that also works). Assign the object to
         surface to a variable named ``result`` (it gets registered + returned).
+        A script that instead assigns a dict describing the object (e.g.
+        ``{'obj_id': model.Name}``) is tolerated -- ``document.Objects`` is
+        searched by that name and the real object substituted (MET-687).
         Blocked names (cannot appear anywhere in the script, including in
         strings/comments): ``open``, ``__import__``, ``os``, ``sys``,
         ``subprocess``, ``eval``, ``exec``, ``compile``. Source-level guarding
@@ -1175,7 +1205,7 @@ class FreecadOperations:
                         signal.signal(signal.SIGALRM, old_handler)
 
         document.recompute()
-        return namespace.get("result")
+        return self._resolve_execute_code_result(document, namespace.get("result"))
 
     def shell_solid(
         self, document: Any, body: Any, thickness: float, faces: list[str] | None = None
