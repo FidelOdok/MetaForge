@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -36,6 +36,15 @@ class GenerateCadIrInput(BaseModel):
             "malformed entities are rejected with a clear error, not a crash."
         ),
     )
+    adapter: Literal["freecad", "cadquery"] = Field(
+        default="freecad",
+        description=(
+            "Which Lowering Pass compiles this document: FreeCAD's session-based, "
+            "one-call-per-entity pass (default, full v1 op coverage), or CadQuery's "
+            "single-script compiler (domain_agents/shared/cadquery_lowering.py, "
+            "narrower v1 op subset -- see its module docstring for exact coverage)."
+        ),
+    )
     material: str = Field(default="aluminum_6061", description="Material name for metadata")
     project_id: str | None = Field(
         default=None,
@@ -63,7 +72,10 @@ class GenerateCadIrOutput(BaseModel):
     )
     obj_id_map: dict[str, str] = Field(
         default_factory=dict,
-        description="Design IR entity id -> FreeCAD obj_id, for diagnostics",
+        description=(
+            "Design IR entity id -> the lowering pass's own per-entity handle, for "
+            "diagnostics (FreeCAD obj_id, or CadQuery's generated script variable name)"
+        ),
     )
     material: str = Field(..., description="Material used")
     committed: bool = Field(

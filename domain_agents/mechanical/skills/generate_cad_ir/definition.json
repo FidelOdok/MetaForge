@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "domain": "mechanical",
   "agent": "mechanical",
-  "description": "Generate CAD geometry from a Design IR document by lowering it against FreeCAD's session API",
+  "description": "Generate CAD geometry from a Design IR document by lowering it via the freecad or cadquery adapter",
   "phase": 1,
   "tools_required": [
+    { "tool_id": "cadquery.execute_script", "capability": "cad_script", "required": false },
     { "tool_id": "freecad.open_session", "capability": "cad_session", "required": true },
     { "tool_id": "freecad.close_session", "capability": "cad_session", "required": true },
     { "tool_id": "freecad.create_body", "capability": "cad_author", "required": false },
@@ -38,5 +39,5 @@
   "timeout_seconds": 300,
   "retries": 1,
   "idempotent": true,
-  "tags": ["cad", "freecad", "design-ir", "feature-tree", "generation", "llm"]
+  "tags": ["cad", "freecad", "cadquery", "design-ir", "feature-tree", "generation", "llm"]
 }

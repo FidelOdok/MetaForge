@@ -43,6 +43,37 @@ def _make_work_product() -> WorkProduct:
     )
 
 
+_BOX_ENTITY = [
+    {
+        "id": "box1",
+        "op": "create_primitive",
+        "kind": "box",
+        "parameters": {"length": 40.0, "width": 20.0, "height": 10.0},
+    }
+]
+
+
+def _register_cadquery_script_tool(mcp: InMemoryMcpBridge) -> None:
+    mcp.register_tool("cadquery.execute_script", capability="cad_script")
+    mcp.register_tool_response(
+        "cadquery.execute_script",
+        {
+            "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+            "volume_mm3": 8000.0,
+            "surface_area_mm2": 2800.0,
+            "bounding_box": {
+                "min_x": 0.0,
+                "min_y": 0.0,
+                "min_z": 0.0,
+                "max_x": 40.0,
+                "max_y": 20.0,
+                "max_z": 10.0,
+            },
+            "script_text": "",
+        },
+    )
+
+
 def _register_freecad_session_tools(mcp: InMemoryMcpBridge) -> None:
     mcp.register_tool("freecad.open_session", capability="cad_session")
     mcp.register_tool_response("freecad.open_session", {"session_id": "sess-1"})
@@ -261,3 +292,105 @@ class TestGenerateCadIrHandler:
             )
         )
         assert any("volume" in e.lower() for e in errors)
+
+
+class TestCadqueryAdapter:
+    """adapter="cadquery" dispatches to lower_design_ir_cadquery instead of FreeCAD."""
+
+    async def test_execute_dispatches_to_cadquery(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        twin = InMemoryTwinAPI.create()
+        mcp = InMemoryMcpBridge()
+        _register_cadquery_script_tool(mcp)
+        work_product = await twin.create_work_product(_make_work_product())
+        ctx = SkillContext(
+            twin=twin,
+            mcp=mcp,
+            logger=structlog.get_logger().bind(skill="generate_cad_ir"),
+            session_id=uuid4(),
+            branch="main",
+        )
+        handler = GenerateCadIrHandler(ctx)
+
+        output = await handler.execute(
+            GenerateCadIrInput(
+                work_product_id=work_product.id, entities=_BOX_ENTITY, adapter="cadquery"
+            )
+        )
+
+        assert output.entity_count == 1
+        assert output.volume_mm3 == 8000.0
+        assert output.obj_id_map == {"box1": "v_box1"}
+        # Only the CadQuery tool was ever called -- no FreeCAD session opened.
+        assert [tool_id for tool_id, _params in mcp.calls] == ["cadquery.execute_script"]
+
+    async def test_preconditions_check_cadquery_tool_not_freecad(self):
+        twin = InMemoryTwinAPI.create()
+        mcp = InMemoryMcpBridge()  # neither tool registered
+        work_product = await twin.create_work_product(_make_work_product())
+        ctx = SkillContext(
+            twin=twin,
+            mcp=mcp,
+            logger=structlog.get_logger().bind(skill="generate_cad_ir"),
+            session_id=uuid4(),
+            branch="main",
+        )
+        handler = GenerateCadIrHandler(ctx)
+
+        errors = await handler.validate_preconditions(
+            GenerateCadIrInput(
+                work_product_id=work_product.id, entities=_BOX_ENTITY, adapter="cadquery"
+            )
+        )
+        assert any("CadQuery script API" in e for e in errors)
+        assert not any("FreeCAD" in e for e in errors)
+
+    async def test_preconditions_pass_when_cadquery_tool_available(self):
+        twin = InMemoryTwinAPI.create()
+        mcp = InMemoryMcpBridge()
+        _register_cadquery_script_tool(mcp)
+        work_product = await twin.create_work_product(_make_work_product())
+        ctx = SkillContext(
+            twin=twin,
+            mcp=mcp,
+            logger=structlog.get_logger().bind(skill="generate_cad_ir"),
+            session_id=uuid4(),
+            branch="main",
+        )
+        handler = GenerateCadIrHandler(ctx)
+
+        errors = await handler.validate_preconditions(
+            GenerateCadIrInput(
+                work_product_id=work_product.id, entities=_BOX_ENTITY, adapter="cadquery"
+            )
+        )
+        assert errors == []
+
+    async def test_unsupported_op_via_cadquery_rejected_before_any_mcp_call(self):
+        twin = InMemoryTwinAPI.create()
+        mcp = InMemoryMcpBridge()
+        _register_cadquery_script_tool(mcp)
+        work_product = await twin.create_work_product(_make_work_product())
+        ctx = SkillContext(
+            twin=twin,
+            mcp=mcp,
+            logger=structlog.get_logger().bind(skill="generate_cad_ir"),
+            session_id=uuid4(),
+            branch="main",
+        )
+        handler = GenerateCadIrHandler(ctx)
+
+        try:
+            await handler.execute(
+                GenerateCadIrInput(
+                    work_product_id=work_product.id,
+                    entities=[{"id": "p1", "op": "create_parametric", "shape_type": "bracket"}],
+                    adapter="cadquery",
+                )
+            )
+            raised = False
+        except ValueError as exc:
+            raised = "unsupported op" in str(exc)
+
+        assert raised
+        assert mcp.calls == []
