@@ -484,7 +484,8 @@ MetaForge/
 │       ├── calculix/           # FEA analysis
 │       ├── freecad/            # CAD operations
 │       ├── kicad/              # PCB/schematic validation
-│       └── spice/              # Circuit simulation
+│       ├── spice/              # Circuit simulation
+│       └── isaac_sim/          # PhysX physics + RTX rendering (ephemeral GPU)
 │
 ├── ide_assistants/             # Layer 7: IDE integrations
 │   ├── vscode_extension/       # VS Code (firmware development)

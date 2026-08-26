@@ -8,13 +8,13 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (43 across 10 adapters)
+## MCP tools (45 across 11 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
-`knowledge,twin,constraint,cadquery,calculix` (19 tools). FreeCAD and
-KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
-(registered when the gateway supplies their backend).
+`knowledge,twin,constraint,cadquery,calculix` (19 tools). FreeCAD, KiCad,
+and Isaac Sim are opt-in; `project`, `memory`, and `session` are
+runtime-injected (registered when the gateway supplies their backend).
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
@@ -51,6 +51,8 @@ KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
 | `kicad` | `kicad.export_netlist` | Netlist export | _none yet_ |
 | `kicad` | `kicad.export_gerber` | Gerber set for fab | _none yet_ |
 | `kicad` | `kicad.get_pin_mapping` | Connector pinmap → JSON | _none yet_ |
+| `isaac_sim` (opt-in) | `isaac_sim.run_physics` | Dispatch a PhysX physics job to the `nvcr.io/nvidia/isaac-sim` container via ephemeral GPU compute; caller supplies the container command, requires `accept_eula=true` | _none yet_ |
+| `isaac_sim` | `isaac_sim.render_scene` | Dispatch an RTX render job to the same container | _none yet_ |
 | `project` (injected) | `project.create` | Create a project (rejects a case-insensitive duplicate name) | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.list` | List projects the caller can see | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.get` | Fetch a project by id or name | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
