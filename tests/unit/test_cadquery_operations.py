@@ -372,3 +372,24 @@ class TestExecuteScriptSandboxConvenienceNames:
                 str(tmp_path / "out.step"),
             )
         assert result["cad_file"] == str(tmp_path / "out.step")
+
+    def test_bare_exporters_name_is_pre_bound(self, tmp_path):
+        """MET-688: `from cadquery import exporters` is stripped by
+        _strip_sandbox_imports (its root "cadquery" is a sandbox module) with
+        nothing rebinding `exporters` as a bare name afterward -- the exact
+        "name 'exporters' is not defined" failure observed live during a
+        Kitchen Table CAD edit. `cq.exporters` is already used internally
+        throughout this module with no extra import, so pre-binding it the
+        same way as the math convenience names above is safe."""
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script(
+                "from cadquery import exporters\n"
+                "assert exporters is not None\n"
+                "result = cq.Workplane()",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")

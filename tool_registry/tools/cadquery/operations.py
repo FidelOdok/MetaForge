@@ -582,6 +582,17 @@ class CadqueryOperations:
                 "cadquery": cq,
                 "math": math,
                 "reduce": functools.reduce,
+                # MET-688: `from cadquery import exporters` is stripped by
+                # _strip_sandbox_imports (its root "cadquery" matches
+                # _SANDBOX_MODULES) but nothing rebinds `exporters` as a bare
+                # name afterward -- the same class of gap MET-645/649 already
+                # fixed for FreeCAD's Vector/Rotation/Placement/Matrix/math
+                # convenience names. Confirmed live: a script wrote
+                # `exporters.export(...)` and hit "name 'exporters' is not
+                # defined". `cq.exporters` is already used internally
+                # throughout this file with no extra import, so it's safe to
+                # pre-bind the same way.
+                "exporters": cq.exporters,
                 # MET-649: a no-op stub for the common CQ-editor/CQGI
                 # `show_object(shape)` convention -- not part of this
                 # headless execution context, but common enough in

@@ -126,7 +126,17 @@ _SAFE_BUILTINS = {
     "NotImplementedError",
 }
 _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
-_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the namespace
+# MET-688: `Import` (FreeCAD's own STEP/IGES import-export module -- the tool
+# that preserves multi-part Labels, per MET-616's "raw Shape.exportStep()
+# collapses everything into one anonymous PRODUCT" finding) grants no
+# capability `Part` doesn't already have -- both do file I/O through FreeCAD's
+# native layer regardless of the sandbox's blocked Python builtins (`open`
+# etc.), which is exactly why the module docstring already says the real
+# isolation boundary is the container, not this allowlist. Confirmed live: a
+# script correctly reached for `import Import` to re-load a STEP file
+# label-preserving, got rejected, and fell back to `Part.Shape().read()`
+# (which flattens to one anonymous shape, losing per-part structure).
+_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "Import", "math"}  # injected into the namespace
 # MET-645: FreeCAD scripts overwhelmingly reach for these bare (not
 # FreeCAD.Vector-qualified) -- binding them directly avoids a
 # NameError-then-fallback-to-raw-primitives round trip on the model's very
@@ -258,7 +268,13 @@ def _sandboxed_import(
     top_level = name.split(".", 1)[0]
     if top_level not in _SANDBOX_MODULES:
         raise ImportError(f"import of {name!r} is not permitted in this sandbox")
-    resolved = {"FreeCAD": FreeCAD, "App": FreeCAD, "Part": Part, "math": _math_module}[top_level]
+    resolved = {
+        "FreeCAD": FreeCAD,
+        "App": FreeCAD,
+        "Part": Part,
+        "Import": Import,
+        "math": _math_module,
+    }[top_level]
     # Bare `import FreeCAD.Base` (no fromlist) and `from FreeCAD import Base`
     # (fromlist=("Base",)) both resolve to the same already-injected object --
     # this sandbox doesn't model real submodule attribute access, it just
@@ -1106,8 +1122,11 @@ class FreecadOperations:
     ) -> Any:
         """Run a sandboxed FreeCAD Python script against the session ``doc``.
 
-        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``math``,
-        the active ``doc``, and the geometry value types ``Vector``,
+        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``Import``
+        (MET-688 -- use ``Import.insert(path, doc.Name)``/``Import.export(objs,
+        path)`` over ``Part.Shape().read(...)`` when Labels/multi-part
+        structure matter), ``math``, the active ``doc``, and the geometry
+        value types ``Vector``,
         ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
         ``FreeCAD.Vector``, though that also works). Assign the object to
         surface to a variable named ``result`` (it gets registered + returned).
@@ -1157,6 +1176,7 @@ class FreecadOperations:
             "FreeCAD": FreeCAD,
             "App": FreeCAD,
             "Part": Part,
+            "Import": Import,
             "math": math,
             "doc": document,
             # MET-649: a no-op stub for the common CQ-editor/CQGI
