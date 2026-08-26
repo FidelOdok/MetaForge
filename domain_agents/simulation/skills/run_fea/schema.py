@@ -35,3 +35,10 @@ class RunFeaOutput(BaseModel):
         ..., ge=0, description="Minimum safety factor across all load cases"
     )
     solver_time_s: float = Field(default=0.0, ge=0, description="Solver wall-clock time in seconds")
+    governing_load_case: str | None = Field(
+        default=None, description="Name of the load case producing the highest stress"
+    )
+    natural_frequencies_hz: list[float] = Field(
+        default_factory=list, description="Eigenfrequencies in Hz (modal analysis only)"
+    )
+    material: str = Field(default="", description="Material the solve actually used")

@@ -305,7 +305,7 @@ Tool adapters wrap engineering tools in MCP-compatible servers. Each adapter run
 
 | Adapter | Tool | Phase | Capabilities |
 |---------|------|-------|-------------|
-| CalculiX | FEA solver | Phase 1 | Mesh validation, stress analysis, thermal analysis |
+| CalculiX | FEA solver | Phase 1 | Mesh validation, static and modal stress analysis, thermal analysis — see [Simulation Fidelity](architecture/simulation-fidelity.md) |
 | FreeCAD | CAD modeler | Phase 1 | Geometry export, STEP/STL conversion, measurement |
 | KiCad | PCB/Schematic | Phase 1 (read-only), Phase 2 (write) | ERC, DRC, BOM export, Gerber export |
 | SPICE | Circuit sim | Phase 1 | DC/AC analysis, transient simulation |

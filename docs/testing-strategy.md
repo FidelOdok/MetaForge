@@ -21,6 +21,13 @@ MetaForge uses a 12-level testing taxonomy. Each level answers a different quest
 | 11 | Acceptance Tests (UAT) | Meets requirements, user sign-off | Not implemented | Gap |
 | 12 | Chaos / Resilience Tests | Behaviour when things fail | Not implemented | Gap |
 
+**Tests requiring external solvers:** `tests/integration/test_calculix_solver_fidelity.py`
+runs the real `ccx` binary and checks generated input decks against closed-form
+solutions (beam deflection, bending stress, cantilever eigenfrequency, 1-D
+conduction) — see [Simulation Fidelity](architecture/simulation-fidelity.md).
+It **skips** when CalculiX is not installed, so a green run without `ccx` has
+not exercised the solver. Install it with `apt-get install calculix-ccx`.
+
 **Component vs. Unit distinction:** Tests under `tests/unit/` use `InMemoryTwinAPI` and `InMemoryMcpBridge` as in-memory doubles, not mocks. Any test that wires a real `McpClient` or real `TwinAPI` to an agent is classified as Component (Level 3). Any test that wires two or more real modules is Integration (Level 5).
 
 **Regression (Level 7) is implicit:** MetaForge does not maintain a separate regression test directory. The full pytest suite acts as the regression gate on every PR via CI.
@@ -57,6 +64,7 @@ tests/
 │   └── ...
 ├── integration/        # Cross-module wiring tests
 │   ├── test_agent_twin_integration.py
+│   ├── test_calculix_solver_fidelity.py
 │   ├── test_cross_agent_workflow.py
 │   ├── test_error_propagation.py
 │   ├── test_gateway_smoke.py

@@ -98,6 +98,7 @@ nav:
       - Skill Spec: skill_spec.md
       - MCP Spec: mcp_spec.md
       - Twin Schema: twin_schema.md
+      - Simulation Fidelity: architecture/simulation-fidelity.md
       - Testing Strategy: testing-strategy.md
       - Governance: governance.md
 

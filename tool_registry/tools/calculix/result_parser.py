@@ -278,3 +278,79 @@ def extract_results(frd_path: str, include_node_data: bool = True) -> dict[str, 
                 result[field]["node_count_stripped"] = node_count
 
     return result
+
+
+def parse_dat_frequencies(dat_path: str) -> list[dict[str, float]]:
+    """Extract eigenfrequencies from a CalculiX ``.dat`` file.
+
+    A ``*FREQUENCY`` step writes its mode shapes to the ``.frd`` but its
+    eigenvalues only to the ``.dat``, under an
+    ``E I G E N V A L U E   O U T P U T`` banner. Reading the ``.frd`` alone
+    therefore reports a successful modal analysis with no frequencies in it.
+
+    Each row is ``mode, eigenvalue, omega (rad/time), frequency (cycles/time),
+    imaginary part``; the cyclic frequency is the one engineers quote in Hz.
+
+    Args:
+        dat_path: Path to the ``.dat`` file.
+
+    Returns:
+        One entry per mode with ``mode``, ``eigenvalue``, ``rad_per_s`` and
+        ``frequency_hz``, ordered as the solver reported them. Returns an empty
+        list when the file holds no eigenvalue block.
+
+    Raises:
+        FrdParseError: If the file cannot be read.
+    """
+    path = Path(dat_path)
+    if not path.exists():
+        raise FrdParseError(f"CalculiX .dat file not found: {dat_path}")
+
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        raise FrdParseError(f"Failed to read .dat file {dat_path}: {exc}") from exc
+
+    modes: list[dict[str, float]] = []
+    in_block = False
+
+    for line in lines:
+        collapsed = "".join(line.split()).upper()
+
+        if "EIGENVALUEOUTPUT" in collapsed:
+            in_block = True
+            continue
+
+        if not in_block:
+            continue
+
+        # The block ends at the next banner (e.g. PARTICIPATION FACTORS).
+        if collapsed and not line.startswith(" " * 4) and not collapsed[0].isdigit():
+            if modes:
+                break
+            continue
+
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+
+        try:
+            mode_no = int(fields[0])
+            eigenvalue = float(fields[1])
+            rad_per_s = float(fields[2])
+            frequency_hz = float(fields[3])
+        except ValueError:
+            # Header rows inside the block ("MODE NO", units) land here.
+            continue
+
+        modes.append(
+            {
+                "mode": mode_no,
+                "eigenvalue": eigenvalue,
+                "rad_per_s": rad_per_s,
+                "frequency_hz": frequency_hz,
+            }
+        )
+
+    logger.info("Parsed eigenfrequencies", dat_path=str(path), modes=len(modes))
+    return modes
