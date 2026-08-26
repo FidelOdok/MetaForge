@@ -267,6 +267,7 @@ def chat_skills_enabled() -> bool:
 
 
 _DEFAULT_CHAT_MAX_STEPS = 24
+_DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS = 1800.0
 
 
 def trace_token_budget(provider: str | None, model: str | None) -> int:
@@ -325,6 +326,31 @@ def chat_max_cost_usd() -> float | None:
     except ValueError:
         return None
     return value if value > 0 else None
+
+
+def chat_approval_timeout_seconds() -> float:
+    """How long a `requires_approval` tool call (``twin.commit_geometry``,
+    etc.) waits for a decision before denying by default
+    (``METAFORGE_CHAT_APPROVAL_TIMEOUT_SECONDS``, default 1800 = 30 minutes).
+
+    The prior 120s default (``HarnessRuntime``'s own fallback) assumed a live
+    approval UI a human could click within two minutes -- none exists yet on
+    either the dashboard or the TUI (both surfaces only show the *result* of
+    a chat turn, not a mid-turn approval prompt), so every real interactive
+    session's `twin.commit_geometry` call was silently denied on a timer the
+    user had no way to beat. Confirmed live: a TUI user's multi-part CAD
+    commit was denied twice in one session, forcing a full geometry rebuild
+    each time. Deny-by-default itself is correct (fail-safe, never silently
+    proceeds) -- this only widens the window a human realistically has to
+    notice and approve out-of-band (e.g. via a polling script) before that
+    fail-safe kicks in.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_APPROVAL_TIMEOUT_SECONDS") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS
+    return value if value > 0 else _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS
 
 
 def _cost_target(ctx: AgentContext) -> tuple[str, str]:
@@ -589,6 +615,7 @@ async def _build_context(
         metrics=metrics,
         runs=get_approval_store(),
         on_approval_request=on_approval_request,
+        approval_timeout_seconds=chat_approval_timeout_seconds(),
     )
 
 
