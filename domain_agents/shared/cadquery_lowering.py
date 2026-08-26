@@ -297,7 +297,13 @@ def _lower_one(
             )
         sketch_var = var_map[entity.sketch_ref]
         cutter_var = f"{var}_cutter"
-        depth = -entity.depth if entity.reversed else entity.depth
+        # A pocket cuts INTO existing material below the sketch plane -- the
+        # opposite direction from pad's default growth (away from the sketch
+        # plane, into empty space). Confirmed live (MET-691 e2e run): using
+        # pad's same sign here extrudes the cutter away from the body with
+        # zero overlap, so .cut() removes nothing -- volume came back
+        # unchanged (24000.0, the un-pocketed box exactly).
+        depth = entity.depth if entity.reversed else -entity.depth
         script_lines.append(f"{cutter_var} = {sketch_var}.extrude({_fmt(depth)})")
         script_lines.append(f"{var} = {current}.cut({cutter_var})")
         body_current[entity.body_ref] = var

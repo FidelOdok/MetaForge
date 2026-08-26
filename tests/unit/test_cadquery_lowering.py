@@ -158,7 +158,11 @@ class TestHappyPath:
 
         assert result.terminal_entity_id == "pk1"
         assert "v_pad1 = v_sk1.extrude(10.0, both=False)" in result.script_text
-        assert "v_pk1_cutter = v_sk2.extrude(5.0)" in result.script_text
+        # Pocket cuts INTO the body (opposite direction from pad's default
+        # growth away from the sketch plane) -- regression for a live e2e
+        # bug where the same sign as pad extruded the cutter away from the
+        # body with zero overlap, so .cut() silently removed nothing.
+        assert "v_pk1_cutter = v_sk2.extrude(-5.0)" in result.script_text
         assert "v_pk1 = v_pad1.cut(v_pk1_cutter)" in result.script_text
         # create_body has no shape of its own -- excluded from obj_id_map's
         # script-variable entries entirely (it never produces one).
