@@ -5,6 +5,7 @@ All tests mock FreeCAD internals since FreeCAD is not available in CI.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -688,6 +689,31 @@ class TestExecuteCodeSandboxedImport:
         ops = FreecadOperations()
         with pytest.raises(ScriptSandboxError, match="__import__"):
             ops.execute_code(None, "result = __import__('math')")
+
+    def test_import_module_is_allowed_and_bare_name_pre_bound(self) -> None:
+        """MET-688: found live -- a script correctly reached for FreeCAD's
+        Import module (the one that preserves STEP Labels/multi-part
+        structure, per MET-616) to re-load a work product, and got
+        "import of 'Import' is not permitted in this sandbox", forcing a
+        fallback to Part.Shape().read() (which flattens to one anonymous
+        shape). Import grants no capability Part doesn't already have (both
+        do file I/O through FreeCAD's native layer regardless of the
+        sandbox's blocked Python builtins) -- the real isolation boundary is
+        the container, per this module's own existing design note."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        fake_import_module = SimpleNamespace(insert=lambda *a, **k: None)
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import_module),
+        ):
+            # Bare name (no import statement needed, matching FreeCAD/Part/math).
+            result = ops.execute_code(doc, "result = Import is not None")
+            assert result is True
+            # Explicit `import Import` statement must also resolve, not raise.
+            result = ops.execute_code(doc, "import Import\nresult = Import is not None")
+            assert result is True
 
 
 class TestExecuteCodeExceptionTypes:
