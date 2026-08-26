@@ -78,22 +78,23 @@ class TestBootstrapToolRegistry:
 
         Post-MET-478: KiCad joined cadquery/freecad/calculix in the
         bootstrap registry (cadquery=7, freecad=5, calculix=4,
-        kicad=6 = 22 tools across 4 adapters).
+        kicad=6 = 22 tools across 4 adapters). MET-635/636 added the
+        Isaac Sim adapter (2 tools, opt-in like freecad/kicad) for 5.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 4
+        assert len(adapters) == 5
         adapter_ids = {a.adapter_id for a in adapters}
-        assert adapter_ids == {"cadquery", "freecad", "calculix", "kicad"}
+        assert adapter_ids == {"cadquery", "freecad", "calculix", "kicad", "isaac_sim"}
 
     async def test_bootstrap_with_existing_registry(self):
         """Bootstrap populates an existing registry instance."""
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 4
+        assert len(registry.list_adapters()) == 5
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -154,12 +155,13 @@ class TestBootstrapToolRegistry:
         """Verify total tool count across all adapters.
 
         Grows as adapters gain tools; freecad reached 40 with the profile-part
-        generator (MET-541), bringing the cross-adapter total to 57.
+        generator (MET-541), bringing the cross-adapter total to 60. MET-635/636
+        added the Isaac Sim adapter's 2 tools (run_physics, render_scene) for 62.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 60
+        assert len(tools) == 62
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

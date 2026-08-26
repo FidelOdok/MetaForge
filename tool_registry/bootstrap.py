@@ -68,6 +68,18 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.kicad.config",
         "config_class": "KicadConfig",
     },
+    # MET-635/636: opt-in like freecad/kicad above -- this adapter is a
+    # thin coordinator (no GPU needed itself); it dispatches to a separate
+    # nvcr.io/nvidia/isaac-sim container via compute_providers.resolve_runtime().
+    # Handlers raise IsaacSimDispatchError if accept_eula isn't explicitly
+    # set true, and RemoteVolumesUnsupportedError if a usd_path is given
+    # while dispatching to a remote GPU provider (pending MET-489).
+    "isaac_sim": {
+        "module": "tool_registry.tools.isaac_sim.adapter",
+        "class": "IsaacSimServer",
+        "config_module": "tool_registry.tools.isaac_sim.config",
+        "config_class": "IsaacSimConfig",
+    },
 }
 
 

@@ -33,10 +33,11 @@ class TestRegistryMcpBridge:
 
         Grows as adapters gain tools; freecad reached 43 with the session
         boolean op (MET-10), bringing the cross-adapter total to 60.
+        MET-635/636 added the Isaac Sim adapter's 2 tools for 62.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 60
+        assert len(tools) == 62
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

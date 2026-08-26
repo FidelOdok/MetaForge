@@ -22,6 +22,7 @@ MCP-based tool access layer. Manages containerized tool adapters (KiCad, FreeCAD
   - `freecad/` -- CAD operations (FreeCAD)
   - `kicad/` -- PCB/schematic validation (KiCad, read-only in Phase 1)
   - `spice/` -- Circuit simulation (ngspice)
+  - `isaac_sim/` -- PhysX physics + RTX rendering, opt-in, dispatches to `nvcr.io/nvidia/isaac-sim` via `compute_providers.resolve_runtime()` (no GPU needed for the adapter container itself)
   - `digikey/`, `mouser/`, `nexar/`, `distributors/` -- Component distributor APIs
 
 ## Testing
