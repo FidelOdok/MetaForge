@@ -580,20 +580,26 @@ export function TwinViewerPage() {
 
   const uploadMutation = useUploadAndConvert();
 
-  // MET-514: preselect a node from the ?node= deep link.
+  // MET-514: sync the selected node with the ?node= deep link. Symmetric --
+  // clears the selection when the param disappears too (e.g. the sidebar's
+  // plain /twin link doesn't remount this page, only re-renders it with
+  // empty searchParams; MET-686 fixed a stale-selection bug where the
+  // previous work product's detail panel and breadcrumb kept showing).
   useEffect(() => {
-    const nodeParam = searchParams.get('node');
-    if (nodeParam) setSelectedId(nodeParam);
+    setSelectedId(searchParams.get('node'));
   }, [searchParams]);
 
   // MET-674: clear the selected node (and its cached model) when the active
   // project changes -- otherwise the detail panel and breadcrumb keep
   // showing the PREVIOUS project's node after the node list/canvas has
-  // already updated to the new project. The ref guard skips the initial
-  // mount so this doesn't fight the ?node= deep-link effect above.
+  // already updated to the new project. Guarded to skip the null -> X
+  // transition (MET-686): on a cold session (no project ever persisted),
+  // useActiveProject's own "auto-select the newest project" effect can land
+  // a moment after mount, racing the ?node= deep-link effect above and
+  // wiping the just-navigated-to node before the user ever sees it.
   const prevProjectIdRef = useRef(activeProjectId);
   useEffect(() => {
-    if (prevProjectIdRef.current !== activeProjectId) {
+    if (prevProjectIdRef.current !== null && prevProjectIdRef.current !== activeProjectId) {
       setSelectedId(null);
       setLoadedModelNodeId(null);
     }
