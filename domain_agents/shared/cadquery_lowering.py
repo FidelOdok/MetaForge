@@ -11,14 +11,27 @@ executed via a single ``cadquery.execute_script`` call.
 v1 scope cuts, each raising ``LoweringError`` rather than guessing or
 silently dropping data (same discipline as the FreeCAD sibling):
 
-- **Still no `loft`/`sweep`/`linear_pattern`/`polar_pattern`/
-  `create_parametric`.** Not technically impossible in CadQuery (it has
-  native `.loft()`/`.sweep()`) -- just not yet built to the same
-  live-verified standard as everything else here (MET-692 found a real
-  silent-wrong-geometry bug in `pocket`, the simplest of the ops already
-  implemented; `loft`/`sweep` need multi-profile/path threading -- each
-  deserves its own careful pass + live verification, not a rushed
-  guess). Tracked as a follow-up.
+- **Still no `loft`/`linear_pattern`/`polar_pattern`/`create_parametric`.**
+  Not technically impossible in CadQuery (it has native `.loft()`) --
+  just not yet built. Confirmed empirically (MET-697): CadQuery's
+  `.loft()` needs its section profiles built as PENDING WIRES chained
+  onto one Workplane object (`wp.circle(5).workplane(offset=10).rect(4,
+  4).loft()`) -- combining independently-built profile objects via
+  `.add(other.vals()).toPending()` executes without error but produces a
+  DIFFERENT (and wrong) result despite a matching reported volume,
+  confirmed by a mismatched bounding box in a controlled live test. Since
+  every other entity here (including `sweep`, below) is built as an
+  independent `cq.Workplane` object per sketch, giving `loft` its
+  required chained-pending-wire structure means re-deriving each
+  section's profile-building calls onto a shared Workplane rather than
+  reusing the already-built per-sketch variables -- a genuine
+  architectural change, not a one-line addition, so it's deferred to its
+  own pass rather than rushed in alongside this one.
+- **`sweep`'s profile and path are each an independent, already-built
+  `cq.Workplane` object** (`profile.sweep(path)`) -- unlike `loft`, this
+  matches the existing per-sketch-object architecture directly, and was
+  confirmed live against an analytically exact cylinder volume
+  (MET-697) before being implemented.
 - **`revolve`'s axis is derived at runtime from the sketch workplane's
   own local coordinate system** (`sketch.plane.origin` +
   `sketch.plane.xDir`/`yDir` for H/V), not hand-computed per sketch
@@ -91,6 +104,7 @@ from twin_core.design_ir.models import (
     SketchEntity,
     SketchLine,
     SketchRectangle,
+    SweepEntity,
     TransformEntity,
 )
 from twin_core.design_ir.validation import validate_design_ir
@@ -110,7 +124,6 @@ _UNSUPPORTED_OPS = frozenset(
     {
         "create_parametric",
         "loft",
-        "sweep",
         "linear_pattern",
         "polar_pattern",
     }
@@ -223,7 +236,7 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
                 f"unsupported op(s) for the CadQuery Lowering Pass: {unsupported} "
                 "(v1 covers create_primitive/transform/boolean/sketch/pad/pocket/"
                 "fillet/chamfer/fillet_edges[empty]/chamfer_edges[empty]/mirror/"
-                "shell[empty]/revolve only)"
+                "shell[empty]/revolve/sweep only)"
             )
 
         terminal = _find_terminal_entity(doc)
@@ -386,6 +399,17 @@ def _lower_one(
         )
         if current is not None:
             script_lines.append(f"{var} = {current}.union({revolved_var})")
+        body_current[entity.body_ref] = var
+        return var
+
+    if isinstance(entity, SweepEntity):
+        profile_var = var_map[entity.profile_ref]
+        path_var = var_map[entity.path_ref]
+        current = body_current.get(entity.body_ref)
+        swept_var = f"{var}_swept" if current is not None else var
+        script_lines.append(f"{swept_var} = {profile_var}.sweep({path_var})")
+        if current is not None:
+            script_lines.append(f"{var} = {current}.union({swept_var})")
         body_current[entity.body_ref] = var
         return var
 
