@@ -291,11 +291,12 @@ class TestRejections:
                     ],
                 },
                 {
-                    "id": "loft1",
-                    "op": "loft",
+                    "id": "lp1",
+                    "op": "linear_pattern",
                     "body_ref": "body1",
-                    "profile_ref": "sk1",
-                    "section_refs": ["sk1"],
+                    "source_ref": "sk1",
+                    "count": 3,
+                    "spacing": 10.0,
                 },
             ]
         )
@@ -765,3 +766,231 @@ class TestSweep:
         assert result.terminal_entity_id == "sw1"
         assert "v_sw1_swept = v_profile1.sweep(v_path1)" in result.script_text
         assert "v_sw1 = v_pad1.union(v_sw1_swept)" in result.script_text
+
+
+class TestLoft:
+    async def test_loft_as_the_first_feature_of_a_body(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 5.0}],
+                },
+                {
+                    "id": "sk2",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 10.0,
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 3.0}],
+                },
+                {
+                    "id": "lf1",
+                    "op": "loft",
+                    "body_ref": "body1",
+                    "profile_ref": "sk1",
+                    "section_refs": ["sk2"],
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "lf1"
+        assert "v_lf1_chain = cq.Workplane('XY')" in result.script_text
+        assert "v_lf1_chain = v_lf1_chain.workplane(offset=0.0)" in result.script_text
+        assert "v_lf1_chain = v_lf1_chain.moveTo(0.0, 0.0).circle(5.0)" in result.script_text
+        assert "v_lf1_chain = v_lf1_chain.workplane(offset=10.0)" in result.script_text
+        assert "v_lf1_chain = v_lf1_chain.moveTo(0.0, 0.0).circle(3.0)" in result.script_text
+        assert "v_lf1 = v_lf1_chain.loft(combine=True)" in result.script_text
+        assert "union" not in result.script_text
+
+    async def test_loft_computes_relative_offset_deltas_between_sections(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 5.0,
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 5.0}],
+                },
+                {
+                    "id": "sk2",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 12.0,
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 3.0}],
+                },
+                {
+                    "id": "lf1",
+                    "op": "loft",
+                    "body_ref": "body1",
+                    "profile_ref": "sk1",
+                    "section_refs": ["sk2"],
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        # First section's own offset (5.0), then the RELATIVE delta to the
+        # second (12.0 - 5.0 = 7.0), not the second's absolute offset.
+        assert "v_lf1_chain = v_lf1_chain.workplane(offset=5.0)" in result.script_text
+        assert "v_lf1_chain = v_lf1_chain.workplane(offset=7.0)" in result.script_text
+
+    async def test_loft_with_a_line_section_closes_it(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [
+                        {"type": "line", "start": (0.0, 0.0), "end": (5.0, 0.0)},
+                        {"type": "line", "start": (5.0, 0.0), "end": (0.0, 5.0)},
+                        {"type": "line", "start": (0.0, 5.0), "end": (0.0, 0.0)},
+                    ],
+                },
+                {
+                    "id": "sk2",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 10.0,
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 3.0}],
+                },
+                {
+                    "id": "lf1",
+                    "op": "loft",
+                    "body_ref": "body1",
+                    "profile_ref": "sk1",
+                    "section_refs": ["sk2"],
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.script_text.count("v_lf1_chain = v_lf1_chain.close()") == 1
+
+    async def test_loft_mismatched_planes_rejected(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 5.0}],
+                },
+                {
+                    "id": "sk2",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XZ",
+                    "offset": 10.0,
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 3.0}],
+                },
+                {
+                    "id": "lf1",
+                    "op": "loft",
+                    "body_ref": "body1",
+                    "profile_ref": "sk1",
+                    "section_refs": ["sk2"],
+                },
+            ]
+        )
+        with pytest.raises(LoweringError, match="same sketch plane"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
+
+    async def test_loft_as_a_subsequent_feature_unions_onto_the_body(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk0",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [
+                        {"type": "rectangle", "origin": (0.0, 0.0), "width": 40.0, "height": 20.0}
+                    ],
+                },
+                {
+                    "id": "pad1",
+                    "op": "pad",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk0",
+                    "depth": 10.0,
+                },
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 10.0,
+                    "elements": [{"type": "circle", "center": (20.0, 10.0), "radius": 5.0}],
+                },
+                {
+                    "id": "sk2",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 20.0,
+                    "elements": [{"type": "circle", "center": (20.0, 10.0), "radius": 3.0}],
+                },
+                {
+                    "id": "lf1",
+                    "op": "loft",
+                    "body_ref": "body1",
+                    "profile_ref": "sk1",
+                    "section_refs": ["sk2"],
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "lf1"
+        assert "v_lf1_lofted = v_lf1_chain.loft(combine=True)" in result.script_text
+        assert "v_lf1 = v_pad1.union(v_lf1_lofted)" in result.script_text
+
+    async def test_loft_section_referencing_a_non_sketch_entity_rejected(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {
+                    "id": "box1",
+                    "op": "create_primitive",
+                    "kind": "box",
+                    "parameters": {"length": 10.0, "width": 10.0, "height": 10.0},
+                },
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 5.0}],
+                },
+                {
+                    "id": "lf1",
+                    "op": "loft",
+                    "body_ref": "body1",
+                    "profile_ref": "box1",
+                    "section_refs": ["sk1"],
+                },
+            ]
+        )
+        with pytest.raises(LoweringError, match="must be a sketch entity"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []

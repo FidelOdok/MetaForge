@@ -11,22 +11,27 @@ executed via a single ``cadquery.execute_script`` call.
 v1 scope cuts, each raising ``LoweringError`` rather than guessing or
 silently dropping data (same discipline as the FreeCAD sibling):
 
-- **Still no `loft`/`linear_pattern`/`polar_pattern`/`create_parametric`.**
-  Not technically impossible in CadQuery (it has native `.loft()`) --
-  just not yet built. Confirmed empirically (MET-697): CadQuery's
-  `.loft()` needs its section profiles built as PENDING WIRES chained
-  onto one Workplane object (`wp.circle(5).workplane(offset=10).rect(4,
-  4).loft()`) -- combining independently-built profile objects via
-  `.add(other.vals()).toPending()` executes without error but produces a
-  DIFFERENT (and wrong) result despite a matching reported volume,
-  confirmed by a mismatched bounding box in a controlled live test. Since
-  every other entity here (including `sweep`, below) is built as an
-  independent `cq.Workplane` object per sketch, giving `loft` its
-  required chained-pending-wire structure means re-deriving each
-  section's profile-building calls onto a shared Workplane rather than
-  reusing the already-built per-sketch variables -- a genuine
-  architectural change, not a one-line addition, so it's deferred to its
-  own pass rather than rushed in alongside this one.
+- **Still no `linear_pattern`/`polar_pattern`/`create_parametric`.**
+
+- **`loft` re-derives each section's profile-building calls, CHAINED onto
+  one shared Workplane, rather than reusing the independently-built
+  per-sketch variables every other entity here uses.** Confirmed
+  empirically (MET-697): CadQuery's `.loft()` needs its section profiles
+  built as PENDING WIRES chained onto one Workplane object
+  (`wp.circle(5).workplane(offset=10).rect(4, 4).loft()`) --  combining
+  independently-built profile objects via `.add(other.vals()).toPending()`
+  executes without error but produces a DIFFERENT (and wrong) result
+  despite a matching reported volume, confirmed by a mismatched bounding
+  box in a controlled live test. `profile_ref` + `section_refs` are looked
+  up by id (an `entities_by_id` map built once per document, the only
+  entity type here that needs one) and their `.plane` must all match --
+  chaining relative `.workplane(offset=delta)` calls only works within a
+  single plane's normal direction, so a mixed-plane loft raises
+  `LoweringError` rather than silently misplacing a section. Each
+  section's ALREADY-emitted standalone script lines (from when its own
+  `SketchEntity` was processed in document order) become harmless dead
+  code in the generated script -- a minor inefficiency, not a correctness
+  issue, left as-is rather than adding a second pre-scan to suppress them.
 - **`sweep`'s profile and path are each an independent, already-built
   `cq.Workplane` object** (`profile.sweep(path)`) -- unlike `loft`, this
   matches the existing per-sketch-object architecture directly, and was
@@ -93,6 +98,7 @@ from twin_core.design_ir.models import (
     FilletEntity,
     IREntity,
     JointEntity,
+    LoftEntity,
     MirrorEntity,
     PadEntity,
     PlaceEntity,
@@ -123,7 +129,6 @@ _NO_SHAPE_OPS = frozenset({"create_body", "sketch", "create_assembly", "joint"})
 _UNSUPPORTED_OPS = frozenset(
     {
         "create_parametric",
-        "loft",
         "linear_pattern",
         "polar_pattern",
     }
@@ -179,19 +184,20 @@ def _find_terminal_entity(doc: DesignIR) -> IREntity:
     )
 
 
-def _lower_sketch_profile(var: str, entity: SketchEntity, *, is_path: bool = False) -> list[str]:
-    """Script lines building a CadQuery Workplane profile (not yet extruded).
+def _lower_sketch_elements(var: str, entity_id: str, elements: list) -> tuple[list[str], bool]:
+    """Script lines for one sketch's profile elements (moveTo/rect/circle/
+    lineTo), NOT including the workplane-establishing prefix or the final
+    ``.close()`` -- shared between a standalone sketch
+    (``_lower_sketch_profile``) and a ``loft`` section chained onto an
+    existing shared Workplane (``_lower_one``'s ``LoftEntity`` branch).
 
-    ``is_path`` -- True when this sketch is used as a ``sweep``'s ``path_ref``.
-    A swept path is an open curve, not a closed profile -- confirmed live
-    (MET-697): auto-closing a line-based path with ``.close()`` (correct for
-    every OTHER consumer -- pad/pocket/revolve/sweep's own profile_ref, which
-    all need a closed wire) turned a straight-line sweep path into a
-    degenerate loop and made ``cadquery.execute_script`` fail outright.
+    Returns ``(lines, has_line)`` -- ``has_line`` tells the caller whether
+    a closing ``.close()`` call is needed (only line-based profiles are
+    open by construction; ``.rect()``/``.circle()`` are already closed).
     """
-    lines = [f"{var} = cq.Workplane({entity.plane!r}).workplane(offset={_fmt(entity.offset)})"]
+    lines: list[str] = []
     has_line = False
-    for el in entity.elements:
+    for el in elements:
         if isinstance(el, SketchRectangle):
             cx = el.origin[0] + el.width / 2.0
             cy = el.origin[1] + el.height / 2.0
@@ -212,12 +218,28 @@ def _lower_sketch_profile(var: str, entity: SketchEntity, *, is_path: bool = Fal
             )
         elif isinstance(el, SketchArc):
             raise LoweringError(
-                f"entity {entity.id!r}: SketchArc is not supported by this Lowering Pass "
+                f"entity {entity_id!r}: SketchArc is not supported by this Lowering Pass "
                 "yet (same v1 cut as the FreeCAD Lowering Pass -- no arc-to-CadQuery "
                 "translation implemented)"
             )
         else:  # pragma: no cover -- exhaustive per SketchElement's discriminated union
-            raise LoweringError(f"entity {entity.id!r}: unsupported sketch element {el!r}")
+            raise LoweringError(f"entity {entity_id!r}: unsupported sketch element {el!r}")
+    return lines, has_line
+
+
+def _lower_sketch_profile(var: str, entity: SketchEntity, *, is_path: bool = False) -> list[str]:
+    """Script lines building a CadQuery Workplane profile (not yet extruded).
+
+    ``is_path`` -- True when this sketch is used as a ``sweep``'s ``path_ref``.
+    A swept path is an open curve, not a closed profile -- confirmed live
+    (MET-697): auto-closing a line-based path with ``.close()`` (correct for
+    every OTHER consumer -- pad/pocket/revolve/sweep's own profile_ref, which
+    all need a closed wire) turned a straight-line sweep path into a
+    degenerate loop and made ``cadquery.execute_script`` fail outright.
+    """
+    lines = [f"{var} = cq.Workplane({entity.plane!r}).workplane(offset={_fmt(entity.offset)})"]
+    element_lines, has_line = _lower_sketch_elements(var, entity.id, entity.elements)
+    lines.extend(element_lines)
     if has_line and not is_path:
         lines.append(f"{var} = {var}.close()")
     return lines
@@ -244,7 +266,7 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
                 f"unsupported op(s) for the CadQuery Lowering Pass: {unsupported} "
                 "(v1 covers create_primitive/transform/boolean/sketch/pad/pocket/"
                 "fillet/chamfer/fillet_edges[empty]/chamfer_edges[empty]/mirror/"
-                "shell[empty]/revolve/sweep only)"
+                "shell[empty]/revolve/sweep/loft only)"
             )
 
         terminal = _find_terminal_entity(doc)
@@ -256,12 +278,21 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
         # reached in document order.
         path_sketch_ids = {e.path_ref for e in doc.entities if isinstance(e, SweepEntity)}
 
+        # loft needs to look up its section sketches by id (to re-derive
+        # their profile-building calls chained onto a shared Workplane,
+        # see LoftEntity below) -- the only entity type here that needs
+        # this, since every other entity only ever needs the already-built
+        # script variable, not the original IR entity object.
+        entities_by_id: dict[str, IREntity] = {e.id: e for e in doc.entities}
+
         script_lines = ["import cadquery as cq"]
         var_map: dict[str, str] = {}
         body_current: dict[str, str] = {}
 
         for entity in doc.entities:
-            var = _lower_one(entity, var_map, body_current, script_lines, path_sketch_ids)
+            var = _lower_one(
+                entity, var_map, body_current, script_lines, path_sketch_ids, entities_by_id
+            )
             if var is not None:
                 var_map[entity.id] = var
 
@@ -299,6 +330,7 @@ def _lower_one(
     body_current: dict[str, str],
     script_lines: list[str],
     path_sketch_ids: set[str],
+    entities_by_id: dict[str, IREntity],
 ) -> str | None:
     """Append this entity's script line(s); return its script variable name
     (or ``None`` for entities that don't produce one -- ``create_body``,
@@ -416,6 +448,53 @@ def _lower_one(
         )
         if current is not None:
             script_lines.append(f"{var} = {current}.union({revolved_var})")
+        body_current[entity.body_ref] = var
+        return var
+
+    if isinstance(entity, LoftEntity):
+        section_ids = [entity.profile_ref, *entity.section_refs]
+        sections: list[SketchEntity] = []
+        for sid in section_ids:
+            section_entity = entities_by_id.get(sid)
+            if not isinstance(section_entity, SketchEntity):
+                raise LoweringError(
+                    f"entity {entity.id!r}: loft section {sid!r} must be a sketch entity"
+                )
+            sections.append(section_entity)
+        planes = {s.plane for s in sections}
+        if len(planes) != 1:
+            raise LoweringError(
+                f"entity {entity.id!r}: loft sections must all be on the same sketch plane "
+                f"(got {sorted(planes)}) -- chaining relative workplane offsets (the only "
+                "verified-correct way to build a CadQuery loft, MET-697/698) only works "
+                "within a single plane's normal direction"
+            )
+        # Each section's profile is re-derived here as a pending wire
+        # CHAINED onto one shared Workplane, rather than reusing the
+        # independently-built variable already emitted when the section's
+        # own SketchEntity was processed (that variable's lines still run,
+        # harmlessly unused -- see module docstring). Confirmed live
+        # (MET-697/698): combining independently-built profile objects
+        # instead executes without error but produces a silently wrong
+        # result despite reporting a matching volume.
+        chain_var = f"{var}_chain"
+        script_lines.append(f"{chain_var} = cq.Workplane({sections[0].plane!r})")
+        previous_offset = 0.0
+        for section in sections:
+            delta = section.offset - previous_offset
+            script_lines.append(f"{chain_var} = {chain_var}.workplane(offset={_fmt(delta)})")
+            element_lines, has_line = _lower_sketch_elements(
+                chain_var, section.id, section.elements
+            )
+            script_lines.extend(element_lines)
+            if has_line:
+                script_lines.append(f"{chain_var} = {chain_var}.close()")
+            previous_offset = section.offset
+        current = body_current.get(entity.body_ref)
+        lofted_var = f"{var}_lofted" if current is not None else var
+        script_lines.append(f"{lofted_var} = {chain_var}.loft(combine=True)")
+        if current is not None:
+            script_lines.append(f"{var} = {current}.union({lofted_var})")
         body_current[entity.body_ref] = var
         return var
 
