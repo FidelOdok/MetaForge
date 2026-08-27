@@ -11,14 +11,29 @@ executed via a single ``cadquery.execute_script`` call.
 v1 scope cuts, each raising ``LoweringError`` rather than guessing or
 silently dropping data (same discipline as the FreeCAD sibling):
 
-- **Narrower op coverage than FreeCAD's lowering pass.** Only
-  ``create_primitive`` (box/cylinder/sphere), ``transform`` (position
-  only), ``boolean``, ``sketch`` (rectangle/circle/line -- not arc), and
-  ``pad``/``pocket`` are implemented. ``revolve``/``loft``/``sweep``/
-  ``fillet_edges``/``chamfer_edges``/``linear_pattern``/``polar_pattern``/
-  ``mirror``/``shell``/``fillet``/``chamfer``/``create_parametric`` all
-  raise cleanly -- this is a first v1 slice covering what's actually been
-  exercised live, not a claim that CadQuery can't do more.
+- **Still no `revolve`/`loft`/`sweep`/`linear_pattern`/`polar_pattern`/
+  `create_parametric`.** Not technically impossible in CadQuery (it has
+  native `.revolve()`/`.loft()`/`.sweep()`) -- just not yet built to the
+  same live-verified standard as everything else here (MET-692 found a
+  real silent-wrong-geometry bug in `pocket`, the simplest of the ops
+  already implemented; `revolve`'s axis needs deriving from a sketch
+  workplane's own local X/Y direction per plane, `loft`/`sweep` need
+  multi-profile/path threading -- each deserves its own careful pass +
+  live verification, not a rushed guess). Tracked as a follow-up.
+- **`fillet_edges`/`chamfer_edges`/`shell` only support the *empty*
+  selector case** ("every edge of the tip" / "a fully closed hollow
+  shell touching every face", matching each FreeCAD op's own documented
+  empty-selector default). A non-empty `edge_selectors`/`face_selectors`
+  raises `LoweringError` -- those are real FreeCAD topology names
+  ("Edge3", "Face2") scoped to FreeCAD's own naming scheme, with no
+  meaningful translation into CadQuery's entirely different selector
+  language (`">Z"`, `"|Z"`, ...). This isn't "not yet built" like the
+  ops above -- it's a genuine cross-kernel incompatibility for the
+  non-empty case.
+- **`mirror` mirrors `source_ref` (a specific prior feature), not the
+  whole current body**, then unions the mirrored copy onto the body --
+  matching FreeCAD PartDesign Mirror's own default (combine/additive)
+  behavior, and matching what `source_ref` is *for* in the schema.
 - **No cone/torus primitives yet** -- box/cylinder/sphere only.
 - **No rotation on transform** -- same restriction, same reasoning as
   FreeCAD's sibling (the real ``.rotate()`` argument shape needs
@@ -48,15 +63,21 @@ from observability.tracing import get_tracer
 from skill_registry.mcp_bridge import McpBridge
 from twin_core.design_ir.models import (
     BooleanEntity,
+    ChamferEdgesEntity,
+    ChamferEntity,
     CreateAssemblyEntity,
     CreateBodyEntity,
     CreatePrimitiveEntity,
     DesignIR,
+    FilletEdgesEntity,
+    FilletEntity,
     IREntity,
     JointEntity,
+    MirrorEntity,
     PadEntity,
     PlaceEntity,
     PocketEntity,
+    ShellEntity,
     SketchArc,
     SketchCircle,
     SketchEntity,
@@ -83,14 +104,8 @@ _UNSUPPORTED_OPS = frozenset(
         "revolve",
         "loft",
         "sweep",
-        "fillet_edges",
-        "chamfer_edges",
         "linear_pattern",
         "polar_pattern",
-        "mirror",
-        "shell",
-        "fillet",
-        "chamfer",
     }
 )
 _SUPPORTED_PRIMITIVE_KINDS = frozenset({"box", "cylinder", "sphere"})
@@ -199,7 +214,9 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
         if unsupported:
             raise LoweringError(
                 f"unsupported op(s) for the CadQuery Lowering Pass: {unsupported} "
-                f"(v1 covers create_primitive/transform/boolean/sketch/pad/pocket only)"
+                "(v1 covers create_primitive/transform/boolean/sketch/pad/pocket/"
+                "fillet/chamfer/fillet_edges[empty]/chamfer_edges[empty]/mirror/"
+                "shell[empty] only)"
             )
 
         terminal = _find_terminal_entity(doc)
@@ -337,6 +354,97 @@ def _lower_one(
         # position (matches FreeCAD's observable "mutates in place" behavior
         # even though the underlying mechanism differs).
         var_map[entity.target_ref] = var
+        return var
+
+    if isinstance(entity, FilletEntity):
+        target_var = var_map[entity.target_ref]
+        script_lines.append(f"{var} = {target_var}.fillet({_fmt(entity.radius)})")
+        return var
+
+    if isinstance(entity, ChamferEntity):
+        target_var = var_map[entity.target_ref]
+        script_lines.append(f"{var} = {target_var}.chamfer({_fmt(entity.distance)})")
+        return var
+
+    if isinstance(entity, FilletEdgesEntity):
+        if entity.edge_selectors:
+            raise LoweringError(
+                f"entity {entity.id!r}: fillet_edges with specific edge_selectors "
+                f"{entity.edge_selectors!r} is not supported by this Lowering Pass -- "
+                'those are real FreeCAD topology names ("Edge3", ...) with no '
+                "meaningful translation into CadQuery's own, unrelated selector "
+                "language. Only the empty-selector case (every edge of the tip) "
+                "is supported."
+            )
+        current = body_current.get(entity.body_ref)
+        if current is None:
+            raise LoweringError(
+                f"entity {entity.id!r}: fillet_edges on body {entity.body_ref!r} with no "
+                "existing solid yet -- pad a sketch first"
+            )
+        script_lines.append(f"{var} = {current}.fillet({_fmt(entity.radius)})")
+        body_current[entity.body_ref] = var
+        return var
+
+    if isinstance(entity, ChamferEdgesEntity):
+        if entity.edge_selectors:
+            raise LoweringError(
+                f"entity {entity.id!r}: chamfer_edges with specific edge_selectors "
+                f"{entity.edge_selectors!r} is not supported by this Lowering Pass -- "
+                'those are real FreeCAD topology names ("Edge3", ...) with no '
+                "meaningful translation into CadQuery's own, unrelated selector "
+                "language. Only the empty-selector case (every edge of the tip) "
+                "is supported."
+            )
+        current = body_current.get(entity.body_ref)
+        if current is None:
+            raise LoweringError(
+                f"entity {entity.id!r}: chamfer_edges on body {entity.body_ref!r} with no "
+                "existing solid yet -- pad a sketch first"
+            )
+        script_lines.append(f"{var} = {current}.chamfer({_fmt(entity.distance)})")
+        body_current[entity.body_ref] = var
+        return var
+
+    if isinstance(entity, MirrorEntity):
+        current = body_current.get(entity.body_ref)
+        if current is None:
+            raise LoweringError(
+                f"entity {entity.id!r}: mirror on body {entity.body_ref!r} with no "
+                "existing solid yet -- pad a sketch first"
+            )
+        source_var = var_map[entity.source_ref]
+        mirrored_var = f"{var}_mirrored"
+        script_lines.append(
+            f"{mirrored_var} = {source_var}.mirror(mirrorPlane={entity.plane!r}, "
+            "basePointVector=(0.0, 0.0, 0.0))"
+        )
+        script_lines.append(f"{var} = {current}.union({mirrored_var})")
+        body_current[entity.body_ref] = var
+        return var
+
+    if isinstance(entity, ShellEntity):
+        if entity.face_selectors:
+            raise LoweringError(
+                f"entity {entity.id!r}: shell with specific face_selectors "
+                f"{entity.face_selectors!r} is not supported by this Lowering Pass -- "
+                'those are real FreeCAD topology names ("Face2", ...) with no '
+                "meaningful translation into CadQuery's own, unrelated selector "
+                "language. Only the empty-selector case (a fully closed hollow "
+                "shell, matching FreeCAD's own default makeThickness behavior with "
+                "no faces removed) is supported."
+            )
+        current = body_current.get(entity.body_ref)
+        if current is None:
+            raise LoweringError(
+                f"entity {entity.id!r}: shell on body {entity.body_ref!r} with no "
+                "existing solid yet -- pad a sketch first"
+            )
+        # Negative thickness shells INWARD (hollows into the solid, keeping the
+        # outer boundary) -- matching "hollows a body's tip" semantics. Positive
+        # would grow a wall outward instead.
+        script_lines.append(f"{var} = {current}.shell({_fmt(-entity.thickness)})")
+        body_current[entity.body_ref] = var
         return var
 
     if isinstance(entity, CreateAssemblyEntity | PlaceEntity | JointEntity):
