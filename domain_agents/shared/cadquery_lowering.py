@@ -11,15 +11,22 @@ executed via a single ``cadquery.execute_script`` call.
 v1 scope cuts, each raising ``LoweringError`` rather than guessing or
 silently dropping data (same discipline as the FreeCAD sibling):
 
-- **Still no `revolve`/`loft`/`sweep`/`linear_pattern`/`polar_pattern`/
+- **Still no `loft`/`sweep`/`linear_pattern`/`polar_pattern`/
   `create_parametric`.** Not technically impossible in CadQuery (it has
-  native `.revolve()`/`.loft()`/`.sweep()`) -- just not yet built to the
-  same live-verified standard as everything else here (MET-692 found a
-  real silent-wrong-geometry bug in `pocket`, the simplest of the ops
-  already implemented; `revolve`'s axis needs deriving from a sketch
-  workplane's own local X/Y direction per plane, `loft`/`sweep` need
-  multi-profile/path threading -- each deserves its own careful pass +
-  live verification, not a rushed guess). Tracked as a follow-up.
+  native `.loft()`/`.sweep()`) -- just not yet built to the same
+  live-verified standard as everything else here (MET-692 found a real
+  silent-wrong-geometry bug in `pocket`, the simplest of the ops already
+  implemented; `loft`/`sweep` need multi-profile/path threading -- each
+  deserves its own careful pass + live verification, not a rushed
+  guess). Tracked as a follow-up.
+- **`revolve`'s axis is derived at runtime from the sketch workplane's
+  own local coordinate system** (`sketch.plane.origin` +
+  `sketch.plane.xDir`/`yDir` for H/V), not hand-computed per sketch
+  plane -- reuses CadQuery's own plane math instead of me re-deriving
+  world-space axis vectors for six plane/axis combinations by hand,
+  which is exactly the class of mistake (guessing a sign/direction
+  convention without empirical grounding) that produced the `pocket`
+  bug. Live-verified against Pappus's centroid theorem (MET-696).
 - **`fillet_edges`/`chamfer_edges`/`shell` only support the *empty*
   selector case** ("every edge of the tip" / "a fully closed hollow
   shell touching every face", matching each FreeCAD op's own documented
@@ -77,6 +84,7 @@ from twin_core.design_ir.models import (
     PadEntity,
     PlaceEntity,
     PocketEntity,
+    RevolveEntity,
     ShellEntity,
     SketchArc,
     SketchCircle,
@@ -101,7 +109,6 @@ _NO_SHAPE_OPS = frozenset({"create_body", "sketch", "create_assembly", "joint"})
 _UNSUPPORTED_OPS = frozenset(
     {
         "create_parametric",
-        "revolve",
         "loft",
         "sweep",
         "linear_pattern",
@@ -216,7 +223,7 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
                 f"unsupported op(s) for the CadQuery Lowering Pass: {unsupported} "
                 "(v1 covers create_primitive/transform/boolean/sketch/pad/pocket/"
                 "fillet/chamfer/fillet_edges[empty]/chamfer_edges[empty]/mirror/"
-                "shell[empty] only)"
+                "shell[empty]/revolve only)"
             )
 
         terminal = _find_terminal_entity(doc)
@@ -354,6 +361,32 @@ def _lower_one(
         # position (matches FreeCAD's observable "mutates in place" behavior
         # even though the underlying mechanism differs).
         var_map[entity.target_ref] = var
+        return var
+
+    if isinstance(entity, RevolveEntity):
+        sketch_var = var_map[entity.sketch_ref]
+        axis_dir_attr = "xDir" if entity.axis == "H" else "yDir"
+        start_var = f"{var}_axis_start"
+        end_var = f"{var}_axis_end"
+        # Derive the axis from the sketch workplane's OWN local coordinate
+        # system at runtime -- xDir/yDir already account for which plane
+        # (XY/XZ/YZ) and offset the sketch is on, so this reuses CadQuery's
+        # own plane math instead of hand-deriving world-space axis vectors
+        # per plane by hand (the same class of unverified-sign-convention
+        # mistake that produced the pocket bug, MET-692).
+        script_lines.append(f"{start_var} = {sketch_var}.plane.origin")
+        op = "-" if entity.reversed else "+"
+        script_lines.append(f"{end_var} = {start_var} {op} {sketch_var}.plane.{axis_dir_attr}")
+        current = body_current.get(entity.body_ref)
+        revolved_var = f"{var}_revolved" if current is not None else var
+        script_lines.append(
+            f"{revolved_var} = {sketch_var}.revolve({_fmt(entity.angle)}, "
+            f"({start_var}.x, {start_var}.y, {start_var}.z), "
+            f"({end_var}.x, {end_var}.y, {end_var}.z))"
+        )
+        if current is not None:
+            script_lines.append(f"{var} = {current}.union({revolved_var})")
+        body_current[entity.body_ref] = var
         return var
 
     if isinstance(entity, FilletEntity):
