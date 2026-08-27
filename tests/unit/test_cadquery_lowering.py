@@ -291,10 +291,11 @@ class TestRejections:
                     ],
                 },
                 {
-                    "id": "rev1",
-                    "op": "revolve",
+                    "id": "loft1",
+                    "op": "loft",
                     "body_ref": "body1",
-                    "sketch_ref": "sk1",
+                    "profile_ref": "sk1",
+                    "section_refs": ["sk1"],
                 },
             ]
         )
@@ -531,3 +532,111 @@ class TestFilletChamferMirrorShell:
         with pytest.raises(LoweringError, match="pad a sketch first"):
             await lower_design_ir_cadquery(mcp, doc)
         assert mcp.calls == []
+
+
+class TestRevolve:
+    async def test_revolve_as_the_first_feature_of_a_body(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [
+                        {"type": "rectangle", "origin": (10.0, 2.0), "width": 20.0, "height": 5.0}
+                    ],
+                },
+                {
+                    "id": "rev1",
+                    "op": "revolve",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk1",
+                    "axis": "H",
+                    "angle": 360.0,
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "rev1"
+        assert "v_rev1_axis_start = v_sk1.plane.origin" in result.script_text
+        assert "v_rev1_axis_end = v_rev1_axis_start + v_sk1.plane.xDir" in result.script_text
+        assert (
+            "v_rev1 = v_sk1.revolve(360.0, "
+            "(v_rev1_axis_start.x, v_rev1_axis_start.y, v_rev1_axis_start.z), "
+            "(v_rev1_axis_end.x, v_rev1_axis_end.y, v_rev1_axis_end.z))" in result.script_text
+        )
+        # First feature of the body -- no union with a nonexistent prior solid.
+        assert "union" not in result.script_text
+
+    async def test_revolve_vertical_axis_reversed(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "elements": [
+                        {"type": "rectangle", "origin": (10.0, 2.0), "width": 20.0, "height": 5.0}
+                    ],
+                },
+                {
+                    "id": "rev1",
+                    "op": "revolve",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk1",
+                    "axis": "V",
+                    "angle": 180.0,
+                    "reversed": True,
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert "v_rev1_axis_end = v_rev1_axis_start - v_sk1.plane.yDir" in result.script_text
+        assert "v_sk1.revolve(180.0," in result.script_text
+
+    async def test_revolve_as_a_subsequent_feature_unions_onto_the_body(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "elements": [
+                        {"type": "rectangle", "origin": (0.0, 0.0), "width": 40.0, "height": 20.0}
+                    ],
+                },
+                {
+                    "id": "pad1",
+                    "op": "pad",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk1",
+                    "depth": 10.0,
+                },
+                {
+                    "id": "sk2",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "offset": 10.0,
+                    "elements": [
+                        {"type": "rectangle", "origin": (10.0, 2.0), "width": 20.0, "height": 5.0}
+                    ],
+                },
+                {
+                    "id": "rev1",
+                    "op": "revolve",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk2",
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "rev1"
+        assert "v_rev1_revolved = v_sk2.revolve(360.0," in result.script_text
+        assert "v_rev1 = v_pad1.union(v_rev1_revolved)" in result.script_text
