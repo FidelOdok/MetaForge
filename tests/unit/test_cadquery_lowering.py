@@ -346,3 +346,188 @@ class TestRejections:
         )
         with pytest.raises(LoweringError, match="no step_base64"):
             await lower_design_ir_cadquery(mcp, doc)
+
+
+def _body_with_pad_doc(*extra: dict) -> DesignIR:
+    """A create_body -> sketch -> pad document, with extra entities appended
+    (all operating on the same body_ref/body1, matching the pad it produces)."""
+    return DesignIR(
+        entities=[
+            {"id": "body1", "op": "create_body"},
+            {
+                "id": "sk1",
+                "op": "sketch",
+                "body_ref": "body1",
+                "plane": "XY",
+                "elements": [
+                    {"type": "rectangle", "origin": (0.0, 0.0), "width": 40.0, "height": 20.0}
+                ],
+            },
+            {"id": "pad1", "op": "pad", "body_ref": "body1", "sketch_ref": "sk1", "depth": 10.0},
+            *extra,
+        ]
+    )
+
+
+class TestFilletChamferMirrorShell:
+    async def test_plain_fillet_on_a_boolean_result(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {
+                    "id": "box1",
+                    "op": "create_primitive",
+                    "kind": "box",
+                    "parameters": {"length": 10.0, "width": 10.0, "height": 10.0},
+                },
+                {"id": "f1", "op": "fillet", "target_ref": "box1", "radius": 1.0},
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "f1"
+        assert "v_f1 = v_box1.fillet(1.0)" in result.script_text
+
+    async def test_plain_chamfer(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {
+                    "id": "box1",
+                    "op": "create_primitive",
+                    "kind": "box",
+                    "parameters": {"length": 10.0, "width": 10.0, "height": 10.0},
+                },
+                {"id": "c1", "op": "chamfer", "target_ref": "box1", "distance": 0.5},
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "c1"
+        assert "v_c1 = v_box1.chamfer(0.5)" in result.script_text
+
+    async def test_fillet_edges_empty_selector(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {"id": "fe1", "op": "fillet_edges", "body_ref": "body1", "radius": 2.0}
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "fe1"
+        assert "v_fe1 = v_pad1.fillet(2.0)" in result.script_text
+
+    async def test_fillet_edges_nonempty_selector_rejected(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {
+                "id": "fe1",
+                "op": "fillet_edges",
+                "body_ref": "body1",
+                "radius": 2.0,
+                "edge_selectors": ["Edge3"],
+            }
+        )
+        with pytest.raises(LoweringError, match="edge_selectors"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
+
+    async def test_fillet_edges_with_no_prior_pad_rejected(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {"id": "fe1", "op": "fillet_edges", "body_ref": "body1", "radius": 2.0},
+            ]
+        )
+        with pytest.raises(LoweringError, match="pad a sketch first"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
+
+    async def test_chamfer_edges_empty_selector(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {"id": "ce1", "op": "chamfer_edges", "body_ref": "body1", "distance": 1.5}
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "ce1"
+        assert "v_ce1 = v_pad1.chamfer(1.5)" in result.script_text
+
+    async def test_chamfer_edges_nonempty_selector_rejected(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {
+                "id": "ce1",
+                "op": "chamfer_edges",
+                "body_ref": "body1",
+                "distance": 1.5,
+                "edge_selectors": ["Edge5"],
+            }
+        )
+        with pytest.raises(LoweringError, match="edge_selectors"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
+
+    async def test_mirror_mirrors_source_ref_and_unions_onto_the_body(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {"id": "m1", "op": "mirror", "body_ref": "body1", "source_ref": "pad1", "plane": "YZ"}
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "m1"
+        assert (
+            "v_m1_mirrored = v_pad1.mirror(mirrorPlane='YZ', "
+            "basePointVector=(0.0, 0.0, 0.0))" in result.script_text
+        )
+        assert "v_m1 = v_pad1.union(v_m1_mirrored)" in result.script_text
+
+    async def test_mirror_with_no_prior_pad_rejected(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 3.0}],
+                },
+                {"id": "m1", "op": "mirror", "body_ref": "body1", "source_ref": "sk1"},
+            ]
+        )
+        with pytest.raises(LoweringError, match="pad a sketch first"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
+
+    async def test_shell_empty_selector(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {"id": "sh1", "op": "shell", "body_ref": "body1", "thickness": 2.0}
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "sh1"
+        # Negative thickness shells INWARD (hollows into the solid).
+        assert "v_sh1 = v_pad1.shell(-2.0)" in result.script_text
+
+    async def test_shell_nonempty_selector_rejected(self):
+        mcp = _bridge()
+        doc = _body_with_pad_doc(
+            {
+                "id": "sh1",
+                "op": "shell",
+                "body_ref": "body1",
+                "thickness": 2.0,
+                "face_selectors": ["Face2"],
+            }
+        )
+        with pytest.raises(LoweringError, match="face_selectors"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
+
+    async def test_shell_with_no_prior_pad_rejected(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {"id": "sh1", "op": "shell", "body_ref": "body1", "thickness": 2.0},
+            ]
+        )
+        with pytest.raises(LoweringError, match="pad a sketch first"):
+            await lower_design_ir_cadquery(mcp, doc)
+        assert mcp.calls == []
