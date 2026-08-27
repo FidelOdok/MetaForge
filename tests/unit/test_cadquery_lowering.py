@@ -640,3 +640,87 @@ class TestRevolve:
         assert result.terminal_entity_id == "rev1"
         assert "v_rev1_revolved = v_sk2.revolve(360.0," in result.script_text
         assert "v_rev1 = v_pad1.union(v_rev1_revolved)" in result.script_text
+
+
+class TestSweep:
+    async def test_sweep_as_the_first_feature_of_a_body(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "profile1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 2.0}],
+                },
+                {
+                    "id": "path1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XZ",
+                    "elements": [{"type": "line", "start": (0.0, 0.0), "end": (0.0, 20.0)}],
+                },
+                {
+                    "id": "sw1",
+                    "op": "sweep",
+                    "body_ref": "body1",
+                    "profile_ref": "profile1",
+                    "path_ref": "path1",
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "sw1"
+        assert "v_sw1 = v_profile1.sweep(v_path1)" in result.script_text
+        assert "union" not in result.script_text
+
+    async def test_sweep_as_a_subsequent_feature_unions_onto_the_body(self):
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "elements": [
+                        {"type": "rectangle", "origin": (0.0, 0.0), "width": 40.0, "height": 20.0}
+                    ],
+                },
+                {
+                    "id": "pad1",
+                    "op": "pad",
+                    "body_ref": "body1",
+                    "sketch_ref": "sk1",
+                    "depth": 10.0,
+                },
+                {
+                    "id": "profile1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "offset": 10.0,
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 2.0}],
+                },
+                {
+                    "id": "path1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XZ",
+                    "elements": [{"type": "line", "start": (0.0, 0.0), "end": (0.0, 5.0)}],
+                },
+                {
+                    "id": "sw1",
+                    "op": "sweep",
+                    "body_ref": "body1",
+                    "profile_ref": "profile1",
+                    "path_ref": "path1",
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert result.terminal_entity_id == "sw1"
+        assert "v_sw1_swept = v_profile1.sweep(v_path1)" in result.script_text
+        assert "v_sw1 = v_pad1.union(v_sw1_swept)" in result.script_text
