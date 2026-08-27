@@ -179,8 +179,16 @@ def _find_terminal_entity(doc: DesignIR) -> IREntity:
     )
 
 
-def _lower_sketch_profile(var: str, entity: SketchEntity) -> list[str]:
-    """Script lines building a CadQuery Workplane profile (not yet extruded)."""
+def _lower_sketch_profile(var: str, entity: SketchEntity, *, is_path: bool = False) -> list[str]:
+    """Script lines building a CadQuery Workplane profile (not yet extruded).
+
+    ``is_path`` -- True when this sketch is used as a ``sweep``'s ``path_ref``.
+    A swept path is an open curve, not a closed profile -- confirmed live
+    (MET-697): auto-closing a line-based path with ``.close()`` (correct for
+    every OTHER consumer -- pad/pocket/revolve/sweep's own profile_ref, which
+    all need a closed wire) turned a straight-line sweep path into a
+    degenerate loop and made ``cadquery.execute_script`` fail outright.
+    """
     lines = [f"{var} = cq.Workplane({entity.plane!r}).workplane(offset={_fmt(entity.offset)})"]
     has_line = False
     for el in entity.elements:
@@ -210,7 +218,7 @@ def _lower_sketch_profile(var: str, entity: SketchEntity) -> list[str]:
             )
         else:  # pragma: no cover -- exhaustive per SketchElement's discriminated union
             raise LoweringError(f"entity {entity.id!r}: unsupported sketch element {el!r}")
-    if has_line:
+    if has_line and not is_path:
         lines.append(f"{var} = {var}.close()")
     return lines
 
@@ -242,12 +250,18 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
         terminal = _find_terminal_entity(doc)
         span.set_attribute("terminal_entity_id", terminal.id)
 
+        # A sketch referenced as a sweep's path_ref must NOT be auto-closed
+        # (see _lower_sketch_profile) -- collected up front since a sketch's
+        # own line is emitted before its consumer (a later SweepEntity) is
+        # reached in document order.
+        path_sketch_ids = {e.path_ref for e in doc.entities if isinstance(e, SweepEntity)}
+
         script_lines = ["import cadquery as cq"]
         var_map: dict[str, str] = {}
         body_current: dict[str, str] = {}
 
         for entity in doc.entities:
-            var = _lower_one(entity, var_map, body_current, script_lines)
+            var = _lower_one(entity, var_map, body_current, script_lines, path_sketch_ids)
             if var is not None:
                 var_map[entity.id] = var
 
@@ -284,6 +298,7 @@ def _lower_one(
     var_map: dict[str, str],
     body_current: dict[str, str],
     script_lines: list[str],
+    path_sketch_ids: set[str],
 ) -> str | None:
     """Append this entity's script line(s); return its script variable name
     (or ``None`` for entities that don't produce one -- ``create_body``,
@@ -315,7 +330,9 @@ def _lower_one(
         return None
 
     if isinstance(entity, SketchEntity):
-        script_lines.extend(_lower_sketch_profile(var, entity))
+        script_lines.extend(
+            _lower_sketch_profile(var, entity, is_path=entity.id in path_sketch_ids)
+        )
         return var
 
     if isinstance(entity, PadEntity):
