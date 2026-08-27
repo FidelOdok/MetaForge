@@ -675,6 +675,47 @@ class TestSweep:
         assert result.terminal_entity_id == "sw1"
         assert "v_sw1 = v_profile1.sweep(v_path1)" in result.script_text
         assert "union" not in result.script_text
+        # Regression (live e2e, MET-697): a line-based sweep PATH must NOT be
+        # auto-closed -- CadQuery's own execute_script rejected the closed
+        # (degenerate-loop) version outright when this was first tried live.
+        assert "v_path1 = v_path1.close()" not in result.script_text
+
+    async def test_sweep_profile_with_a_line_is_still_closed(self):
+        # Unlike the path (above), a sweep's PROFILE must still be closed --
+        # it needs a closed wire to sweep into a solid, same as pad/pocket.
+        mcp = _bridge()
+        doc = DesignIR(
+            entities=[
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "profile1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [
+                        {"type": "line", "start": (0.0, 0.0), "end": (2.0, 0.0)},
+                        {"type": "line", "start": (2.0, 0.0), "end": (2.0, 2.0)},
+                        {"type": "line", "start": (2.0, 2.0), "end": (0.0, 0.0)},
+                    ],
+                },
+                {
+                    "id": "path1",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XZ",
+                    "elements": [{"type": "circle", "center": (0.0, 0.0), "radius": 1.0}],
+                },
+                {
+                    "id": "sw1",
+                    "op": "sweep",
+                    "body_ref": "body1",
+                    "profile_ref": "profile1",
+                    "path_ref": "path1",
+                },
+            ]
+        )
+        result = await lower_design_ir_cadquery(mcp, doc)
+        assert "v_profile1 = v_profile1.close()" in result.script_text
 
     async def test_sweep_as_a_subsequent_feature_unions_onto_the_body(self):
         mcp = _bridge()
