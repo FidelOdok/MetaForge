@@ -268,6 +268,7 @@ def chat_skills_enabled() -> bool:
 
 _DEFAULT_CHAT_MAX_STEPS = 24
 _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS = 1800.0
+_DEFAULT_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS = 10.0
 
 
 def trace_token_budget(provider: str | None, model: str | None) -> int:
@@ -351,6 +352,35 @@ def chat_approval_timeout_seconds() -> float:
     except ValueError:
         return _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS
     return value if value > 0 else _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS
+
+
+def design_flow_approval_timeout_seconds() -> float:
+    """How long a `requires_approval` tool call waits before denying by
+    default when the turn was launched by the design-flow (`/v1/runs`)
+    executor, not a live chat session (``METAFORGE_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS``,
+    default 10s).
+
+    Design-flow (`ReActPhaseBrain`, ``api_gateway/runs/flow_brain.py``) drives
+    phases through this same `run_chat_turn` harness, but it is a fully
+    unattended surface -- nothing ever polls or resolves
+    `/v1/chat/tool_approvals/{run_id}` for a design-flow-originated call, so
+    the wait is *always* a timeout, never a real decision. Design-flow's own
+    phase-level gate (`awaiting_approval` on the `/v1/runs` resource,
+    resolved via `/v1/runs/{id}/approval`) is the actual human-in-the-loop
+    checkpoint for this surface (MET-707). Inheriting chat's 1800s default
+    here (tuned for a human who might click "approve" any time in the next
+    half hour) means every phase that records a decision -- normal, expected
+    agent behavior, not an edge case -- stalls for up to 30 minutes before
+    even getting the chance to fail gracefully and continue. Kept short but
+    non-zero (not bypassed outright) so the fail-safe "never silently
+    proceed" property still holds.
+    """
+    raw = (os.environ.get("METAFORGE_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS
+    return value if value > 0 else _DEFAULT_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS
 
 
 def _cost_target(ctx: AgentContext) -> tuple[str, str]:
@@ -577,6 +607,7 @@ async def _build_context(
     twin: Any = None,
     metrics: MetricsCollector | None = None,
     on_approval_request: OnApprovalRequest | None = None,
+    approval_timeout_seconds: float | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -595,7 +626,10 @@ async def _build_context(
     (``get_approval_store()``) so a `requires_approval` tool call can be
     resolved by a separate ``POST /v1/chat/tool_approvals/{run_id}`` request;
     ``on_approval_request``, when given, is notified the moment such a call
-    pauses."""
+    pauses. ``approval_timeout_seconds``, when given, overrides
+    :func:`chat_approval_timeout_seconds` -- design-flow (MET-707) passes a
+    short value here since its unattended turns have no approver to wait
+    for."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
     mcp_tools = await mcp_tools_from_bridge(mcp_bridge, enabled) if mcp_bridge is not None else []
     native_tools = (
@@ -615,7 +649,11 @@ async def _build_context(
         metrics=metrics,
         runs=get_approval_store(),
         on_approval_request=on_approval_request,
-        approval_timeout_seconds=chat_approval_timeout_seconds(),
+        approval_timeout_seconds=(
+            approval_timeout_seconds
+            if approval_timeout_seconds is not None
+            else chat_approval_timeout_seconds()
+        ),
     )
 
 
@@ -637,6 +675,7 @@ async def run_chat_turn(
     twin: Any = None,
     metrics: MetricsCollector | None = None,
     wall_clock_seconds: float | None = None,
+    approval_timeout_seconds: float | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -652,6 +691,9 @@ async def run_chat_turn(
     the skill-layer tools when ``chat_skills_enabled()`` (MET-548 follow-up).
     ``metrics``, when given, records a turn-duration metric. ``wall_clock_seconds``
     (defaults to :func:`chat_wall_clock_seconds`) hard-bounds the loop.
+    ``approval_timeout_seconds`` (defaults to :func:`chat_approval_timeout_seconds`)
+    overrides how long a `requires_approval` tool call waits before denying by
+    default -- see :func:`design_flow_approval_timeout_seconds`.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -668,6 +710,7 @@ async def run_chat_turn(
         chat_backend=chat_backend,
         twin=twin,
         metrics=metrics,
+        approval_timeout_seconds=approval_timeout_seconds,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
