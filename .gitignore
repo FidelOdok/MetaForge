@@ -66,6 +66,11 @@ node_modules/
 # the binary PDFs are fetched on demand and never go in git.
 .cache/datasheets/
 
+# CAD-Coder validation split cached by evals/cad_bench/fetch_dataset.py.
+# Only the small deterministic sample it derives is committed, under
+# evals/cad_bench/samples/.
+.cache/cad_bench/
+
 # MkDocs build output (deployed by .github/workflows/docs.yml).
 site/
 

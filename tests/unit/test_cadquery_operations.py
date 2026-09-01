@@ -259,6 +259,11 @@ class _FakeExporters:
 class _FakeCq:
     exporters = _FakeExporters()
     Vector = object
+    # Mirrors real cadquery: `dir(cadquery)` includes the package's own
+    # internal `cq` submodule under that exact name (`cadquery.cq`) -- a
+    # collision the MET-702 pre-binding fix must not fall into (see
+    # test_bare_cq_name_is_not_shadowed_by_the_internal_cq_submodule).
+    cq = "the internal cadquery.cq submodule, NOT the top-level package"
 
     @staticmethod
     def Workplane(*_args, **_kwargs):  # noqa: N802
@@ -390,6 +395,48 @@ class TestExecuteScriptSandboxConvenienceNames:
                 "from cadquery import exporters\n"
                 "assert exporters is not None\n"
                 "result = cq.Workplane()",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")
+
+    def test_bare_workplane_and_vector_names_are_pre_bound(self, tmp_path):
+        """MET-702: same gap as MET-688, found via a real external dataset
+        (CAD-Coder, 8.8K CadQuery scripts) rather than a live edit --
+        `from cadquery import Workplane, Vector` is stripped the same way,
+        with nothing rebinding `Workplane`/`Vector` bare. ~1.3% of the
+        dataset's scripts bare-imported a name outside the already-fixed
+        set (mostly Workplane/Vector). Rather than add names one at a time
+        forever, the fix pre-binds cadquery's entire public top-level API --
+        this test checks two representative names, not an exhaustive list,
+        since every one of them is already reachable via `cq.<Name>`."""
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.execute_script(
+                "from cadquery import Workplane, Vector\n"
+                "assert Vector is not None\n"
+                "result = Workplane()",
+                str(tmp_path / "out.step"),
+            )
+        assert result["cad_file"] == str(tmp_path / "out.step")
+
+    def test_bare_cq_name_is_not_shadowed_by_the_internal_cq_submodule(self, tmp_path):
+        """`dir(cadquery)` includes the package's own internal `cq` submodule
+        under that exact name (`cadquery.cq`) -- naively pre-binding every
+        public dir() name would silently replace the `cq` alias every script
+        actually expects to mean the top-level package with that unrelated
+        submodule. Confirms `cq` still resolves to the patched top-level
+        fake, not `getattr(cq, "cq")`."""
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        fake = _FakeCq()
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", fake),
+        ):
+            result = ops.execute_script(
+                "assert cq is not None\nresult = cq.Workplane()",
                 str(tmp_path / "out.step"),
             )
         assert result["cad_file"] == str(tmp_path / "out.step")

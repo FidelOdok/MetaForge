@@ -1,0 +1,38 @@
+dataset: CAD-Coder
+source: gudo7208/CAD-Coder (Hugging Face)
+source_url: https://huggingface.co/datasets/gudo7208/CAD-Coder
+paper: "CAD-Coder: Text-to-CAD Generation with Chain-of-Thought and Geometric Reward"
+paper_url: https://arxiv.org/abs/2505.19713
+venue: NeurIPS 2025 (Poster)
+license: apache-2.0
+license_note: >
+  Apache 2.0, freely redistributable. Confirmed via the Hugging Face
+  dataset card (cardData.license) as of 2026-09-01.
+
+file: cad_data_validation.json
+file_sha256: c528d14d6a7c3aca6b9ea4353a56c85e508abec813d285ee9164cae1fd200f3f
+file_total_samples: 8817
+file_note: >
+  A held-out validation split, not the training data -- chosen so any
+  future MetaForge-generation eval (phase 2+) isn't scoring against
+  examples the same underlying Text2CAD/DeepCAD lineage may have been
+  trained on.
+
+sample: samples/cad_coder_validation_sample.json
+sample_count: 25
+sample_seed: 42
+sample_method: >
+  `random.Random(42).sample(range(8817), 25)`, sorted -- deterministic,
+  reproducible from the full validation file. See fetch_dataset.py.
+
+schema:
+  messages[0].content: Natural-language description of the CAD model (machine-generated, per the paper -- not human-authored).
+  messages[1].content: Reference CadQuery Python script. Assigns its final model to an arbitrary variable (consistently `r` across a 200-sample check of this file), NOT `result` -- MetaForge's `cadquery.execute_script` contract requires the literal name `result`, so run_cad_bench.py's `bridge_to_result()` appends a bridge line rather than requiring the source data to match MetaForge's convention.
+  model_path: Reference identifier for the original 3D model (not itself fetched by this suite).
+
+why_not_committed_in_full: >
+  8817 samples x ~1KB avg = ~9MB; not worth committing whole when only a
+  small, fixed sample is actually used. The full validation file is
+  fetched into a gitignored .cache/cad_bench/ by fetch_dataset.py,
+  matching tests/fixtures/datasheets/'s PDF-not-committed precedent --
+  except here the full extract isn't committed either, only the sample.
