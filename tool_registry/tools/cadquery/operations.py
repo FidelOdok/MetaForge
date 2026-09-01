@@ -509,11 +509,20 @@ class CadqueryOperations:
                 duration_s=round(elapsed, 3),
             )
 
-            return {
+            result: dict[str, Any] = {
                 "output_file": output_path,
                 "file_size_bytes": file_size,
                 "format": output_format,
             }
+            # MET-489: same gap MET-648 closed for execute_script -- without
+            # step_base64, this export had no path into twin.commit_geometry
+            # and would be lost when the adapter container recreates. Only
+            # populate it for an actual STEP export -- commit_geometry's
+            # step_base64 is STEP-specific.
+            if output_format.lower() in ("step", "stp"):
+                with open(output_path, "rb") as f:  # noqa: PTH123
+                    result["step_base64"] = base64.b64encode(f.read()).decode("ascii")
+            return result
 
     def execute_script(
         self,
