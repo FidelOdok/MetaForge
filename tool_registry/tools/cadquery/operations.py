@@ -605,6 +605,28 @@ class CadqueryOperations:
                     for name in _MATH_CONVENIENCE_NAMES
                     if hasattr(math, name)
                 },
+                # MET-702: `from cadquery import Workplane, Vector, ...` is
+                # stripped by _strip_sandbox_imports (root "cadquery" matches
+                # _SANDBOX_MODULES) but nothing rebinds those names bare --
+                # the same gap MET-645/649/688 already hit for a handful of
+                # individual names, one at a time. Found this time via a real
+                # external dataset (CAD-Coder, 8.8K CadQuery scripts): ~1.3%
+                # bare-imported a name outside the already-fixed set (mostly
+                # `Workplane`/`Vector`, plus one-off `Solid`/`Assembly`/
+                # `Sketch`/`Plane`/`Location`). Rather than add names one at a
+                # time as the next script happens to use a new one, pre-bind
+                # cadquery's ENTIRE public top-level API -- every one of these
+                # is already fully reachable via `cq.<Name>` (see `"cq": cq`
+                # above), so this grants no new capability, only convenience.
+                # `cq` itself is excluded: `dir(cq)` includes the internal
+                # `cadquery.cq` submodule under that same name, which would
+                # silently replace the `cq` alias for the top-level package
+                # every script actually expects.
+                **{
+                    name: getattr(cq, name)
+                    for name in dir(cq)
+                    if not name.startswith("_") and name != "cq"
+                },
             }
 
             # Execute with timeout
