@@ -9,6 +9,9 @@ MCP tools are namespaced ``mcp_<server>_<tool>`` so they can never collide with
 native tools or with tools from a different server -- the naming scheme called
 for in MET-547.
 
+Every invocation is schema-validated before the handler runs (MET-569), so a
+malformed model-emitted call never reaches a tool.
+
 Layering: this registry holds an opaque async ``handler`` per tool and never
 imports ``mcp_core`` (which ``orchestrator`` may not depend on). Whoever bridges
 an MCP server registers its tools by passing a handler that performs the actual
@@ -23,6 +26,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import structlog
+
+from orchestrator.harness.validation import validate_arguments
 
 logger = structlog.get_logger(__name__)
 
@@ -191,6 +196,12 @@ class ToolRegistry:
         gate_check: GateCheck | None = None,
     ) -> Any:
         spec = self.get(name)
+        # MET-569: check the declared schema before the handler runs. A bad
+        # argument used to become a real invocation -- an adapter container
+        # round-trip, or a half-applied side effect -- to discover something
+        # the schema already stated. Raised, not returned, so the ReAct and
+        # native loops surface it through their existing error paths.
+        validate_arguments(name, spec.input_schema, arguments)
         if spec.required_gates:
             # Fail safe: a gated tool never runs without an evaluator.
             if gate_check is None:

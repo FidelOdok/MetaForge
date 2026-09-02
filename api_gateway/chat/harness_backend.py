@@ -164,6 +164,53 @@ _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
 )
 
 
+# MET-569: gate names the chat runtime evaluates. The harness has had gate
+# plumbing since MET-547 (``ToolSpec.required_gates`` ->
+# ``ToolRegistry.invoke`` -> ``GateBlockedError``) and nothing ever declared a
+# gate, so the mechanism was dead code and "read-only by default" described the
+# MCP sidecar's CLI flag only -- chat itself could always write.
+GATE_TWIN_WRITE = "twin_write"
+GATE_PROJECT_WRITE = "project_write"
+
+_GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
+    # Persistent twin mutations: these create or change work products the twin
+    # owns, which is exactly what the Prime Rule says must stay reviewable.
+    "twin.commit_geometry": (GATE_TWIN_WRITE,),
+    "twin.record_decision": (GATE_TWIN_WRITE,),
+    "twin.record_constraint_set": (GATE_TWIN_WRITE,),
+    "twin.record_document": (GATE_TWIN_WRITE,),
+    "twin.propose_change": (GATE_TWIN_WRITE,),
+    "twin.stage_work_product_file": (GATE_TWIN_WRITE,),
+    "project.create": (GATE_PROJECT_WRITE,),
+    "project.update": (GATE_PROJECT_WRITE,),
+    "project.delete": (GATE_PROJECT_WRITE,),
+}
+
+# Both gates default to SATISFIED, so declaring them changes nothing about what
+# today's deployments can do -- an operator who wants a read-only chat surface
+# now has a switch where before there was none. The gate is a static
+# precondition; the per-call human decision for the same tools remains the
+# separate "ask" tier (``_REQUIRES_APPROVAL_TOOL_IDS``).
+_GATE_ENV = {
+    GATE_TWIN_WRITE: "METAFORGE_CHAT_TWIN_WRITES",
+    GATE_PROJECT_WRITE: "METAFORGE_CHAT_PROJECT_WRITES",
+}
+
+
+def chat_gate_check(gate: str) -> bool:
+    """Whether ``gate`` is satisfied for chat-driven tool calls.
+
+    An unknown gate is never satisfied: a tool declaring a gate nobody
+    evaluates must not run — the same fail-safe discipline ``ToolRegistry``
+    applies when no evaluator is wired at all.
+    """
+    env_var = _GATE_ENV.get(gate)
+    if env_var is None:
+        logger.warning("chat_gate_unknown", gate=gate)
+        return False
+    return os.environ.get(env_var, "").strip().lower() not in _FALSY
+
+
 async def mcp_tools_from_bridge(
     bridge: McpBridge, enabled: set[str] | None = None
 ) -> list[tuple[str, NativeToolDef]]:
@@ -219,6 +266,7 @@ async def mcp_tools_from_bridge(
                     description=description,
                     input_schema=input_schema,
                     handler=_make_handler(tool_id),
+                    required_gates=_GATED_TOOL_IDS.get(tool_id, ()),
                     requires_approval=tool_id in _REQUIRES_APPROVAL_TOOL_IDS,
                 ),
             )
@@ -644,6 +692,9 @@ async def _build_context(
         provider_config_from_env(provider=provider, model=model),
         credentials=store,
         session_id=session_id,
+        # MET-569: without an evaluator a gated tool never runs (fail safe),
+        # so declaring gates and wiring this are one change, not two.
+        gate_check=chat_gate_check,
         rotation_strategy=rotation_strategy_from_env(),
         native_tools=native_tools,
         mcp_tools=mcp_tools,

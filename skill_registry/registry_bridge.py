@@ -88,7 +88,12 @@ class RegistryMcpBridge(McpBridge):
             raise McpToolError(tool_id, str(exc)) from exc
 
         if result.status != "success":
-            raise McpToolError(tool_id, f"Tool returned status: {result.status}")
+            # MET-569: the adapter's envelope (its error object, code, and any
+            # hint about what to do instead) lives in ``result.data``. Dropping
+            # it here left the model with only "Tool returned status: error".
+            envelope = result.data if isinstance(result.data, dict) else {}
+            detail = str(envelope.get("error") or f"Tool returned status: {result.status}")
+            raise McpToolError(tool_id, detail, payload=envelope)
 
         # Remember an export's STEP so a later commit can reference it.
         if tool_id == "freecad.export_model" and isinstance(result.data, dict):
