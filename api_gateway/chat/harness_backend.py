@@ -24,6 +24,7 @@ from typing import Any
 import structlog
 
 from api_gateway.chat.backend import ChatBackend
+from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
 from api_gateway.chat.skill_tools import skill_tools_from_registry
 from api_gateway.chat.tool_approvals import get_approval_store
@@ -676,6 +677,7 @@ async def run_chat_turn(
     metrics: MetricsCollector | None = None,
     wall_clock_seconds: float | None = None,
     approval_timeout_seconds: float | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -694,6 +696,9 @@ async def run_chat_turn(
     ``approval_timeout_seconds`` (defaults to :func:`chat_approval_timeout_seconds`)
     overrides how long a `requires_approval` tool call waits before denying by
     default -- see :func:`design_flow_approval_timeout_seconds`.
+    ``project_id`` scopes the turn's memory deposit (MET-567) to a project;
+    tool-using turns are recorded as experiences so the memory tier learns from
+    chat, not just from the orchestrator's Temporal path.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -765,10 +770,27 @@ async def run_chat_turn(
         except Exception:  # noqa: BLE001 - metrics must never break a turn
             pass
     if result.output:
-        return str(result.output)
-    if result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
-        return summarize_trajectory(result.steps)
-    return _FALLBACK_ANSWER
+        answer = str(result.output)
+    elif result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
+        answer = summarize_trajectory(result.steps)
+    else:
+        answer = _FALLBACK_ANSWER
+    # MET-567: deposit the trajectory into the experience store (no-op unless
+    # the turn called a tool and a recorder is wired).
+    await record_chat_experience(
+        thread_id=session_id,
+        user_content=user_content,
+        reply=answer,
+        steps=result.steps,
+        status=result.status,
+        stop_reason=result.stop_reason,
+        duration_seconds=time.monotonic() - turn_start,
+        project_id=project_id,
+        provider=provider,
+        model=model,
+        path="native" if native else "react",
+    )
+    return answer
 
 
 _FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
@@ -1033,6 +1055,7 @@ async def run_chat_turn_streaming(
     twin: Any = None,
     metrics: MetricsCollector | None = None,
     wall_clock_seconds: float | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -1058,6 +1081,7 @@ async def run_chat_turn_streaming(
     follow-up), when given, is notified ``(run_id, tool, arguments)`` the
     moment a `requires_approval` tool call pauses — resolved by a separate
     ``POST /v1/chat/tool_approvals/{run_id}`` request, never by this turn.
+    ``project_id`` scopes this turn's memory deposit (MET-567).
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -1235,6 +1259,23 @@ async def run_chat_turn_streaming(
     # MET-590: steps were already streamed live during the loop (live_step),
     # so no post-loop re-emit — duplicates would double-render the timeline.
 
+    async def _record_turn_experience(final_answer: str) -> None:
+        # MET-567: deposit this turn's trajectory into the experience store.
+        # No-op unless the turn called a tool and a recorder is wired.
+        await record_chat_experience(
+            thread_id=session_id,
+            user_content=user_content,
+            reply=final_answer,
+            steps=result.steps,
+            status=result.status,
+            stop_reason=result.stop_reason,
+            duration_seconds=time.monotonic() - turn_start,
+            project_id=project_id,
+            provider=provider,
+            model=model,
+            path="native" if native else "react",
+        )
+
     answer = str(result.output or "").strip()
     # Never stream an empty answer — a completed turn with no final text (weak
     # model, or an empty `final`), or one that hit the step cap / wall-clock
@@ -1247,8 +1288,10 @@ async def run_chat_turn_streaming(
             if result.stop_reason in ("max_steps", "timeout", "budget_exceeded")
             else _FALLBACK_ANSWER
         )
+        await _record_turn_experience(answer)
         await on_delta(answer)
         return answer
+    await _record_turn_experience(answer)
     # Emit the loop's own answer as chunked deltas. This used to re-generate
     # the final text with a second, context-free model call (no history, no
     # tool results), and stream THAT — which could drift from or hallucinate

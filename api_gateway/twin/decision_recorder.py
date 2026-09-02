@@ -7,7 +7,8 @@ breaking the twin list in MET-490). One call does all three persistence facets:
 
 1. render the decision to canonical markdown,
 2. store the markdown blob in MinIO (graceful — node still created on failure),
-3. create a validated ``WorkProduct`` via the twin and link it to its project.
+3. create a validated ``WorkProduct`` via the twin and link it to its project,
+4. publish ``WORK_PRODUCT_CREATED`` so the knowledge layer indexes it (MET-567).
 
 Lives in the api_gateway layer because it composes twin_core (the model), the
 ``digital_twin.storage`` blob store, and the project backend. It's injected as
@@ -25,6 +26,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
+from api_gateway.twin.work_product_events import publish_work_product_created
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -180,11 +182,28 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 except Exception as exc:  # noqa: BLE001 — link is best-effort
                     logger.warning("decision_project_link_failed", error=str(exc))
 
+            # 3. knowledge ingest (MET-567): announce the new work product so
+            #    ``KnowledgeConsumer`` chunks + embeds the decision. Without this
+            #    the agent could record a decision it was explicitly instructed
+            #    to record and then fail to find it again with
+            #    ``knowledge.search(knowledge_type=DESIGN_DECISION)`` -- the
+            #    node existed, the blob existed, the semantic index didn't.
+            indexed = await publish_work_product_created(
+                work_product_id=node_id,
+                work_product_type="design_decision",
+                name=title,
+                content=markdown,
+                project_id=project_id,
+                source="twin.record_decision",
+                metadata={"content_sha256": content_hash},
+            )
+
             logger.info(
                 "decision_recorded",
                 node_id=node_id,
                 project_id=project_id,
                 linked=linked,
+                indexed=indexed,
                 minio_object_key=minio_object_key,
             )
             return {
@@ -192,6 +211,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
                 "project_linked": linked,
+                "knowledge_indexed": indexed,
                 "deduplicated": False,
             }
 

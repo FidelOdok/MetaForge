@@ -460,7 +460,16 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 logger.info("memory_store_in_memory_initialized")
 
             app.state.memory_store = memory_store
-            app.state.memory_client = MemoryClient(memory_store, app.state.embedding_service)
+            # MET-567: pass the knowledge service through. Without it
+            # ``search_design_rationale`` / ``get_component_context`` raise,
+            # so ``POST /v1/memory/search`` and
+            # ``GET /v1/memory/components/{name}`` answered 503 forever even
+            # on a fully-configured deployment.
+            app.state.memory_client = MemoryClient(
+                memory_store,
+                app.state.embedding_service,
+                knowledge_service=getattr(app.state, "knowledge_service", None),
+            )
         except Exception as exc:
             logger.warning("memory_client_init_failed", error=str(exc))
             app.state.memory_store = None
@@ -481,8 +490,10 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             from digital_twin.memory.consolidation import (
                 ConfidenceDecay,
                 ConsolidationOrchestrator,
+                ConsolidationScheduler,
                 ContradictionDetector,
                 DualWriteInsightStore,
+                EventFetcher,
                 EventGrouper,
                 InMemoryEventFetcher,
                 InMemoryInsightStore,
@@ -493,9 +504,11 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 OpenRouterConfig,
                 OpenRouterError,
                 OpenRouterLLMClient,
+                PgVectorEventFetcher,
                 PgVectorInsightStore,
                 SemanticMemoryWriter,
                 StubLLMClient,
+                interval_seconds_from_env,
                 register_consolidation_activities,
             )
             from digital_twin.memory.consolidation.llm import LLMClient
@@ -567,8 +580,22 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             # STALE_WARN marking, and contradiction detection against the
             # existing corpus during BACKGROUND synthesis. The detector
             # reuses the same LLM client as the synthesizer.
+            # MET-567: the in-memory fetcher snapshots
+            # ``InMemoryExperienceStore._experiences``, an attribute the
+            # pgvector store does not have — so on every real deployment the
+            # pass fetched zero experiences and synthesised nothing, no matter
+            # how full ``agent_experiences`` was. Pick the fetcher that
+            # matches the store.
+            fetcher: EventFetcher
+            if hasattr(app.state.memory_store, "list_window"):
+                fetcher = PgVectorEventFetcher(app.state.memory_store)
+                logger.info("consolidation_fetcher_selected", backend="pgvector")
+            else:
+                fetcher = InMemoryEventFetcher(app.state.memory_store)
+                logger.info("consolidation_fetcher_selected", backend="in_memory")
+
             orchestrator = ConsolidationOrchestrator(
-                fetcher=InMemoryEventFetcher(app.state.memory_store),
+                fetcher=fetcher,
                 grouper=EventGrouper(),
                 synthesizer=InsightSynthesizer(llm_client),
                 validator=InsightValidator(),
@@ -583,6 +610,16 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             app.state.consolidation_orchestrator = orchestrator
             app.state.consolidation_insight_store = insight_store
             logger.info("consolidation_orchestrator_initialized")
+
+            # MET-567: nothing ever triggered a pass. The pipeline, the
+            # Temporal workflow, and the REST trigger all existed while
+            # ``memory.list_insights`` stayed empty in every deployment,
+            # because no scheduler and no worker ever called any of them.
+            scheduler = ConsolidationScheduler(
+                orchestrator, interval_seconds=interval_seconds_from_env()
+            )
+            app.state.consolidation_scheduler = scheduler
+            scheduler.start()
         except Exception as exc:
             logger.warning("consolidation_orchestrator_init_failed", error=str(exc))
             app.state.consolidation_orchestrator = None
@@ -691,8 +728,17 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Shares the same DATABASE_URL-selected backend as the rest of the
     # gateway; read by the /v1/sessions routes via app.state.
     from api_gateway.sessions.backend import create_agent_session_store as _create_ass
+    from api_gateway.sessions.experience_bridge import wrap_with_experience_bridge
 
-    app.state.agent_session_store = await _create_ass()
+    # MET-567: wrap the store so completing a session also deposits one
+    # experience row. All three completion paths (REST route, session.complete
+    # MCP tool, sidecar idle rollover) go through the store, so this is the
+    # single seam that catches them.
+    app.state.agent_session_store = wrap_with_experience_bridge(
+        await _create_ass(),
+        getattr(app.state, "memory_store", None),
+        getattr(app.state, "embedding_service", None),
+    )
 
     # Bootstrap tool adapters into the registry and create real MCP bridge.
     # The knowledge MCP adapter is included only when a KnowledgeService is
@@ -792,10 +838,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
         backend="postgres" if type(chat_backend).__name__ == "PgChatBackend" else "in_memory",
     )
 
+    from api_gateway.chat.experience_adapter import init_chat_experience_recorder
     from api_gateway.chat.turn_capture import init_turn_capture
 
     # MET-594: tee live chat steps into the agent-session event log.
     init_turn_capture(getattr(app.state, "agent_session_store", None))
+
+    # MET-567: give chat turns an experience recorder. Until now only
+    # MechanicalAgent had one, so no amount of chat traffic filled the store
+    # the memory tier reads from.
+    init_chat_experience_recorder(
+        getattr(app.state, "memory_store", None),
+        getattr(app.state, "embedding_service", None),
+    )
 
     init_project_backend(project_backend)
     logger.info(
@@ -842,6 +897,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         collector=_collector,
         knowledge_service=getattr(app.state, "knowledge_service", None),
     )
+
+    # MET-567: let the twin recorders publish WORK_PRODUCT_CREATED onto this
+    # bus. ``KnowledgeConsumer`` has subscribed to that event since MET-307
+    # but nothing ever published one, so a recorded design decision never
+    # became searchable knowledge.
+    from api_gateway.twin.work_product_events import init_work_product_events
+
+    init_work_product_events(event_bus)
 
     # MET-453: subscribe the ExperienceConsumer so AGENT_TASK_* events
     # actually flow into the experience store (the rest of the memory
@@ -1019,6 +1082,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.tool_registry.close_all()
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
+    # MET-567: stop the periodic consolidation pass.
+    if getattr(app.state, "consolidation_scheduler", None) is not None:
+        await app.state.consolidation_scheduler.stop()
     # Close LightRAG service if active
     if hasattr(app.state, "knowledge_service") and app.state.knowledge_service is not None:
         try:
