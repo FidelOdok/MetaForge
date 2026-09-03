@@ -451,15 +451,17 @@ class _FakeVector3:
         self.x, self.y, self.z = x, y, z
 
 
-class _FakeInertiaMatrix:
-    """A diagonal-only fake matching a rectangular prism's own inertia
-    shape closely enough to sanity-check the unit conversion, without
-    needing a real geometry kernel."""
-
-    _diag = {(0, 0): 6.0, (1, 1): 5.0, (2, 2): 4.0}
-
-    def Value(self, r: int, c: int) -> float:  # noqa: N802
-        return self._diag.get((r - 1, c - 1), 0.0)
+# Real cadquery (2.8.0, verified live against the deployed cadquery-adapter
+# container -- MET-706 follow-up) exposes inertia as the STATIC method
+# ``cq.Shape.matrixOfInertia(solid)``, returning a plain 0-indexed
+# ``list[list[float]]`` -- NOT an instance method returning an OCCT-style
+# ``.Value(r, c)`` object, which the original fakes here (and the code
+# itself) wrongly assumed until a live-verify call surfaced the mismatch.
+_FAKE_INERTIA_ROWS = [
+    [6.0, 0.0, 0.0],
+    [0.0, 5.0, 0.0],
+    [0.0, 0.0, 4.0],
+]
 
 
 class _FakeMassSolid:
@@ -473,13 +475,19 @@ class _FakeMassSolid:
     def Center(self):  # noqa: N802
         return _FakeVector3(1.0, 2.0, 3.0)
 
-    def MatrixOfInertia(self):  # noqa: N802
-        return _FakeInertiaMatrix()
-
 
 class _FakeMassShape:
     def val(self):
         return _FakeMassSolid()
+
+
+class _FakeShapeNamespace:
+    """Stands in for ``cq.Shape`` -- just the one static method the
+    production code calls."""
+
+    @staticmethod
+    def matrixOfInertia(_solid):  # noqa: N802
+        return [row[:] for row in _FAKE_INERTIA_ROWS]
 
 
 class _FakeUrdfExporters:
@@ -501,6 +509,7 @@ class _FakeImporters:
 class _FakeCqForUrdf:
     exporters = _FakeUrdfExporters()
     importers = _FakeImporters()
+    Shape = _FakeShapeNamespace()
 
 
 class TestExportUrdf:
@@ -531,7 +540,7 @@ class TestExportUrdf:
         assert result["inertia_kgm2"]["ixx"] == pytest.approx(6.0 * 1e-15 * 2700.0)
         assert result["inertia_kgm2"]["iyy"] == pytest.approx(5.0 * 1e-15 * 2700.0)
         assert result["inertia_kgm2"]["izz"] == pytest.approx(4.0 * 1e-15 * 2700.0)
-        # off-diagonal terms not covered by _FakeInertiaMatrix._diag are 0
+        # off-diagonal terms in _FAKE_INERTIA_ROWS are 0
         assert result["inertia_kgm2"]["ixy"] == 0.0
 
         assert result["link_name"] == "widget_link"
@@ -1030,6 +1039,7 @@ class _FakeStlExporters:
 class _FakeCqForUsd:
     exporters = _FakeStlExporters()
     importers = _FakeImporters()
+    Shape = _FakeShapeNamespace()
 
 
 class TestExportUsd:
@@ -1060,24 +1070,21 @@ class TestExportUsd:
     def test_non_axis_aligned_part_raises_instead_of_silently_wrong_output(self, tmp_path):
         from tool_registry.tools.cadquery.usd_export import NonAxisAlignedInertiaError
 
-        # _FakeInertiaMatrix only has diagonal terms, so patch Value() to
-        # return a non-negligible off-diagonal term for this one test.
-        class _TiltedInertia:
-            def Value(self, r, c):  # noqa: N802
-                if r == c:
-                    return 6.0
-                return 3.0  # large off-diagonal relative to the diagonal
-
-        class _TiltedSolid(_FakeMassSolid):
-            def MatrixOfInertia(self):  # noqa: N802
-                return _TiltedInertia()
+        # _FAKE_INERTIA_ROWS is diagonal-only, so this fake's Shape
+        # namespace returns a matrix with a large off-diagonal term instead,
+        # for this one test.
+        class _TiltedShapeNamespace:
+            @staticmethod
+            def matrixOfInertia(_solid):  # noqa: N802
+                return [[6.0, 3.0, 3.0], [3.0, 6.0, 3.0], [3.0, 3.0, 6.0]]
 
         class _TiltedShape:
             def val(self):
-                return _TiltedSolid()
+                return _FakeMassSolid()
 
         class _FakeCqTilted:
             exporters = _FakeStlExporters()
+            Shape = _TiltedShapeNamespace()
 
             class importers:  # noqa: N801
                 @staticmethod
