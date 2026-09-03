@@ -35,11 +35,13 @@ class TestRegistryMcpBridge:
         describe_step_file (MET-629), bringing the cross-adapter total to
         61. MET-436 adds offer_resolver's one tool (distributors.resolve_
         offers, registers unconditionally — no required collaborator),
-        bringing it to 62.
+        bringing it to 62. MET-706 adds seven cadquery export tools
+        (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
+        bringing it to 69.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 62
+        assert len(tools) == 69
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

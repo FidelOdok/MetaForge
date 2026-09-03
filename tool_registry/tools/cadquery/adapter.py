@@ -234,6 +234,597 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_urdf",
+                adapter_id="cadquery",
+                name="Export URDF",
+                description=(
+                    "Export a single-link URDF (robot description) for a STEP file: "
+                    "a companion visual/collision mesh plus a physically real "
+                    "<inertial> block (mass, center of mass, inertia tensor) computed "
+                    "from the part's geometry and a material density. Tier-1 only -- "
+                    "one link, no joints; a multi-body assembly with real kinematic "
+                    "joints needs the FreeCAD assembly-joint tools, not this."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "Path to the source STEP file",
+                        },
+                        "link_name": {
+                            "type": "string",
+                            "description": "URDF <link> name (default 'base_link')",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for density lookup (e.g. 'aluminum_6061', "
+                                "'steel', 'abs'); unrecognized names fall back to a "
+                                "neutral default density rather than failing"
+                            ),
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": (
+                                "Explicit density override in kg/m^3, "
+                                "takes precedence over material"
+                            ),
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "mesh_uri_prefix": {
+                            "type": "string",
+                            "description": (
+                                "Prefix prepended to the mesh filename in the URDF's "
+                                "<mesh filename=...>, e.g. 'package://my_robot/meshes/'"
+                            ),
+                        },
+                        "xacro": {
+                            "type": "boolean",
+                            "description": (
+                                "Write a .xacro-extension file with the xacro namespace "
+                                "declared on the root <robot> element, so it can be "
+                                "<xacro:include>d into a larger macro-based robot "
+                                "description (default false). No macro directives are "
+                                "generated -- the content is otherwise identical URDF."
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .urdf/.xacro file path",
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_file": {"type": "string"},
+                        "link_name": {"type": "string"},
+                        "density_kg_m3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "center_of_mass_m": {"type": "object"},
+                        "inertia_kgm2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_urdf,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.export_urdf_assembly",
+                adapter_id="cadquery",
+                name="Export Assembly URDF",
+                description=(
+                    "Export a multi-link URDF with real kinematic joints from a set "
+                    "of STEP parts plus a joint list (the same shape FreeCAD's "
+                    "add_assembly_joint/list_joints produce: base/follower link "
+                    "names, axis, anchor). Maps fixed->fixed, slider->prismatic "
+                    "(requires explicit limits), revolute->continuous (no fabricated "
+                    "rotation limits); cylindrical/ball joints are rejected -- they "
+                    "have no single-joint URDF equivalent."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "One entry per link: {input_file, link_name, "
+                                "material?, density_kg_m3?}"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "input_file": {"type": "string"},
+                                    "link_name": {"type": "string"},
+                                    "material": {"type": "string"},
+                                    "density_kg_m3": {"type": "number"},
+                                },
+                                "required": ["input_file", "link_name"],
+                            },
+                        },
+                        "joints": {
+                            "type": "array",
+                            "description": (
+                                "FreeCAD-shaped joint records: {name, type "
+                                "(fixed/slider/revolute -- cylindrical/ball rejected), "
+                                "base, follower, axis: [x,y,z], anchor: [x,y,z] (mm), "
+                                "limits?: {lower, upper, effort?, velocity?} "
+                                "(required for slider joints)}"
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "robot_name": {
+                            "type": "string",
+                            "description": "URDF <robot> name (default 'robot')",
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "mesh_uri_prefix": {
+                            "type": "string",
+                            "description": (
+                                "Prefix prepended to each mesh filename in the URDF's "
+                                "<mesh filename=...>, e.g. 'package://my_robot/meshes/'"
+                            ),
+                        },
+                        "xacro": {
+                            "type": "boolean",
+                            "description": (
+                                "Write a .xacro-extension file with the xacro namespace "
+                                "declared on the root <robot> element (default false). "
+                                "No macro directives are generated -- see the "
+                                "cadquery.export_urdf tool's xacro description."
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .urdf/.xacro file path",
+                        },
+                    },
+                    "required": ["parts", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_files": {"type": "array", "items": {"type": "string"}},
+                        "robot_name": {"type": "string"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "joint_names": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_urdf_assembly,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.export_sdf",
+                adapter_id="cadquery",
+                name="Export SDF",
+                description=(
+                    "Export a single-link SDFormat model (Gazebo) for a STEP file: "
+                    "a companion visual/collision mesh plus a physically real "
+                    "<inertial> block, schema grounded directly against "
+                    "gazebosim/sdformat's spec. Tier-1 only -- one model, one link, "
+                    "no <joint>. Pass world_name to wrap the model in a <world> "
+                    "(.world file); otherwise writes a standalone .sdf model."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "Path to the source STEP file",
+                        },
+                        "model_name": {
+                            "type": "string",
+                            "description": "SDF <model> name (default 'model')",
+                        },
+                        "link_name": {
+                            "type": "string",
+                            "description": "SDF <link> name (default 'link')",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for density lookup (e.g. 'aluminum_6061', "
+                                "'steel', 'abs'); unrecognized names fall back to a "
+                                "neutral default density rather than failing"
+                            ),
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": (
+                                "Explicit density override in kg/m^3, "
+                                "takes precedence over material"
+                            ),
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "mesh_uri": {
+                            "type": "string",
+                            "description": (
+                                "Explicit <mesh><uri> value; defaults to the "
+                                "exported mesh file's bare filename"
+                            ),
+                        },
+                        "static": {
+                            "type": "boolean",
+                            "description": "SDF <static> flag (default false)",
+                        },
+                        "world_name": {
+                            "type": "string",
+                            "description": (
+                                "When given, wraps the model in a <world name=...> "
+                                "and writes a .world file instead of a standalone "
+                                ".sdf model"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .sdf/.world file path",
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_file": {"type": "string"},
+                        "model_name": {"type": "string"},
+                        "link_name": {"type": "string"},
+                        "density_kg_m3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "center_of_mass_m": {"type": "object"},
+                        "inertia_kgm2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_sdf,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.export_sdf_assembly",
+                adapter_id="cadquery",
+                name="Export Assembly SDF",
+                description=(
+                    "Export a multi-link SDFormat model (Gazebo) with real joints "
+                    "from a set of STEP parts plus a joint list (the same shape "
+                    "FreeCAD's add_assembly_joint/list_joints produce). Maps "
+                    "fixed->fixed, slider->prismatic (requires explicit limits), "
+                    "revolute->continuous (no fabricated rotation limit), "
+                    "ball->ball (SDF supports it natively); cylindrical joints are "
+                    "rejected -- no direct SDF <joint> equivalent."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "One entry per link: {input_file, link_name, "
+                                "material?, density_kg_m3?}"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "input_file": {"type": "string"},
+                                    "link_name": {"type": "string"},
+                                    "material": {"type": "string"},
+                                    "density_kg_m3": {"type": "number"},
+                                },
+                                "required": ["input_file", "link_name"],
+                            },
+                        },
+                        "joints": {
+                            "type": "array",
+                            "description": (
+                                "FreeCAD-shaped joint records: {name, type "
+                                "(fixed/slider/revolute/ball -- cylindrical rejected), "
+                                "base, follower, axis: [x,y,z], anchor: [x,y,z] (mm), "
+                                "limits?: {lower, upper, effort?, velocity?} "
+                                "(required for slider joints)}"
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "model_name": {
+                            "type": "string",
+                            "description": "SDF <model> name (default 'model')",
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "static": {
+                            "type": "boolean",
+                            "description": "SDF <static> flag (default false)",
+                        },
+                        "world_name": {
+                            "type": "string",
+                            "description": (
+                                "When given, wraps the model in a <world name=...> "
+                                "and writes a .world file instead of a standalone "
+                                ".sdf model"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .sdf/.world file path",
+                        },
+                    },
+                    "required": ["parts", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_files": {"type": "array", "items": {"type": "string"}},
+                        "model_name": {"type": "string"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "joint_names": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_sdf_assembly,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.export_usd",
+                adapter_id="cadquery",
+                name="Export USD",
+                description=(
+                    "Export a plain-text .usda (USD) file for a STEP file: mesh "
+                    "geometry as UsdGeomMesh point/face arrays plus real "
+                    "PhysicsRigidBodyAPI/PhysicsCollisionAPI/PhysicsMassAPI "
+                    "properties. Tier-1 only -- axis-aligned parts (negligible "
+                    "off-diagonal inertia terms); rotated/asymmetric parts raise "
+                    "an explicit error rather than silently emitting wrong "
+                    "principal-axis physics data."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "Path to the source STEP file",
+                        },
+                        "prim_name": {
+                            "type": "string",
+                            "description": "USD prim/defaultPrim name (default 'model')",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for density lookup (e.g. 'aluminum_6061', "
+                                "'steel', 'abs'); unrecognized names fall back to a "
+                                "neutral default density rather than failing"
+                            ),
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": (
+                                "Explicit density override in kg/m^3, "
+                                "takes precedence over material"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .usda file path",
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_file": {"type": "string"},
+                        "prim_name": {"type": "string"},
+                        "triangle_count": {"type": "integer"},
+                        "density_kg_m3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "center_of_mass_m": {"type": "object"},
+                        "inertia_kgm2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_usd,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.export_usd_assembly",
+                adapter_id="cadquery",
+                name="Export Assembly USD",
+                description=(
+                    "Export a multi-body .usda (USD) file with real UsdPhysics "
+                    "joints from a set of STEP parts plus a joint list (the same "
+                    "shape FreeCAD's add_assembly_joint/list_joints produce). Maps "
+                    "fixed->PhysicsFixedJoint, slider->PhysicsPrismaticJoint "
+                    "(requires explicit limits), revolute->PhysicsRevoluteJoint (no "
+                    "fabricated rotation limit), ball->PhysicsSphericalJoint (USD "
+                    "supports it natively); cylindrical joints are rejected -- no "
+                    "matching UsdPhysics joint type. Still axis-aligned-inertia-only "
+                    "per part, same tier-1 restriction as cadquery.export_usd."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "One entry per link: {input_file, link_name, "
+                                "material?, density_kg_m3?}"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "input_file": {"type": "string"},
+                                    "link_name": {"type": "string"},
+                                    "material": {"type": "string"},
+                                    "density_kg_m3": {"type": "number"},
+                                },
+                                "required": ["input_file", "link_name"],
+                            },
+                        },
+                        "joints": {
+                            "type": "array",
+                            "description": (
+                                "FreeCAD-shaped joint records: {name, type "
+                                "(fixed/slider/revolute/ball -- cylindrical rejected), "
+                                "base, follower, axis: [x,y,z], anchor: [x,y,z] (mm), "
+                                "limits?: {lower, upper} (required for slider joints)}"
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "robot_name": {
+                            "type": "string",
+                            "description": "USD defaultPrim/robot name (default 'robot')",
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .usda file path",
+                        },
+                    },
+                    "required": ["parts", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_files": {"type": "array", "items": {"type": "string"}},
+                        "robot_name": {"type": "string"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "joint_names": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_usd_assembly,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.generate_ros2_launch",
+                adapter_id="cadquery",
+                name="Generate ROS 2 Launch File",
+                description=(
+                    "Generate a standalone ROS 2 launch file (robot_state_publisher "
+                    "+ optional joint_state_publisher(_gui) + rviz2) for an exported "
+                    "URDF. Grounded against ros/urdf_launch's real launch files. Pure "
+                    "text generation -- does not require a STEP file or CadQuery "
+                    "geometry, only a URDF path and robot name."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "robot_name": {
+                            "type": "string",
+                            "description": "Robot name, used in the launch file's docstring",
+                        },
+                        "default_urdf_path": {
+                            "type": "string",
+                            "description": (
+                                "Default value for the launch file's 'urdf_path' "
+                                "argument, overridable at invocation time"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .launch.py file path",
+                        },
+                        "include_joint_state_publisher_gui": {
+                            "type": "boolean",
+                            "description": (
+                                "Include a jsp_gui-toggled joint_state_publisher/_gui "
+                                "pair (default true)"
+                            ),
+                        },
+                        "include_rviz": {
+                            "type": "boolean",
+                            "description": "Include an rviz2 node (default true)",
+                        },
+                    },
+                    "required": ["robot_name", "default_urdf_path"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "robot_name": {"type": "string"},
+                        "default_urdf_path": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=512, max_cpu_seconds=30, max_disk_mb=64
+                ),
+            ),
+            handler=self.generate_ros2_launch,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
                 adapter_id="cadquery",
                 name="Execute Script",
@@ -523,6 +1114,185 @@ class CadqueryServer(McpToolServer):
             timeout=self.config.max_operation_time,
         )
         return ops.export_geometry(input_file, output_format, output_path)
+
+    async def export_urdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a single-link URDF for a STEP file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Exporting URDF", input_file=input_file)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_urdf(
+            input_file,
+            link_name=arguments.get("link_name") or "base_link",
+            material=arguments.get("material", ""),
+            density_kg_m3=arguments.get("density_kg_m3"),
+            mesh_format=arguments.get("mesh_format") or "stl",
+            mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            xacro=bool(arguments.get("xacro", False)),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_urdf_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a multi-link URDF with real kinematic joints."""
+        parts = arguments.get("parts") or []
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+        joints = arguments.get("joints")
+        if joints is None:
+            raise ValueError("joints is required (pass an empty list for no joints)")
+
+        logger.info("Exporting assembly URDF", part_count=len(parts), joint_count=len(joints))
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_urdf_assembly(
+            parts,
+            joints,
+            robot_name=arguments.get("robot_name") or "robot",
+            mesh_format=arguments.get("mesh_format") or "stl",
+            mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            xacro=bool(arguments.get("xacro", False)),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_sdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a single-link SDFormat model for a STEP file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Exporting SDF", input_file=input_file)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_sdf(
+            input_file,
+            model_name=arguments.get("model_name") or "model",
+            link_name=arguments.get("link_name") or "link",
+            material=arguments.get("material", ""),
+            density_kg_m3=arguments.get("density_kg_m3"),
+            mesh_format=arguments.get("mesh_format") or "stl",
+            mesh_uri=arguments.get("mesh_uri", ""),
+            static=bool(arguments.get("static", False)),
+            world_name=arguments.get("world_name", ""),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_sdf_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a multi-link SDFormat model with real joints."""
+        parts = arguments.get("parts") or []
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+        joints = arguments.get("joints")
+        if joints is None:
+            raise ValueError("joints is required (pass an empty list for no joints)")
+
+        logger.info("Exporting assembly SDF", part_count=len(parts), joint_count=len(joints))
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_sdf_assembly(
+            parts,
+            joints,
+            model_name=arguments.get("model_name") or "model",
+            mesh_format=arguments.get("mesh_format") or "stl",
+            static=bool(arguments.get("static", False)),
+            world_name=arguments.get("world_name", ""),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_usd(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a plain-text .usda file for a STEP file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Exporting USD", input_file=input_file)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_usd(
+            input_file,
+            prim_name=arguments.get("prim_name") or "model",
+            material=arguments.get("material", ""),
+            density_kg_m3=arguments.get("density_kg_m3"),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_usd_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a multi-body .usda file with real UsdPhysics joints."""
+        parts = arguments.get("parts") or []
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+        joints = arguments.get("joints")
+        if joints is None:
+            raise ValueError("joints is required (pass an empty list for no joints)")
+
+        logger.info("Exporting assembly USD", part_count=len(parts), joint_count=len(joints))
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_usd_assembly(
+            parts,
+            joints,
+            robot_name=arguments.get("robot_name") or "robot",
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def generate_ros2_launch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Generate a standalone ROS 2 launch file for an exported URDF."""
+        robot_name = arguments.get("robot_name", "")
+        default_urdf_path = arguments.get("default_urdf_path", "")
+        if not robot_name:
+            raise ValueError("robot_name is required")
+        if not default_urdf_path:
+            raise ValueError("default_urdf_path is required")
+
+        logger.info("Generating ROS 2 launch file", robot_name=robot_name)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.generate_ros2_launch(
+            robot_name,
+            default_urdf_path,
+            output_path=arguments.get("output_path", ""),
+            include_joint_state_publisher_gui=bool(
+                arguments.get("include_joint_state_publisher_gui", True)
+            ),
+            include_rviz=bool(arguments.get("include_rviz", True)),
+        )
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute a sandboxed CadQuery Python script."""

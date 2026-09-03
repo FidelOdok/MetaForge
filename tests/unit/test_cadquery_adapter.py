@@ -42,9 +42,9 @@ class TestCadqueryConfig:
 class TestCadqueryServer:
     """Tests for CadqueryServer tool registration."""
 
-    def test_registers_seven_tools(self):
+    def test_registers_fourteen_tools(self):
         server = CadqueryServer()
-        assert len(server.tool_ids) == 7
+        assert len(server.tool_ids) == 14
 
     def test_tool_ids_correct(self):
         server = CadqueryServer()
@@ -53,6 +53,13 @@ class TestCadqueryServer:
             "cadquery.boolean_operation",
             "cadquery.get_properties",
             "cadquery.export_geometry",
+            "cadquery.export_urdf",
+            "cadquery.export_urdf_assembly",
+            "cadquery.export_sdf",
+            "cadquery.export_sdf_assembly",
+            "cadquery.export_usd",
+            "cadquery.export_usd_assembly",
+            "cadquery.generate_ros2_launch",
             "cadquery.execute_script",
             "cadquery.create_assembly",
             "cadquery.generate_enclosure",
@@ -204,6 +211,69 @@ class TestCreateAssembly:
             )
 
 
+class TestExportUrdfAssembly:
+    """Tests for cadquery.export_urdf_assembly handler validation."""
+
+    async def test_missing_parts(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="parts is required"):
+            await server.export_urdf_assembly({"joints": []})
+
+    async def test_empty_parts(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="parts is required"):
+            await server.export_urdf_assembly({"parts": [], "joints": []})
+
+    async def test_missing_joints(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="joints is required"):
+            await server.export_urdf_assembly(
+                {"parts": [{"input_file": "a.step", "link_name": "a"}]}
+            )
+
+
+class TestExportSdfAssembly:
+    """Tests for cadquery.export_sdf_assembly handler validation."""
+
+    async def test_missing_parts(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="parts is required"):
+            await server.export_sdf_assembly({"joints": []})
+
+    async def test_empty_parts(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="parts is required"):
+            await server.export_sdf_assembly({"parts": [], "joints": []})
+
+    async def test_missing_joints(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="joints is required"):
+            await server.export_sdf_assembly(
+                {"parts": [{"input_file": "a.step", "link_name": "a"}]}
+            )
+
+
+class TestExportUsdAssembly:
+    """Tests for cadquery.export_usd_assembly handler validation."""
+
+    async def test_missing_parts(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="parts is required"):
+            await server.export_usd_assembly({"joints": []})
+
+    async def test_empty_parts(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="parts is required"):
+            await server.export_usd_assembly({"parts": [], "joints": []})
+
+    async def test_missing_joints(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="joints is required"):
+            await server.export_usd_assembly(
+                {"parts": [{"input_file": "a.step", "link_name": "a"}]}
+            )
+
+
 class TestGenerateEnclosure:
     """Tests for cadquery.generate_enclosure handler validation."""
 
@@ -240,7 +310,7 @@ class TestJsonRpcIntegration:
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "1"
         tools = response["result"]["tools"]
-        assert len(tools) == 7
+        assert len(tools) == 14
 
     async def test_tool_list_filter_by_capability(self):
         server = CadqueryServer()
@@ -275,7 +345,7 @@ class TestJsonRpcIntegration:
         result = response["result"]
         assert result["adapter_id"] == "cadquery"
         assert result["status"] == "healthy"
-        assert result["tools_available"] == 7
+        assert result["tools_available"] == 14
 
     async def test_unknown_method(self):
         server = CadqueryServer()

@@ -8,11 +8,11 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (52 across 13 adapters)
+## MCP tools (55 across 13 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
-`knowledge,twin,constraint,cadquery,calculix` (19 tools). FreeCAD and
+`knowledge,twin,constraint,cadquery,calculix` (22 tools). FreeCAD and
 KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
 (registered when the gateway supplies their backend).
 
@@ -40,6 +40,13 @@ KiCad are opt-in; `project`, `memory`, and `session` are runtime-injected
 | `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.get_properties` | Mass / volume / bounding-box for a STEP file | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.export_geometry` | Convert STEP → GLB (web viewer) or STL | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
+| `cadquery` | `cadquery.export_urdf` | Export a single-link URDF (robot description) — companion mesh + a real `<inertial>` block (mass/center-of-mass/inertia tensor) from the part's geometry and a material density lookup. Tier-1 only: one link, no joints — a multi-body assembly with real kinematic joints needs the FreeCAD assembly-joint tools mapped to URDF's `<joint>` schema, separate follow-on work. `xacro=true` writes a `.xacro`-extension file with the xacro namespace declared on the root element (no macro directives generated — includable into a larger macro-based description) (MET-706) | unit-verified |
+| `cadquery` | `cadquery.export_urdf_assembly` | Export a multi-link URDF with real kinematic joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). Maps `fixed`→`fixed`, `slider`→`prismatic` (requires explicit `limits`), `revolute`→`continuous` (no fabricated rotation limit); `cylindrical`/`ball` joints are rejected — no single-joint URDF equivalent. Same `xacro=true` support as `cadquery.export_urdf` (MET-706) | unit-verified |
+| `cadquery` | `cadquery.export_sdf` | Export a single-link SDFormat model (Gazebo) — same mass-property/mesh pattern as `export_urdf`, schema grounded directly against `gazebosim/sdformat`'s spec files. `world_name` wraps the model in a `<world>` (`.world` file); otherwise a standalone `.sdf` model. Tier-1 only: one model, one link, no `<joint>` (MET-706) | unit-verified |
+| `cadquery` | `cadquery.export_sdf_assembly` | Export a multi-link SDFormat model (Gazebo) with real joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). SDF's own `<joint>` schema is more permissive than URDF's: maps `fixed`→`fixed`, `slider`→`prismatic` (requires explicit `limits`), `revolute`→`continuous` (no fabricated rotation limit), and `ball`→`ball` (SDF supports it natively — URDF has no single-joint equivalent); `cylindrical` joints are rejected — no direct SDF `<joint>` equivalent (MET-706) | unit-verified |
+| `cadquery` | `cadquery.export_usd` | Export a plain-text `.usda` (USD) file — hand-authored (no `usd-core`/`pxr` dependency), mesh geometry as `UsdGeomMesh` point/face arrays (via an STL round-trip) plus real `PhysicsRigidBodyAPI`/`PhysicsCollisionAPI`/`PhysicsMassAPI` properties, schema grounded against `PixarAnimationStudios/OpenUSD`'s spec. Tier-1 only: axis-aligned parts (negligible off-diagonal inertia) — a rotated/asymmetric part raises an explicit error rather than emitting wrong principal-axis physics data (MET-706) | unit-verified |
+| `cadquery` | `cadquery.export_usd_assembly` | Export a multi-body `.usda` (USD) file with real UsdPhysics joints from a set of STEP parts + a joint list (same shape FreeCAD's `add_assembly_joint`/`list_joints` produce). Maps `fixed`→`PhysicsFixedJoint`, `slider`→`PhysicsPrismaticJoint` (requires explicit `limits`), `revolute`→`PhysicsRevoluteJoint` (no fabricated rotation limit), `ball`→`PhysicsSphericalJoint` (USD supports it natively, like SDF); `cylindrical` joints are rejected — no matching UsdPhysics joint type. Since `physics:axis` is a canonical X/Y/Z token (not a free vector), an arbitrary joint axis is expressed via a computed alignment quaternion on the joint frame. Still axis-aligned-inertia-only per part, same tier-1 restriction as `cadquery.export_usd` (MET-706) | unit-verified |
+| `cadquery` | `cadquery.generate_ros2_launch` | Generate a standalone ROS 2 launch file (`robot_state_publisher` + optional `joint_state_publisher`(`_gui`) + `rviz2`) for an exported URDF, grounded directly against `ros/urdf_launch`'s real launch files. Pure text generation — no STEP file or CadQuery geometry involved (MET-706) | unit-verified |
 | `cadquery` | `cadquery.execute_script` | Run an inline CadQuery Python script | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.create_assembly` | Multi-body assembly (Phase 2 — manifest only) | _Phase 2_ |
 | `cadquery` | `cadquery.generate_enclosure` | Parametric enclosure generator (Phase 2 — manifest only) | _Phase 2_ |
