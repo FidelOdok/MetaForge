@@ -174,6 +174,30 @@ A bare `pip install -e .` (no extras) gets you:
 You'll want at least `pip install -e ".[dev,knowledge,cadquery]"` to
 get a useful loadout.
 
+## Compute providers (MET-564)
+
+`tool_registry.container_runtime.ContainerRuntime` is the abstraction
+tool execution runs against — `DockerRuntime` (local Docker) is the
+default. `tool_registry.compute_providers.resolve_runtime()` selects a
+runtime by provider id (env `METAFORGE_COMPUTE_PROVIDER`, default
+`docker`), so simulation-heavy work (CalculiX FEA, meshing) can burst
+onto ephemeral cloud compute instead of only local Docker.
+
+| Provider id | Backend | Credential | Notes |
+|---|---|---|---|
+| `docker` (default) | Local Docker daemon | — | No change from prior behavior |
+| `runpod` | RunPod Serverless | `RUNPOD_API_KEY` | `ContainerConfig.image` is the RunPod *endpoint id*, not a Docker tag — a Serverless endpoint is pre-built around one worker image |
+| `vast_ai` (aliases `vastai`, `vast.ai`) | Vast.ai instance rental | `VAST_API_KEY` | Best-effort success signal — Vast.ai's REST API doesn't expose a process exit code, so `success` is inferred from instance lifecycle state |
+
+Neither remote runtime supports `ContainerConfig.volumes` (no host
+filesystem to bind-mount into a remote provider) — `run()` raises
+`RemoteVolumesUnsupportedError` if volumes are set. Real blob-store-backed
+input/output is tracked separately (MET-489). This first slice is also
+not yet wired into `bootstrap.py`'s on-demand adapter spin-up — see
+MET-564 for what's deliberately deferred (AWS Batch / GCP / Azure /
+CoreWeave / Lambda Cloud / Paperspace adapters, a GPU field on
+`ContainerConfig`).
+
 ## Phase-1 limits
 
 What's deliberately not in scope this phase — see
