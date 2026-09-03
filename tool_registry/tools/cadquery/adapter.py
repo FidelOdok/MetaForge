@@ -316,6 +316,105 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_sdf",
+                adapter_id="cadquery",
+                name="Export SDF",
+                description=(
+                    "Export a single-link SDFormat model (Gazebo) for a STEP file: "
+                    "a companion visual/collision mesh plus a physically real "
+                    "<inertial> block, schema grounded directly against "
+                    "gazebosim/sdformat's spec. Tier-1 only -- one model, one link, "
+                    "no <joint>. Pass world_name to wrap the model in a <world> "
+                    "(.world file); otherwise writes a standalone .sdf model."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "Path to the source STEP file",
+                        },
+                        "model_name": {
+                            "type": "string",
+                            "description": "SDF <model> name (default 'model')",
+                        },
+                        "link_name": {
+                            "type": "string",
+                            "description": "SDF <link> name (default 'link')",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for density lookup (e.g. 'aluminum_6061', "
+                                "'steel', 'abs'); unrecognized names fall back to a "
+                                "neutral default density rather than failing"
+                            ),
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": (
+                                "Explicit density override in kg/m^3, "
+                                "takes precedence over material"
+                            ),
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "mesh_uri": {
+                            "type": "string",
+                            "description": (
+                                "Explicit <mesh><uri> value; defaults to the "
+                                "exported mesh file's bare filename"
+                            ),
+                        },
+                        "static": {
+                            "type": "boolean",
+                            "description": "SDF <static> flag (default false)",
+                        },
+                        "world_name": {
+                            "type": "string",
+                            "description": (
+                                "When given, wraps the model in a <world name=...> "
+                                "and writes a .world file instead of a standalone "
+                                ".sdf model"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .sdf/.world file path",
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_file": {"type": "string"},
+                        "model_name": {"type": "string"},
+                        "link_name": {"type": "string"},
+                        "density_kg_m3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "center_of_mass_m": {"type": "object"},
+                        "inertia_kgm2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_sdf,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
                 adapter_id="cadquery",
                 name="Execute Script",
@@ -627,6 +726,33 @@ class CadqueryServer(McpToolServer):
             density_kg_m3=arguments.get("density_kg_m3"),
             mesh_format=arguments.get("mesh_format") or "stl",
             mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_sdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a single-link SDFormat model for a STEP file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Exporting SDF", input_file=input_file)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_sdf(
+            input_file,
+            model_name=arguments.get("model_name") or "model",
+            link_name=arguments.get("link_name") or "link",
+            material=arguments.get("material", ""),
+            density_kg_m3=arguments.get("density_kg_m3"),
+            mesh_format=arguments.get("mesh_format") or "stl",
+            mesh_uri=arguments.get("mesh_uri", ""),
+            static=bool(arguments.get("static", False)),
+            world_name=arguments.get("world_name", ""),
             output_path=arguments.get("output_path", ""),
         )
 

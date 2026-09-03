@@ -579,3 +579,77 @@ class TestExportUrdf:
             )
         urdf_text = Path(output_path).read_text()
         assert 'filename="package://widget/meshes/part4.stl"' in urdf_text
+
+
+class TestExportSdf:
+    """MET-706 session: SDF (Gazebo) export -- schema grounded against
+    gazebosim/sdformat's actual spec files, same real-mass-properties
+    reasoning as TestExportUrdf."""
+
+    def test_writes_standalone_sdf_model_with_correct_mass_properties(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "part.sdf")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_sdf(
+                "part.step",
+                model_name="widget",
+                link_name="widget_link",
+                material="steel",
+                output_path=output_path,
+            )
+
+        # mass = 1_000_000 mm^3 * 1e-9 * 7850 kg/m^3 = 7.85 kg
+        assert result["mass_kg"] == pytest.approx(7.85)
+        assert result["density_kg_m3"] == 7850.0
+        assert result["center_of_mass_m"] == {"x": 0.001, "y": 0.002, "z": 0.003}
+        assert result["inertia_kgm2"]["ixx"] == pytest.approx(6.0 * 1e-15 * 7850.0)
+
+        sdf_text = Path(output_path).read_text()
+        assert '<sdf version="1.11">' in sdf_text
+        assert '<model name="widget">' in sdf_text
+        assert '<link name="widget_link">' in sdf_text
+        assert "<world" not in sdf_text  # standalone model, no world wrapper
+        assert sdf_text.count("<mesh>") == 2  # collision + visual
+        assert Path(result["mesh_file"]).exists()
+
+    def test_world_name_wraps_model_and_changes_extension(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_sdf("part.step", world_name="my_world")
+
+        assert result["output_file"].endswith(".world")
+        sdf_text = Path(result["output_file"]).read_text()
+        assert '<world name="my_world">' in sdf_text
+        assert "<model" in sdf_text
+
+    def test_static_flag_is_reflected(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "static_part.sdf")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            ops.export_sdf("part.step", static=True, output_path=output_path)
+        sdf_text = Path(output_path).read_text()
+        assert "<static>true</static>" in sdf_text
+
+    def test_explicit_mesh_uri_overrides_default(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "part5.sdf")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            ops.export_sdf(
+                "part.step",
+                mesh_uri="model://widget/meshes/part.stl",
+                output_path=output_path,
+            )
+        sdf_text = Path(output_path).read_text()
+        assert "<uri>model://widget/meshes/part.stl</uri>" in sdf_text

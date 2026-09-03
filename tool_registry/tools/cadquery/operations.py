@@ -260,6 +260,67 @@ def _build_single_link_urdf(
     return '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
 
 
+def _build_single_link_sdf(
+    *,
+    model_name: str,
+    link_name: str,
+    mesh_uri: str,
+    mass_kg: float,
+    com_m: tuple[float, float, float],
+    inertia_kgm2: tuple[float, float, float, float, float, float],
+    static: bool,
+    world_name: str,
+) -> str:
+    """Build a single-link, single-model SDFormat document.
+
+    Schema per gazebosim/sdformat's ``sdf/1.11/{model,link,inertial,
+    collision,visual,mesh_shape}.sdf`` (fetched directly from the primary
+    source while building this, not guessed): ``<sdf version><model name>``
+    contains ``<link name>``, which contains ``<inertial>`` (``<mass value>``,
+    ``<pose>`` for the center-of-mass frame relative to the link frame,
+    ``<inertia><ixx>...<izz></inertia>``) plus ``<collision name>``/
+    ``<visual name>`` (each wrapping ``<geometry><mesh><uri></uri></mesh>
+    </geometry>``). SDF poses are ``"x y z roll pitch yaw"`` in meters/
+    radians -- already SI, same convention the mass properties are computed
+    in, unlike URDF's separate xyz+rpy attributes but the same numbers.
+    """
+    ixx, ixy, ixz, iyy, iyz, izz = inertia_kgm2
+    sdf = ET.Element("sdf", version="1.11")
+    parent = sdf
+    if world_name:
+        parent = ET.SubElement(sdf, "world", name=world_name)
+
+    model = ET.SubElement(parent, "model", name=model_name)
+    ET.SubElement(model, "static").text = "true" if static else "false"
+    link = ET.SubElement(model, "link", name=link_name)
+
+    inertial = ET.SubElement(link, "inertial")
+    ET.SubElement(inertial, "mass").text = f"{mass_kg:.9g}"
+    ET.SubElement(inertial, "pose").text = f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g} 0 0 0"
+    inertia = ET.SubElement(inertial, "inertia")
+    for tag, val in (
+        ("ixx", ixx),
+        ("ixy", ixy),
+        ("ixz", ixz),
+        ("iyy", iyy),
+        ("iyz", iyz),
+        ("izz", izz),
+    ):
+        ET.SubElement(inertia, tag).text = f"{val:.9g}"
+
+    # Visual and collision share the same mesh -- same tier-1 tradeoff as
+    # _build_single_link_urdf (a real pipeline would want a simplified
+    # collision hull).
+    for tag in ("collision", "visual"):
+        section = ET.SubElement(link, tag, name=f"{link_name}_{tag}")
+        geometry = ET.SubElement(section, "geometry")
+        mesh = ET.SubElement(geometry, "mesh")
+        ET.SubElement(mesh, "uri").text = mesh_uri
+
+    ET.indent(sdf, space="  ")
+    return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
+
+
 class CadqueryOperations:
     """Core CadQuery CAD operations.
 
@@ -575,6 +636,52 @@ class CadqueryOperations:
                 "format": output_format,
             }
 
+    def _compute_mass_properties(
+        self, shape: Any, material: str, density_kg_m3: float | None
+    ) -> dict[str, Any]:
+        """Shared by ``export_urdf``/``export_sdf``: real mass properties
+        from geometry + a material density, not a placeholder.
+
+        Reuses exactly the mass-property data ``get_properties`` already
+        computes (``Solid.MatrixOfInertia()`` -- unit-density, i.e.
+        geometric moments about the center of mass, per that method's own
+        docstring) rather than introducing a second computation path. The
+        one new ingredient is ``material``: nothing previously converted it
+        to a density (see ``materials.py``), but both URDF's and SDF's
+        ``<inertial>`` blocks need a real mass, not a geometric volume.
+
+        Unit conversion: CadQuery/OCCT report volume in mm^3 and inertia in
+        mm^5 (both implicitly unit-density -- ``density=1``). Both URDF and
+        SDF expect SI: mass in kg, inertia in kg*m^2, lengths in m.
+            mass_kg      = volume_mm3 * 1e-9 * density_kg_m3
+            inertia_kgm2 = inertia_mm5 * 1e-15 * density_kg_m3
+            (1 mm^3 = 1e-9 m^3; 1 mm^5 = 1e-15 m^5)
+        """
+        solid = shape.val()
+        volume_mm3 = solid.Volume()
+        com = solid.Center()
+        inertia_geo = solid.MatrixOfInertia()
+
+        density = resolve_density_kg_m3(material, density_kg_m3)
+        mass_kg = volume_mm3 * _MM3_TO_M3 * density
+
+        def _inertia(r: int, c: int) -> float:
+            return inertia_geo.Value(r + 1, c + 1) * _MM5_TO_M5 * density
+
+        return {
+            "density_kg_m3": density,
+            "mass_kg": mass_kg,
+            "com_m": (com.x * _MM_TO_M, com.y * _MM_TO_M, com.z * _MM_TO_M),
+            "inertia_kgm2": (
+                _inertia(0, 0),
+                _inertia(0, 1),
+                _inertia(0, 2),
+                _inertia(1, 1),
+                _inertia(1, 2),
+                _inertia(2, 2),
+            ),
+        }
+
     def export_urdf(
         self,
         input_file: str,
@@ -590,23 +697,8 @@ class CadqueryOperations:
         Tier-1 URDF support (MET-706 session): one link, no joints -- a
         multi-body assembly with real kinematic joints needs the FreeCAD
         assembly-joint tools (``freecad_add_assembly_joint``) mapped to
-        URDF's ``<joint>`` schema, which is separate follow-on work.
-
-        Reuses exactly the mass-property data ``get_properties`` already
-        computes (``Solid.MatrixOfInertia()`` -- unit-density, i.e.
-        geometric moments about the center of mass, per that method's own
-        docstring) rather than introducing a second computation path, and
-        the existing ``export_geometry`` machinery for the companion mesh.
-        The one new ingredient is ``material``: nothing previously
-        converted it to a density (see ``materials.py``), but URDF's
-        ``<inertial>`` block needs a real mass, not a geometric volume.
-
-        Unit conversion: CadQuery/OCCT report volume in mm^3 and inertia in
-        mm^5 (both implicitly unit-density -- ``density=1``). URDF expects
-        SI: mass in kg, inertia in kg*m^2, lengths in m.
-            mass_kg           = volume_mm3 * 1e-9 * density_kg_m3
-            inertia_kgm2      = inertia_mm5 * 1e-15 * density_kg_m3
-            (1 mm^3 = 1e-9 m^3; 1 mm^5 = 1e-15 m^5)
+        URDF's ``<joint>`` schema, which is separate follow-on work. See
+        ``_compute_mass_properties`` for the mass/inertia derivation.
         """
         self._require_cadquery()
 
@@ -617,22 +709,11 @@ class CadqueryOperations:
             start = time.monotonic()
 
             shape = cq.importers.importStep(input_file)
-            solid = shape.val()
-
-            volume_mm3 = solid.Volume()
-            com = solid.Center()
-            inertia_geo = solid.MatrixOfInertia()
-
-            density = resolve_density_kg_m3(material, density_kg_m3)
-            mass_kg = volume_mm3 * _MM3_TO_M3 * density
-
-            def _inertia(r: int, c: int) -> float:
-                return inertia_geo.Value(r + 1, c + 1) * _MM5_TO_M5 * density
-
-            ixx, ixy, ixz = _inertia(0, 0), _inertia(0, 1), _inertia(0, 2)
-            iyy, iyz = _inertia(1, 1), _inertia(1, 2)
-            izz = _inertia(2, 2)
-            com_m = (com.x * _MM_TO_M, com.y * _MM_TO_M, com.z * _MM_TO_M)
+            mp = self._compute_mass_properties(shape, material, density_kg_m3)
+            density = mp["density_kg_m3"]
+            mass_kg = mp["mass_kg"]
+            com_m = mp["com_m"]
+            ixx, ixy, ixz, iyy, iyz, izz = mp["inertia_kgm2"]
 
             if not output_path:
                 stem = Path(input_file).stem
@@ -684,6 +765,110 @@ class CadqueryOperations:
                 # fields above -- physical inertia in kg*m^2 is legitimately
                 # tiny for small parts (e.g. ~1e-11), and round(x, 9) would
                 # silently zero out a real, correct value.
+                "inertia_kgm2": {
+                    "ixx": ixx,
+                    "ixy": ixy,
+                    "ixz": ixz,
+                    "iyy": iyy,
+                    "iyz": iyz,
+                    "izz": izz,
+                },
+            }
+
+    def export_sdf(
+        self,
+        input_file: str,
+        model_name: str = "model",
+        link_name: str = "link",
+        material: str = "",
+        density_kg_m3: float | None = None,
+        mesh_format: str = "stl",
+        mesh_uri: str = "",
+        static: bool = False,
+        world_name: str = "",
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Export a single-link SDFormat model (Gazebo) for a STEP file.
+
+        Schema grounded directly against the primary source
+        (gazebosim/sdformat's ``sdf/1.11/{model,link,inertial,collision,
+        visual,mesh_shape}.sdf``), not guessed: a ``<model>`` requires a
+        ``name`` and contains ``<link>`` elements; a ``<link>`` contains
+        ``<inertial>`` (``<mass>``, ``<pose>`` for the center-of-mass frame,
+        ``<inertia>`` with ``ixx/ixy/ixz/iyy/iyz/izz``) plus ``<collision>``/
+        ``<visual>`` (each ``<geometry><mesh><uri>...</uri></mesh></geometry>``).
+        SDF's units are already SI (m, kg, kg*m^2, radians) -- same
+        convention as URDF, so no extra unit-mismatch to handle beyond what
+        ``_compute_mass_properties`` already does.
+
+        Tier-1 only: one model, one link, no ``<joint>`` -- same scope note
+        as ``export_urdf``. ``world_name``, when given, wraps the model in
+        a ``<world>`` (producing a ``.world`` file); otherwise this writes a
+        standalone ``.sdf`` model file (``<sdf><model>...</model></sdf>``),
+        includable into a world separately via SDF's own ``<include>``.
+        """
+        self._require_cadquery()
+
+        with tracer.start_as_current_span("cadquery.export_sdf") as span:
+            span.set_attribute("input.file", input_file)
+            span.set_attribute("model.name", model_name)
+
+            start = time.monotonic()
+
+            shape = cq.importers.importStep(input_file)
+            mp = self._compute_mass_properties(shape, material, density_kg_m3)
+
+            if not output_path:
+                stem = Path(input_file).stem
+                ext = "world" if world_name else "sdf"
+                output_path = os.path.join(self.work_dir, f"{stem}.{ext}")
+            self._ensure_output_dir(output_path)
+
+            out_dir = os.path.dirname(output_path) or self.work_dir
+            mesh_stem = Path(output_path).stem
+            mesh_path = os.path.join(out_dir, f"{mesh_stem}.{mesh_format}")
+            cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+            resolved_mesh_uri = mesh_uri or os.path.basename(mesh_path)
+
+            sdf_xml = _build_single_link_sdf(
+                model_name=model_name,
+                link_name=link_name,
+                mesh_uri=resolved_mesh_uri,
+                mass_kg=mp["mass_kg"],
+                com_m=mp["com_m"],
+                inertia_kgm2=mp["inertia_kgm2"],
+                static=static,
+                world_name=world_name,
+            )
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(sdf_xml)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Exported SDF",
+                input_file=input_file,
+                output_path=output_path,
+                mesh_path=mesh_path,
+                mass_kg=round(mp["mass_kg"], 6),
+                duration_s=round(elapsed, 3),
+            )
+
+            ixx, ixy, ixz, iyy, iyz, izz = mp["inertia_kgm2"]
+            com_m = mp["com_m"]
+            return {
+                "output_file": output_path,
+                "mesh_file": mesh_path,
+                "model_name": model_name,
+                "link_name": link_name,
+                "density_kg_m3": mp["density_kg_m3"],
+                "mass_kg": mp["mass_kg"],
+                "center_of_mass_m": {
+                    "x": round(com_m[0], 6),
+                    "y": round(com_m[1], 6),
+                    "z": round(com_m[2], 6),
+                },
                 "inertia_kgm2": {
                     "ixx": ixx,
                     "ixy": ixy,
