@@ -189,12 +189,14 @@ class TestBootstrapToolRegistry:
         Grows as adapters gain tools; freecad reached 44 with
         describe_step_file (MET-629), bringing the cross-adapter total to
         61. MET-436 adds offer_resolver's one tool (distributors.resolve_
-        offers), bringing it to 62.
+        offers), bringing it to 62. MET-706 adds seven cadquery export tools
+        (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
+        bringing it to 69.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 62
+        assert len(tools) == 69
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
@@ -209,4 +211,4 @@ class TestBootstrapToolRegistry:
 
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
-        assert health.tools_available == 7
+        assert health.tools_available == 14

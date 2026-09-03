@@ -22,9 +22,17 @@ from xml.etree import ElementTree as ET
 import structlog
 
 from observability.tracing import get_tracer
+from tool_registry.tools.cadquery.joints import (
+    MissingJointLimitsError,
+    UnsupportedJointTypeError,
+)
 from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 from tool_registry.tools.cadquery.ros_launch import build_ros2_launch_py
-from tool_registry.tools.cadquery.usd_export import build_usda, parse_stl_mesh
+from tool_registry.tools.cadquery.usd_export import (
+    build_usda,
+    build_usda_assembly,
+    parse_stl_mesh,
+)
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.cadquery.operations")
@@ -278,19 +286,6 @@ def _build_single_link_urdf(
 # zero-mass-link structure is real, separate work, not attempted here.
 _URDF_JOINT_TYPE_MAP = {"fixed": "fixed", "slider": "prismatic", "revolute": "continuous"}
 _URDF_UNSUPPORTED_JOINT_TYPES = {"cylindrical", "ball"}
-
-
-class UnsupportedJointTypeError(ValueError):
-    """Raised for a FreeCAD joint type with no single-joint URDF/SDF
-    equivalent (cylindrical, ball) -- see the module-level joint-mapping
-    comment above ``_URDF_JOINT_TYPE_MAP``."""
-
-
-class MissingJointLimitsError(ValueError):
-    """Raised when a ``prismatic`` joint has no caller-supplied ``limits``
-    -- URDF requires a ``<limit>`` element for prismatic joints, and
-    MetaForge's joint metadata never captures one, so fabricating a value
-    would silently claim data that doesn't exist."""
 
 
 def _build_assembly_urdf(
@@ -1391,6 +1386,88 @@ class CadqueryOperations:
                     "iyz": iyz,
                     "izz": izz,
                 },
+            }
+
+    def export_usd_assembly(
+        self,
+        parts: list[dict[str, Any]],
+        joints: list[dict[str, Any]],
+        robot_name: str = "robot",
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Export a multi-body ``.usda`` with real UsdPhysics joints.
+
+        Tier-2a (MET-706 session follow-on to ``export_usd``'s tier-1) --
+        same ``parts``/``joints`` shapes as ``export_urdf_assembly``/
+        ``export_sdf_assembly``. Still axis-aligned-inertia-only per part
+        (see ``usd_export.py``'s module docstring); see
+        ``_USD_JOINT_TYPE_MAP``'s comment there for the joint-type mapping
+        and ``_quat_align_x_to`` for how an arbitrary joint axis is
+        expressed against UsdPhysics's canonical-axis-token schema.
+        """
+        self._require_cadquery()
+
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+
+        with tracer.start_as_current_span("cadquery.export_usd_assembly") as span:
+            span.set_attribute("robot.name", robot_name)
+            span.set_attribute("parts.count", len(parts))
+            span.set_attribute("joints.count", len(joints))
+
+            start = time.monotonic()
+
+            if not output_path:
+                output_path = os.path.join(self.work_dir, f"{robot_name}.usda")
+            self._ensure_output_dir(output_path)
+            out_dir = os.path.dirname(output_path) or self.work_dir
+
+            links: list[dict[str, Any]] = []
+            mesh_files: list[str] = []
+            for part in parts:
+                link_name = part["link_name"]
+                shape = cq.importers.importStep(part["input_file"])
+                mp = self._compute_mass_properties(
+                    shape, part.get("material", ""), part.get("density_kg_m3")
+                )
+                mesh_path = os.path.join(out_dir, f"{link_name}.stl")
+                cq.exporters.export(shape, mesh_path, exportType="STL")
+                mesh_files.append(mesh_path)
+                points, face_vertex_indices, face_vertex_counts = parse_stl_mesh(mesh_path)
+                links.append(
+                    {
+                        "name": link_name,
+                        "points": points,
+                        "face_vertex_indices": face_vertex_indices,
+                        "face_vertex_counts": face_vertex_counts,
+                        "mass_kg": mp["mass_kg"],
+                        "com_m": mp["com_m"],
+                        "inertia_kgm2": mp["inertia_kgm2"],
+                    }
+                )
+
+            usda_text = build_usda_assembly(robot_name=robot_name, links=links, joints=joints)
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(usda_text)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Exported assembly USD",
+                robot_name=robot_name,
+                output_path=output_path,
+                link_count=len(links),
+                joint_count=len(joints),
+                duration_s=round(elapsed, 3),
+            )
+
+            return {
+                "output_file": output_path,
+                "mesh_files": mesh_files,
+                "robot_name": robot_name,
+                "link_names": [link["name"] for link in links],
+                "joint_names": [joint.get("name", "") for joint in joints],
             }
 
     def generate_ros2_launch(

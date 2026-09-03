@@ -669,6 +669,82 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_usd_assembly",
+                adapter_id="cadquery",
+                name="Export Assembly USD",
+                description=(
+                    "Export a multi-body .usda (USD) file with real UsdPhysics "
+                    "joints from a set of STEP parts plus a joint list (the same "
+                    "shape FreeCAD's add_assembly_joint/list_joints produce). Maps "
+                    "fixed->PhysicsFixedJoint, slider->PhysicsPrismaticJoint "
+                    "(requires explicit limits), revolute->PhysicsRevoluteJoint (no "
+                    "fabricated rotation limit), ball->PhysicsSphericalJoint (USD "
+                    "supports it natively); cylindrical joints are rejected -- no "
+                    "matching UsdPhysics joint type. Still axis-aligned-inertia-only "
+                    "per part, same tier-1 restriction as cadquery.export_usd."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "One entry per link: {input_file, link_name, "
+                                "material?, density_kg_m3?}"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "input_file": {"type": "string"},
+                                    "link_name": {"type": "string"},
+                                    "material": {"type": "string"},
+                                    "density_kg_m3": {"type": "number"},
+                                },
+                                "required": ["input_file", "link_name"],
+                            },
+                        },
+                        "joints": {
+                            "type": "array",
+                            "description": (
+                                "FreeCAD-shaped joint records: {name, type "
+                                "(fixed/slider/revolute/ball -- cylindrical rejected), "
+                                "base, follower, axis: [x,y,z], anchor: [x,y,z] (mm), "
+                                "limits?: {lower, upper} (required for slider joints)}"
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "robot_name": {
+                            "type": "string",
+                            "description": "USD defaultPrim/robot name (default 'robot')",
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .usda file path",
+                        },
+                    },
+                    "required": ["parts", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_files": {"type": "array", "items": {"type": "string"}},
+                        "robot_name": {"type": "string"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "joint_names": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_usd_assembly,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.generate_ros2_launch",
                 adapter_id="cadquery",
                 name="Generate ROS 2 Launch File",
@@ -1143,6 +1219,30 @@ class CadqueryServer(McpToolServer):
             prim_name=arguments.get("prim_name") or "model",
             material=arguments.get("material", ""),
             density_kg_m3=arguments.get("density_kg_m3"),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_usd_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a multi-body .usda file with real UsdPhysics joints."""
+        parts = arguments.get("parts") or []
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+        joints = arguments.get("joints")
+        if joints is None:
+            raise ValueError("joints is required (pass an empty list for no joints)")
+
+        logger.info("Exporting assembly USD", part_count=len(parts), joint_count=len(joints))
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_usd_assembly(
+            parts,
+            joints,
+            robot_name=arguments.get("robot_name") or "robot",
             output_path=arguments.get("output_path", ""),
         )
 

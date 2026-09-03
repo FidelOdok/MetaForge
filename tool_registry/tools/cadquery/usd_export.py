@@ -22,7 +22,14 @@ follow-on work, not silently approximated here.
 
 from __future__ import annotations
 
+import math
 import struct
+from typing import Any
+
+from tool_registry.tools.cadquery.joints import (
+    MissingJointLimitsError,
+    UnsupportedJointTypeError,
+)
 
 _BINARY_STL_HEADER_SIZE = 80
 _BINARY_STL_TRIANGLE_RECORD_SIZE = 50  # 12 (normal) + 36 (3 vertices) + 2 (attr count)
@@ -185,5 +192,170 @@ def Xform "{prim_name}" (
         int[] faceVertexIndices = [{indices_str}]
         int[] faceVertexCounts = [{counts_str}]
     }}
+}}
+'''
+
+
+# Tier-2a (MET-706 session follow-on to MET-713's single-body tier-1):
+# grounded against the same schema.usda's PhysicsRevoluteJoint/
+# PhysicsPrismaticJoint/PhysicsSphericalJoint/PhysicsFixedJoint classes.
+# `fixed`->PhysicsFixedJoint and `ball`->PhysicsSphericalJoint are direct,
+# faithful matches (USD has a native ball/spherical joint, same as SDF and
+# unlike URDF). `revolute`->PhysicsRevoluteJoint and `slider`->
+# PhysicsPrismaticJoint both take a `physics:lowerLimit`/`upperLimit` pair
+# that DEFAULTS to -inf/inf when omitted (per the schema's own defaults),
+# so -- same honesty rule as URDF's `continuous` and SDF's `continuous` --
+# `revolute` omits limits entirely rather than fabricating a range, while
+# `slider` requires the caller to supply one explicitly (a truly unbounded
+# prismatic joint is physically unusual, so silence there is more likely a
+# missing input than an intentional one). `cylindrical` has no matching
+# UsdPhysics joint type (no single 2-DOF translate+rotate-about-same-axis
+# joint exists in the schema) and is rejected, same as URDF/SDF.
+_USD_JOINT_TYPE_MAP = {
+    "fixed": "PhysicsFixedJoint",
+    "slider": "PhysicsPrismaticJoint",
+    "revolute": "PhysicsRevoluteJoint",
+    "ball": "PhysicsSphericalJoint",
+}
+_USD_UNSUPPORTED_JOINT_TYPES = {"cylindrical"}
+
+
+def _quat_align_x_to(axis: tuple[float, float, float]) -> tuple[float, float, float, float]:
+    """Shortest-arc quaternion (w, x, y, z) rotating the +X axis onto the
+    given (not necessarily unit-length) ``axis`` vector.
+
+    Needed because UsdPhysics's ``physics:axis`` is a canonical token
+    (``"X"``/``"Y"``/``"Z"``), not a free vector like URDF's/SDF's `<axis>`
+    -- an arbitrary joint axis has to be expressed by rotating the joint
+    frame (``physics:localRot0``/``localRot1``) so its local X aligns with
+    the real axis instead. Pure Python (no numpy) -- standard "quaternion
+    between two unit vectors" construction.
+    """
+    ax, ay, az = axis
+    norm = math.sqrt(ax * ax + ay * ay + az * az)
+    if norm < 1e-12:
+        raise ValueError("joint axis must be a non-zero vector")
+    ax, ay, az = ax / norm, ay / norm, az / norm
+
+    dot = ax  # dot((1,0,0), (ax,ay,az))
+    if dot > 1.0 - 1e-9:
+        return (1.0, 0.0, 0.0, 0.0)
+    if dot < -1.0 + 1e-9:
+        # 180 degrees about any axis perpendicular to +X -- +Y is as good
+        # as any and sends (1,0,0) to (-1,0,0) as required.
+        return (0.0, 0.0, 1.0, 0.0)
+
+    # cross((1,0,0), (ax,ay,az)) = (0, -az, ay)
+    cx, cy, cz = 0.0, -az, ay
+    w = 1.0 + dot
+    mag = math.sqrt(w * w + cx * cx + cy * cy + cz * cz)
+    return (w / mag, cx / mag, cy / mag, cz / mag)
+
+
+def build_usda_assembly(
+    *,
+    robot_name: str,
+    links: list[dict[str, Any]],
+    joints: list[dict[str, Any]],
+) -> str:
+    """Build a multi-body ``.usda`` document with real UsdPhysics joints.
+
+    ``links``: each ``{name, points, face_vertex_indices, face_vertex_counts,
+    mass_kg, com_m, inertia_kgm2}`` -- the per-part mesh + mass-property
+    shape ``build_usda`` takes, just N of them, each becoming its own
+    ``def Xform`` (physics APIs applied directly to it, per the same
+    UsdPhysics convention ``build_usda`` already follows).
+    ``joints``: the same FreeCAD-shaped records ``_build_assembly_urdf``/
+    ``_build_assembly_sdf`` take (``{name, type, base, follower, axis,
+    anchor, limits?}``) -- see ``_USD_JOINT_TYPE_MAP``'s comment above for
+    the type mapping.
+
+    Raises :class:`NonAxisAlignedInertiaError` per-link (same as
+    ``build_usda``), :class:`UnsupportedJointTypeError` for ``cylindrical``,
+    and :class:`MissingJointLimitsError` for a ``slider`` joint with no
+    ``limits`` supplied.
+    """
+    link_blocks: list[str] = []
+    for link in links:
+        ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
+        _check_axis_aligned(ixx, ixy, ixz, iyy, iyz, izz)
+        com_m = link["com_m"]
+        points_str = ", ".join(f"({x:.9g}, {y:.9g}, {z:.9g})" for x, y, z in link["points"])
+        indices_str = ", ".join(str(i) for i in link["face_vertex_indices"])
+        counts_str = ", ".join(str(c) for c in link["face_vertex_counts"])
+        link_blocks.append(f'''
+    def Xform "{link["name"]}" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+    )
+    {{
+        float physics:mass = {link["mass_kg"]:.9g}
+        point3f physics:centerOfMass = ({com_m[0]:.9g}, {com_m[1]:.9g}, {com_m[2]:.9g})
+        float3 physics:diagonalInertia = ({ixx:.9g}, {iyy:.9g}, {izz:.9g})
+        quatf physics:principalAxes = (1, 0, 0, 0)
+
+        def Mesh "geometry"
+        {{
+            point3f[] points = [{points_str}]
+            int[] faceVertexIndices = [{indices_str}]
+            int[] faceVertexCounts = [{counts_str}]
+        }}
+    }}''')
+
+    joint_blocks: list[str] = []
+    for joint in joints:
+        fc_type = joint["type"].lower()
+        if fc_type in _USD_UNSUPPORTED_JOINT_TYPES:
+            raise UnsupportedJointTypeError(
+                f"joint {joint.get('name', '?')!r} has type {fc_type!r}, which has no "
+                "matching UsdPhysics joint type (see _USD_JOINT_TYPE_MAP's module comment)"
+            )
+        usd_type = _USD_JOINT_TYPE_MAP[fc_type]
+        name = joint.get("name", f"{joint['base']}_to_{joint['follower']}")
+        anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+        pos = f"({anchor[0] * 1e-3:.9g}, {anchor[1] * 1e-3:.9g}, {anchor[2] * 1e-3:.9g})"
+
+        body_lines = [
+            f"    rel physics:body0 = </{robot_name}/{joint['base']}>",
+            f"    rel physics:body1 = </{robot_name}/{joint['follower']}>",
+            f"    point3f physics:localPos0 = {pos}",
+            f"    point3f physics:localPos1 = {pos}",
+        ]
+
+        extra_lines: list[str] = []
+        if usd_type in ("PhysicsRevoluteJoint", "PhysicsPrismaticJoint"):
+            axis = joint.get("axis") or (0.0, 0.0, 1.0)
+            w, x, y, z = _quat_align_x_to(axis)
+            body_lines.append(f"    quatf physics:localRot0 = ({w:.9g}, {x:.9g}, {y:.9g}, {z:.9g})")
+            body_lines.append(f"    quatf physics:localRot1 = ({w:.9g}, {x:.9g}, {y:.9g}, {z:.9g})")
+            extra_lines.append('    uniform token physics:axis = "X"')
+            if usd_type == "PhysicsPrismaticJoint":
+                limits = joint.get("limits")
+                if not limits:
+                    raise MissingJointLimitsError(
+                        f"joint {name!r} is a prismatic (slider) joint -- no 'limits' "
+                        "({'lower','upper'}) was supplied for it, and MetaForge's joint "
+                        "metadata never captures one, so it must be passed explicitly "
+                        "rather than fabricated"
+                    )
+                extra_lines.append(f"    float physics:lowerLimit = {limits['lower']:.9g}")
+                extra_lines.append(f"    float physics:upperLimit = {limits['upper']:.9g}")
+
+        block = "\n".join([f'def {usd_type} "{name}"', "{", *body_lines, *extra_lines, "}"])
+        joint_blocks.append("\n    " + block.replace("\n", "\n    "))
+
+    links_str = "\n".join(link_blocks)
+    joints_str = "\n".join(joint_blocks)
+
+    return f'''#usda 1.0
+(
+    defaultPrim = "{robot_name}"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "{robot_name}"
+{{
+{links_str}
+{joints_str}
 }}
 '''

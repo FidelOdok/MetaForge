@@ -1059,6 +1059,50 @@ class TestExportUsd:
             ops.export_usd("part.step", output_path=str(tmp_path / "tilted.usda"))
 
 
+class TestExportUsdAssembly:
+    """MET-706 session (tier-2a): the multi-part CadQuery-facing entry point
+    for multi-body USD with real UsdPhysics joints."""
+
+    def test_writes_multi_body_usda_with_per_part_mass_properties(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "robot.usda")
+        parts = [
+            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
+        ]
+        joints = [
+            {"name": "j1", "type": "ball", "base": "base", "follower": "arm"},
+        ]
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUsd()),
+        ):
+            result = ops.export_usd_assembly(
+                parts, joints, robot_name="my_robot", output_path=output_path
+            )
+
+        assert result["link_names"] == ["base", "arm"]
+        assert result["joint_names"] == ["j1"]
+        assert len(result["mesh_files"]) == 2
+        for mesh_file in result["mesh_files"]:
+            assert Path(mesh_file).exists()
+
+        usda_text = Path(output_path).read_text()
+        assert 'def Xform "my_robot"' in usda_text
+        assert 'def Xform "base"' in usda_text
+        assert 'def Xform "arm"' in usda_text
+        assert 'def PhysicsSphericalJoint "j1"' in usda_text
+
+    def test_empty_parts_raises(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUsd()),
+        ):
+            with pytest.raises(ValueError, match="parts is required"):
+                ops.export_usd_assembly([], [])
+
+
 class TestGenerateRos2Launch:
     """MET-706 session: ROS 2 launch file generation -- pure text, no
     CadQuery/geometry involved, unlike this class's other export_* methods."""
