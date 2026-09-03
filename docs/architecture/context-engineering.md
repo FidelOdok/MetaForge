@@ -2,7 +2,9 @@
 
 > **Status:** P1.13 foundation shipped (MET-315 / 316 / 317 / 322 / 323).
 > Wired into the live chat path per turn since MET-566 — see
-> [Live chat wiring](#live-chat-wiring-met-566) below.
+> [Live chat wiring](#live-chat-wiring-met-566) below. The deposit side
+> (what fills the memory tier the assembler reads) landed in MET-567 —
+> see [Filling the memory tier](#filling-the-memory-tier-met-567).
 > Keep this doc as the canonical reference; update inline rather than
 > forking when extending the protocol.
 
@@ -264,6 +266,73 @@ current date → tool-family capability summary (from the runtime's
 registry) → project brief → response guidance (cite bracketed source
 ids).
 
+## Filling the memory tier (MET-567)
+
+Retrieval is only half of context engineering: something has to *deposit*
+what gets retrieved. Until MET-567 the deposit side was wired in one
+place only — `MechanicalAgent` — and consolidation read from a fetcher
+that a pgvector deployment never populates, so `agent_experiences` and
+`memory.list_insights` were near-empty in every real deployment no
+matter how much traffic the system saw. Five seams close that:
+
+| Deposit path | Where | What lands |
+| --- | --- | --- |
+| Chat turn | `api_gateway/chat/experience_adapter.py` | one experience per **tool-using** turn: goal, tools used, failures, outcome |
+| Completed session | `digital_twin/memory/session_bridge.py`, installed by `api_gateway/sessions/experience_bridge.py` | one experience per session: tool inventory, decisions, failures |
+| Recorded decision | `api_gateway/twin/work_product_events.py` → `KnowledgeConsumer` | a `DESIGN_DECISION` knowledge chunk |
+| Consolidation batch | `digital_twin/memory/consolidation/fetcher.py::PgVectorEventFetcher` | reads `agent_experiences` by time window in SQL |
+| Consolidation cadence | `digital_twin/memory/consolidation/scheduler.py` | one BACKGROUND pass per interval |
+
+Design points worth keeping:
+
+- **Only tool-using turns are recorded.** A turn where the model just
+  answered has no trajectory to learn from, and the design-flow
+  handlers' one-shot extraction prompts (`max_steps=1`, no bridge)
+  would otherwise flood the corpus with prompt-engineering noise.
+- **One experience per session, not per event.** The lesson worth
+  recalling is "how did this piece of work go"; per-event rows would
+  bury it under individual tool calls.
+- **Importance uses the same scorer everywhere.** Both new paths score
+  through `digital_twin/memory/importance.py::score_importance` (via a
+  synthetic `AGENT_TASK_*` event) rather than inventing their own
+  formula, because the consolidation pass applies one `min_importance`
+  floor across the whole corpus — a second formula would silently
+  change what that floor means per deposit path.
+- **The session deposit hooks the store, not the callers.** All three
+  `complete_session` callers (REST route, `session.complete` MCP tool,
+  sidecar idle rollover) go through the store, so
+  `ExperienceBridgingSessionStore` wraps it once instead of leaving the
+  next caller to rediscover the requirement.
+- **Every deposit is best-effort.** A memory-tier failure never fails a
+  chat turn, a session completion, or a decision recording.
+
+`WORK_PRODUCT_CREATED` is the event `KnowledgeConsumer` has subscribed
+to since MET-307 while nothing published one. `twin.record_decision`
+now publishes it (returning `knowledge_indexed` in its result), which is
+what makes a just-recorded decision findable via
+`knowledge.search(knowledge_type=DESIGN_DECISION)`.
+
+### Consolidation cadence
+
+`ConsolidationScheduler` runs one BACKGROUND pass per interval from the
+gateway lifespan. It is an asyncio task rather than a Temporal schedule
+because the gateway runs no Temporal worker today
+(`orchestrator/temporal_worker.py` registers the agent workflows only),
+so a Temporal schedule would have left consolidation dormant — the exact
+failure being fixed. The interval reuses the MET-454 spec's
+`DEFAULT_INTERVAL_SECONDS` (30 min) so the two drivers of the same
+pipeline cannot drift; each pass looks back twice the interval so an
+experience written near a boundary still falls inside the next window.
+
+| Env var | Default | Effect |
+| --- | --- | --- |
+| `METAFORGE_CONSOLIDATION_INTERVAL_SECONDS` | `1800` | Seconds between passes; `0` (or a negative value) disables the loop — set this when handing the job to a Temporal worker |
+
+`MemoryClient` is now constructed with the `knowledge_service` in both
+bootstraps (gateway and MCP sidecar). Omitting it left
+`POST /v1/memory/search` and `GET /v1/memory/components/{name}`
+answering 503 on every deployment.
+
 ## Observability hooks
 
 - `context.assemble`, `context.collect_knowledge`,
@@ -310,3 +379,6 @@ Adding a tracked conflict field:
 - MET-317 — Token budgets + composite priority.
 - MET-322 — Conflict detection.
 - MET-323 — Staleness aging.
+- MET-567 — Memory deposit paths + consolidation cadence.
+- MET-569 — Tool-call hardening (see
+  [robust-harness-design.md](robust-harness-design.md#tool-call-hardening-met-569)).

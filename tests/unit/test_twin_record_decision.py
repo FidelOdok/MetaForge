@@ -203,6 +203,83 @@ class TestAdapterHandler:
             await server.record_decision({"title": "t"})
 
 
+class TestKnowledgeIndexing:
+    """MET-567: a recorded decision must also become searchable knowledge.
+
+    Before this, ``twin.record_decision`` created the node and the blob but
+    published nothing, so the agent could not find with
+    ``knowledge.search(knowledge_type=DESIGN_DECISION)`` the very decision it
+    had just been instructed to record.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_bus(self):
+        from api_gateway.twin.work_product_events import init_work_product_events
+
+        yield
+        init_work_product_events(None)
+
+    async def test_recording_publishes_a_work_product_created_event(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.work_product_events import init_work_product_events
+        from orchestrator.event_bus.events import EventType
+
+        _patch_blob(monkeypatch)
+        published: list[Any] = []
+
+        class _Bus:
+            async def publish(self, event: Any) -> None:
+                published.append(event)
+
+        init_work_product_events(_Bus())
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+
+        result = await record(title="Slot remodel", rationale="slots beat holes")
+
+        assert result["knowledge_indexed"] is True
+        event = published[0]
+        assert event.type is EventType.WORK_PRODUCT_CREATED
+        assert event.data["work_product_id"] == result["node_id"]
+        assert event.data["work_product_type"] == "design_decision"
+        assert "slots beat holes" in event.data["content"]
+        assert event.source == "twin.record_decision"
+
+    async def test_recording_still_succeeds_with_no_bus_wired(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.work_product_events import init_work_product_events
+
+        _patch_blob(monkeypatch)
+        init_work_product_events(None)
+        twin = InMemoryTwinAPI.create()
+
+        result = await make_decision_recorder(twin, None)(title="D", rationale="r")
+
+        assert result["knowledge_indexed"] is False
+        assert await twin.get_work_product(UUID(result["node_id"])) is not None
+
+    async def test_a_publish_failure_never_fails_the_recording(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.work_product_events import init_work_product_events
+
+        _patch_blob(monkeypatch)
+
+        class _BrokenBus:
+            async def publish(self, event: Any) -> None:
+                raise RuntimeError("kafka down")
+
+        init_work_product_events(_BrokenBus())
+        twin = InMemoryTwinAPI.create()
+
+        result = await make_decision_recorder(twin, None)(title="D", rationale="r")
+
+        assert result["knowledge_indexed"] is False
+        assert await twin.get_work_product(UUID(result["node_id"])) is not None
+
+
 def test_design_decision_enum_parses() -> None:
     assert WorkProductType("design_decision") is WorkProductType.DESIGN_DECISION
     # blob_store re-export still works (backward compat)

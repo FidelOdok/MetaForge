@@ -809,13 +809,18 @@ def _build_component_intent_llm() -> Any:
         return None
 
 
-async def _build_memory_client() -> tuple[Any, Any]:
-    """Construct ``MemoryClient`` + experience store for the standalone MCP entrypoint.
+async def _build_memory_client(knowledge_service: Any = None) -> tuple[Any, Any, Any]:
+    """Construct ``MemoryClient`` + experience store + embedder for the MCP entrypoint.
 
     Mirrors ``api_gateway/server.py``'s memory wiring (MET-453). Returns
-    ``(client, store)`` so the caller can close the pgvector pool on
-    shutdown. Returns ``(None, None)`` when no embedding backend is
+    ``(client, store, embeddings)`` so the caller can close the pgvector pool
+    on shutdown and reuse the embedder for the session→experience bridge
+    (MET-567). Returns ``(None, None, None)`` when no embedding backend is
     available — the rest of the MCP surface stays usable.
+
+    ``knowledge_service`` is passed through to the client so
+    ``memory.search_design_rationale`` / ``get_component_context`` work here
+    too, instead of raising the way they did with the L1 service omitted.
     """
     try:
         from digital_twin.knowledge.embedding_service import create_embedding_service
@@ -844,11 +849,11 @@ async def _build_memory_client() -> tuple[Any, Any]:
             store = InMemoryExperienceStore()
             logger.info("mcp_memory_store_in_memory_initialised")
 
-        client = MemoryClient(store, embeddings)
-        return client, store
+        client = MemoryClient(store, embeddings, knowledge_service=knowledge_service)
+        return client, store, embeddings
     except Exception as exc:
         logger.warning("mcp_memory_client_init_failed", error=str(exc))
-        return None, None
+        return None, None, None
 
 
 async def _close_memory_store(store: Any) -> None:
@@ -973,7 +978,7 @@ async def _bootstrap(
     # MET-453: build the memory client so `memory.retrieve_similar_experience`
     # is exposed alongside knowledge.* when the standalone stdio MCP
     # server is the entrypoint (Claude Code / Cursor talking direct).
-    memory_client, memory_store = await _build_memory_client()
+    memory_client, memory_store, memory_embeddings = await _build_memory_client(knowledge_service)
     # MET-477 / G1: build the consolidation insight store so
     # ``memory.list_insights`` doesn't error out with
     # "set_insight_store was never called". The gateway has the full
@@ -983,6 +988,31 @@ async def _bootstrap(
     # Shares the DATABASE_URL-selected backend with the gateway so captured
     # sessions land in the same Postgres the /sessions routes read.
     agent_session_store = await _build_agent_session_store()
+    # MET-567: the sidecar is where Layer-A auto-capture runs, so it closes
+    # more sessions than the gateway does — wrap the store so each completion
+    # (including an idle rollover) deposits an experience.
+    try:
+        from api_gateway.sessions.experience_bridge import wrap_with_experience_bridge
+
+        agent_session_store = wrap_with_experience_bridge(
+            agent_session_store, memory_store, memory_embeddings
+        )
+    except Exception as exc:  # noqa: BLE001 — capture must never block boot
+        logger.warning("mcp_session_experience_bridge_failed", error=str(exc))
+    # MET-567: publish WORK_PRODUCT_CREATED from the twin recorders onto an
+    # in-process bus carrying the KnowledgeConsumer, so a decision recorded
+    # over MCP becomes searchable knowledge here too (not only in the gateway).
+    try:
+        from api_gateway.twin.work_product_events import init_work_product_events
+        from orchestrator.event_bus.subscribers import create_default_bus
+
+        init_work_product_events(
+            create_default_bus(knowledge_service=knowledge_service)
+            if knowledge_service is not None
+            else None
+        )
+    except Exception as exc:  # noqa: BLE001 — indexing is best-effort
+        logger.warning("mcp_work_product_events_wiring_failed", error=str(exc))
     # MET-495: the decision recorder composes twin + project backend + MinIO
     # blob store; built here (api_gateway is importable) and injected so the
     # twin adapter exposes twin.record_decision without layer violations.

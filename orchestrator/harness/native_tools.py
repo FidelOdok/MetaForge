@@ -11,10 +11,16 @@ The loop speaks one canonical (OpenAI-compatible) message shape — ``openai_inv
 returns ``{text, tool_calls:[{id,name,arguments}]}`` directly (OpenAI / OpenRouter /
 vLLM / Ollama), and ``anthropic_invoke`` translates that shape to/from Anthropic's
 ``tool_use``/``tool_result`` blocks — so the same loop drives Claude models too.
+
+A batch of tool calls is executed with three properties (MET-569): independent
+calls run concurrently, an identical repeat within the same turn reuses the
+first result instead of re-running the tool, and a failure comes back to the
+model as a structured envelope rather than a flattened string.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -29,6 +35,7 @@ from orchestrator.harness.providers.pipeline import Invoke, StreamEvents
 from orchestrator.harness.providers.pricing import DEFAULT_PRICING, TokenPricing, estimate_cost_usd
 from orchestrator.harness.react import OnStep, ReActResult, ReActStep, ToolCall
 from orchestrator.harness.runtime import HarnessRuntime
+from orchestrator.harness.validation import ToolValidationError
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.native_tools")
@@ -111,6 +118,146 @@ def _json_safe(value: Any) -> str:
     return truncate_observation_value(value, _MAX_OBSERVATION_CHARS, render=_render_json)
 
 
+_CACHED_NOTE = (
+    "identical call already made this turn -- the previous successful result is "
+    "reused verbatim and the tool was NOT executed again"
+)
+
+
+def _dedup_key(name: str, arguments: dict[str, Any]) -> str:
+    """Stable identity for one (tool, arguments) pair within a turn."""
+    try:
+        return json.dumps({"tool": name, "arguments": arguments}, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return f"{name}:{arguments!r}"
+
+
+def _error_content(exc: Exception) -> str:
+    """Render a failed call as a structured result the model can act on.
+
+    MET-569: this used to be ``f"ERROR: {exc}"``. An MCP adapter's error
+    envelope -- its status, its message, and any hint it carried about what to
+    do instead -- was flattened into one opaque line, so a model could not tell
+    "the container is down, stop trying" from "that argument was wrong, fix it".
+    """
+    if isinstance(exc, ToolValidationError):
+        return _render_json(exc.to_payload())
+    payload: dict[str, Any] = {"status": "error", "error": str(exc)}
+    tool_id = getattr(exc, "tool_id", None)
+    if isinstance(tool_id, str) and tool_id:
+        payload["tool"] = tool_id
+    envelope = getattr(exc, "payload", None)
+    if isinstance(envelope, dict) and envelope:
+        payload["details"] = envelope
+    return _render_json(payload)
+
+
+def _requires_approval(runtime: HarnessRuntime, name: str) -> bool:
+    try:
+        return bool(runtime.tools.get(name).requires_approval)
+    except Exception:  # noqa: BLE001 — an unknown tool fails in call_tool, not here
+        return False
+
+
+async def _execute_calls(
+    runtime: HarnessRuntime,
+    calls: list[dict[str, Any]],
+    thought: str,
+    cache: dict[str, Any],
+) -> list[tuple[ReActStep, str, str]]:
+    """Execute one batch of model-emitted calls.
+
+    Returns ``(step, tool_message_content, tool_call_id)`` in the model's
+    original call order — providers match results to calls by id, and the trace
+    should read in the order the model asked for.
+
+    The batch runs concurrently, which is the whole point of a provider emitting
+    parallel calls; before MET-569 they were awaited one at a time, so four
+    independent reads cost four serial round-trips. Exceptions are isolated per
+    call: one failing tool never cancels its siblings.
+    """
+    entries: list[tuple[str, str, dict[str, Any], str]] = []
+    for c in calls:
+        name = str(c["name"])
+        args = c.get("arguments") or {}
+        entries.append((str(c["id"]), name, args, _dedup_key(name, args)))
+
+    # One execution per distinct (tool, arguments) — this collapses duplicates
+    # *within* the batch as well as against earlier steps in the same turn.
+    pending: dict[str, tuple[str, dict[str, Any]]] = {}
+    for _cid, name, args, key in entries:
+        if key not in cache and key not in pending:
+            pending[key] = (name, args)
+
+    outcomes: dict[str, tuple[Any, Exception | None]] = {}
+    if pending:
+        keys = list(pending)
+
+        async def _call(key: str) -> tuple[Any, Exception | None]:
+            call_name, call_args = pending[key]
+            try:
+                return await runtime.call_tool(call_name, call_args), None
+            except Exception as exc:  # noqa: BLE001 - surface to the model, don't abort
+                logger.warning("native_tool_error", tool=call_name, error=str(exc))
+                return None, exc
+
+        # A tool that pauses for a human decision must not do so alongside
+        # others: concurrent approval prompts race for one approver, and a
+        # queued call can hit its deny-by-default timeout while the person is
+        # still answering the first. A batch containing one runs serially.
+        if any(_requires_approval(runtime, pending[k][0]) for k in keys):
+            for key in keys:
+                outcomes[key] = await _call(key)
+        else:
+            gathered = await asyncio.gather(*(_call(k) for k in keys))
+            outcomes = dict(zip(keys, gathered, strict=True))
+
+    results: list[tuple[ReActStep, str, str]] = []
+    served: set[str] = set()
+    for cid, name, args, key in entries:
+        outcome = outcomes.get(key)
+        if outcome is not None and key not in served:
+            observation, exc = outcome
+            served.add(key)
+            if exc is not None:
+                # Failures are never cached: whatever caused them (an adapter
+                # restarting, a lock clearing) may have changed by the time the
+                # model tries again.
+                step = ReActStep(thought=thought, tool_call=ToolCall(name, args), error=str(exc))
+                results.append((step, _error_content(exc), cid))
+                continue
+            cache[key] = observation
+            step = ReActStep(
+                thought=thought, tool_call=ToolCall(name, args), observation=observation
+            )
+            results.append((step, _json_safe(observation), cid))
+            continue
+
+        if key not in cache:
+            # The single execution for this key failed, so every duplicate of
+            # it gets the same structured error rather than a bogus cache hit.
+            _observation, exc = outcomes.get(key, (None, None))
+            step = ReActStep(
+                thought=thought,
+                tool_call=ToolCall(name, args),
+                error=str(exc) if exc else "tool call not executed",
+            )
+            content = _error_content(exc) if exc else _render_json({"status": "error"})
+            results.append((step, content, cid))
+            continue
+
+        # The step's observation is the SAME envelope the model receives, so
+        # the reuse is visible everywhere the trace goes -- the live SSE step
+        # feed, the durable session log, and ``score_sessions`` replay. An
+        # earlier cut marked only the model's copy, which left the dedup
+        # invisible to every observer and unassertable in the eval suite.
+        cached_view = {"cached": True, "note": _CACHED_NOTE, "result": cache[key]}
+        logger.info("native_tool_call_deduplicated", tool=name)
+        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=cached_view)
+        results.append((step, _json_safe(cached_view), cid))
+    return results
+
+
 async def run_native_tools(
     runtime: HarnessRuntime,
     goal: str,
@@ -159,6 +306,10 @@ async def run_native_tools(
     tools = _tool_schemas(runtime)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
+    # MET-569: (tool, arguments) -> observation, for this turn only. Scoped to
+    # the turn deliberately — the same call in a *later* turn may be the user
+    # asking for current state, which is a legitimate re-read.
+    tool_cache: dict[str, Any] = {}
     # MET-596: sum provider-reported usage across the turn's model calls.
     usage_total = {"input_tokens": 0, "output_tokens": 0}
     usage_seen = False
@@ -270,25 +421,12 @@ async def run_native_tools(
                     ],
                 }
             )
-            for c in calls:
-                name = c["name"]
-                args = c.get("arguments") or {}
-                try:
-                    observation = await runtime.call_tool(name, args)
-                    content = _json_safe(observation)
-                    steps.append(
-                        ReActStep(
-                            thought=text, tool_call=ToolCall(name, args), observation=observation
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001 - surface to the model, don't abort
-                    content = f"ERROR: {exc}"
-                    steps.append(
-                        ReActStep(thought=text, tool_call=ToolCall(name, args), error=str(exc))
-                    )
-                    logger.warning("native_tool_error", tool=name, error=str(exc))
-                await _emit(steps[-1])
-                messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
+            for step, content, call_id in await _execute_calls(
+                runtime, list(calls), text, tool_cache
+            ):
+                steps.append(step)
+                await _emit(step)
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": content})
 
         # Step cap, deadline, or spend cap hit — force a final text answer (no
         # tools) so we never return empty.

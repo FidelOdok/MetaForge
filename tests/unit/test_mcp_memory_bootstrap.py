@@ -14,10 +14,13 @@ async def test_build_memory_client_returns_in_memory_when_no_db_url(monkeypatch)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    client, store = await _build_memory_client()
+    client, store, embeddings = await _build_memory_client()
     try:
         assert isinstance(client, MemoryClient)
         assert isinstance(store, InMemoryExperienceStore)
+        # MET-567: the embedder is returned so the session→experience bridge
+        # can reuse it instead of constructing a second one.
+        assert embeddings is not None
     finally:
         await _close_memory_store(store)
 
@@ -29,7 +32,7 @@ async def test_build_memory_client_falls_back_to_in_memory_on_pgvector_failure(m
     monkeypatch.setenv("DATABASE_URL", "postgresql://invalid:invalid@127.0.0.1:1/none")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    client, store = await _build_memory_client()
+    client, store, _embeddings = await _build_memory_client()
     try:
         assert isinstance(client, MemoryClient)
         assert isinstance(store, InMemoryExperienceStore)
@@ -38,9 +41,24 @@ async def test_build_memory_client_falls_back_to_in_memory_on_pgvector_failure(m
 
 
 @pytest.mark.asyncio
+async def test_build_memory_client_passes_the_knowledge_service_through(monkeypatch):
+    # MET-567: omitting it left POST /v1/memory/search and
+    # GET /v1/memory/components/{name} answering 503 on every deployment.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    sentinel = object()
+
+    client, store, _embeddings = await _build_memory_client(sentinel)
+    try:
+        assert client._knowledge is sentinel  # noqa: SLF001
+    finally:
+        await _close_memory_store(store)
+
+
+@pytest.mark.asyncio
 async def test_close_memory_store_tolerates_none():
     # Defensive: the close helper must not raise on a None argument because
-    # _build_memory_client may return (None, None) on cold-path failures.
+    # _build_memory_client may return (None, None, None) on cold-path failures.
     await _close_memory_store(None)
 
 

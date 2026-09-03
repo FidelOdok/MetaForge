@@ -455,6 +455,9 @@ async def _invoke_agent(
                     chat_backend=_backend,
                     twin=_twin,
                     metrics=_metrics,
+                    # MET-567: scope this turn's experience deposit to the
+                    # thread's project (None on an unscoped assistant thread).
+                    project_id=capture_project,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(

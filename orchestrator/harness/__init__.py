@@ -31,6 +31,7 @@ from orchestrator.harness.three_agent import (
     ThreeAgentHarness,
 )
 from orchestrator.harness.toolkit import AgentContext, NativeToolDef, build_agent_runtime
+from orchestrator.harness.validation import ToolValidationError
 
 __all__ = [
     "AgentContext",
@@ -45,5 +46,6 @@ __all__ = [
     "NativeToolDef",
     "Planner",
     "ThreeAgentHarness",
+    "ToolValidationError",
     "build_agent_runtime",
 ]
