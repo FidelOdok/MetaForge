@@ -31,6 +31,77 @@ from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
 from twin_core.versioning.git_backend import GitVersionEngine
 
+DEFAULT_NEO4J_CONNECT_ATTEMPTS = 5
+"""Connect attempts before falling back (MET-710).
+
+A live incident: the gateway and Neo4j restarted together, the gateway resolved
+``neo4j`` a moment before its DNS entry existed, and it ran on the in-memory
+twin for 43 hours — ignoring 623 persisted nodes, with ``/health`` still
+reporting healthy. The proof that a retry is the right fix is in the same boot
+log: the *consolidation insight store*, which connects to the same URI slightly
+later in the lifespan, succeeded. The name was resolvable seconds afterwards.
+
+Five attempts with the backoff below span ~7.5s, which covers a container-DNS
+race without meaningfully delaying a boot where Neo4j is genuinely absent."""
+
+_NEO4J_CONNECT_BACKOFF = (0.5, 1.0, 2.0, 4.0)
+
+
+def neo4j_connect_attempts() -> int:
+    """Configured connect attempts; ``METAFORGE_NEO4J_CONNECT_ATTEMPTS``."""
+    raw = os.environ.get("METAFORGE_NEO4J_CONNECT_ATTEMPTS", "").strip()
+    if not raw:
+        return DEFAULT_NEO4J_CONNECT_ATTEMPTS
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_NEO4J_CONNECT_ATTEMPTS
+
+
+async def _connect_with_retry(
+    graph: Any,
+    uri: str,
+    logger: Any,
+    *,
+    attempts: int | None = None,
+    sleep: Any = None,
+) -> None:
+    """Connect to Neo4j, retrying transient failures. Re-raises the last error.
+
+    The caller decides what a final failure means (``create_from_env``'s
+    contract is to propagate, and the gateway then either fails fast or falls
+    back per ``METAFORGE_REQUIRE_NEO4J``) — this only removes the case where a
+    *momentary* DNS or startup race is treated as a permanent absence.
+    """
+    import asyncio
+
+    total = attempts if attempts is not None else neo4j_connect_attempts()
+    delay = sleep if sleep is not None else asyncio.sleep
+    last: Exception | None = None
+    for attempt in range(total):
+        try:
+            await graph.connect()
+            if attempt:
+                logger.info("neo4j_connect_recovered", uri=uri, attempt=attempt + 1)
+            return
+        except Exception as exc:  # noqa: BLE001 — retried, then re-raised below
+            last = exc
+            if attempt == total - 1:
+                break
+            wait = _NEO4J_CONNECT_BACKOFF[min(attempt, len(_NEO4J_CONNECT_BACKOFF) - 1)]
+            logger.warning(
+                "neo4j_connect_retrying",
+                uri=uri,
+                attempt=attempt + 1,
+                of=total,
+                retry_in_s=wait,
+                error=str(exc),
+            )
+            await delay(wait)
+    assert last is not None
+    logger.error("neo4j_connect_exhausted", uri=uri, attempts=total, error=str(last))
+    raise last
+
 
 @dataclass
 class OrphanReport:
@@ -444,7 +515,7 @@ class InMemoryTwinAPI(TwinAPI):
                 user=user,
                 password=password,
             )
-            await graph.connect()  # type: ignore[attr-defined]
+            await _connect_with_retry(graph, uri, _logger)
             _logger.info("twin_api_neo4j_connected", uri=uri)
         else:
             graph = InMemoryGraphEngine(collector=collector)
