@@ -17,13 +17,22 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 
 import structlog
 
 from observability.tracing import get_tracer
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.cadquery.operations")
+
+# URDF/mass-property unit conversion -- CadQuery/OCCT report volume in mm^3
+# and inertia in mm^5 (both implicitly unit-density); URDF wants SI (m, kg,
+# kg*m^2). See export_urdf()'s docstring for the derivation.
+_MM_TO_M = 1e-3
+_MM3_TO_M3 = 1e-9  # (1e-3)^3
+_MM5_TO_M5 = 1e-15  # (1e-3)^5
 
 # Conditional CadQuery import
 try:
@@ -198,6 +207,57 @@ _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
         "wall_thickness": 2.0,
     },
 }
+
+
+def _build_single_link_urdf(
+    *,
+    link_name: str,
+    mesh_uri: str,
+    mass_kg: float,
+    com_m: tuple[float, float, float],
+    inertia_kgm2: tuple[float, float, float, float, float, float],
+) -> str:
+    """Build a single-link URDF document (visual + collision + inertial).
+
+    Built with ``xml.etree.ElementTree`` rather than string formatting so
+    ``link_name``/``mesh_uri`` (caller-controlled strings) are XML-escaped
+    correctly rather than risking malformed or injected markup.
+
+    Visual and collision share the same mesh -- acceptable for a single
+    authored part; a real robot pipeline would want a simplified collision
+    hull, which is out of scope for this tier-1 cut (no joints either, see
+    ``CadqueryOperations.export_urdf``'s docstring).
+    """
+    ixx, ixy, ixz, iyy, iyz, izz = inertia_kgm2
+    robot = ET.Element("robot", name=f"{link_name}_robot")
+    link = ET.SubElement(robot, "link", name=link_name)
+
+    for tag in ("visual", "collision"):
+        section = ET.SubElement(link, tag)
+        geometry = ET.SubElement(section, "geometry")
+        ET.SubElement(geometry, "mesh", filename=mesh_uri)
+
+    inertial = ET.SubElement(link, "inertial")
+    ET.SubElement(
+        inertial,
+        "origin",
+        xyz=f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g}",
+        rpy="0 0 0",
+    )
+    ET.SubElement(inertial, "mass", value=f"{mass_kg:.9g}")
+    ET.SubElement(
+        inertial,
+        "inertia",
+        ixx=f"{ixx:.9g}",
+        ixy=f"{ixy:.9g}",
+        ixz=f"{ixz:.9g}",
+        iyy=f"{iyy:.9g}",
+        iyz=f"{iyz:.9g}",
+        izz=f"{izz:.9g}",
+    )
+
+    ET.indent(robot, space="  ")
+    return '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
 
 
 class CadqueryOperations:
@@ -513,6 +573,125 @@ class CadqueryOperations:
                 "output_file": output_path,
                 "file_size_bytes": file_size,
                 "format": output_format,
+            }
+
+    def export_urdf(
+        self,
+        input_file: str,
+        link_name: str = "base_link",
+        material: str = "",
+        density_kg_m3: float | None = None,
+        mesh_format: str = "stl",
+        mesh_uri_prefix: str = "",
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Export a single-link URDF (robot description) for a STEP file.
+
+        Tier-1 URDF support (MET-706 session): one link, no joints -- a
+        multi-body assembly with real kinematic joints needs the FreeCAD
+        assembly-joint tools (``freecad_add_assembly_joint``) mapped to
+        URDF's ``<joint>`` schema, which is separate follow-on work.
+
+        Reuses exactly the mass-property data ``get_properties`` already
+        computes (``Solid.MatrixOfInertia()`` -- unit-density, i.e.
+        geometric moments about the center of mass, per that method's own
+        docstring) rather than introducing a second computation path, and
+        the existing ``export_geometry`` machinery for the companion mesh.
+        The one new ingredient is ``material``: nothing previously
+        converted it to a density (see ``materials.py``), but URDF's
+        ``<inertial>`` block needs a real mass, not a geometric volume.
+
+        Unit conversion: CadQuery/OCCT report volume in mm^3 and inertia in
+        mm^5 (both implicitly unit-density -- ``density=1``). URDF expects
+        SI: mass in kg, inertia in kg*m^2, lengths in m.
+            mass_kg           = volume_mm3 * 1e-9 * density_kg_m3
+            inertia_kgm2      = inertia_mm5 * 1e-15 * density_kg_m3
+            (1 mm^3 = 1e-9 m^3; 1 mm^5 = 1e-15 m^5)
+        """
+        self._require_cadquery()
+
+        with tracer.start_as_current_span("cadquery.export_urdf") as span:
+            span.set_attribute("input.file", input_file)
+            span.set_attribute("link.name", link_name)
+
+            start = time.monotonic()
+
+            shape = cq.importers.importStep(input_file)
+            solid = shape.val()
+
+            volume_mm3 = solid.Volume()
+            com = solid.Center()
+            inertia_geo = solid.MatrixOfInertia()
+
+            density = resolve_density_kg_m3(material, density_kg_m3)
+            mass_kg = volume_mm3 * _MM3_TO_M3 * density
+
+            def _inertia(r: int, c: int) -> float:
+                return inertia_geo.Value(r + 1, c + 1) * _MM5_TO_M5 * density
+
+            ixx, ixy, ixz = _inertia(0, 0), _inertia(0, 1), _inertia(0, 2)
+            iyy, iyz = _inertia(1, 1), _inertia(1, 2)
+            izz = _inertia(2, 2)
+            com_m = (com.x * _MM_TO_M, com.y * _MM_TO_M, com.z * _MM_TO_M)
+
+            if not output_path:
+                stem = Path(input_file).stem
+                output_path = os.path.join(self.work_dir, f"{stem}.urdf")
+            self._ensure_output_dir(output_path)
+
+            out_dir = os.path.dirname(output_path) or self.work_dir
+            mesh_stem = Path(output_path).stem
+            mesh_path = os.path.join(out_dir, f"{mesh_stem}.{mesh_format}")
+            cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+            mesh_uri = mesh_uri_prefix + os.path.basename(mesh_path)
+
+            urdf_xml = _build_single_link_urdf(
+                link_name=link_name,
+                mesh_uri=mesh_uri,
+                mass_kg=mass_kg,
+                com_m=com_m,
+                inertia_kgm2=(ixx, ixy, ixz, iyy, iyz, izz),
+            )
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(urdf_xml)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Exported URDF",
+                input_file=input_file,
+                output_path=output_path,
+                mesh_path=mesh_path,
+                mass_kg=round(mass_kg, 6),
+                duration_s=round(elapsed, 3),
+            )
+
+            return {
+                "output_file": output_path,
+                "mesh_file": mesh_path,
+                "link_name": link_name,
+                "density_kg_m3": density,
+                # Not decimal-place-rounded -- same reasoning as inertia_kgm2
+                # below: a small real part can legitimately mass < 1e-6 kg.
+                "mass_kg": mass_kg,
+                "center_of_mass_m": {
+                    "x": round(com_m[0], 6),
+                    "y": round(com_m[1], 6),
+                    "z": round(com_m[2], 6),
+                },
+                # noqa comment: NOT decimal-place-rounded like the mm-scale
+                # fields above -- physical inertia in kg*m^2 is legitimately
+                # tiny for small parts (e.g. ~1e-11), and round(x, 9) would
+                # silently zero out a real, correct value.
+                "inertia_kgm2": {
+                    "ixx": ixx,
+                    "ixy": ixy,
+                    "ixz": ixz,
+                    "iyy": iyy,
+                    "iyz": iyz,
+                    "izz": izz,
+                },
             }
 
     def execute_script(

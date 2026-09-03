@@ -234,6 +234,88 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_urdf",
+                adapter_id="cadquery",
+                name="Export URDF",
+                description=(
+                    "Export a single-link URDF (robot description) for a STEP file: "
+                    "a companion visual/collision mesh plus a physically real "
+                    "<inertial> block (mass, center of mass, inertia tensor) computed "
+                    "from the part's geometry and a material density. Tier-1 only -- "
+                    "one link, no joints; a multi-body assembly with real kinematic "
+                    "joints needs the FreeCAD assembly-joint tools, not this."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "Path to the source STEP file",
+                        },
+                        "link_name": {
+                            "type": "string",
+                            "description": "URDF <link> name (default 'base_link')",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for density lookup (e.g. 'aluminum_6061', "
+                                "'steel', 'abs'); unrecognized names fall back to a "
+                                "neutral default density rather than failing"
+                            ),
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": (
+                                "Explicit density override in kg/m^3, "
+                                "takes precedence over material"
+                            ),
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "mesh_uri_prefix": {
+                            "type": "string",
+                            "description": (
+                                "Prefix prepended to the mesh filename in the URDF's "
+                                "<mesh filename=...>, e.g. 'package://my_robot/meshes/'"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .urdf file path",
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_file": {"type": "string"},
+                        "link_name": {"type": "string"},
+                        "density_kg_m3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "center_of_mass_m": {"type": "object"},
+                        "inertia_kgm2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_urdf,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
                 adapter_id="cadquery",
                 name="Execute Script",
@@ -523,6 +605,30 @@ class CadqueryServer(McpToolServer):
             timeout=self.config.max_operation_time,
         )
         return ops.export_geometry(input_file, output_format, output_path)
+
+    async def export_urdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a single-link URDF for a STEP file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Exporting URDF", input_file=input_file)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_urdf(
+            input_file,
+            link_name=arguments.get("link_name") or "base_link",
+            material=arguments.get("material", ""),
+            density_kg_m3=arguments.get("density_kg_m3"),
+            mesh_format=arguments.get("mesh_format") or "stl",
+            mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            output_path=arguments.get("output_path", ""),
+        )
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute a sandboxed CadQuery Python script."""

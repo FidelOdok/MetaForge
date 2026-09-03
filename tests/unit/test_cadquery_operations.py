@@ -440,3 +440,142 @@ class TestExecuteScriptSandboxConvenienceNames:
                 str(tmp_path / "out.step"),
             )
         assert result["cad_file"] == str(tmp_path / "out.step")
+
+
+class _FakeVector3:
+    def __init__(self, x: float, y: float, z: float):
+        self.x, self.y, self.z = x, y, z
+
+
+class _FakeInertiaMatrix:
+    """A diagonal-only fake matching a rectangular prism's own inertia
+    shape closely enough to sanity-check the unit conversion, without
+    needing a real geometry kernel."""
+
+    _diag = {(0, 0): 6.0, (1, 1): 5.0, (2, 2): 4.0}
+
+    def Value(self, r: int, c: int) -> float:  # noqa: N802
+        return self._diag.get((r - 1, c - 1), 0.0)
+
+
+class _FakeMassSolid:
+    """volume=1_000_000 mm^3 (a 100mm cube), center at (1,2,3)mm, a
+    deliberately simple inertia matrix -- exact numeric correctness is
+    checked via the hand-derived expected values in the tests below."""
+
+    def Volume(self):  # noqa: N802
+        return 1_000_000.0
+
+    def Center(self):  # noqa: N802
+        return _FakeVector3(1.0, 2.0, 3.0)
+
+    def MatrixOfInertia(self):  # noqa: N802
+        return _FakeInertiaMatrix()
+
+
+class _FakeMassShape:
+    def val(self):
+        return _FakeMassSolid()
+
+
+class _FakeUrdfExporters:
+    calls: list[tuple[str, str]] = []
+
+    @classmethod
+    def export(cls, _shape, output_path, exportType=None):  # noqa: N803
+        cls.calls.append((output_path, exportType))
+        with open(output_path, "wb") as f:  # noqa: PTH123
+            f.write(b"fake mesh bytes")
+
+
+class _FakeImporters:
+    @staticmethod
+    def importStep(_path):  # noqa: N802
+        return _FakeMassShape()
+
+
+class _FakeCqForUrdf:
+    exporters = _FakeUrdfExporters()
+    importers = _FakeImporters()
+
+
+class TestExportUrdf:
+    """MET-706 session: URDF export -- a real <inertial> block derived from
+    actual geometry + a material density, not a placeholder."""
+
+    def test_writes_urdf_and_mesh_with_correct_mass_properties(self, tmp_path):
+        _FakeUrdfExporters.calls = []
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "part.urdf")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf(
+                "part.step",
+                link_name="widget_link",
+                material="aluminum_6061",
+                output_path=output_path,
+            )
+
+        # mass = volume_mm3 * 1e-9 * density = 1_000_000 * 1e-9 * 2700 = 2.7 kg
+        assert result["mass_kg"] == pytest.approx(2.7)
+        assert result["density_kg_m3"] == 2700.0
+        # center of mass mm -> m
+        assert result["center_of_mass_m"] == {"x": 0.001, "y": 0.002, "z": 0.003}
+        # inertia mm^5 -> kg*m^2: ixx = 6.0 * 1e-15 * 2700 = 1.62e-11
+        assert result["inertia_kgm2"]["ixx"] == pytest.approx(6.0 * 1e-15 * 2700.0)
+        assert result["inertia_kgm2"]["iyy"] == pytest.approx(5.0 * 1e-15 * 2700.0)
+        assert result["inertia_kgm2"]["izz"] == pytest.approx(4.0 * 1e-15 * 2700.0)
+        # off-diagonal terms not covered by _FakeInertiaMatrix._diag are 0
+        assert result["inertia_kgm2"]["ixy"] == 0.0
+
+        assert result["link_name"] == "widget_link"
+        urdf_text = Path(output_path).read_text()
+        assert '<robot name="widget_link_robot">' in urdf_text
+        assert '<link name="widget_link">' in urdf_text
+        assert urdf_text.count("<mesh") == 2  # visual + collision
+        assert Path(result["mesh_file"]).exists()
+
+    def test_explicit_density_overrides_material_name(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf(
+                "part.step",
+                material="aluminum_6061",
+                density_kg_m3=1234.0,
+                output_path=str(tmp_path / "part2.urdf"),
+            )
+        assert result["density_kg_m3"] == 1234.0
+        assert result["mass_kg"] == pytest.approx(1_000_000.0 * 1e-9 * 1234.0)
+
+    def test_unrecognized_material_falls_back_to_default_density(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf(
+                "part.step",
+                material="some unlisted unobtainium alloy",
+                output_path=str(tmp_path / "part3.urdf"),
+            )
+        assert result["density_kg_m3"] == 1000.0  # DEFAULT_DENSITY_KG_M3
+
+    def test_mesh_uri_prefix_is_applied(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "part4.urdf")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            ops.export_urdf(
+                "part.step",
+                mesh_uri_prefix="package://widget/meshes/",
+                output_path=output_path,
+            )
+        urdf_text = Path(output_path).read_text()
+        assert 'filename="package://widget/meshes/part4.stl"' in urdf_text
