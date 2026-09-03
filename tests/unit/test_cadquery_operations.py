@@ -16,6 +16,7 @@ from tool_registry.tools.cadquery.operations import (
     MissingJointLimitsError,
     ScriptSandboxError,
     UnsupportedJointTypeError,
+    _build_assembly_sdf,
     _build_assembly_urdf,
 )
 
@@ -815,6 +816,157 @@ class TestExportSdf:
             )
         sdf_text = Path(output_path).read_text()
         assert "<uri>model://widget/meshes/part.stl</uri>" in sdf_text
+
+
+class TestBuildAssemblySdf:
+    """MET-706 session (tier-2a): multi-link SDF with real joints. SDF's
+    schema is more permissive than URDF's -- also exercises `ball`, which
+    URDF has no single-joint equivalent for (see _SDF_JOINT_TYPE_MAP's
+    module comment)."""
+
+    _LINKS = [
+        {
+            "name": "base",
+            "mesh_uri": "base.stl",
+            "mass_kg": 1.0,
+            "com_m": (0.0, 0.0, 0.0),
+            "inertia_kgm2": (1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        },
+        {
+            "name": "arm",
+            "mesh_uri": "arm.stl",
+            "mass_kg": 0.5,
+            "com_m": (0.1, 0.0, 0.0),
+            "inertia_kgm2": (0.1, 0.0, 0.0, 0.1, 0.0, 0.1),
+        },
+    ]
+
+    def test_fixed_joint(self):
+        joints = [
+            {"name": "base_to_arm", "type": "fixed", "base": "base", "follower": "arm"},
+        ]
+        xml = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+        )
+        assert '<model name="bot">' in xml
+        assert '<link name="base">' in xml
+        assert '<link name="arm">' in xml
+        assert '<joint name="base_to_arm" type="fixed">' in xml
+        assert "<parent>base</parent>" in xml
+        assert "<child>arm</child>" in xml
+
+    def test_revolute_maps_to_continuous_with_no_fabricated_limit(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+            },
+        ]
+        xml = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+        )
+        assert 'type="continuous"' in xml
+        assert "<axis>" in xml
+        assert "<limit" not in xml
+
+    def test_ball_joint_is_supported_natively(self):
+        joints = [
+            {"name": "j1", "type": "ball", "base": "base", "follower": "arm"},
+        ]
+        xml = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+        )
+        assert 'type="ball">' in xml
+        assert "<axis>" not in xml
+
+    def test_slider_maps_to_prismatic_with_limits(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "slider",
+                "base": "base",
+                "follower": "arm",
+                "axis": (1, 0, 0),
+                "limits": {"lower": -0.05, "upper": 0.05},
+            },
+        ]
+        xml = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+        )
+        assert 'type="prismatic"' in xml
+        assert "<lower>-0.05</lower>" in xml
+        assert "<upper>0.05</upper>" in xml
+
+    def test_slider_without_limits_raises(self):
+        joints = [
+            {"name": "j1", "type": "slider", "base": "base", "follower": "arm", "axis": (1, 0, 0)},
+        ]
+        with pytest.raises(MissingJointLimitsError):
+            _build_assembly_sdf(
+                model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+            )
+
+    def test_cylindrical_raises(self):
+        joints = [
+            {"name": "j1", "type": "cylindrical", "base": "base", "follower": "arm"},
+        ]
+        with pytest.raises(UnsupportedJointTypeError, match="no direct SDF"):
+            _build_assembly_sdf(
+                model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+            )
+
+    def test_world_name_wraps_model(self):
+        xml = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=[], static=False, world_name="my_world"
+        )
+        assert '<world name="my_world">' in xml
+        assert "<model" in xml
+
+
+class TestExportSdfAssembly:
+    """MET-706 session (tier-2a): the multi-part CadQuery-facing entry point."""
+
+    def test_writes_multi_link_sdf_with_per_part_mass_properties(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "robot.sdf")
+        parts = [
+            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
+        ]
+        joints = [
+            {"name": "j1", "type": "ball", "base": "base", "follower": "arm"},
+        ]
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_sdf_assembly(
+                parts, joints, model_name="my_robot", output_path=output_path
+            )
+
+        assert result["link_names"] == ["base", "arm"]
+        assert result["joint_names"] == ["j1"]
+        assert len(result["mesh_files"]) == 2
+        for mesh_file in result["mesh_files"]:
+            assert Path(mesh_file).exists()
+
+        sdf_text = Path(output_path).read_text()
+        assert '<model name="my_robot">' in sdf_text
+        assert '<link name="base">' in sdf_text
+        assert '<link name="arm">' in sdf_text
+        assert 'type="ball">' in sdf_text
+
+    def test_empty_parts_raises(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            with pytest.raises(ValueError, match="parts is required"):
+                ops.export_sdf_assembly([], [])
 
 
 class _FakeStlExporters:

@@ -505,6 +505,101 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_sdf_assembly",
+                adapter_id="cadquery",
+                name="Export Assembly SDF",
+                description=(
+                    "Export a multi-link SDFormat model (Gazebo) with real joints "
+                    "from a set of STEP parts plus a joint list (the same shape "
+                    "FreeCAD's add_assembly_joint/list_joints produce). Maps "
+                    "fixed->fixed, slider->prismatic (requires explicit limits), "
+                    "revolute->continuous (no fabricated rotation limit), "
+                    "ball->ball (SDF supports it natively); cylindrical joints are "
+                    "rejected -- no direct SDF <joint> equivalent."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "One entry per link: {input_file, link_name, "
+                                "material?, density_kg_m3?}"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "input_file": {"type": "string"},
+                                    "link_name": {"type": "string"},
+                                    "material": {"type": "string"},
+                                    "density_kg_m3": {"type": "number"},
+                                },
+                                "required": ["input_file", "link_name"],
+                            },
+                        },
+                        "joints": {
+                            "type": "array",
+                            "description": (
+                                "FreeCAD-shaped joint records: {name, type "
+                                "(fixed/slider/revolute/ball -- cylindrical rejected), "
+                                "base, follower, axis: [x,y,z], anchor: [x,y,z] (mm), "
+                                "limits?: {lower, upper, effort?, velocity?} "
+                                "(required for slider joints)}"
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "model_name": {
+                            "type": "string",
+                            "description": "SDF <model> name (default 'model')",
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "static": {
+                            "type": "boolean",
+                            "description": "SDF <static> flag (default false)",
+                        },
+                        "world_name": {
+                            "type": "string",
+                            "description": (
+                                "When given, wraps the model in a <world name=...> "
+                                "and writes a .world file instead of a standalone "
+                                ".sdf model"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .sdf/.world file path",
+                        },
+                    },
+                    "required": ["parts", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_files": {"type": "array", "items": {"type": "string"}},
+                        "model_name": {"type": "string"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "joint_names": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_sdf_assembly,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.export_usd",
                 adapter_id="cadquery",
                 name="Export USD",
@@ -997,6 +1092,33 @@ class CadqueryServer(McpToolServer):
             density_kg_m3=arguments.get("density_kg_m3"),
             mesh_format=arguments.get("mesh_format") or "stl",
             mesh_uri=arguments.get("mesh_uri", ""),
+            static=bool(arguments.get("static", False)),
+            world_name=arguments.get("world_name", ""),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_sdf_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a multi-link SDFormat model with real joints."""
+        parts = arguments.get("parts") or []
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+        joints = arguments.get("joints")
+        if joints is None:
+            raise ValueError("joints is required (pass an empty list for no joints)")
+
+        logger.info("Exporting assembly SDF", part_count=len(parts), joint_count=len(joints))
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_sdf_assembly(
+            parts,
+            joints,
+            model_name=arguments.get("model_name") or "model",
+            mesh_format=arguments.get("mesh_format") or "stl",
             static=bool(arguments.get("static", False)),
             world_name=arguments.get("world_name", ""),
             output_path=arguments.get("output_path", ""),

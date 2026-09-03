@@ -451,6 +451,119 @@ def _build_single_link_sdf(
     return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
 
 
+# SDF's own <joint> schema (gazebosim/sdformat's sdf/1.11/joint.sdf, fetched
+# from the primary source) is materially more complete than URDF's: it has a
+# native `ball` type (single element, no axis needed -- a true 1:1 match for
+# FreeCAD's `ball` joint, unlike URDF which has no single-joint ball
+# equivalent) and a `continuous` type distinct from `revolute` whose own
+# <limit> is honestly optional ("Omit if joint is continuous" per the spec
+# text, despite the schema's required=1 on the <limit> element itself --
+# a known sdformat quirk where required= governs XML-schema generation, not
+# runtime validity). So the only type still rejected is `cylindrical`: SDF
+# has no direct 2-DOF (1 translation + 1 rotation, same axis) joint element
+# -- `screw` looks similar but couples the two motions via a fixed pitch,
+# which isn't the same kinematics, so it would misrepresent the joint rather
+# than approximate it.
+_SDF_JOINT_TYPE_MAP = {
+    "fixed": "fixed",
+    "slider": "prismatic",
+    "revolute": "continuous",
+    "ball": "ball",
+}
+_SDF_UNSUPPORTED_JOINT_TYPES = {"cylindrical"}
+
+
+def _build_assembly_sdf(
+    *,
+    model_name: str,
+    links: list[dict[str, Any]],
+    joints: list[dict[str, Any]],
+    static: bool,
+    world_name: str,
+) -> str:
+    """Build a multi-link, single-model SDFormat document with real joints.
+
+    ``links``/``joints`` have the same shapes ``_build_assembly_urdf`` takes
+    -- see its docstring and ``_SDF_JOINT_TYPE_MAP``'s comment above for the
+    joint-type mapping (SDF's is more permissive than URDF's: it also
+    supports `ball` natively).
+    """
+    sdf = ET.Element("sdf", version="1.11")
+    parent = sdf
+    if world_name:
+        parent = ET.SubElement(sdf, "world", name=world_name)
+
+    model = ET.SubElement(parent, "model", name=model_name)
+    ET.SubElement(model, "static").text = "true" if static else "false"
+
+    for link in links:
+        link_el = ET.SubElement(model, "link", name=link["name"])
+        ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
+        com_m = link["com_m"]
+
+        inertial = ET.SubElement(link_el, "inertial")
+        ET.SubElement(inertial, "mass").text = f"{link['mass_kg']:.9g}"
+        ET.SubElement(inertial, "pose").text = f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g} 0 0 0"
+        inertia = ET.SubElement(inertial, "inertia")
+        for tag, val in (
+            ("ixx", ixx),
+            ("ixy", ixy),
+            ("ixz", ixz),
+            ("iyy", iyy),
+            ("iyz", iyz),
+            ("izz", izz),
+        ):
+            ET.SubElement(inertia, tag).text = f"{val:.9g}"
+
+        for tag in ("collision", "visual"):
+            section = ET.SubElement(link_el, tag, name=f"{link['name']}_{tag}")
+            geometry = ET.SubElement(section, "geometry")
+            mesh = ET.SubElement(geometry, "mesh")
+            ET.SubElement(mesh, "uri").text = link["mesh_uri"]
+
+    for joint in joints:
+        fc_type = joint["type"].lower()
+        if fc_type in _SDF_UNSUPPORTED_JOINT_TYPES:
+            raise UnsupportedJointTypeError(
+                f"joint {joint.get('name', '?')!r} has type {fc_type!r}, which has no "
+                "direct SDF <joint> equivalent (see _SDF_JOINT_TYPE_MAP's module comment)"
+            )
+        sdf_type = _SDF_JOINT_TYPE_MAP[fc_type]
+
+        joint_el = ET.SubElement(
+            model,
+            "joint",
+            name=joint.get("name", f"{joint['base']}_to_{joint['follower']}"),
+            type=sdf_type,
+        )
+        ET.SubElement(joint_el, "parent").text = joint["base"]
+        ET.SubElement(joint_el, "child").text = joint["follower"]
+
+        if sdf_type in ("continuous", "prismatic"):
+            axis = joint.get("axis") or (0.0, 0.0, 1.0)
+            axis_el = ET.SubElement(joint_el, "axis")
+            ET.SubElement(axis_el, "xyz").text = f"{axis[0]:.9g} {axis[1]:.9g} {axis[2]:.9g}"
+            if sdf_type == "prismatic":
+                limits = joint.get("limits")
+                if not limits:
+                    raise MissingJointLimitsError(
+                        f"joint {joint.get('name', '?')!r} is a prismatic (slider) joint -- "
+                        "no 'limits' ({'lower','upper','effort','velocity'}) was supplied for "
+                        "it, and MetaForge's joint metadata never captures one, so it must be "
+                        "passed explicitly rather than fabricated"
+                    )
+                limit_el = ET.SubElement(axis_el, "limit")
+                ET.SubElement(limit_el, "lower").text = f"{limits['lower']:.9g}"
+                ET.SubElement(limit_el, "upper").text = f"{limits['upper']:.9g}"
+                if "effort" in limits:
+                    ET.SubElement(limit_el, "effort").text = f"{limits['effort']:.9g}"
+                if "velocity" in limits:
+                    ET.SubElement(limit_el, "velocity").text = f"{limits['velocity']:.9g}"
+
+    ET.indent(sdf, space="  ")
+    return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
+
+
 class CadqueryOperations:
     """Core CadQuery CAD operations.
 
@@ -1096,6 +1209,93 @@ class CadqueryOperations:
                     "iyz": iyz,
                     "izz": izz,
                 },
+            }
+
+    def export_sdf_assembly(
+        self,
+        parts: list[dict[str, Any]],
+        joints: list[dict[str, Any]],
+        model_name: str = "model",
+        mesh_format: str = "stl",
+        static: bool = False,
+        world_name: str = "",
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Export a multi-link SDFormat model with real joints.
+
+        Tier-2a (MET-706 session follow-on to ``export_sdf``'s tier-1) --
+        same ``parts``/``joints`` shapes as ``export_urdf_assembly``. See
+        ``_SDF_JOINT_TYPE_MAP``'s module comment for SDF's (more permissive
+        than URDF's) joint-type mapping, and ``_build_assembly_sdf`` for the
+        SDF document.
+        """
+        self._require_cadquery()
+
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+
+        with tracer.start_as_current_span("cadquery.export_sdf_assembly") as span:
+            span.set_attribute("model.name", model_name)
+            span.set_attribute("parts.count", len(parts))
+            span.set_attribute("joints.count", len(joints))
+
+            start = time.monotonic()
+
+            if not output_path:
+                ext = "world" if world_name else "sdf"
+                output_path = os.path.join(self.work_dir, f"{model_name}.{ext}")
+            self._ensure_output_dir(output_path)
+            out_dir = os.path.dirname(output_path) or self.work_dir
+
+            links: list[dict[str, Any]] = []
+            mesh_files: list[str] = []
+            for part in parts:
+                link_name = part["link_name"]
+                shape = cq.importers.importStep(part["input_file"])
+                mp = self._compute_mass_properties(
+                    shape, part.get("material", ""), part.get("density_kg_m3")
+                )
+                mesh_path = os.path.join(out_dir, f"{link_name}.{mesh_format}")
+                cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+                mesh_files.append(mesh_path)
+                links.append(
+                    {
+                        "name": link_name,
+                        "mesh_uri": os.path.basename(mesh_path),
+                        "mass_kg": mp["mass_kg"],
+                        "com_m": mp["com_m"],
+                        "inertia_kgm2": mp["inertia_kgm2"],
+                    }
+                )
+
+            sdf_xml = _build_assembly_sdf(
+                model_name=model_name,
+                links=links,
+                joints=joints,
+                static=static,
+                world_name=world_name,
+            )
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(sdf_xml)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Exported assembly SDF",
+                model_name=model_name,
+                output_path=output_path,
+                link_count=len(links),
+                joint_count=len(joints),
+                duration_s=round(elapsed, 3),
+            )
+
+            return {
+                "output_file": output_path,
+                "mesh_files": mesh_files,
+                "model_name": model_name,
+                "link_names": [link["name"] for link in links],
+                "joint_names": [joint.get("name", "") for joint in joints],
             }
 
     def export_usd(
