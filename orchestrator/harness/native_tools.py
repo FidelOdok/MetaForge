@@ -246,16 +246,15 @@ async def _execute_calls(
             results.append((step, content, cid))
             continue
 
-        observation = cache[key]
+        # The step's observation is the SAME envelope the model receives, so
+        # the reuse is visible everywhere the trace goes -- the live SSE step
+        # feed, the durable session log, and ``score_sessions`` replay. An
+        # earlier cut marked only the model's copy, which left the dedup
+        # invisible to every observer and unassertable in the eval suite.
+        cached_view = {"cached": True, "note": _CACHED_NOTE, "result": cache[key]}
         logger.info("native_tool_call_deduplicated", tool=name)
-        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=observation)
-        results.append(
-            (
-                step,
-                _json_safe({"cached": True, "note": _CACHED_NOTE, "result": observation}),
-                cid,
-            )
-        )
+        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=cached_view)
+        results.append((step, _json_safe(cached_view), cid))
     return results
 
 

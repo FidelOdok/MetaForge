@@ -202,6 +202,11 @@ class TestSameTurnDedup:
         second = json.loads(tool_messages[1]["content"])
         assert second["cached"] is True
         assert second["result"] == {"value": 1}
+        # The trace carries the SAME envelope the model saw, so the reuse is
+        # visible to the SSE step feed, the session log, and the eval suite's
+        # `no_duplicate_tool_executions` check -- not only to the model.
+        assert result.steps[1].observation == second
+        assert result.steps[0].observation == {"value": 1}
 
     @pytest.mark.asyncio
     async def test_duplicates_inside_one_batch_execute_once(self):
