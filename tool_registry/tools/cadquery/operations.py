@@ -23,6 +23,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
+from tool_registry.tools.cadquery.ros_launch import build_ros2_launch_py
 from tool_registry.tools.cadquery.usd_export import build_usda, parse_stl_mesh
 
 logger = structlog.get_logger(__name__)
@@ -973,6 +974,58 @@ class CadqueryOperations:
                     "iyz": iyz,
                     "izz": izz,
                 },
+            }
+
+    def generate_ros2_launch(
+        self,
+        robot_name: str,
+        default_urdf_path: str,
+        output_path: str = "",
+        include_joint_state_publisher_gui: bool = True,
+        include_rviz: bool = True,
+    ) -> dict[str, Any]:
+        """Generate a standalone ROS 2 launch file for an exported URDF
+        (MET-706 session, 4th and final robotics-simulation-file slice
+        after export_urdf/export_sdf/export_usd).
+
+        Pure text generation -- no CadQuery/geometry kernel involved,
+        unlike this class's other methods, so ``_require_cadquery()`` is
+        deliberately not called here. See ``ros_launch.py``'s module
+        docstring for the real-source grounding (``ros/urdf_launch``) and
+        why the URDF path is a launch-time-resolved argument, not baked in.
+        """
+        with tracer.start_as_current_span("cadquery.generate_ros2_launch") as span:
+            span.set_attribute("robot.name", robot_name)
+
+            start = time.monotonic()
+
+            launch_text = build_ros2_launch_py(
+                robot_name=robot_name,
+                default_urdf_path=default_urdf_path,
+                include_joint_state_publisher_gui=include_joint_state_publisher_gui,
+                include_rviz=include_rviz,
+            )
+
+            if not output_path:
+                output_path = os.path.join(self.work_dir, f"{robot_name}.launch.py")
+            self._ensure_output_dir(output_path)
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(launch_text)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Generated ROS 2 launch file",
+                robot_name=robot_name,
+                output_path=output_path,
+                duration_s=round(elapsed, 3),
+            )
+
+            return {
+                "output_file": output_path,
+                "robot_name": robot_name,
+                "default_urdf_path": default_urdf_path,
             }
 
     def execute_script(

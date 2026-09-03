@@ -743,3 +743,31 @@ class TestExportUsd:
             pytest.raises(NonAxisAlignedInertiaError),
         ):
             ops.export_usd("part.step", output_path=str(tmp_path / "tilted.usda"))
+
+
+class TestGenerateRos2Launch:
+    """MET-706 session: ROS 2 launch file generation -- pure text, no
+    CadQuery/geometry involved, unlike this class's other export_* methods."""
+
+    def test_writes_a_valid_python_launch_file(self, tmp_path):
+        import ast
+
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "widget.launch.py")
+        result = ops.generate_ros2_launch("widget", "/tmp/widget.urdf", output_path=output_path)
+        assert result["output_file"] == output_path
+        assert result["robot_name"] == "widget"
+        text = Path(output_path).read_text()
+        ast.parse(text)
+        assert "robot_state_publisher" in text
+
+    def test_does_not_require_cadquery_to_be_available(self, tmp_path):
+        """Unlike export_urdf/export_sdf/export_usd, this is pure text
+        generation -- confirms it works even with HAS_CADQUERY False,
+        i.e. _require_cadquery() is genuinely never called."""
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", False):
+            result = ops.generate_ros2_launch(
+                "widget", "/tmp/widget.urdf", output_path=str(tmp_path / "w.launch.py")
+            )
+        assert Path(result["output_file"]).exists()

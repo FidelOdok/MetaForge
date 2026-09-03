@@ -484,6 +484,67 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.generate_ros2_launch",
+                adapter_id="cadquery",
+                name="Generate ROS 2 Launch File",
+                description=(
+                    "Generate a standalone ROS 2 launch file (robot_state_publisher "
+                    "+ optional joint_state_publisher(_gui) + rviz2) for an exported "
+                    "URDF. Grounded against ros/urdf_launch's real launch files. Pure "
+                    "text generation -- does not require a STEP file or CadQuery "
+                    "geometry, only a URDF path and robot name."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "robot_name": {
+                            "type": "string",
+                            "description": "Robot name, used in the launch file's docstring",
+                        },
+                        "default_urdf_path": {
+                            "type": "string",
+                            "description": (
+                                "Default value for the launch file's 'urdf_path' "
+                                "argument, overridable at invocation time"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .launch.py file path",
+                        },
+                        "include_joint_state_publisher_gui": {
+                            "type": "boolean",
+                            "description": (
+                                "Include a jsp_gui-toggled joint_state_publisher/_gui "
+                                "pair (default true)"
+                            ),
+                        },
+                        "include_rviz": {
+                            "type": "boolean",
+                            "description": "Include an rviz2 node (default true)",
+                        },
+                    },
+                    "required": ["robot_name", "default_urdf_path"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "robot_name": {"type": "string"},
+                        "default_urdf_path": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=512, max_cpu_seconds=30, max_disk_mb=64
+                ),
+            ),
+            handler=self.generate_ros2_launch,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
                 adapter_id="cadquery",
                 name="Execute Script",
@@ -845,6 +906,33 @@ class CadqueryServer(McpToolServer):
             material=arguments.get("material", ""),
             density_kg_m3=arguments.get("density_kg_m3"),
             output_path=arguments.get("output_path", ""),
+        )
+
+    async def generate_ros2_launch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Generate a standalone ROS 2 launch file for an exported URDF."""
+        robot_name = arguments.get("robot_name", "")
+        default_urdf_path = arguments.get("default_urdf_path", "")
+        if not robot_name:
+            raise ValueError("robot_name is required")
+        if not default_urdf_path:
+            raise ValueError("default_urdf_path is required")
+
+        logger.info("Generating ROS 2 launch file", robot_name=robot_name)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.generate_ros2_launch(
+            robot_name,
+            default_urdf_path,
+            output_path=arguments.get("output_path", ""),
+            include_joint_state_publisher_gui=bool(
+                arguments.get("include_joint_state_publisher_gui", True)
+            ),
+            include_rviz=bool(arguments.get("include_rviz", True)),
         )
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
