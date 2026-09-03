@@ -836,12 +836,17 @@ class CadqueryOperations:
                     "max_z": round(bb.zmax, 2),
                 }
             if "inertia" in properties:
-                # Moments of inertia about center of mass
+                # Moments of inertia about center of mass. CadQuery's real
+                # API (verified live against 2.8.0 -- MET-706 follow-up
+                # after a live-verify failure caught this) is the STATIC
+                # method ``cq.Shape.matrixOfInertia(solid)`` (lowercase,
+                # explicit ``obj`` argument, returns a plain
+                # ``list[list[float]]``) -- NOT an instance method
+                # ``solid.MatrixOfInertia()`` returning an OCCT-style
+                # ``.Value(r, c)`` object, which this used to (wrongly)
+                # assume and which the try/except silently swallowed.
                 try:
-                    props = solid.MatrixOfInertia()
-                    result["inertia_matrix"] = [
-                        [props.Value(r + 1, c + 1) for c in range(3)] for r in range(3)
-                    ]
+                    result["inertia_matrix"] = cq.Shape.matrixOfInertia(solid)
                 except Exception:
                     result["inertia_matrix"] = None
 
@@ -907,12 +912,12 @@ class CadqueryOperations:
         from geometry + a material density, not a placeholder.
 
         Reuses exactly the mass-property data ``get_properties`` already
-        computes (``Solid.MatrixOfInertia()`` -- unit-density, i.e.
-        geometric moments about the center of mass, per that method's own
-        docstring) rather than introducing a second computation path. The
-        one new ingredient is ``material``: nothing previously converted it
-        to a density (see ``materials.py``), but both URDF's and SDF's
-        ``<inertial>`` blocks need a real mass, not a geometric volume.
+        computes (``cq.Shape.matrixOfInertia(solid)`` -- unit-density, i.e.
+        geometric moments about the center of mass) rather than introducing
+        a second computation path. The one new ingredient is ``material``:
+        nothing previously converted it to a density (see ``materials.py``),
+        but both URDF's and SDF's ``<inertial>`` blocks need a real mass,
+        not a geometric volume.
 
         Unit conversion: CadQuery/OCCT report volume in mm^3 and inertia in
         mm^5 (both implicitly unit-density -- ``density=1``). Both URDF and
@@ -924,13 +929,19 @@ class CadqueryOperations:
         solid = shape.val()
         volume_mm3 = solid.Volume()
         com = solid.Center()
-        inertia_geo = solid.MatrixOfInertia()
+        # cq.Shape.matrixOfInertia is a STATIC method taking the solid
+        # explicitly and returning a plain list[list[float]] (0-indexed) --
+        # verified live against the real cadquery-adapter container
+        # (cadquery==2.8.0) after a live-verify failure caught the wrong
+        # assumption this used to make (``solid.MatrixOfInertia()`` with an
+        # OCCT-style ``.Value(r, c)`` return, which doesn't exist on 2.8.0).
+        inertia_geo = cq.Shape.matrixOfInertia(solid)
 
         density = resolve_density_kg_m3(material, density_kg_m3)
         mass_kg = volume_mm3 * _MM3_TO_M3 * density
 
         def _inertia(r: int, c: int) -> float:
-            return inertia_geo.Value(r + 1, c + 1) * _MM5_TO_M5 * density
+            return inertia_geo[r][c] * _MM5_TO_M5 * density
 
         return {
             "density_kg_m3": density,
