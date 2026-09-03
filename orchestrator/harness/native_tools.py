@@ -35,7 +35,12 @@ from orchestrator.harness.providers.pipeline import Invoke, StreamEvents
 from orchestrator.harness.providers.pricing import DEFAULT_PRICING, TokenPricing, estimate_cost_usd
 from orchestrator.harness.react import OnStep, ReActResult, ReActStep, ToolCall
 from orchestrator.harness.runtime import HarnessRuntime
-from orchestrator.harness.validation import ToolValidationError
+from orchestrator.harness.tool_exec import (
+    TurnToolCache,
+    cached_view,
+    dedup_key,
+    error_content,
+)
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.native_tools")
@@ -118,40 +123,6 @@ def _json_safe(value: Any) -> str:
     return truncate_observation_value(value, _MAX_OBSERVATION_CHARS, render=_render_json)
 
 
-_CACHED_NOTE = (
-    "identical call already made this turn -- the previous successful result is "
-    "reused verbatim and the tool was NOT executed again"
-)
-
-
-def _dedup_key(name: str, arguments: dict[str, Any]) -> str:
-    """Stable identity for one (tool, arguments) pair within a turn."""
-    try:
-        return json.dumps({"tool": name, "arguments": arguments}, sort_keys=True, default=str)
-    except (TypeError, ValueError):
-        return f"{name}:{arguments!r}"
-
-
-def _error_content(exc: Exception) -> str:
-    """Render a failed call as a structured result the model can act on.
-
-    MET-569: this used to be ``f"ERROR: {exc}"``. An MCP adapter's error
-    envelope -- its status, its message, and any hint it carried about what to
-    do instead -- was flattened into one opaque line, so a model could not tell
-    "the container is down, stop trying" from "that argument was wrong, fix it".
-    """
-    if isinstance(exc, ToolValidationError):
-        return _render_json(exc.to_payload())
-    payload: dict[str, Any] = {"status": "error", "error": str(exc)}
-    tool_id = getattr(exc, "tool_id", None)
-    if isinstance(tool_id, str) and tool_id:
-        payload["tool"] = tool_id
-    envelope = getattr(exc, "payload", None)
-    if isinstance(envelope, dict) and envelope:
-        payload["details"] = envelope
-    return _render_json(payload)
-
-
 def _requires_approval(runtime: HarnessRuntime, name: str) -> bool:
     try:
         return bool(runtime.tools.get(name).requires_approval)
@@ -163,7 +134,7 @@ async def _execute_calls(
     runtime: HarnessRuntime,
     calls: list[dict[str, Any]],
     thought: str,
-    cache: dict[str, Any],
+    cache: TurnToolCache,
 ) -> list[tuple[ReActStep, str, str]]:
     """Execute one batch of model-emitted calls.
 
@@ -180,13 +151,13 @@ async def _execute_calls(
     for c in calls:
         name = str(c["name"])
         args = c.get("arguments") or {}
-        entries.append((str(c["id"]), name, args, _dedup_key(name, args)))
+        entries.append((str(c["id"]), name, args, dedup_key(name, args)))
 
     # One execution per distinct (tool, arguments) — this collapses duplicates
     # *within* the batch as well as against earlier steps in the same turn.
     pending: dict[str, tuple[str, dict[str, Any]]] = {}
     for _cid, name, args, key in entries:
-        if key not in cache and key not in pending:
+        if not cache.has(key) and key not in pending:
             pending[key] = (name, args)
 
     outcomes: dict[str, tuple[Any, Exception | None]] = {}
@@ -224,16 +195,16 @@ async def _execute_calls(
                 # restarting, a lock clearing) may have changed by the time the
                 # model tries again.
                 step = ReActStep(thought=thought, tool_call=ToolCall(name, args), error=str(exc))
-                results.append((step, _error_content(exc), cid))
+                results.append((step, error_content(exc), cid))
                 continue
-            cache[key] = observation
+            cache.put(key, observation)
             step = ReActStep(
                 thought=thought, tool_call=ToolCall(name, args), observation=observation
             )
             results.append((step, _json_safe(observation), cid))
             continue
 
-        if key not in cache:
+        if not cache.has(key):
             # The single execution for this key failed, so every duplicate of
             # it gets the same structured error rather than a bogus cache hit.
             _observation, exc = outcomes.get(key, (None, None))
@@ -242,7 +213,7 @@ async def _execute_calls(
                 tool_call=ToolCall(name, args),
                 error=str(exc) if exc else "tool call not executed",
             )
-            content = _error_content(exc) if exc else _render_json({"status": "error"})
+            content = error_content(exc) if exc else _render_json({"status": "error"})
             results.append((step, content, cid))
             continue
 
@@ -251,10 +222,10 @@ async def _execute_calls(
         # feed, the durable session log, and ``score_sessions`` replay. An
         # earlier cut marked only the model's copy, which left the dedup
         # invisible to every observer and unassertable in the eval suite.
-        cached_view = {"cached": True, "note": _CACHED_NOTE, "result": cache[key]}
+        view = cached_view(cache.get(key))
         logger.info("native_tool_call_deduplicated", tool=name)
-        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=cached_view)
-        results.append((step, _json_safe(cached_view), cid))
+        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=view)
+        results.append((step, _json_safe(view), cid))
     return results
 
 
@@ -306,10 +277,9 @@ async def run_native_tools(
     tools = _tool_schemas(runtime)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
-    # MET-569: (tool, arguments) -> observation, for this turn only. Scoped to
-    # the turn deliberately — the same call in a *later* turn may be the user
-    # asking for current state, which is a legitimate re-read.
-    tool_cache: dict[str, Any] = {}
+    # MET-569: successful (tool, arguments) results for this turn only —
+    # see ``TurnToolCache`` for why the scope is the turn.
+    tool_cache = TurnToolCache()
     # MET-596: sum provider-reported usage across the turn's model calls.
     usage_total = {"input_tokens": 0, "output_tokens": 0}
     usage_seen = False
