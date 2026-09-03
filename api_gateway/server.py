@@ -1023,6 +1023,52 @@ async def _init_orchestrator(app: FastAPI) -> None:
         get_health_checker().register_check("neo4j", _neo4j_health)
         logger.info("neo4j_health_check_registered")
 
+    # MET-710: the check above is registered ONLY when the twin is already
+    # Neo4j-backed -- so the one signal that would reveal a degraded twin
+    # disappears in exactly the case it is needed. A boot DNS race put this
+    # gateway on the in-memory backend for 43h, ignoring 623 persisted nodes,
+    # while /health reported "healthy" with no neo4j component at all.
+    # This component is always registered and reports the *intent* mismatch:
+    # configured for Neo4j, running on memory.
+    from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
+
+    _twin_backend = twin_backend
+    _neo4j_configured = (
+        bool(neo4j_uri) or os.environ.get("METAFORGE_GRAPH_BACKEND", "").lower() == "neo4j"
+    )
+
+    async def _twin_backend_health() -> ComponentHealth:
+        if _twin_backend != "in_memory":
+            return ComponentHealth(
+                name="twin_backend",
+                status=DependencyStatus.HEALTHY,
+                message=f"{_twin_backend} (persistent)",
+            )
+        if _neo4j_configured:
+            return ComponentHealth(
+                name="twin_backend",
+                status=DependencyStatus.DEGRADED,
+                message=(
+                    "configured for Neo4j but running in_memory -- twin writes "
+                    "are process-local and will be lost on restart; any "
+                    "persisted graph is invisible. Restart once Neo4j is "
+                    "reachable, or set METAFORGE_REQUIRE_NEO4J=true to fail fast."
+                ),
+            )
+        # No Neo4j configured at all: in-memory is the intended local-dev mode.
+        return ComponentHealth(
+            name="twin_backend",
+            status=DependencyStatus.HEALTHY,
+            message="in_memory (no Neo4j configured)",
+        )
+
+    get_health_checker().register_check("twin_backend", _twin_backend_health)
+    logger.info(
+        "twin_backend_health_check_registered",
+        backend=_twin_backend,
+        neo4j_configured=_neo4j_configured,
+    )
+
     logger.info(
         "orchestrator_initialized",
         workflows=list(ACTION_WORKFLOWS.keys()),
