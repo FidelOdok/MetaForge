@@ -219,6 +219,24 @@ _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
 }
 
 
+def _robot_root_attrib(name: str, xacro: bool) -> dict[str, str]:
+    """Root ``<robot>`` element attributes, optionally declaring the xacro
+    namespace.
+
+    A xacro file with no macro directives (``<xacro:*>``/``${...}``) is
+    still a valid, useful xacro file -- it's exactly what a plain URDF
+    looks like when it's meant to be ``<xacro:include>``d into a larger,
+    macro-based robot description, which is the actual role MetaForge's
+    generated (macro-free, fully concrete) description plays in that
+    workflow. Declaring ``xmlns:xacro`` is what signals that intent; nothing
+    here fabricates macro parameters MetaForge has no data for.
+    """
+    attrib = {"name": name}
+    if xacro:
+        attrib["xmlns:xacro"] = "http://www.ros.org/wiki/xacro"
+    return attrib
+
+
 def _build_single_link_urdf(
     *,
     link_name: str,
@@ -226,6 +244,7 @@ def _build_single_link_urdf(
     mass_kg: float,
     com_m: tuple[float, float, float],
     inertia_kgm2: tuple[float, float, float, float, float, float],
+    xacro: bool = False,
 ) -> str:
     """Build a single-link URDF document (visual + collision + inertial).
 
@@ -237,9 +256,12 @@ def _build_single_link_urdf(
     authored part; a real robot pipeline would want a simplified collision
     hull, which is out of scope for this tier-1 cut (no joints either, see
     ``CadqueryOperations.export_urdf``'s docstring).
+
+    ``xacro=True`` declares the xacro namespace on the root element -- see
+    ``_robot_root_attrib``'s docstring.
     """
     ixx, ixy, ixz, iyy, iyz, izz = inertia_kgm2
-    robot = ET.Element("robot", name=f"{link_name}_robot")
+    robot = ET.Element("robot", attrib=_robot_root_attrib(f"{link_name}_robot", xacro))
     link = ET.SubElement(robot, "link", name=link_name)
 
     for tag in ("visual", "collision"):
@@ -293,6 +315,7 @@ def _build_assembly_urdf(
     robot_name: str,
     links: list[dict[str, Any]],
     joints: list[dict[str, Any]],
+    xacro: bool = False,
 ) -> str:
     """Build a multi-link URDF document with real joints.
 
@@ -303,8 +326,11 @@ def _build_assembly_urdf(
     ``limits: {lower, upper, effort, velocity}`` for a ``slider`` joint --
     see ``_URDF_JOINT_TYPE_MAP``'s reasoning above for why ``revolute``
     doesn't need one).
+
+    ``xacro=True`` declares the xacro namespace on the root element -- see
+    ``_robot_root_attrib``'s docstring.
     """
-    robot = ET.Element("robot", name=robot_name)
+    robot = ET.Element("robot", attrib=_robot_root_attrib(robot_name, xacro))
 
     for link in links:
         link_el = ET.SubElement(robot, "link", name=link["name"])
@@ -928,6 +954,7 @@ class CadqueryOperations:
         density_kg_m3: float | None = None,
         mesh_format: str = "stl",
         mesh_uri_prefix: str = "",
+        xacro: bool = False,
         output_path: str = "",
     ) -> dict[str, Any]:
         """Export a single-link URDF (robot description) for a STEP file.
@@ -937,6 +964,12 @@ class CadqueryOperations:
         assembly-joint tools (``freecad_add_assembly_joint``) mapped to
         URDF's ``<joint>`` schema, which is separate follow-on work. See
         ``_compute_mass_properties`` for the mass/inertia derivation.
+
+        ``xacro=True`` writes a ``.xacro``-extension file with the xacro
+        namespace declared on the root element -- see
+        ``_robot_root_attrib``'s docstring for what that does and doesn't
+        mean (no macro directives are generated; MetaForge has no macro
+        parameters to invent).
         """
         self._require_cadquery()
 
@@ -955,7 +988,8 @@ class CadqueryOperations:
 
             if not output_path:
                 stem = Path(input_file).stem
-                output_path = os.path.join(self.work_dir, f"{stem}.urdf")
+                ext = "xacro" if xacro else "urdf"
+                output_path = os.path.join(self.work_dir, f"{stem}.{ext}")
             self._ensure_output_dir(output_path)
 
             out_dir = os.path.dirname(output_path) or self.work_dir
@@ -970,6 +1004,7 @@ class CadqueryOperations:
                 mass_kg=mass_kg,
                 com_m=com_m,
                 inertia_kgm2=(ixx, ixy, ixz, iyy, iyz, izz),
+                xacro=xacro,
             )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
                 f.write(urdf_xml)
@@ -1020,6 +1055,7 @@ class CadqueryOperations:
         robot_name: str = "robot",
         mesh_format: str = "stl",
         mesh_uri_prefix: str = "",
+        xacro: bool = False,
         output_path: str = "",
     ) -> dict[str, Any]:
         """Export a multi-link URDF with real kinematic joints.
@@ -1039,6 +1075,10 @@ class CadqueryOperations:
         where ``base``/``follower`` are ``link_name`` values from ``parts``,
         and ``limits`` (``{lower, upper, effort?, velocity?}``) is required
         only for ``slider`` (URDF ``prismatic``) joints.
+
+        ``xacro=True`` writes a ``.xacro``-extension file with the xacro
+        namespace declared on the root element -- see
+        ``_robot_root_attrib``'s docstring.
         """
         self._require_cadquery()
 
@@ -1053,7 +1093,8 @@ class CadqueryOperations:
             start = time.monotonic()
 
             if not output_path:
-                output_path = os.path.join(self.work_dir, f"{robot_name}.urdf")
+                ext = "xacro" if xacro else "urdf"
+                output_path = os.path.join(self.work_dir, f"{robot_name}.{ext}")
             self._ensure_output_dir(output_path)
             out_dir = os.path.dirname(output_path) or self.work_dir
 
@@ -1078,7 +1119,9 @@ class CadqueryOperations:
                     }
                 )
 
-            urdf_xml = _build_assembly_urdf(robot_name=robot_name, links=links, joints=joints)
+            urdf_xml = _build_assembly_urdf(
+                robot_name=robot_name, links=links, joints=joints, xacro=xacro
+            )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
                 f.write(urdf_xml)
 

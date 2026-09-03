@@ -584,6 +584,28 @@ class TestExportUrdf:
         urdf_text = Path(output_path).read_text()
         assert 'filename="package://widget/meshes/part4.stl"' in urdf_text
 
+    def test_xacro_flag_writes_xacro_extension_and_namespace(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf("part.step", link_name="widget_link", xacro=True)
+        assert result["output_file"].endswith(".xacro")
+        text = Path(result["output_file"]).read_text()
+        assert 'xmlns:xacro="http://www.ros.org/wiki/xacro"' in text
+
+    def test_no_xacro_namespace_when_flag_false(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf("part.step", link_name="widget_link")
+        assert result["output_file"].endswith(".urdf")
+        text = Path(result["output_file"]).read_text()
+        assert "xacro" not in text
+
 
 class TestBuildAssemblyUrdf:
     """MET-706 session (tier-2a): multi-link URDF with real joints, built
@@ -733,6 +755,18 @@ class TestExportUrdfAssembly:
         assert '<link name="base">' in urdf_text
         assert '<link name="arm">' in urdf_text
         assert 'type="continuous"' in urdf_text
+
+    def test_xacro_flag_writes_xacro_extension_and_namespace(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        parts = [{"input_file": "base.step", "link_name": "base"}]
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf_assembly(parts, [], robot_name="my_robot", xacro=True)
+        assert result["output_file"].endswith(".xacro")
+        text = Path(result["output_file"]).read_text()
+        assert 'xmlns:xacro="http://www.ros.org/wiki/xacro"' in text
 
     def test_empty_parts_raises(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)

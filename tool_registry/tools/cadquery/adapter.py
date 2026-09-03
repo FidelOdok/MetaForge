@@ -287,9 +287,19 @@ class CadqueryServer(McpToolServer):
                                 "<mesh filename=...>, e.g. 'package://my_robot/meshes/'"
                             ),
                         },
+                        "xacro": {
+                            "type": "boolean",
+                            "description": (
+                                "Write a .xacro-extension file with the xacro namespace "
+                                "declared on the root <robot> element, so it can be "
+                                "<xacro:include>d into a larger macro-based robot "
+                                "description (default false). No macro directives are "
+                                "generated -- the content is otherwise identical URDF."
+                            ),
+                        },
                         "output_path": {
                             "type": "string",
-                            "description": "Optional output .urdf file path",
+                            "description": "Optional output .urdf/.xacro file path",
                         },
                     },
                     "required": ["input_file"],
@@ -379,9 +389,18 @@ class CadqueryServer(McpToolServer):
                                 "<mesh filename=...>, e.g. 'package://my_robot/meshes/'"
                             ),
                         },
+                        "xacro": {
+                            "type": "boolean",
+                            "description": (
+                                "Write a .xacro-extension file with the xacro namespace "
+                                "declared on the root <robot> element (default false). "
+                                "No macro directives are generated -- see the "
+                                "cadquery.export_urdf tool's xacro description."
+                            ),
+                        },
                         "output_path": {
                             "type": "string",
-                            "description": "Optional output .urdf file path",
+                            "description": "Optional output .urdf/.xacro file path",
                         },
                     },
                     "required": ["parts", "joints"],
@@ -1117,6 +1136,7 @@ class CadqueryServer(McpToolServer):
             density_kg_m3=arguments.get("density_kg_m3"),
             mesh_format=arguments.get("mesh_format") or "stl",
             mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            xacro=bool(arguments.get("xacro", False)),
             output_path=arguments.get("output_path", ""),
         )
 
@@ -1143,6 +1163,7 @@ class CadqueryServer(McpToolServer):
             robot_name=arguments.get("robot_name") or "robot",
             mesh_format=arguments.get("mesh_format") or "stl",
             mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            xacro=bool(arguments.get("xacro", False)),
             output_path=arguments.get("output_path", ""),
         )
 
