@@ -251,13 +251,20 @@ class _FakeSolid:
 
 class _FakeExporters:
     @staticmethod
-    def export(_obj, output_path):
+    def export(_obj, output_path, exportType=None):  # noqa: N803
         with open(output_path, "wb") as f:  # noqa: PTH123
             f.write(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
 
 
+class _FakeImporters:
+    @staticmethod
+    def importStep(_input_file):  # noqa: N802
+        return _FakeSolid()
+
+
 class _FakeCq:
     exporters = _FakeExporters()
+    importers = _FakeImporters()
     Vector = object
     # Mirrors real cadquery: `dir(cadquery)` includes the package's own
     # internal `cq` submodule under that exact name (`cadquery.cq`) -- a
@@ -298,6 +305,36 @@ class TestExecuteScriptStepBase64:
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
         ):
             result = ops.execute_script("result = cq.Workplane()", output_path)
+        assert "step_base64" not in result
+
+
+class TestExportGeometryStepBase64:
+    """MET-489: export_geometry had the same gap MET-648 closed for
+    execute_script -- STEP output had no path into twin.commit_geometry and
+    was lost when the adapter container recreated."""
+
+    def test_step_output_includes_step_base64(self, tmp_path):
+        import base64
+
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "out.step")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.export_geometry("in.step", "step", output_path)
+        assert "step_base64" in result
+        decoded = base64.b64decode(result["step_base64"])
+        assert decoded == Path(output_path).read_bytes()
+
+    def test_non_step_output_omits_step_base64(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "out.stl")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCq()),
+        ):
+            result = ops.export_geometry("in.step", "stl", output_path)
         assert "step_base64" not in result
 
 
