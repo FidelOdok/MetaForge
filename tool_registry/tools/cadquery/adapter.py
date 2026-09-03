@@ -316,6 +316,96 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_urdf_assembly",
+                adapter_id="cadquery",
+                name="Export Assembly URDF",
+                description=(
+                    "Export a multi-link URDF with real kinematic joints from a set "
+                    "of STEP parts plus a joint list (the same shape FreeCAD's "
+                    "add_assembly_joint/list_joints produce: base/follower link "
+                    "names, axis, anchor). Maps fixed->fixed, slider->prismatic "
+                    "(requires explicit limits), revolute->continuous (no fabricated "
+                    "rotation limits); cylindrical/ball joints are rejected -- they "
+                    "have no single-joint URDF equivalent."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "One entry per link: {input_file, link_name, "
+                                "material?, density_kg_m3?}"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "input_file": {"type": "string"},
+                                    "link_name": {"type": "string"},
+                                    "material": {"type": "string"},
+                                    "density_kg_m3": {"type": "number"},
+                                },
+                                "required": ["input_file", "link_name"],
+                            },
+                        },
+                        "joints": {
+                            "type": "array",
+                            "description": (
+                                "FreeCAD-shaped joint records: {name, type "
+                                "(fixed/slider/revolute -- cylindrical/ball rejected), "
+                                "base, follower, axis: [x,y,z], anchor: [x,y,z] (mm), "
+                                "limits?: {lower, upper, effort?, velocity?} "
+                                "(required for slider joints)}"
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "robot_name": {
+                            "type": "string",
+                            "description": "URDF <robot> name (default 'robot')",
+                        },
+                        "mesh_format": {
+                            "type": "string",
+                            "enum": ["stl", "obj"],
+                            "description": (
+                                "Companion mesh format for visual/collision "
+                                "geometry (default 'stl')"
+                            ),
+                        },
+                        "mesh_uri_prefix": {
+                            "type": "string",
+                            "description": (
+                                "Prefix prepended to each mesh filename in the URDF's "
+                                "<mesh filename=...>, e.g. 'package://my_robot/meshes/'"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .urdf file path",
+                        },
+                    },
+                    "required": ["parts", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_files": {"type": "array", "items": {"type": "string"}},
+                        "robot_name": {"type": "string"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "joint_names": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_urdf_assembly,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.export_sdf",
                 adapter_id="cadquery",
                 name="Export SDF",
@@ -854,6 +944,32 @@ class CadqueryServer(McpToolServer):
             link_name=arguments.get("link_name") or "base_link",
             material=arguments.get("material", ""),
             density_kg_m3=arguments.get("density_kg_m3"),
+            mesh_format=arguments.get("mesh_format") or "stl",
+            mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_urdf_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a multi-link URDF with real kinematic joints."""
+        parts = arguments.get("parts") or []
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+        joints = arguments.get("joints")
+        if joints is None:
+            raise ValueError("joints is required (pass an empty list for no joints)")
+
+        logger.info("Exporting assembly URDF", part_count=len(parts), joint_count=len(joints))
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_urdf_assembly(
+            parts,
+            joints,
+            robot_name=arguments.get("robot_name") or "robot",
             mesh_format=arguments.get("mesh_format") or "stl",
             mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
             output_path=arguments.get("output_path", ""),

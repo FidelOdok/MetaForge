@@ -262,6 +262,134 @@ def _build_single_link_urdf(
     return '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
 
 
+# Tier 2a (MET-706 session follow-on): FreeCAD's assembly-joint types
+# (fixed/revolute/slider/cylindrical/ball -- tool_registry/tools/freecad/
+# adapter.py's _VALID_JOINT_TYPES) don't map 1:1 onto URDF's joint types.
+# `fixed` and `slider` map directly (`slider` -> `prismatic`). `revolute`
+# maps to URDF's `continuous` (unlimited rotation), NOT `revolute` --
+# MetaForge's joint metadata (base/follower/axis/anchor) never captures a
+# rotation limit, and `revolute` is only valid in URDF *with* a `<limit>`;
+# inventing one would be the same class of mistake avoided for USD's
+# inertia (silently-plausible-but-wrong data). `continuous` needs no
+# `<limit>` at all, so it is the honest mapping given what's actually known.
+# `cylindrical`/`ball` have no single-joint URDF equivalent (URDF joints
+# are single-DOF except `floating`/`planar`, neither of which is a
+# faithful match) -- decomposing them into a chained multi-joint,
+# zero-mass-link structure is real, separate work, not attempted here.
+_URDF_JOINT_TYPE_MAP = {"fixed": "fixed", "slider": "prismatic", "revolute": "continuous"}
+_URDF_UNSUPPORTED_JOINT_TYPES = {"cylindrical", "ball"}
+
+
+class UnsupportedJointTypeError(ValueError):
+    """Raised for a FreeCAD joint type with no single-joint URDF/SDF
+    equivalent (cylindrical, ball) -- see the module-level joint-mapping
+    comment above ``_URDF_JOINT_TYPE_MAP``."""
+
+
+class MissingJointLimitsError(ValueError):
+    """Raised when a ``prismatic`` joint has no caller-supplied ``limits``
+    -- URDF requires a ``<limit>`` element for prismatic joints, and
+    MetaForge's joint metadata never captures one, so fabricating a value
+    would silently claim data that doesn't exist."""
+
+
+def _build_assembly_urdf(
+    *,
+    robot_name: str,
+    links: list[dict[str, Any]],
+    joints: list[dict[str, Any]],
+) -> str:
+    """Build a multi-link URDF document with real joints.
+
+    ``links``: each ``{name, mesh_uri, mass_kg, com_m, inertia_kgm2}`` --
+    same per-link shape ``_build_single_link_urdf`` uses, just N of them.
+    ``joints``: each FreeCAD joint record's shape directly
+    (``{name, type, base, follower, axis, anchor}``, optionally
+    ``limits: {lower, upper, effort, velocity}`` for a ``slider`` joint --
+    see ``_URDF_JOINT_TYPE_MAP``'s reasoning above for why ``revolute``
+    doesn't need one).
+    """
+    robot = ET.Element("robot", name=robot_name)
+
+    for link in links:
+        link_el = ET.SubElement(robot, "link", name=link["name"])
+        for tag in ("visual", "collision"):
+            section = ET.SubElement(link_el, tag)
+            geometry = ET.SubElement(section, "geometry")
+            ET.SubElement(geometry, "mesh", filename=link["mesh_uri"])
+
+        ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
+        com_m = link["com_m"]
+        inertial = ET.SubElement(link_el, "inertial")
+        ET.SubElement(
+            inertial,
+            "origin",
+            xyz=f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g}",
+            rpy="0 0 0",
+        )
+        ET.SubElement(inertial, "mass", value=f"{link['mass_kg']:.9g}")
+        ET.SubElement(
+            inertial,
+            "inertia",
+            ixx=f"{ixx:.9g}",
+            ixy=f"{ixy:.9g}",
+            ixz=f"{ixz:.9g}",
+            iyy=f"{iyy:.9g}",
+            iyz=f"{iyz:.9g}",
+            izz=f"{izz:.9g}",
+        )
+
+    for joint in joints:
+        fc_type = joint["type"].lower()
+        if fc_type in _URDF_UNSUPPORTED_JOINT_TYPES:
+            raise UnsupportedJointTypeError(
+                f"joint {joint.get('name', '?')!r} has type {fc_type!r}, which has no "
+                "single-joint URDF equivalent (needs multi-joint decomposition, not "
+                "yet implemented -- see _URDF_JOINT_TYPE_MAP's module comment)"
+            )
+        urdf_type = _URDF_JOINT_TYPE_MAP[fc_type]
+
+        joint_el = ET.SubElement(
+            robot,
+            "joint",
+            name=joint.get("name", f"{joint['base']}_to_{joint['follower']}"),
+            type=urdf_type,
+        )
+        ET.SubElement(joint_el, "parent", link=joint["base"])
+        ET.SubElement(joint_el, "child", link=joint["follower"])
+        anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+        ET.SubElement(
+            joint_el,
+            "origin",
+            xyz=f"{anchor[0] * _MM_TO_M:.9g} {anchor[1] * _MM_TO_M:.9g} {anchor[2] * _MM_TO_M:.9g}",
+            rpy="0 0 0",
+        )
+        if urdf_type in ("continuous", "prismatic"):
+            axis = joint.get("axis") or (0.0, 0.0, 1.0)
+            ET.SubElement(joint_el, "axis", xyz=f"{axis[0]:.9g} {axis[1]:.9g} {axis[2]:.9g}")
+        if urdf_type == "prismatic":
+            limits = joint.get("limits")
+            if not limits:
+                raise MissingJointLimitsError(
+                    f"joint {joint.get('name', '?')!r} is a prismatic (slider) joint, which "
+                    "URDF requires a <limit> element for, but no 'limits' "
+                    "({'lower','upper','effort','velocity'}) was supplied for it -- "
+                    "MetaForge's joint metadata never captures one, so it must be passed "
+                    "explicitly rather than fabricated"
+                )
+            ET.SubElement(
+                joint_el,
+                "limit",
+                lower=f"{limits['lower']:.9g}",
+                upper=f"{limits['upper']:.9g}",
+                effort=f"{limits.get('effort', 100.0):.9g}",
+                velocity=f"{limits.get('velocity', 1.0):.9g}",
+            )
+
+    ET.indent(robot, space="  ")
+    return '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
+
+
 def _build_single_link_sdf(
     *,
     model_name: str,
@@ -775,6 +903,95 @@ class CadqueryOperations:
                     "iyz": iyz,
                     "izz": izz,
                 },
+            }
+
+    def export_urdf_assembly(
+        self,
+        parts: list[dict[str, Any]],
+        joints: list[dict[str, Any]],
+        robot_name: str = "robot",
+        mesh_format: str = "stl",
+        mesh_uri_prefix: str = "",
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Export a multi-link URDF with real kinematic joints.
+
+        Tier-2a (MET-706 session follow-on to ``export_urdf``'s tier-1).
+        Decoupled from any live FreeCAD session -- ``joints`` takes the same
+        shape FreeCAD's ``add_assembly_joint``/``list_joints`` already
+        produce (``{name, type, base, follower, axis, anchor}``, see
+        ``tool_registry/tools/freecad/adapter.py``), so a caller can pass
+        a FreeCAD session's joint list straight through. See
+        ``_URDF_JOINT_TYPE_MAP``'s module comment for the joint-type
+        mapping (and why ``cylindrical``/``ball`` raise rather than
+        approximate) and ``_build_assembly_urdf`` for the URDF assembly.
+
+        ``parts``: each ``{input_file, link_name, material="", density_kg_m3=None}``.
+        ``joints``: each ``{name, type, base, follower, axis, anchor, limits?}``
+        where ``base``/``follower`` are ``link_name`` values from ``parts``,
+        and ``limits`` (``{lower, upper, effort?, velocity?}``) is required
+        only for ``slider`` (URDF ``prismatic``) joints.
+        """
+        self._require_cadquery()
+
+        if not parts:
+            raise ValueError("parts is required and must be non-empty")
+
+        with tracer.start_as_current_span("cadquery.export_urdf_assembly") as span:
+            span.set_attribute("robot.name", robot_name)
+            span.set_attribute("parts.count", len(parts))
+            span.set_attribute("joints.count", len(joints))
+
+            start = time.monotonic()
+
+            if not output_path:
+                output_path = os.path.join(self.work_dir, f"{robot_name}.urdf")
+            self._ensure_output_dir(output_path)
+            out_dir = os.path.dirname(output_path) or self.work_dir
+
+            links: list[dict[str, Any]] = []
+            mesh_files: list[str] = []
+            for part in parts:
+                link_name = part["link_name"]
+                shape = cq.importers.importStep(part["input_file"])
+                mp = self._compute_mass_properties(
+                    shape, part.get("material", ""), part.get("density_kg_m3")
+                )
+                mesh_path = os.path.join(out_dir, f"{link_name}.{mesh_format}")
+                cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+                mesh_files.append(mesh_path)
+                links.append(
+                    {
+                        "name": link_name,
+                        "mesh_uri": mesh_uri_prefix + os.path.basename(mesh_path),
+                        "mass_kg": mp["mass_kg"],
+                        "com_m": mp["com_m"],
+                        "inertia_kgm2": mp["inertia_kgm2"],
+                    }
+                )
+
+            urdf_xml = _build_assembly_urdf(robot_name=robot_name, links=links, joints=joints)
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(urdf_xml)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Exported assembly URDF",
+                robot_name=robot_name,
+                output_path=output_path,
+                link_count=len(links),
+                joint_count=len(joints),
+                duration_s=round(elapsed, 3),
+            )
+
+            return {
+                "output_file": output_path,
+                "mesh_files": mesh_files,
+                "robot_name": robot_name,
+                "link_names": [link["name"] for link in links],
+                "joint_names": [joint.get("name", "") for joint in joints],
             }
 
     def export_sdf(

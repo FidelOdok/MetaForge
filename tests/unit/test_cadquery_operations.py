@@ -13,7 +13,10 @@ from tool_registry.tools.cadquery.operations import (
     _SHAPE_DEFAULTS,
     CadqueryNotAvailableError,
     CadqueryOperations,
+    MissingJointLimitsError,
     ScriptSandboxError,
+    UnsupportedJointTypeError,
+    _build_assembly_urdf,
 )
 
 
@@ -579,6 +582,165 @@ class TestExportUrdf:
             )
         urdf_text = Path(output_path).read_text()
         assert 'filename="package://widget/meshes/part4.stl"' in urdf_text
+
+
+class TestBuildAssemblyUrdf:
+    """MET-706 session (tier-2a): multi-link URDF with real joints, built
+    directly against ``_build_assembly_urdf`` (no CadQuery involved --
+    joint-type mapping and XML shape are pure logic)."""
+
+    _LINKS = [
+        {
+            "name": "base",
+            "mesh_uri": "base.stl",
+            "mass_kg": 1.0,
+            "com_m": (0.0, 0.0, 0.0),
+            "inertia_kgm2": (1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        },
+        {
+            "name": "arm",
+            "mesh_uri": "arm.stl",
+            "mass_kg": 0.5,
+            "com_m": (0.1, 0.0, 0.0),
+            "inertia_kgm2": (0.1, 0.0, 0.0, 0.1, 0.0, 0.1),
+        },
+    ]
+
+    def test_fixed_joint(self):
+        joints = [
+            {
+                "name": "base_to_arm",
+                "type": "fixed",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (10.0, 0.0, 0.0),
+            },
+        ]
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert '<robot name="bot">' in xml
+        assert '<link name="base">' in xml
+        assert '<link name="arm">' in xml
+        assert '<joint name="base_to_arm" type="fixed">' in xml
+        assert '<parent link="base" />' in xml
+        assert '<child link="arm" />' in xml
+        # anchor mm -> m
+        assert 'xyz="0.01 0 0"' in xml
+        # fixed joints carry no <axis>
+        assert "<axis" not in xml
+
+    def test_revolute_maps_to_continuous_with_no_fabricated_limit(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+            },
+        ]
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'type="continuous"' in xml
+        assert "<axis" in xml
+        assert "<limit" not in xml
+
+    def test_slider_maps_to_prismatic_with_limits(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "slider",
+                "base": "base",
+                "follower": "arm",
+                "axis": (1, 0, 0),
+                "anchor": (0, 0, 0),
+                "limits": {"lower": -0.05, "upper": 0.05},
+            },
+        ]
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'type="prismatic"' in xml
+        assert 'lower="-0.05"' in xml
+        assert 'upper="0.05"' in xml
+
+    def test_slider_without_limits_raises(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "slider",
+                "base": "base",
+                "follower": "arm",
+                "axis": (1, 0, 0),
+                "anchor": (0, 0, 0),
+            },
+        ]
+        with pytest.raises(MissingJointLimitsError, match="requires a <limit>"):
+            _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+
+    @pytest.mark.parametrize("bad_type", ["cylindrical", "ball"])
+    def test_unsupported_joint_types_raise(self, bad_type):
+        joints = [
+            {
+                "name": "j1",
+                "type": bad_type,
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+            },
+        ]
+        with pytest.raises(UnsupportedJointTypeError, match="no single-joint URDF equivalent"):
+            _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+
+
+class TestExportUrdfAssembly:
+    """MET-706 session (tier-2a): the multi-part CadQuery-facing entry point."""
+
+    def test_writes_multi_link_urdf_with_per_part_mass_properties(self, tmp_path):
+        _FakeUrdfExporters.calls = []
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "robot.urdf")
+        parts = [
+            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
+        ]
+        joints = [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+            },
+        ]
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf_assembly(
+                parts, joints, robot_name="my_robot", output_path=output_path
+            )
+
+        assert result["link_names"] == ["base", "arm"]
+        assert result["joint_names"] == ["j1"]
+        assert len(result["mesh_files"]) == 2
+        for mesh_file in result["mesh_files"]:
+            assert Path(mesh_file).exists()
+
+        urdf_text = Path(output_path).read_text()
+        assert '<robot name="my_robot">' in urdf_text
+        assert '<link name="base">' in urdf_text
+        assert '<link name="arm">' in urdf_text
+        assert 'type="continuous"' in urdf_text
+
+    def test_empty_parts_raises(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            with pytest.raises(ValueError, match="parts is required"):
+                ops.export_urdf_assembly([], [])
 
 
 class TestExportSdf:
