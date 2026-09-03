@@ -415,6 +415,75 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="cadquery.export_usd",
+                adapter_id="cadquery",
+                name="Export USD",
+                description=(
+                    "Export a plain-text .usda (USD) file for a STEP file: mesh "
+                    "geometry as UsdGeomMesh point/face arrays plus real "
+                    "PhysicsRigidBodyAPI/PhysicsCollisionAPI/PhysicsMassAPI "
+                    "properties. Tier-1 only -- axis-aligned parts (negligible "
+                    "off-diagonal inertia terms); rotated/asymmetric parts raise "
+                    "an explicit error rather than silently emitting wrong "
+                    "principal-axis physics data."
+                ),
+                capability="cad_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": "Path to the source STEP file",
+                        },
+                        "prim_name": {
+                            "type": "string",
+                            "description": "USD prim/defaultPrim name (default 'model')",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for density lookup (e.g. 'aluminum_6061', "
+                                "'steel', 'abs'); unrecognized names fall back to a "
+                                "neutral default density rather than failing"
+                            ),
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": (
+                                "Explicit density override in kg/m^3, "
+                                "takes precedence over material"
+                            ),
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional output .usda file path",
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "output_file": {"type": "string"},
+                        "mesh_file": {"type": "string"},
+                        "prim_name": {"type": "string"},
+                        "triangle_count": {"type": "integer"},
+                        "density_kg_m3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
+                        "center_of_mass_m": {"type": "object"},
+                        "inertia_kgm2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.export_usd,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
                 adapter_id="cadquery",
                 name="Execute Script",
@@ -753,6 +822,28 @@ class CadqueryServer(McpToolServer):
             mesh_uri=arguments.get("mesh_uri", ""),
             static=bool(arguments.get("static", False)),
             world_name=arguments.get("world_name", ""),
+            output_path=arguments.get("output_path", ""),
+        )
+
+    async def export_usd(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Export a plain-text .usda file for a STEP file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Exporting USD", input_file=input_file)
+
+        from tool_registry.tools.cadquery.operations import CadqueryOperations
+
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+        )
+        return ops.export_usd(
+            input_file,
+            prim_name=arguments.get("prim_name") or "model",
+            material=arguments.get("material", ""),
+            density_kg_m3=arguments.get("density_kg_m3"),
             output_path=arguments.get("output_path", ""),
         )
 

@@ -23,6 +23,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
+from tool_registry.tools.cadquery.usd_export import build_usda, parse_stl_mesh
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.cadquery.operations")
@@ -862,6 +863,101 @@ class CadqueryOperations:
                 "mesh_file": mesh_path,
                 "model_name": model_name,
                 "link_name": link_name,
+                "density_kg_m3": mp["density_kg_m3"],
+                "mass_kg": mp["mass_kg"],
+                "center_of_mass_m": {
+                    "x": round(com_m[0], 6),
+                    "y": round(com_m[1], 6),
+                    "z": round(com_m[2], 6),
+                },
+                "inertia_kgm2": {
+                    "ixx": ixx,
+                    "ixy": ixy,
+                    "ixz": ixz,
+                    "iyy": iyy,
+                    "iyz": iyz,
+                    "izz": izz,
+                },
+            }
+
+    def export_usd(
+        self,
+        input_file: str,
+        prim_name: str = "model",
+        material: str = "",
+        density_kg_m3: float | None = None,
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Export a plain-text ``.usda`` (USD) file for a STEP file.
+
+        Tier-1 only (MET-713): axis-aligned parts, where the inertia
+        tensor's off-diagonal terms are negligible -- see
+        ``usd_export.py``'s module docstring for why the general
+        (rotated/asymmetric) case needs real 3x3 eigendecomposition rather
+        than being silently approximated, and why this hand-authors
+        ``.usda`` text instead of depending on ``usd-core``/``pxr``.
+
+        Unlike ``export_urdf``/``export_sdf`` (which point at an external
+        mesh file), USD wants geometry authored as explicit ``UsdGeomMesh``
+        point/face arrays -- so the mesh is exported to STL and then
+        re-parsed back into those arrays (``usd_export.parse_stl_mesh``)
+        rather than referenced by path.
+        """
+        self._require_cadquery()
+
+        with tracer.start_as_current_span("cadquery.export_usd") as span:
+            span.set_attribute("input.file", input_file)
+            span.set_attribute("prim.name", prim_name)
+
+            start = time.monotonic()
+
+            shape = cq.importers.importStep(input_file)
+            mp = self._compute_mass_properties(shape, material, density_kg_m3)
+
+            if not output_path:
+                stem = Path(input_file).stem
+                output_path = os.path.join(self.work_dir, f"{stem}.usda")
+            self._ensure_output_dir(output_path)
+
+            out_dir = os.path.dirname(output_path) or self.work_dir
+            mesh_stem = Path(output_path).stem
+            mesh_path = os.path.join(out_dir, f"{mesh_stem}.stl")
+            cq.exporters.export(shape, mesh_path, exportType="STL")
+
+            points, face_vertex_indices, face_vertex_counts = parse_stl_mesh(mesh_path)
+
+            usda_text = build_usda(
+                prim_name=prim_name,
+                points=points,
+                face_vertex_indices=face_vertex_indices,
+                face_vertex_counts=face_vertex_counts,
+                mass_kg=mp["mass_kg"],
+                com_m=mp["com_m"],
+                inertia_kgm2=mp["inertia_kgm2"],
+            )
+            with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
+                f.write(usda_text)
+
+            elapsed = time.monotonic() - start
+            span.set_attribute("operation.duration_s", round(elapsed, 3))
+
+            logger.info(
+                "Exported USD",
+                input_file=input_file,
+                output_path=output_path,
+                mesh_path=mesh_path,
+                triangle_count=len(face_vertex_counts),
+                mass_kg=round(mp["mass_kg"], 6),
+                duration_s=round(elapsed, 3),
+            )
+
+            ixx, ixy, ixz, iyy, iyz, izz = mp["inertia_kgm2"]
+            com_m = mp["com_m"]
+            return {
+                "output_file": output_path,
+                "mesh_file": mesh_path,
+                "prim_name": prim_name,
+                "triangle_count": len(face_vertex_counts),
                 "density_kg_m3": mp["density_kg_m3"],
                 "mass_kg": mp["mass_kg"],
                 "center_of_mass_m": {

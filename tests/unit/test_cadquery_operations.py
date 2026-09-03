@@ -653,3 +653,93 @@ class TestExportSdf:
             )
         sdf_text = Path(output_path).read_text()
         assert "<uri>model://widget/meshes/part.stl</uri>" in sdf_text
+
+
+class _FakeStlExporters:
+    """Writes a real, minimal binary STL (one triangle) regardless of what
+    shape/exportType is passed -- export_usd always requests STL for its
+    mesh, then re-parses it, so the fake needs to produce parseable bytes,
+    not just a placeholder file."""
+
+    calls: list[tuple[str, str]] = []
+
+    @classmethod
+    def export(cls, _shape, output_path, exportType=None):  # noqa: N803
+        cls.calls.append((output_path, exportType))
+        import struct
+
+        header = b"\x00" * 80
+        body = struct.pack("<I", 1)
+        body += struct.pack("<3f", 0.0, 0.0, 1.0)
+        body += struct.pack("<3f", 0.0, 0.0, 0.0)
+        body += struct.pack("<3f", 1.0, 0.0, 0.0)
+        body += struct.pack("<3f", 0.0, 1.0, 0.0)
+        body += struct.pack("<H", 0)
+        with open(output_path, "wb") as f:  # noqa: PTH123
+            f.write(header + body)
+
+
+class _FakeCqForUsd:
+    exporters = _FakeStlExporters()
+    importers = _FakeImporters()
+
+
+class TestExportUsd:
+    """MET-706 session: USD export -- hand-authored .usda, real mesh (via
+    STL round-trip) and real mass properties, same as URDF/SDF."""
+
+    def test_writes_usda_with_correct_mass_properties_and_mesh(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        output_path = str(tmp_path / "part.usda")
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUsd()),
+        ):
+            result = ops.export_usd(
+                "part.step",
+                prim_name="widget",
+                material="aluminum_6061",
+                output_path=output_path,
+            )
+
+        assert result["mass_kg"] == pytest.approx(2.7)
+        assert result["triangle_count"] == 1
+        usda_text = Path(output_path).read_text()
+        assert 'def Xform "widget"' in usda_text
+        assert "PhysicsMassAPI" in usda_text
+        assert Path(result["mesh_file"]).exists()
+
+    def test_non_axis_aligned_part_raises_instead_of_silently_wrong_output(self, tmp_path):
+        from tool_registry.tools.cadquery.usd_export import NonAxisAlignedInertiaError
+
+        # _FakeInertiaMatrix only has diagonal terms, so patch Value() to
+        # return a non-negligible off-diagonal term for this one test.
+        class _TiltedInertia:
+            def Value(self, r, c):  # noqa: N802
+                if r == c:
+                    return 6.0
+                return 3.0  # large off-diagonal relative to the diagonal
+
+        class _TiltedSolid(_FakeMassSolid):
+            def MatrixOfInertia(self):  # noqa: N802
+                return _TiltedInertia()
+
+        class _TiltedShape:
+            def val(self):
+                return _TiltedSolid()
+
+        class _FakeCqTilted:
+            exporters = _FakeStlExporters()
+
+            class importers:  # noqa: N801
+                @staticmethod
+                def importStep(_path):  # noqa: N802
+                    return _TiltedShape()
+
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqTilted()),
+            pytest.raises(NonAxisAlignedInertiaError),
+        ):
+            ops.export_usd("part.step", output_path=str(tmp_path / "tilted.usda"))
