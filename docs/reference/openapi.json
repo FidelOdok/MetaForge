@@ -1449,6 +1449,25 @@
         "title": "EvidenceType",
         "type": "string"
       },
+      "ExportFile": {
+        "description": "A generated file, fetched via ``GET /v1/cad-export/download/{export_id}/{filename}``.",
+        "properties": {
+          "download_url": {
+            "title": "Download Url",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "download_url"
+        ],
+        "title": "ExportFile",
+        "type": "object"
+      },
       "FieldDelta": {
         "description": "Change for a single metadata field.",
         "properties": {
@@ -2118,6 +2137,81 @@
         "title": "IterateRequest",
         "type": "object"
       },
+      "JointSpec": {
+        "description": "One joint between two parts \u2014 the same shape FreeCAD's\n``add_assembly_joint``/``list_joints`` already produce, so a caller can\npass through what MET-721 reads from a live session, or supply a saved\njoint list manually.",
+        "properties": {
+          "anchor": {
+            "description": "Anchor point (mm).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Anchor",
+            "type": "array"
+          },
+          "axis": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Axis",
+            "type": "array"
+          },
+          "base": {
+            "description": "Link name of the base part.",
+            "title": "Base",
+            "type": "string"
+          },
+          "follower": {
+            "description": "Link name of the follower part.",
+            "title": "Follower",
+            "type": "string"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for 'slider' joints \u2014 {lower, upper, effort?, velocity?}.",
+            "title": "Limits"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "fixed",
+              "slider",
+              "revolute",
+              "cylindrical",
+              "ball"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "base",
+          "follower",
+          "axis",
+          "anchor"
+        ],
+        "title": "JointSpec",
+        "type": "object"
+      },
       "KnowledgeEntryResponse": {
         "description": "API response model for a single knowledge entry.",
         "properties": {
@@ -2768,6 +2862,50 @@
         "title": "OkResponse",
         "type": "object"
       },
+      "PartRef": {
+        "description": "One part of an assembly, referencing a Twin STEP work product.",
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "link_name": {
+            "minLength": 1,
+            "title": "Link Name",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "link_name"
+        ],
+        "title": "PartRef",
+        "type": "object"
+      },
       "ProjectListResponse": {
         "description": "List of projects.",
         "properties": {
@@ -3010,6 +3148,59 @@
         "title": "RevisionDiff",
         "type": "object"
       },
+      "Ros2LaunchRequest": {
+        "properties": {
+          "default_urdf_path": {
+            "description": "Default 'urdf_path' launch argument \u2014 e.g. a just-exported URDF's download_url.",
+            "minLength": 1,
+            "title": "Default Urdf Path",
+            "type": "string"
+          },
+          "include_joint_state_publisher_gui": {
+            "default": true,
+            "title": "Include Joint State Publisher Gui",
+            "type": "boolean"
+          },
+          "include_rviz": {
+            "default": true,
+            "title": "Include Rviz",
+            "type": "boolean"
+          },
+          "robot_name": {
+            "minLength": 1,
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "robot_name",
+          "default_urdf_path"
+        ],
+        "title": "Ros2LaunchRequest",
+        "type": "object"
+      },
+      "Ros2LaunchResponse": {
+        "properties": {
+          "default_urdf_path": {
+            "title": "Default Urdf Path",
+            "type": "string"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_name": {
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_file",
+          "robot_name",
+          "default_urdf_path"
+        ],
+        "title": "Ros2LaunchResponse",
+        "type": "object"
+      },
       "RotationDelta": {
         "description": "Single-axis rotation delta of a dragged group (MET-611).",
         "properties": {
@@ -3189,6 +3380,225 @@
           "factor"
         ],
         "title": "ScaleDelta",
+        "type": "object"
+      },
+      "SdfAssemblyExportRequest": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointSpec"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "model_name": {
+            "default": "model",
+            "title": "Model Name",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "static": {
+            "default": false,
+            "title": "Static",
+            "type": "boolean"
+          },
+          "world_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "World Name"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "SdfAssemblyExportRequest",
+        "type": "object"
+      },
+      "SdfAssemblyExportResponse": {
+        "properties": {
+          "joint_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Names",
+            "type": "array"
+          },
+          "link_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Link Names",
+            "type": "array"
+          },
+          "mesh_files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "title": "Mesh Files",
+            "type": "array"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_files",
+          "model_name",
+          "link_names",
+          "joint_names"
+        ],
+        "title": "SdfAssemblyExportResponse",
+        "type": "object"
+      },
+      "SdfExportRequest": {
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "link_name": {
+            "default": "link",
+            "title": "Link Name",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "model_name": {
+            "default": "model",
+            "title": "Model Name",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "static": {
+            "default": false,
+            "title": "Static",
+            "type": "boolean"
+          },
+          "world_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "World Name"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "SdfExportRequest",
+        "type": "object"
+      },
+      "SdfExportResponse": {
+        "properties": {
+          "center_of_mass_m": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Center Of Mass M",
+            "type": "object"
+          },
+          "density_kg_m3": {
+            "title": "Density Kg M3",
+            "type": "number"
+          },
+          "inertia_kgm2": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inertia Kgm2",
+            "type": "object"
+          },
+          "link_name": {
+            "title": "Link Name",
+            "type": "string"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "mesh_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_file",
+          "model_name",
+          "link_name",
+          "density_kg_m3",
+          "mass_kg",
+          "center_of_mass_m",
+          "inertia_kgm2"
+        ],
+        "title": "SdfExportResponse",
         "type": "object"
       },
       "SearchResponse": {
@@ -4368,6 +4778,367 @@
         "title": "UpdateThreadScopeRequest",
         "type": "object"
       },
+      "UrdfAssemblyExportRequest": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointSpec"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "mesh_uri_prefix": {
+            "default": "",
+            "title": "Mesh Uri Prefix",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "robot_name": {
+            "default": "robot",
+            "title": "Robot Name",
+            "type": "string"
+          },
+          "xacro": {
+            "default": false,
+            "title": "Xacro",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "UrdfAssemblyExportRequest",
+        "type": "object"
+      },
+      "UrdfAssemblyExportResponse": {
+        "properties": {
+          "joint_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Names",
+            "type": "array"
+          },
+          "link_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Link Names",
+            "type": "array"
+          },
+          "mesh_files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "title": "Mesh Files",
+            "type": "array"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_name": {
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_files",
+          "robot_name",
+          "link_names",
+          "joint_names"
+        ],
+        "title": "UrdfAssemblyExportResponse",
+        "type": "object"
+      },
+      "UrdfExportRequest": {
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "link_name": {
+            "default": "base_link",
+            "title": "Link Name",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "mesh_uri_prefix": {
+            "default": "",
+            "title": "Mesh Uri Prefix",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "xacro": {
+            "default": false,
+            "title": "Xacro",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "UrdfExportRequest",
+        "type": "object"
+      },
+      "UrdfExportResponse": {
+        "properties": {
+          "center_of_mass_m": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Center Of Mass M",
+            "type": "object"
+          },
+          "density_kg_m3": {
+            "title": "Density Kg M3",
+            "type": "number"
+          },
+          "inertia_kgm2": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inertia Kgm2",
+            "type": "object"
+          },
+          "link_name": {
+            "title": "Link Name",
+            "type": "string"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "mesh_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_file",
+          "link_name",
+          "density_kg_m3",
+          "mass_kg",
+          "center_of_mass_m",
+          "inertia_kgm2"
+        ],
+        "title": "UrdfExportResponse",
+        "type": "object"
+      },
+      "UsdAssemblyExportRequest": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointSpec"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "robot_name": {
+            "default": "robot",
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "UsdAssemblyExportRequest",
+        "type": "object"
+      },
+      "UsdAssemblyExportResponse": {
+        "properties": {
+          "joint_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Names",
+            "type": "array"
+          },
+          "link_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Link Names",
+            "type": "array"
+          },
+          "mesh_files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "title": "Mesh Files",
+            "type": "array"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_name": {
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_files",
+          "robot_name",
+          "link_names",
+          "joint_names"
+        ],
+        "title": "UsdAssemblyExportResponse",
+        "type": "object"
+      },
+      "UsdExportRequest": {
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "prim_name": {
+            "default": "model",
+            "title": "Prim Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "UsdExportRequest",
+        "type": "object"
+      },
+      "UsdExportResponse": {
+        "properties": {
+          "center_of_mass_m": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Center Of Mass M",
+            "type": "object"
+          },
+          "density_kg_m3": {
+            "title": "Density Kg M3",
+            "type": "number"
+          },
+          "inertia_kgm2": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inertia Kgm2",
+            "type": "object"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "mesh_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "prim_name": {
+            "title": "Prim Name",
+            "type": "string"
+          },
+          "triangle_count": {
+            "title": "Triangle Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_file",
+          "prim_name",
+          "triangle_count",
+          "density_kg_m3",
+          "mass_kg",
+          "center_of_mass_m",
+          "inertia_kgm2"
+        ],
+        "title": "UsdExportResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -4880,6 +5651,342 @@
         "summary": "List Bom",
         "tags": [
           "bom"
+        ]
+      }
+    },
+    "/v1/cad-export/download/{export_id}/{filename}": {
+      "get": {
+        "operationId": "download_export_file_v1_cad_export_download__export_id___filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Export File",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/ros2-launch": {
+      "post": {
+        "operationId": "generate_ros2_launch_v1_cad_export_ros2_launch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Ros2LaunchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ros2LaunchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Ros2 Launch",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sdf": {
+      "post": {
+        "operationId": "export_sdf_v1_cad_export_sdf_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SdfExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdfExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Sdf",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sdf-assembly": {
+      "post": {
+        "operationId": "export_sdf_assembly_v1_cad_export_sdf_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SdfAssemblyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdfAssemblyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Sdf Assembly",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/urdf": {
+      "post": {
+        "operationId": "export_urdf_v1_cad_export_urdf_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrdfExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrdfExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Urdf",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/urdf-assembly": {
+      "post": {
+        "operationId": "export_urdf_assembly_v1_cad_export_urdf_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrdfAssemblyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrdfAssemblyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Urdf Assembly",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/usd": {
+      "post": {
+        "operationId": "export_usd_v1_cad_export_usd_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsdExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsdExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Usd",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/usd-assembly": {
+      "post": {
+        "operationId": "export_usd_assembly_v1_cad_export_usd_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsdAssemblyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsdAssemblyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Usd Assembly",
+        "tags": [
+          "cad-export"
         ]
       }
     },
