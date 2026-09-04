@@ -279,18 +279,42 @@ message rather than an invocation:
   `requires_approval` tool runs serially: concurrent approval prompts race for
   one approver, and a queued call can hit its deny-by-default timeout while
   the person is still answering the first.
-- **Same-turn duplicate guard** — calls are keyed by `(tool, canonical
-  arguments)`. An identical repeat of an already-successful call, whether in
+- **Same-turn duplicate guard** (both loops) — calls are keyed by `(tool,
+  canonical arguments)`. An identical repeat of an already-successful call, whether in
   the same batch or a later step of the same turn, reuses the stored
   observation and returns it marked `{"cached": true, ...}` without re-running
   the tool. Failures are never cached, so a genuine retry really retries, and
   the cache is turn-scoped, so the same call in a later turn is treated as a
   legitimate re-read of current state.
-- **Structured error pass-through** — a failed call returns a JSON envelope
-  instead of the old `ERROR: <str(exc)>` line. `McpToolError` carries the
+- **Structured error pass-through** (both loops) — a failed call returns a
+  JSON envelope instead of the old `ERROR: <str(exc)>` line. `McpToolError` carries the
   adapter's own envelope (`payload`), so its status, message, and any hint
   survive into `details` and the model can distinguish "the container is down,
   stop trying" from "that argument was wrong, fix it".
+
+### Which loop gets what
+
+The dedup guard and structured errors are **loop-agnostic** and live in
+`orchestrator/harness/tool_exec.py` (`TurnToolCache`, `cached_view`,
+`error_content`), so both `run_native_tools` and `run_react` call in. They
+originally shipped inside the native loop only, which meant any provider whose
+adapter cannot parse native `tool_calls` — Gemini, Bedrock, anything else
+`native_tools_enabled()` returns False for — fell back to ReAct and silently
+kept the old behaviour. Losing a correctness property because of which
+provider a deployment picked is a bad trade.
+
+Schema pre-validation was always shared (it lives in `ToolRegistry.invoke`), as
+are the gate declarations below. **Parallel batched execution stays
+native-only** and always will: the JSON-ReAct protocol emits exactly one tool
+call per step, so there is never a batch to parallelise.
+
+| Property | Native | ReAct |
+| --- | --- | --- |
+| Schema pre-validation | ✅ | ✅ (shared registry) |
+| Parallel batched execution | ✅ | n/a — one call per step |
+| Same-turn duplicate guard | ✅ | ✅ (shared `tool_exec`) |
+| Structured error pass-through | ✅ | ✅ (shared `tool_exec`) |
+| Gate declarations | ✅ | ✅ (shared registry) |
 
 ### Gate declarations for chat tools
 

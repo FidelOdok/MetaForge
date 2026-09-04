@@ -21,6 +21,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from orchestrator.harness.runtime import HarnessRuntime
+from orchestrator.harness.tool_exec import TurnToolCache, cached_view, error_content
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.react")
@@ -123,6 +124,7 @@ async def run_react(
     every step. ``None`` keeps the historical unbounded behavior.
     """
     steps: list[ReActStep] = []
+    tool_cache = TurnToolCache()
 
     async def _emit(step: ReActStep) -> None:
         # MET-590: live progress — a broken observer must never break the turn.
@@ -180,12 +182,28 @@ async def run_react(
 
             call = action.tool_call
             assert call is not None  # not is_final => tool_call set
+
+            # MET-569 follow-up: the same-turn duplicate guard and structured
+            # errors were native-path only, so a ReAct turn (any provider whose
+            # adapter can't parse native tool_calls) re-executed repeats and got
+            # a flattened `str(exc)`. Both properties are loop-agnostic; they
+            # now live in ``tool_exec`` and apply here too.
+            key = tool_cache.key(call.name, call.arguments)
+            if tool_cache.has(key):
+                view = cached_view(tool_cache.get(key))
+                logger.info("react_tool_call_deduplicated", tool=call.name)
+                steps.append(ReActStep(action.thought, call, observation=view))
+                await _emit(steps[-1])
+                continue
+
             try:
                 observation = await runtime.call_tool(call.name, call.arguments)
+                tool_cache.put(key, observation)
                 steps.append(ReActStep(action.thought, call, observation=observation))
                 await _emit(steps[-1])
             except Exception as exc:  # noqa: BLE001 - surface tool failure to the policy, don't abort
-                steps.append(ReActStep(action.thought, call, error=str(exc)))
+                # Failures are never cached, so a retry really retries.
+                steps.append(ReActStep(action.thought, call, error=error_content(exc)))
                 await _emit(steps[-1])
                 logger.warning("react_tool_error", tool=call.name, error=str(exc))
 

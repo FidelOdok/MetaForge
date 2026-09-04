@@ -356,9 +356,9 @@ class TestStructuredErrors:
         assert isinstance(result.steps[1].observation, str)
 
     def test_validation_errors_render_as_their_own_payload(self):
-        from orchestrator.harness.native_tools import _error_content
+        from orchestrator.harness.tool_exec import error_content
 
-        payload = json.loads(_error_content(ToolValidationError("t", ["missing 'x'"])))
+        payload = json.loads(error_content(ToolValidationError("t", ["missing 'x'"])))
 
         assert payload["error"] == "invalid_arguments"
         assert payload["validation_errors"] == ["missing 'x'"]
