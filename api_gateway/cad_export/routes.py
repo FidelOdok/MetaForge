@@ -38,6 +38,8 @@ from api_gateway.cad_export.schemas import (
     SdfAssemblyExportResponse,
     SdfExportRequest,
     SdfExportResponse,
+    SessionJointsResponse,
+    SessionSummary,
     UrdfAssemblyExportRequest,
     UrdfAssemblyExportResponse,
     UrdfExportRequest,
@@ -368,6 +370,33 @@ async def generate_ros2_launch(body: Ros2LaunchRequest) -> Ros2LaunchResponse:
         robot_name=data["robot_name"],
         default_urdf_path=data["default_urdf_path"],
     )
+
+
+# ---------------------------------------------------------------------------
+# Session introspection (MET-721) — read-only, for a "reuse joints an agent
+# already recorded via chat" picker. Only works while the session that
+# recorded them is still open (default 30 min idle TTL); there is no lookup
+# by Twin/assembly node id, and no persistence for joints at all -- the
+# caller must already have the session_id (e.g. echoed by a chat turn).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sessions/{session_id}", response_model=SessionSummary)
+async def get_session_summary(session_id: str) -> SessionSummary:
+    from api_gateway.chat.routes import get_mcp_bridge
+
+    bridge = get_mcp_bridge()
+    data = await _invoke(bridge, "freecad.describe_session", {"session_id": session_id})
+    return SessionSummary(**data)
+
+
+@router.get("/sessions/{session_id}/joints", response_model=SessionJointsResponse)
+async def get_session_joints(session_id: str) -> SessionJointsResponse:
+    from api_gateway.chat.routes import get_mcp_bridge
+
+    bridge = get_mcp_bridge()
+    data = await _invoke(bridge, "freecad.list_joints", {"session_id": session_id})
+    return SessionJointsResponse(**data)
 
 
 # ---------------------------------------------------------------------------

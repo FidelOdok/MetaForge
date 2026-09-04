@@ -194,3 +194,41 @@ class Ros2LaunchResponse(BaseModel):
     output_file: ExportFile
     robot_name: str
     default_urdf_path: str
+
+
+# ---------------------------------------------------------------------------
+# Session introspection (MET-721) — read-only lookups against a LIVE FreeCAD
+# authoring session, for a "reuse joints an agent already recorded via chat"
+# picker. Joints are never persisted anywhere durable (unlike geometry, which
+# survives a session closing via the committed STEP blob) — this only works
+# while the session that recorded them is still open (default 30 min idle
+# TTL, see tool_registry/tools/freecad/config.py). There is no lookup by
+# Twin/assembly node id; the caller must already have the session_id.
+# ---------------------------------------------------------------------------
+
+
+class SessionObject(BaseModel):
+    obj_id: str
+    kind: str
+    name: str
+    order: int
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    name: str
+    object_count: int
+    objects: list[SessionObject]
+
+
+class SessionJoint(BaseModel):
+    name: str
+    type: JointType
+    base: str
+    follower: str
+    axis: list[float]
+    anchor: list[float]
+
+
+class SessionJointsResponse(BaseModel):
+    joints: list[SessionJoint]
