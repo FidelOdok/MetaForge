@@ -15,6 +15,15 @@ vi.mock('../../hooks/use-conversion', () => ({
   }),
 }));
 
+const mockUrdfMutate = vi.fn();
+const mockSdfMutate = vi.fn();
+const mockUsdMutate = vi.fn();
+vi.mock('../../hooks/use-cad-export', () => ({
+  useExportUrdf: () => ({ mutate: mockUrdfMutate, isPending: false }),
+  useExportSdf: () => ({ mutate: mockSdfMutate, isPending: false }),
+  useExportUsd: () => ({ mutate: mockUsdMutate, isPending: false }),
+}));
+
 vi.mock('../../store/viewer-store', () => ({
   useViewerStore: vi.fn((selector) => {
     const state = {
@@ -327,5 +336,83 @@ describe('TwinViewerPage', () => {
       useProjectStore.setState({ activeProjectId: 'proj-other', hasSelected: true });
     });
     expect(screen.getAllByText('bracket-v1.step').length).toBeLessThan(selectedCount);
+  });
+
+  describe('export for robotics sim (MET-720)', () => {
+    const cadNode = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: { wp_type: 'cad_model' },
+      updatedAt: new Date().toISOString(),
+    };
+
+    beforeEach(() => {
+      mockUseTwinNodes.mockReturnValue({
+        data: [cadNode],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof useTwinNodes>);
+      mockUseTwinNode.mockReturnValue({ data: cadNode, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+      mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+      mockUrdfMutate.mockClear();
+      mockSdfMutate.mockClear();
+      mockUsdMutate.mockClear();
+    });
+
+    it('toggles the export panel and submits a URDF export with the entered params', () => {
+      render(<TwinViewerPage />);
+      fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+      fireEvent.click(screen.getByTitle('Export for robotics sim (URDF/SDF/USD)'));
+      expect(screen.getByText('Export for robotics sim')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Export URDF' }));
+
+      expect(mockUrdfMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ node_id: 'n1', link_name: 'base_link', xacro: false }),
+        expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+      );
+    });
+
+    it('switching format tabs submits to the matching mutation', () => {
+      render(<TwinViewerPage />);
+      fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+      fireEvent.click(screen.getByTitle('Export for robotics sim (URDF/SDF/USD)'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'sdf' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Export SDF' }));
+
+      // link_name is a shared field across tabs (an edit shouldn't be
+      // clobbered by switching format) -- still whatever it defaulted to.
+      expect(mockSdfMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ node_id: 'n1', model_name: 'model', link_name: 'base_link' }),
+        expect.anything(),
+      );
+      expect(mockUrdfMutate).not.toHaveBeenCalled();
+    });
+
+    it('shows download links (prefixed for the /api proxy) after a successful export', () => {
+      render(<TwinViewerPage />);
+      fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+      fireEvent.click(screen.getByTitle('Export for robotics sim (URDF/SDF/USD)'));
+      fireEvent.click(screen.getByRole('button', { name: 'Export URDF' }));
+
+      const onSuccess = mockUrdfMutate.mock.calls[0]?.[1].onSuccess as (data: unknown) => void;
+      act(() => {
+        onSuccess({
+          output_file: { filename: 'model.urdf', download_url: '/v1/cad-export/download/abc/model.urdf' },
+          mesh_file: { filename: 'model.stl', download_url: '/v1/cad-export/download/abc/model.stl' },
+        });
+      });
+
+      const urdfLink = screen.getByText('model.urdf').closest('a');
+      expect(urdfLink).toHaveAttribute('href', '/api/v1/cad-export/download/abc/model.urdf');
+      const meshLink = screen.getByText('model.stl').closest('a');
+      expect(meshLink).toHaveAttribute('href', '/api/v1/cad-export/download/abc/model.stl');
+    });
   });
 });

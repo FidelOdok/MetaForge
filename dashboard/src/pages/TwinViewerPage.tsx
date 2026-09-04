@@ -15,8 +15,19 @@ import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel, nodeFileUrl, fetchNodeFileText } from '../api/endpoints/twin';
+import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
+import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
+import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
+
+// MET-720: names the cadquery adapter's material density table
+// (tool_registry/tools/cadquery/materials.py) actually recognizes.
+const CAD_EXPORT_MATERIALS = [
+  'aluminum_6061', 'aluminum', 'steel', 'stainless_steel', 'titanium', 'brass',
+  'copper', 'abs', 'pla', 'petg', 'nylon', 'polycarbonate', 'acrylic', 'wood',
+  'carbon_fiber', 'rubber',
+];
 
 // MET-683: same response.data.detail extraction pattern as
 // ProjectDetailPage.tsx's getErrorMessage, applied to a failed model load.
@@ -230,11 +241,230 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
   );
 }
 
+// ── Export for robotics sim (MET-720) ────────────────────────────────────────
+const _EXPORT_FORMATS = ['urdf', 'sdf', 'usd'] as const;
+type _ExportFormat = (typeof _EXPORT_FORMATS)[number];
+
+const _exportInputStyle: React.CSSProperties = {
+  fontSize: 11,
+  background: '#1e1f26',
+  border: `1px solid ${KC.border}`,
+  color: KC.onSurface,
+};
+
+function ExportForSimSection({ node, onClose }: { node: TwinNode; onClose: () => void }) {
+  const toast = useToast();
+  const urdfExport = useExportUrdf();
+  const sdfExport = useExportSdf();
+  const usdExport = useExportUsd();
+
+  const [format, setFormat] = useState<_ExportFormat>('urdf');
+  const [material, setMaterial] = useState('');
+  const [density, setDensity] = useState('');
+  const [linkName, setLinkName] = useState('base_link');
+  const [modelName, setModelName] = useState('model');
+  const [primName, setPrimName] = useState('model');
+  const [xacro, setXacro] = useState(false);
+  const [worldName, setWorldName] = useState('');
+  const [staticFlag, setStaticFlag] = useState(false);
+  const [result, setResult] = useState<{ outputFile: ExportFile; meshFile: ExportFile } | null>(null);
+
+  const pending = urdfExport.isPending || sdfExport.isPending || usdExport.isPending;
+  const densityKgM3 = density.trim() ? Number(density) : undefined;
+
+  const handleSubmit = () => {
+    setResult(null);
+    const onSuccess = (data: { output_file: ExportFile; mesh_file: ExportFile }) => {
+      setResult({ outputFile: data.output_file, meshFile: data.mesh_file });
+      toast.success(`Exported ${data.output_file.filename}`);
+    };
+    const onError = () => toast.error(`${format.toUpperCase()} export failed`);
+
+    if (format === 'urdf') {
+      urdfExport.mutate(
+        {
+          node_id: node.id,
+          link_name: linkName || undefined,
+          material: material || undefined,
+          density_kg_m3: densityKgM3,
+          xacro,
+        },
+        { onSuccess, onError },
+      );
+    } else if (format === 'sdf') {
+      sdfExport.mutate(
+        {
+          node_id: node.id,
+          model_name: modelName || undefined,
+          link_name: linkName || undefined,
+          material: material || undefined,
+          density_kg_m3: densityKgM3,
+          static: staticFlag,
+          world_name: worldName || undefined,
+        },
+        { onSuccess, onError },
+      );
+    } else {
+      usdExport.mutate(
+        {
+          node_id: node.id,
+          prim_name: primName || undefined,
+          material: material || undefined,
+          density_kg_m3: densityKgM3,
+        },
+        { onSuccess, onError },
+      );
+    }
+  };
+
+  return (
+    <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+          Export for robotics sim
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{ background: 'transparent', border: 'none', color: KC.onSurfaceVariant, cursor: 'pointer', padding: 2 }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+        </button>
+      </div>
+
+      <div className="flex gap-1 mb-2">
+        {_EXPORT_FORMATS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => { setFormat(f); setResult(null); }}
+            className="font-mono rounded px-2 py-1 uppercase"
+            style={{
+              fontSize: 10,
+              background: format === f ? KC.orangeFaint : 'transparent',
+              border: `1px solid ${format === f ? KC.orangeBorder : KC.border}`,
+              color: format === f ? KC.orange : KC.onSurfaceVariant,
+              cursor: 'pointer',
+            }}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5 mb-2">
+        <div className="flex gap-1.5">
+          <select
+            value={material}
+            onChange={(e) => setMaterial(e.target.value)}
+            className="font-mono rounded px-2 py-1 flex-1"
+            style={_exportInputStyle}
+          >
+            <option value="">No material (density only)</option>
+            {CAD_EXPORT_MATERIALS.map((m) => (
+              <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            placeholder="density kg/m³"
+            value={density}
+            onChange={(e) => setDensity(e.target.value)}
+            className="font-mono rounded px-2 py-1"
+            style={{ ..._exportInputStyle, width: 110 }}
+          />
+        </div>
+
+        {format === 'urdf' && (
+          <div className="flex gap-1.5 items-center">
+            <input
+              type="text"
+              placeholder="link name"
+              value={linkName}
+              onChange={(e) => setLinkName(e.target.value)}
+              className="font-mono rounded px-2 py-1 flex-1"
+              style={_exportInputStyle}
+            />
+            <label className="font-mono flex items-center gap-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+              <input type="checkbox" checked={xacro} onChange={(e) => setXacro(e.target.checked)} />
+              xacro
+            </label>
+          </div>
+        )}
+
+        {format === 'sdf' && (
+          <>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                placeholder="model name"
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                className="font-mono rounded px-2 py-1 flex-1"
+                style={_exportInputStyle}
+              />
+              <input
+                type="text"
+                placeholder="link name"
+                value={linkName}
+                onChange={(e) => setLinkName(e.target.value)}
+                className="font-mono rounded px-2 py-1 flex-1"
+                style={_exportInputStyle}
+              />
+            </div>
+            <div className="flex gap-1.5 items-center">
+              <input
+                type="text"
+                placeholder="world name (optional)"
+                value={worldName}
+                onChange={(e) => setWorldName(e.target.value)}
+                className="font-mono rounded px-2 py-1 flex-1"
+                style={_exportInputStyle}
+              />
+              <label className="font-mono flex items-center gap-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+                <input type="checkbox" checked={staticFlag} onChange={(e) => setStaticFlag(e.target.checked)} />
+                static
+              </label>
+            </div>
+          </>
+        )}
+
+        {format === 'usd' && (
+          <input
+            type="text"
+            placeholder="prim name"
+            value={primName}
+            onChange={(e) => setPrimName(e.target.value)}
+            className="font-mono rounded px-2 py-1"
+            style={_exportInputStyle}
+          />
+        )}
+      </div>
+
+      <Button variant="primary" size="sm" onClick={handleSubmit} disabled={pending} className="text-xs w-full">
+        {pending ? 'Exporting…' : `Export ${format.toUpperCase()}`}
+      </Button>
+
+      {result && (
+        <div className="flex gap-1.5 mt-2" style={{ flexWrap: 'wrap' }}>
+          <a href={toDownloadHref(result.outputFile.download_url)} download style={{ textDecoration: 'none' }}>
+            <FileActionBtn icon="download" label={result.outputFile.filename} />
+          </a>
+          <a href={toDownloadHref(result.meshFile.download_url)} download style={{ textDecoration: 'none' }}>
+            <FileActionBtn icon="download" label={result.meshFile.filename} />
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
   const loadModel = useViewerStore((s) => s.loadModel);
   const setViewMode = useViewerStore((s) => s.setViewMode);
   const openBooleanCut = useViewerStore((s) => s.openBooleanCut);
   const [loading3d, setLoading3d] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const isCAD = node.properties.wp_type === 'cad_model';
 
   const handleView3D = useCallback(async () => {
@@ -321,7 +551,21 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             >
               <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>content_cut</span>
             </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setExportOpen((v) => !v)}
+              className="text-xs"
+              title="Export for robotics sim (URDF/SDF/USD)"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>precision_manufacturing</span>
+            </Button>
           </div>
+        )}
+
+        {/* Export for robotics sim (MET-720) */}
+        {isCAD && exportOpen && (
+          <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
         )}
 
         {/* File: worktype + path + download / open / preview (MET-483) */}
