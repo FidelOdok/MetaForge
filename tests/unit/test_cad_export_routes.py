@@ -88,6 +88,33 @@ class _FakeBridge:
                 "default_urdf_path": params["default_urdf_path"],
             }
 
+        if tool_id == "freecad.describe_session":
+            if params["session_id"] == "missing":
+                raise RuntimeError("unknown session")
+            return {
+                "session_id": params["session_id"],
+                "name": "my_assembly",
+                "object_count": 2,
+                "objects": [
+                    {"obj_id": "o1", "kind": "part", "name": "base", "order": 0},
+                    {"obj_id": "o2", "kind": "part", "name": "arm", "order": 1},
+                ],
+            }
+
+        if tool_id == "freecad.list_joints":
+            return {
+                "joints": [
+                    {
+                        "name": "base-arm",
+                        "type": "revolute",
+                        "base": "base",
+                        "follower": "arm",
+                        "axis": [0.0, 0.0, 1.0],
+                        "anchor": [0.0, 0.0, 10.0],
+                    }
+                ]
+            }
+
         raise AssertionError(f"unexpected tool call in test: {tool_id}")
 
 
@@ -281,3 +308,46 @@ def test_download_export_file_rejects_path_traversal(
 def test_download_export_file_rejects_invalid_export_id(client: TestClient) -> None:
     resp = client.get("/v1/cad-export/download/not-a-uuid/model.urdf")
     assert resp.status_code == 400
+
+
+def test_get_session_summary_lists_objects(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _FakeBridge()
+    _patch_bridge(monkeypatch, bridge)
+
+    resp = client.get("/v1/cad-export/sessions/sess-1")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["session_id"] == "sess-1"
+    assert body["object_count"] == 2
+    assert [o["name"] for o in body["objects"]] == ["base", "arm"]
+    assert bridge.calls == [("freecad.describe_session", {"session_id": "sess-1"})]
+
+
+def test_get_session_summary_502_when_session_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _FakeBridge()
+    _patch_bridge(monkeypatch, bridge)
+
+    resp = client.get("/v1/cad-export/sessions/missing")
+    assert resp.status_code == 502
+
+
+def test_get_session_joints_returns_recorded_joints(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _FakeBridge()
+    _patch_bridge(monkeypatch, bridge)
+
+    resp = client.get("/v1/cad-export/sessions/sess-1/joints")
+
+    assert resp.status_code == 200, resp.text
+    joints = resp.json()["joints"]
+    assert len(joints) == 1
+    assert joints[0]["base"] == "base"
+    assert joints[0]["follower"] == "arm"
+    assert joints[0]["type"] == "revolute"
+    assert bridge.calls == [("freecad.list_joints", {"session_id": "sess-1"})]

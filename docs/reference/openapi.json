@@ -3854,6 +3854,73 @@
         "title": "SessionEventResponse",
         "type": "object"
       },
+      "SessionJoint": {
+        "properties": {
+          "anchor": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Anchor",
+            "type": "array"
+          },
+          "axis": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Axis",
+            "type": "array"
+          },
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "follower": {
+            "title": "Follower",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "fixed",
+              "slider",
+              "revolute",
+              "cylindrical",
+              "ball"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "base",
+          "follower",
+          "axis",
+          "anchor"
+        ],
+        "title": "SessionJoint",
+        "type": "object"
+      },
+      "SessionJointsResponse": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/SessionJoint"
+            },
+            "title": "Joints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "joints"
+        ],
+        "title": "SessionJointsResponse",
+        "type": "object"
+      },
       "SessionListResponse": {
         "description": "List of sessions.",
         "properties": {
@@ -3874,6 +3941,34 @@
           "total"
         ],
         "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionObject": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "obj_id": {
+            "title": "Obj Id",
+            "type": "string"
+          },
+          "order": {
+            "title": "Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "obj_id",
+          "kind",
+          "name",
+          "order"
+        ],
+        "title": "SessionObject",
         "type": "object"
       },
       "SessionResponse": {
@@ -3970,6 +4065,37 @@
           "started_at"
         ],
         "title": "SessionResponse",
+        "type": "object"
+      },
+      "SessionSummary": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "object_count": {
+            "title": "Object Count",
+            "type": "integer"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/SessionObject"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "name",
+          "object_count",
+          "objects"
+        ],
+        "title": "SessionSummary",
         "type": "object"
       },
       "SessionUpdateRequest": {
@@ -5821,6 +5947,90 @@
           }
         },
         "summary": "Export Sdf Assembly",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sessions/{session_id}": {
+      "get": {
+        "operationId": "get_session_summary_v1_cad_export_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Summary",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sessions/{session_id}/joints": {
+      "get": {
+        "operationId": "get_session_joints_v1_cad_export_sessions__session_id__joints_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionJointsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Joints",
         "tags": [
           "cad-export"
         ]

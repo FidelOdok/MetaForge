@@ -11,6 +11,7 @@ import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
+import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
@@ -772,6 +773,7 @@ export function TwinViewerPage() {
   // ── state ──
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [assemblyExportOpen, setAssemblyExportOpen] = useState(false);
   const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
   const [quality, setQuality] = useState('standard');
   const [showTree, setShowTree] = useState(true);
@@ -1267,6 +1269,29 @@ export function TwinViewerPage() {
           IMPORT
         </button>
 
+        {/* Export assembly for sim (MET-721) — only meaningful with a node list to pick parts from */}
+        {isGraphMode && items.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setAssemblyExportOpen((p) => !p)}
+            className="flex items-center gap-1.5 rounded px-2"
+            style={{
+              height: 28,
+              background: assemblyExportOpen ? KC.orangeFaint : 'rgba(30,31,38,0.85)',
+              backdropFilter: 'blur(16px)',
+              border: `1px solid ${assemblyExportOpen ? KC.orangeBorder : KC.borderMid}`,
+              color: assemblyExportOpen ? KC.orange : KC.onSurfaceVariant,
+              fontSize: 11,
+              cursor: 'pointer',
+              letterSpacing: '0.06em',
+              fontFamily: "'Roboto Mono', monospace",
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>precision_manufacturing</span>
+            ASSEMBLY
+          </button>
+        )}
+
         {/* MODEL | GRAPH segmented toggle */}
         <div
           className="flex items-center rounded overflow-hidden"
@@ -1365,6 +1390,12 @@ export function TwinViewerPage() {
       {/* ═══════════════════════════════════════════
           IMPORT PANEL (slide-in under top bar)
       ════════════════════════════════════════════ */}
+      {assemblyExportOpen && (
+        <div style={{ position: 'absolute', top: 52, right: 16, zIndex: 50 }}>
+          <AssemblyExportPanel items={items} onClose={() => setAssemblyExportOpen(false)} />
+        </div>
+      )}
+
       {importOpen && (
         <GlassPanel
           style={{
