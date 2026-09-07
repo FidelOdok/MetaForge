@@ -217,9 +217,11 @@ class ConsolidationOrchestrator:
         rejected: list[str] = []
         contradictions: list[str] = []
 
+        synthesis_failures = 0
         for group in groups:
             insight = await self._synthesizer.synthesize(group)
             if insight is None:
+                synthesis_failures += 1
                 rejected.append(f"theme={group.theme.value} reason=synthesis_failed")
                 continue
             synthesized.append(insight)
@@ -257,6 +259,25 @@ class ConsolidationOrchestrator:
         )
         span.set_attribute("memory.accepted_count", report.accepted_count)
         span.set_attribute("memory.rejected_count", report.rejected_count)
+        # MET-727: a pass in which EVERY group failed to synthesize is an
+        # outage, not a quiet day, and must not read as a clean completion.
+        # The retired Open Router model slugs 404'd on every call for months
+        # while passes reported "completed" with synthesized=0 -- which is
+        # why memory.list_insights stayed empty in every deployment even
+        # after the scheduler was wired (MET-567).
+        if groups and synthesis_failures == len(groups):
+            logger.warning(
+                "consolidation_pass_all_synthesis_failed",
+                mode=request.mode.value,
+                fetched=report.fetched_count,
+                groups=report.group_count,
+                hint=(
+                    "every group's LLM call failed -- check the preceding "
+                    "consolidation_synthesizer_llm_error entries. A 404 from "
+                    "chat/completions means the configured model slug does "
+                    "not exist."
+                ),
+            )
         logger.info(
             "consolidation_pass_completed",
             mode=request.mode.value,
@@ -265,6 +286,7 @@ class ConsolidationOrchestrator:
             synthesized=report.synthesized_count,
             accepted=report.accepted_count,
             rejected=report.rejected_count,
+            synthesis_failures=synthesis_failures,
             project_id=str(request.project_id) if request.project_id else None,
         )
         return report
