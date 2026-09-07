@@ -90,9 +90,16 @@ jobs:
           filters: |
             dashboard:
               - 'dashboard/**'
+              # MET-731: the workflow itself counts as a dashboard change.
+              # Without this you can edit -- or break -- the dashboard job and
+              # CI will not run it, because the filter only watched the code
+              # the job tests and not the job doing the testing. It also means
+              # a PR that adds a step to this job cannot exercise the step it
+              # adds.
+              - '.github/workflows/ci.yml'
 
   dashboard:
-    name: Dashboard Type Check
+    name: Dashboard Checks
     runs-on: [self-hosted, linux, fidel-dev]
     needs: changes
     if: needs.changes.outputs.dashboard == 'true'
@@ -105,3 +112,14 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: cd dashboard && npm ci
       - run: cd dashboard && npx tsc --noEmit
+      # MET-731: this job type-checked and stopped, so the dashboard's 47 test
+      # files / 235 tests never ran anywhere. npm ci is already done above, so
+      # adding them costs only their runtime. Verified all 235 pass on main
+      # first -- unlike MET-730's suites, which had already rotted into three
+      # failures by the time anyone ran them.
+      #
+      # `npm run lint` is deliberately NOT added: eslint is not a dependency
+      # and there is no eslint.config.*, so the script cannot run at all
+      # (MET-732). Repairing it means choosing a lint policy, which is not a
+      # decision to make inside a CI wiring change.
+      - run: cd dashboard && npx vitest run
