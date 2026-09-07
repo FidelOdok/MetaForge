@@ -273,9 +273,11 @@ class ConsolidationOrchestrator:
                 groups=report.group_count,
                 hint=(
                     "every group's LLM call failed -- check the preceding "
-                    "consolidation_synthesizer_llm_error entries. A 404 from "
-                    "chat/completions means the configured model slug does "
-                    "not exist."
+                    "consolidation_synthesizer_llm_error entries for the "
+                    "status. From chat/completions: 404 means the configured "
+                    "model slug does not exist, 402 means the account has no "
+                    "credit, 401 means the key is bad. All three look "
+                    "identical from here -- a pass that synthesised nothing."
                 ),
             )
         logger.info(

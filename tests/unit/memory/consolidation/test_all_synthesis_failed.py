@@ -147,8 +147,14 @@ class TestTotalFailureIsLoud:
         warnings = _events(captured_logs, "consolidation_pass_all_synthesis_failed")
         assert warnings, "a total synthesis failure must not read as a clean pass"
         assert warnings[0]["groups"] == report.group_count
-        # The hint has to name the actual diagnosis, or it is just noise.
-        assert "404" in warnings[0]["hint"]
+        # The hint has to name the actual diagnoses, or it is just noise.
+        # All three statuses look identical from here -- a pass that
+        # synthesised nothing -- so naming only one sends the reader looking
+        # in the wrong place. Found that out live: fixing the retired slugs
+        # turned 404 into 402, and the hint still said "model slug".
+        hint = warnings[0]["hint"]
+        for status in ("404", "402", "401"):
+            assert status in hint, f"hint does not mention {status}: {hint}"
 
     @pytest.mark.asyncio
     async def test_the_completion_log_carries_the_failure_count(self, captured_logs):
