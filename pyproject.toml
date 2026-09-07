@@ -68,6 +68,13 @@ build = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    # The durable tiers must be EXERCISED by CI, not skipped there. Both were
+    # dead for six months precisely because nothing ran them; leaving their
+    # SDKs out of the test env would recreate that (the tests would silently
+    # skip and the tier could break unnoticed). The modules themselves still
+    # degrade gracefully when absent, so a stripped env stays usable.
+    "aiokafka>=0.9",
+    "temporalio>=1.5",
     # Pinned exactly: ruff's formatter output changes between minor releases,
     # so an unpinned range let CI drift to a newer ruff than local dev and
     # fail `ruff format --check .` on unchanged files. Bump deliberately.

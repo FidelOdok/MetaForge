@@ -104,7 +104,16 @@ class TestWorkflowSandbox:
 
 class TestConnectRetry:
     """A worker container and its server start together, so a first-attempt
-    failure is usually a race — the MET-710 lesson applied to Temporal."""
+    failure is usually a race — the MET-710 lesson applied to Temporal.
+
+    These patch ``temporalio.client.Client``, so they need the SDK. It is in
+    the ``dev`` extra deliberately (CI must exercise the durable tiers, not
+    skip them), but a stripped env should skip rather than error.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_sdk(self):
+        pytest.importorskip("temporalio.client")
 
     @pytest.mark.asyncio
     async def test_a_transient_failure_is_retried_and_recovers(
