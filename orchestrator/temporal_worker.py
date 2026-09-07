@@ -86,7 +86,18 @@ PASSTHROUGH_MODULES = (
     "rich",
     "pydantic",
     "observability",
+    # ConsolidationWorkflow reaches httpx through its Open Router LLM client;
+    # httpx/_models.py subclasses urllib.request.Request at module scope.
+    "httpx",
 )
+
+# The durable fix is architectural: Temporal's own guidance is that a workflow
+# module should import only pure types, with all I/O in activities. Ours pull
+# in logging and HTTP clients transitively, so each new dependency risks another
+# import-time restriction. Splitting the workflow definitions away from the
+# client imports would make this list shrink to nothing; until then it is
+# enumerated explicitly and covered by a test that validates every registered
+# workflow.
 
 
 def workflow_runner() -> Any:

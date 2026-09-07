@@ -77,29 +77,29 @@ class TestWorkflowSandbox:
         assert "rich" in PASSTHROUGH_MODULES
         assert "structlog" in PASSTHROUGH_MODULES
 
-    def test_every_registered_workflow_passes_validation(self):
-        """The failure mode is at Worker() construction, before any client use.
+    @pytest.mark.asyncio
+    async def test_every_registered_workflow_passes_sandbox_validation(self):
+        """Run the sandbox over each workflow, exactly as a worker would.
 
-        A MagicMock client gets far enough to validate all three workflows and
-        then fails on the client itself -- so a ``TypeError`` about the client
-        means validation PASSED, while a ``RuntimeError`` naming a workflow
-        means it did not. Asserting the distinction pins the sandbox fix
-        without needing a live Temporal server.
+        An earlier version of this test asserted that ``create_worker`` with a
+        MagicMock raised ``TypeError`` (client) rather than ``RuntimeError``
+        (validation) -- but the client check happens *before* workflow
+        validation, so it never reached the thing it claimed to prove and
+        passed while ConsolidationWorkflow was still broken. This calls
+        ``prepare_workflow`` directly, which is what actually fails, and needs
+        a running loop -- hence async.
         """
-        from unittest.mock import MagicMock
+        pytest.importorskip("temporalio")
+        from temporalio.workflow import _Definition
 
-        from orchestrator.temporal_worker import HAS_TEMPORAL, create_worker
+        from orchestrator.temporal_worker import ALL_WORKFLOWS, workflow_runner
 
-        if not HAS_TEMPORAL:
-            pytest.skip("temporalio not installed")
-
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011 - asserting WHICH error
-            create_worker(MagicMock())
-
-        assert not isinstance(excinfo.value, RuntimeError), (
-            f"workflow validation regressed: {excinfo.value}"
-        )
-        assert "worker_service_client" in str(excinfo.value)
+        runner = workflow_runner()
+        for wf in ALL_WORKFLOWS:
+            defn = _Definition.must_from_class(wf)
+            # Raises RestrictedWorkflowAccessError if an import in the
+            # workflow's chain touches non-determinism at module scope.
+            runner.prepare_workflow(defn)
 
 
 class TestConnectRetry:
