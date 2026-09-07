@@ -275,6 +275,44 @@ find . -name __pycache__ -type d -prune -exec rm -rf {} +
 pytest
 ```
 
+## `pytest` stalls near the very end (98%+), then finishes
+
+**Symptom:** `pytest tests/unit` reaches ~98%, then sits there for
+30-50 seconds with the wall clock climbing but no CPU time accruing.
+`/proc/<pid>` shows state `S`, blocked on `futex_wait_queue`, with a
+pile of threads alive. It reads exactly like a deadlock, but the run
+does eventually finish.
+
+**Cause:** `api_gateway/server.py` calls `init_observability()` at
+**module** scope, so merely importing the app stands up three live OTLP
+exporters aimed at `OTEL_EXPORTER_OTLP_ENDPOINT`, which defaults to
+`http://localhost:4317`. With no collector listening — a test run, a
+laptop without the observability stack — the batch span/metric/log
+processors spend the whole of interpreter shutdown trying to flush to a
+dead endpoint. Measured on the full unit suite: **202s with export on,
+101s with it off**, on identical code.
+
+**Fix:** none needed; `tests/conftest.py` sets
+`METAFORGE_OTEL_EXPORT=off` before any app import. If you see this
+stall, check that line still exists —
+`test_export_is_off_for_this_run` fails loudly if it is removed.
+
+To profile telemetry deliberately, set `METAFORGE_OTEL_EXPORT=on` and
+expect the suite to take about twice as long.
+
+## Telemetry env switches
+
+Two switches, and the difference matters:
+
+| Variable | Effect | Use it when |
+|----------|--------|-------------|
+| `METAFORGE_OTEL_EXPORT=off` | Builds no exporters. Tracing stays fully functional, so instrumentation still records spans — anything that installs its own span processor keeps working. | You have no collector: tests, local dev, CI |
+| `OTEL_SDK_DISABLED=true` | The OpenTelemetry-standard kill switch. Turns the SDK off entirely, so code records **nothing**. | You want no telemetry at all |
+
+Reaching for `OTEL_SDK_DISABLED` when you only meant "don't export" is
+the trap: it also makes the SDK hand out no-op tracers, which silently
+breaks any test that asserts on span attributes.
+
 ## When to escalate
 
 If the issue is:
