@@ -944,6 +944,18 @@ class TwinServer(McpToolServer):
                                 "metadata alongside 'parameters'."
                             ),
                         },
+                        "source_tool": {
+                            "type": "string",
+                            "description": (
+                                "Which authoring tool produced this geometry, e.g. "
+                                "'cadquery.execute_script' or 'freecad.export_model'. "
+                                "Recorded as the work product's provenance "
+                                "(authored_by/created_by). Defaults to "
+                                "'freecad.export_model', so pass it explicitly when the "
+                                "geometry came from CadQuery — otherwise the node claims "
+                                "a tool that never touched it (MET-693)."
+                            ),
+                        },
                     },
                     "required": ["name"],
                 },
@@ -1006,6 +1018,15 @@ class TwinServer(McpToolServer):
         parameters = arguments.get("parameters")
         properties = arguments.get("properties")
         script_source = script_source if isinstance(script_source, str) and script_source else None
+        # MET-693: the recorder's `source_tool` defaults to
+        # "freecad.export_model", and this handler never passed one -- so every
+        # commit was stamped as FreeCAD-authored, including CadQuery geometry.
+        # The provenance of a work product has to be accurate: it is what a
+        # reviewer reads to know how the artifact was produced, and script-as-
+        # SSOT diffing (MET-630) depends on knowing which authoring tool the
+        # stored script belongs to.
+        source_tool = arguments.get("source_tool")
+        source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -1016,6 +1037,7 @@ class TwinServer(McpToolServer):
             script_source=script_source,
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
+            **({"source_tool": source_tool} if source_tool else {}),
         )
 
     def _register_stage_work_product_file(self) -> None:
