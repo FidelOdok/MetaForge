@@ -328,6 +328,14 @@ experience written near a boundary still falls inside the next window.
 | --- | --- | --- |
 | `METAFORGE_CONSOLIDATION_INTERVAL_SECONDS` | `1800` | Seconds between passes; `0` (or a negative value) disables the loop — set this when handing the job to a Temporal worker |
 
+**Handing the cadence to Temporal.** `ConsolidationWorkflow` (MET-454) is now
+registered on the worker (`orchestrator/temporal_worker.py`), which runs as
+its own `temporal-worker` compose service. To hand over: start the worker,
+start a `ConsolidationWorkflow` (its own loop owns the interval), and set
+`METAFORGE_CONSOLIDATION_INTERVAL_SECONDS=0` on the gateway so the in-process
+asyncio loop stands down. Run one or the other, never both — two drivers would
+double every pass.
+
 `MemoryClient` is now constructed with the `knowledge_service` in both
 bootstraps (gateway and MCP sidecar). Omitting it left
 `POST /v1/memory/search` and `GET /v1/memory/components/{name}`
