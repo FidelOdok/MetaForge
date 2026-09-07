@@ -921,6 +921,18 @@ async def _init_orchestrator(app: FastAPI) -> None:
                 collector=_collector,
             )
             await kafka_publisher.start()
+            # `start()` never raises -- a missing SDK or an unreachable broker
+            # degrades internally -- so "did it actually attach a producer?"
+            # has to be asked explicitly. Caught live: without this check the
+            # gateway logged `event_bus_kafka_initialized` while `aiokafka`
+            # was absent from the image and every event was being dropped,
+            # which is the same false-positive that let this tier stay dark
+            # for six months.
+            if not kafka_publisher.started:
+                raise RuntimeError(
+                    "Kafka producer did not start (missing aiokafka, or broker "
+                    "unreachable) -- see the kafka_producer_start_failed log line"
+                )
             logger.info("event_bus_kafka_initialized", bootstrap_servers=_kafka_servers)
         except Exception as exc:
             # A broker that is down must not take the gateway with it -- the
@@ -931,6 +943,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
                 error=str(exc),
                 hint="falling back to the in-process bus; events will not be replayable",
             )
+            if kafka_publisher is not None:
+                await kafka_publisher.stop()
             kafka_publisher = None
             event_bus = None
 

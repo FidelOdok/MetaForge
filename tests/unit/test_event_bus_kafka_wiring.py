@@ -146,3 +146,46 @@ def test_the_in_process_bus_has_no_publisher():
     bus = create_default_bus()
 
     assert bus._kafka_publisher is None  # noqa: SLF001
+
+
+class TestHonestReadiness:
+    """``start()`` never raises, so ``started`` is what tells the truth.
+
+    Caught live while testing end to end: the gateway logged
+    ``event_bus_kafka_initialized`` while ``aiokafka`` was absent from the
+    image and every event was being dropped. ``start()`` swallows a missing
+    SDK and an unreachable broker alike (correctly -- neither should fail
+    boot), which makes a public readiness signal load-bearing rather than
+    cosmetic. Without it the wiring reproduces the exact false positive that
+    let this tier stay dark for six months.
+    """
+
+    @pytest.mark.asyncio
+    async def test_started_is_false_when_the_sdk_or_broker_is_missing(self):
+        from orchestrator.event_bus.kafka_producer import KafkaEventPublisher
+
+        publisher = KafkaEventPublisher(bootstrap_servers="nonexistent-broker:9092")
+
+        # Never raises, by design.
+        await publisher.start()
+
+        # But it must not claim to be running.
+        assert publisher.started is False
+
+    @pytest.mark.asyncio
+    async def test_started_is_true_only_with_a_live_producer(self):
+        from orchestrator.event_bus.kafka_producer import KafkaEventPublisher
+
+        publisher = KafkaEventPublisher(bootstrap_servers="kafka:29092")
+        assert publisher.started is False
+
+        class _Producer:
+            async def stop(self) -> None: ...
+
+        publisher._producer = _Producer()  # noqa: SLF001
+        publisher._started = True  # noqa: SLF001
+        assert publisher.started is True
+
+        # A stopped producer is not started, even if the flag lingers.
+        await publisher.stop()
+        assert publisher.started is False
