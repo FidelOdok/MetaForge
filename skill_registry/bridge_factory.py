@@ -84,7 +84,10 @@ async def create_mcp_bridge(
                 fb,
                 require,
             )
-        transport = HttpTransport(url, api_key=api_key)
+        # Annotated as the union because the stdio branch below binds a
+        # StdioTransport to this same name; without it the second assignment
+        # reads as a type error rather than the two-mode dispatch it is.
+        transport: HttpTransport | StdioTransport = HttpTransport(url, api_key=api_key)
         return await _connect_and_wrap("http", url, transport, fb, require)
 
     if mode == "stdio":

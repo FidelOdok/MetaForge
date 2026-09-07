@@ -325,7 +325,14 @@ async def gemini_invoke(
     """
     system, messages, max_tokens, temperature = _normalize_request(request)
     if client is None:
-        from google import genai
+        # MET-733: google-genai is an optional provider SDK and is in no
+        # dependency group, so mypy's view of `google.genai` depends on which
+        # other `google.*` namespace packages happen to be installed. With
+        # none present it stays quiet; with a sibling present (as on the CI
+        # runner) it resolves `google` and then reports `has no attribute
+        # "genai"`. That divergence is why this passed locally and failed in
+        # CI when the mypy ratchet first covered this package.
+        from google import genai  # type: ignore[attr-defined]
 
         # cast(Any, …): keep the SDK seam untyped — request payloads here are
         # normalized plain dicts, which the SDK accepts at runtime but whose
@@ -664,7 +671,14 @@ async def gemini_stream(
     """Stream a Google Gemini model's text deltas."""
     system, messages, max_tokens, temperature = _normalize_request(request)
     if client is None:
-        from google import genai
+        # MET-733: google-genai is an optional provider SDK and is in no
+        # dependency group, so mypy's view of `google.genai` depends on which
+        # other `google.*` namespace packages happen to be installed. With
+        # none present it stays quiet; with a sibling present (as on the CI
+        # runner) it resolves `google` and then reports `has no attribute
+        # "genai"`. That divergence is why this passed locally and failed in
+        # CI when the mypy ratchet first covered this package.
+        from google import genai  # type: ignore[attr-defined]
 
         # cast(Any, …): keep the SDK seam untyped — request payloads here are
         # normalized plain dicts, which the SDK accepts at runtime but whose

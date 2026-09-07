@@ -80,6 +80,10 @@ dev = [
     # fail `ruff format --check .` on unchanged files. Bump deliberately.
     "ruff==0.15.6",
     "mypy>=1.13",
+    # MET-733: 11 of the errors that made `mypy .` unusable were
+    # "Library stubs not installed for yaml". The stubs are a type-check
+    # dependency, so they belong in the extra that installs the type checker.
+    "types-PyYAML>=6.0",
     "httpx>=0.27",
     # Pulled in so unit tests like ``test_pg_backend.py`` (which use
     # in-process sqlite via ``aiosqlite``) run without extra setup. The

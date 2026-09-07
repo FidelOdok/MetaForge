@@ -189,12 +189,17 @@ class HardwareDesignWorkflow:
             parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
             has_failure = False
             for result in parallel_results:
-                if isinstance(result, Exception):
+                # MET-733: BaseException, not Exception. asyncio.CancelledError
+                # has inherited from BaseException since Python 3.8, so a
+                # cancelled step took the else branch and died on `.status`
+                # with an AttributeError instead of being recorded as failed.
+                # Cancellation is not exotic in a Temporal workflow.
+                if isinstance(result, BaseException):
                     steps.append(
                         StepOutcome(
                             agent_code="unknown",
                             status="failed",
-                            error=str(result),
+                            error=str(result) or type(result).__name__,
                         )
                     )
                     has_failure = True
