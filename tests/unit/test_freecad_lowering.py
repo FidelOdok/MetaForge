@@ -224,6 +224,53 @@ class TestHappyPath:
         assert calls["freecad.measure"]["obj_id"] == "prim_1"
         assert calls["freecad.export_model"]["obj_id"] == "prim_1"
 
+    async def test_document_ending_in_a_dangling_sketch_skips_it_as_terminal(self):
+        # Regression (MET-690): _NO_SHAPE_OPS carried the literal
+        # "create_sketch" while the real entity op is "sketch"
+        # (SketchEntity.op), so the sketch exclusion never matched anything.
+        # A document ending in a dangling, unconsumed sketch therefore picked
+        # the sketch as terminal -- and a bare Sketcher::SketchObject has no
+        # exportable solid, so export_model/measure would fail against a real
+        # FreeCAD adapter exactly as in the MET-682 "joint" case. Asserting on
+        # WHICH obj_id becomes terminal is the only way to catch this: the
+        # in-memory bridge returns canned responses regardless of what is sent.
+        mcp = InMemoryMcpBridge()
+        _register(mcp, "freecad.open_session", {"session_id": "sess-1"})
+        _register(mcp, "freecad.create_primitive", {"obj_id": "prim_1"})
+        _register(mcp, "freecad.create_body", {"obj_id": "body_1"})
+        _register(mcp, "freecad.create_sketch", {"obj_id": "sketch_1"})
+        _register(
+            mcp,
+            "freecad.measure",
+            {"volume_mm3": 500.0, "surface_area_mm2": 300.0, "bounding_box": {}},
+        )
+        _register(
+            mcp,
+            "freecad.export_model",
+            {"step_base64": base64.b64encode(b"STEP").decode("ascii")},
+        )
+        _register(mcp, "freecad.close_session", {})
+
+        doc = DesignIR(
+            entities=[
+                {"id": "p1", "op": "create_primitive", "kind": "box"},
+                {"id": "b1", "op": "create_body"},
+                {
+                    "id": "sk1",
+                    "op": "sketch",
+                    "body_ref": "b1",
+                    "plane": "XY",
+                    "elements": [],
+                },
+            ]
+        )
+        result = await lower_design_ir_freecad(mcp, doc)
+
+        # The primitive is the last entity that actually has a shape.
+        assert result.terminal_entity_id == "p1"
+        calls = dict(mcp.calls)
+        assert calls["freecad.export_model"]["obj_id"] == "prim_1"
+
     async def test_transform_mutates_in_place_no_new_obj_id(self):
         mcp = InMemoryMcpBridge()
         _register(mcp, "freecad.open_session", {"session_id": "sess-1"})

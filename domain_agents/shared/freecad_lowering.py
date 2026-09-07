@@ -73,7 +73,16 @@ from twin_core.design_ir.validation import validate_design_ir
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("domain_agents.shared.freecad_lowering")
 
-_NO_SHAPE_OPS = frozenset({"create_body", "create_sketch", "create_assembly", "joint"})
+# MET-690: this said "create_sketch" from MET-642 onward, but the real entity
+# literal is "sketch" (twin_core/design_ir/models.py: SketchEntity.op), so the
+# exclusion never matched a single real entity and a document ending in a
+# dangling sketch picked it as terminal -- a bare Sketcher::SketchObject has no
+# exportable solid, the same failure class as the MET-682 "joint" bug. The
+# CadQuery sibling had the correct literal from the start.
+#
+# The other three are verified against models.py: create_body, create_assembly,
+# and joint all match their real op literals.
+_NO_SHAPE_OPS = frozenset({"create_body", "sketch", "create_assembly", "joint"})
 _UNSUPPORTED_OPS = frozenset({"create_parametric"})
 
 
