@@ -26,13 +26,20 @@ _OCCT_URL = os.getenv("OCCT_CONVERTER_URL", "http://localhost:8100")
 
 
 class ConversionError(RuntimeError):
-    """The OCCT converter rejected the file (bad request, not a server crash).
+    """This content could not be converted.
 
     MET-652: previously a bare ``RuntimeError``, which the route handler
     never caught -- every rejection (e.g. "Can't export empty scenes!" for a
     STEP with no exportable solids) surfaced as an unhandled 500 with a full
     stack trace, even though it's a client-facing "this content can't be
     converted" case, not a server fault.
+
+    MET-684 widened it from "the converter rejected the file" to include "the
+    converter died trying": a malformed STEP can crash OCCT mid-parse, which
+    arrives as a dropped connection rather than an error status. Both are the
+    same thing to a caller -- this file will not convert -- and both are
+    distinct from the converter being unreachable, which still degrades to
+    stub metadata instead of raising.
     """
 
     def __init__(self, status_code: int, body: str) -> None:
@@ -162,6 +169,33 @@ class ConversionService:
             )
             self._write_fallback(cache, filename)
             return
+        except httpx.RequestError as exc:
+            # MET-684: only ConnectError was handled, so everything else -- a
+            # converter that accepted the request and then died parsing the
+            # file (``RemoteProtocolError: Server disconnected without sending
+            # a response``), a read error, a timeout -- escaped as an unhandled
+            # 500 with a stack trace on every request for that node.
+            #
+            # Deliberately NOT the stub fallback above. ConnectError means the
+            # service is down, and a stub keeps development moving. This means
+            # the service was reachable and this file killed it: live-caught
+            # with a STEP carrying a single corrupted character, where OCCT
+            # logged "Incorrect Syntax : Fails Count: 3" and restarted. Serving
+            # a stub there would present a broken blob as a converted model,
+            # which is the failure MET-683 was about. Raising keeps it a
+            # client-facing "this content cannot be converted" (422).
+            logger.warning(
+                "occt_service_request_failed",
+                url=url,
+                filename=filename,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise ConversionError(
+                502,
+                f"the OCCT converter did not complete this conversion "
+                f"({type(exc).__name__}: {exc}) — the file may be malformed",
+            ) from exc
 
         if resp.status_code != 200:
             raise ConversionError(resp.status_code, resp.text)

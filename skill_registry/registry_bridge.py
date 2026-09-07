@@ -75,6 +75,20 @@ class RegistryMcpBridge(McpBridge):
                     session_id=params.get("session_id"),
                     obj_id=params.get("obj_id"),
                 )
+            elif filled.diverged:
+                # MET-684: the caller carried a step_base64 back that does not
+                # match the export it names. The pristine blob has been
+                # substituted, so the commit succeeds -- but the divergence is
+                # the signal that a large value is being damaged in transit,
+                # and silently repairing it without saying so would hide that.
+                logger.warning(
+                    "geometry_commit_blob_diverged",
+                    session_id=params.get("session_id"),
+                    obj_id=params.get("obj_id"),
+                    stashed_chars=filled.stashed_chars,
+                    supplied_chars=filled.supplied_chars,
+                    resolution="used_stashed_export",
+                )
 
         request = ToolCallRequest(
             tool_id=tool_id,

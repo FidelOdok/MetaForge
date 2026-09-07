@@ -448,6 +448,20 @@ class UnifiedMcpServer:
                         session_id=args.get("session_id"),
                         obj_id=args.get("obj_id"),
                     )
+                elif filled.diverged:
+                    # MET-684: see the matching branch in
+                    # skill_registry/registry_bridge.py. The blob the caller
+                    # carried back does not match the export it names, so the
+                    # pristine one was substituted -- logged rather than
+                    # silently repaired.
+                    logger.warning(
+                        "geometry_commit_blob_diverged",
+                        session_id=args.get("session_id"),
+                        obj_id=args.get("obj_id"),
+                        stashed_chars=filled.stashed_chars,
+                        supplied_chars=filled.supplied_chars,
+                        resolution="used_stashed_export",
+                    )
 
         # Delegate to the adapter's own JSON-RPC dispatcher so its
         # per-tool error handling, timing, and structlog records all
