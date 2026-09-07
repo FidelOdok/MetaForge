@@ -853,6 +853,17 @@ async def _init_orchestrator(app: FastAPI) -> None:
         getattr(app.state, "embedding_service", None),
     )
 
+    # MET-672: HeartbeatMonitor has existed since MET-547 Phase 4 with no
+    # production caller -- its docstring describes "a cron/heartbeat job" that
+    # was never built, so an abandoned run sat non-terminal forever. Observed
+    # live: three `awaiting_approval` runs left behind by a client killed
+    # mid-turn, still listed as pending long afterwards.
+    from api_gateway.chat.tool_approvals import get_approval_store
+    from orchestrator.harness.heartbeat import RunReaper
+
+    app.state.run_reaper = RunReaper(get_approval_store())
+    app.state.run_reaper.start()
+
     init_project_backend(project_backend)
     logger.info(
         "project_backend_selected",
@@ -1190,6 +1201,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # MET-567: stop the periodic consolidation pass.
     if getattr(app.state, "consolidation_scheduler", None) is not None:
         await app.state.consolidation_scheduler.stop()
+    # MET-672: stop the abandoned-run reaper.
+    if getattr(app.state, "run_reaper", None) is not None:
+        await app.state.run_reaper.stop()
     # Flush and close the Kafka producer so buffered events are not dropped.
     if getattr(app.state, "kafka_publisher", None) is not None:
         try:
