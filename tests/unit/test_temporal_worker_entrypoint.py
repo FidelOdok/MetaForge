@@ -58,6 +58,50 @@ def test_the_consolidation_workflow_is_registered():
     assert "run_consolidation_pass_activity" in {getattr(a, "__name__", "") for a in ALL_ACTIVITIES}
 
 
+class TestWorkflowSandbox:
+    """Every registered workflow must survive Temporal's sandbox validation.
+
+    Caught by actually starting a worker: construction died with
+    ``RuntimeError: Failed validating workflow SingleAgentWorkflow``, because
+    the sandbox re-imports each workflow module and ``structlog`` pulls in
+    ``rich``, whose ``style.py`` runs ``count(getrandbits(24))`` at module
+    scope. So the workflows were not merely un-started for six months -- they
+    were **un-runnable by any worker**, which is why the server's execution
+    history is empty.
+    """
+
+    def test_passthrough_covers_the_import_unclean_dependencies(self):
+        from orchestrator.temporal_worker import PASSTHROUGH_MODULES
+
+        # rich is the actual offender; structlog is how we reach it.
+        assert "rich" in PASSTHROUGH_MODULES
+        assert "structlog" in PASSTHROUGH_MODULES
+
+    def test_every_registered_workflow_passes_validation(self):
+        """The failure mode is at Worker() construction, before any client use.
+
+        A MagicMock client gets far enough to validate all three workflows and
+        then fails on the client itself -- so a ``TypeError`` about the client
+        means validation PASSED, while a ``RuntimeError`` naming a workflow
+        means it did not. Asserting the distinction pins the sandbox fix
+        without needing a live Temporal server.
+        """
+        from unittest.mock import MagicMock
+
+        from orchestrator.temporal_worker import HAS_TEMPORAL, create_worker
+
+        if not HAS_TEMPORAL:
+            pytest.skip("temporalio not installed")
+
+        with pytest.raises(Exception) as excinfo:  # noqa: PT011 - asserting WHICH error
+            create_worker(MagicMock())
+
+        assert not isinstance(excinfo.value, RuntimeError), (
+            f"workflow validation regressed: {excinfo.value}"
+        )
+        assert "worker_service_client" in str(excinfo.value)
+
+
 class TestConnectRetry:
     """A worker container and its server start together, so a first-attempt
     failure is usually a race — the MET-710 lesson applied to Temporal."""

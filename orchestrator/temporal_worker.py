@@ -57,10 +57,43 @@ DEFAULT_TASK_QUEUE = "metaforge-agent-tasks"
 
 try:
     from temporalio.worker import Worker
+    from temporalio.worker.workflow_sandbox import (
+        SandboxedWorkflowRunner,
+        SandboxRestrictions,
+    )
 
     HAS_TEMPORAL = True
 except ImportError:
     HAS_TEMPORAL = False
+
+
+# Modules the workflow sandbox must import *outside* its determinism checks.
+#
+# Temporal re-imports every workflow module (and its transitive imports) inside
+# a sandbox that forbids non-deterministic calls at import time. Our workflows
+# import ``structlog``, which pulls in ``rich``, whose ``style.py`` runs
+# ``count(getrandbits(24))`` at module scope -- so worker construction died
+# with `Failed validating workflow SingleAgentWorkflow`. That is why the
+# Temporal server has zero workflow executions in its history: the workflows
+# were not merely un-started, they were un-runnable by any worker.
+#
+# Passing these through is Temporal's documented remedy for third-party
+# modules that are deterministic in use but not import-clean. It is far
+# narrower than ``UnsandboxedWorkflowRunner``, which would switch determinism
+# checking off for our own workflow code too.
+PASSTHROUGH_MODULES = (
+    "structlog",
+    "rich",
+    "pydantic",
+    "observability",
+)
+
+
+def workflow_runner() -> Any:
+    """Sandboxed runner with the passthrough set applied."""
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules(*PASSTHROUGH_MODULES)
+    )
 
 
 def create_worker(client: Any, task_queue: str = DEFAULT_TASK_QUEUE) -> Any:
@@ -94,6 +127,7 @@ def create_worker(client: Any, task_queue: str = DEFAULT_TASK_QUEUE) -> Any:
         task_queue=task_queue,
         workflows=ALL_WORKFLOWS,
         activities=ALL_ACTIVITIES,
+        workflow_runner=workflow_runner(),
     )
 
 
