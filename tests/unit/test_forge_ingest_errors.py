@@ -34,11 +34,43 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYTHON = _REPO_ROOT / ".venv" / "bin" / "python"
 
 
+# MET-703 hardening. These are the variables `cli.forge_cli` reads; the
+# subprocess used to inherit os.environ wholesale, so an earlier test leaking
+# one of them could change this child's behaviour while the tests here assert
+# on exact exit codes and on stderr containing no traceback.
+#
+# Honest scope: this is defence in depth, NOT a proven fix for MET-703.
+#  * The reported failure does not reproduce on current main -- collection
+#    order is deterministic (no randomising plugin), the suite has grown from
+#    ~2.3k tests to ~5.8k since the report, and the full suite is green, so the
+#    ordering that produced it no longer exists.
+#  * Attempting to demonstrate the mechanism FAILED: with the strip removed,
+#    deliberately leaking each of these four variables (including a
+#    non-numeric METAFORGE_INGEST_TIMEOUT) does not break the CLI. So the
+#    polluter, if it returns, is something else.
+#
+# The strip is kept because a subprocess test inheriting caller config is a
+# real order-dependence hazard regardless of whether it caused this particular
+# report -- but the issue should stay open, not be closed as fixed.
+_CLI_ENV_PREFIXES = ("METAFORGE_", "FORGE_")
+
+
+def _clean_env() -> dict[str, str]:
+    """A copy of the environment with every CLI-read variable removed."""
+    return {
+        k: v for k, v in os.environ.items() if not any(k.startswith(p) for p in _CLI_ENV_PREFIXES)
+    }
+
+
 def _run_ingest(*args: str) -> subprocess.CompletedProcess[str]:
     """Run ``python -m cli.forge_cli.main ingest <args> --dry-run``.
 
     --dry-run is added by default so we don't hit the gateway. Tests
     that need a non-dry-run path can build their own argv.
+
+    The child gets an explicitly cleaned environment (see ``_clean_env``) so
+    these assertions depend on the ingest logic alone, not on what earlier
+    tests left in ``os.environ``.
     """
     interpreter = str(_PYTHON) if _PYTHON.exists() else sys.executable
     cmd = [interpreter, "-m", "cli.forge_cli.main", "ingest", *args]
@@ -48,12 +80,61 @@ def _run_ingest(*args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         cwd=str(_REPO_ROOT),
         timeout=60,
+        env=_clean_env(),
     )
 
 
 # ---------------------------------------------------------------------------
 # Nonexistent path → exit code 2, actionable stderr
 # ---------------------------------------------------------------------------
+
+
+class TestEnvironmentIsolation:
+    """The subprocess must not inherit CLI-read variables (MET-703 hardening).
+
+    These pin the isolation contract: whatever a caller has in its own
+    environment, the child sees none of the CLI's configuration variables.
+
+    They do NOT prove the MET-703 failure is fixed. Verified explicitly:
+    with the strip removed, these same leaks still pass, so none of these four
+    variables is capable of producing the reported symptom. See the note above
+    ``_CLI_ENV_PREFIXES``.
+    """
+
+    @pytest.mark.parametrize(
+        "var,value",
+        [
+            ("METAFORGE_INGEST_TIMEOUT", "not-a-number"),
+            ("METAFORGE_GATEWAY_URL", "http://127.0.0.1:1"),
+            ("METAFORGE_HARNESS_ADMIN_TOKEN", "bogus"),
+            ("FORGE_CONFIG", "/does/not/exist/forge.json"),
+        ],
+    )
+    def test_a_leaked_variable_cannot_change_the_result(
+        self, var: str, value: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(var, value)
+        bogus = "/does/not/exist/at/all"
+
+        proc = _run_ingest(bogus, "--dry-run")
+
+        assert proc.returncode == 2, (
+            f"{var} leaked into the child and changed the exit code: "
+            f"{proc.returncode}\nstderr={proc.stderr!r}"
+        )
+        assert "Traceback (most recent call last):" not in proc.stderr
+
+    def test_clean_env_strips_only_the_cli_variables(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("METAFORGE_GATEWAY_URL", "http://x")
+        monkeypatch.setenv("FORGE_CONFIG", "/tmp/x.json")
+
+        env = _clean_env()
+
+        assert not [k for k in env if k.startswith(("METAFORGE_", "FORGE_"))]
+        # The interpreter still needs to be able to run.
+        for keep in ("PATH", "HOME"):
+            if keep in os.environ:
+                assert keep in env
 
 
 class TestNonexistentPath:
