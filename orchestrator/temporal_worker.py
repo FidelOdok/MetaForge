@@ -18,6 +18,10 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.temporal_worker")
 
 # Activities
+from digital_twin.memory.consolidation.workflow import (  # noqa: E402
+    ConsolidationWorkflow,
+    run_consolidation_pass_activity,
+)
 from orchestrator.activities.approval_activity import wait_for_approval  # noqa: E402
 from orchestrator.activities.electronics_activity import run_electronics_agent  # noqa: E402
 from orchestrator.activities.firmware_activity import run_firmware_agent  # noqa: E402
@@ -35,12 +39,18 @@ ALL_ACTIVITIES = [
     run_firmware_agent,
     run_simulation_agent,
     wait_for_approval,
+    # MET-567 follow-up: the consolidation pass had a Temporal workflow since
+    # MET-454 and was never registered here, so even a running worker could
+    # not have picked it up. Registering it is what lets a worker own the
+    # cadence instead of the gateway's in-process asyncio loop.
+    run_consolidation_pass_activity,
 ]
 
 # All registered workflows
 ALL_WORKFLOWS = [
     SingleAgentWorkflow,
     HardwareDesignWorkflow,
+    ConsolidationWorkflow,
 ]
 
 DEFAULT_TASK_QUEUE = "metaforge-agent-tasks"
@@ -121,3 +131,97 @@ async def run_worker(client: Any, task_queue: str = DEFAULT_TASK_QUEUE) -> None:
         await shutdown_event.wait()
 
     logger.info("temporal_worker_stopped", task_queue=task_queue)
+
+
+# ---------------------------------------------------------------------------
+# Entrypoint
+# ---------------------------------------------------------------------------
+#
+# `create_worker` / `run_worker` have existed since MET-186 (2026-03-08) with
+# **no caller outside tests** and no client connect anywhere in the tree, so
+# the Temporal server ran with zero workflow executions for six months while
+# `TEMPORAL_HOST` was passed to the gateway and read by nothing. This is the
+# missing last mile: something that resolves the host, connects, and runs.
+
+
+DEFAULT_TEMPORAL_HOST = "localhost:7233"
+DEFAULT_NAMESPACE = "default"
+
+
+def temporal_host() -> str:
+    """Server address; ``TEMPORAL_HOST`` (as docker-compose already sets)."""
+    import os
+
+    return os.environ.get("TEMPORAL_HOST", "").strip() or DEFAULT_TEMPORAL_HOST
+
+
+def temporal_namespace() -> str:
+    import os
+
+    return os.environ.get("TEMPORAL_NAMESPACE", "").strip() or DEFAULT_NAMESPACE
+
+
+async def connect_client(
+    host: str | None = None,
+    namespace: str | None = None,
+    *,
+    attempts: int = 10,
+    sleep: Any = None,
+) -> Any:
+    """Connect a Temporal client, retrying while the server comes up.
+
+    Same lesson as MET-710: a worker container and its server start together,
+    so a first-attempt failure is usually a race, not an absence. Retrying
+    turns that into a slow start instead of a dead worker.
+    """
+    if not HAS_TEMPORAL:
+        raise ImportError(
+            "temporalio is required to run the worker. Install with: "
+            "pip install 'metaforge[temporal]'"
+        )
+    from temporalio.client import Client
+
+    target = host or temporal_host()
+    ns = namespace or temporal_namespace()
+    delay = sleep if sleep is not None else asyncio.sleep
+    last: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            client = await Client.connect(target, namespace=ns)
+            logger.info("temporal_client_connected", host=target, namespace=ns)
+            return client
+        except Exception as exc:  # noqa: BLE001 — retried, re-raised below
+            last = exc
+            if attempt == attempts - 1:
+                break
+            wait = min(2.0 * (attempt + 1), 10.0)
+            logger.warning(
+                "temporal_client_retrying",
+                host=target,
+                attempt=attempt + 1,
+                of=attempts,
+                retry_in_s=wait,
+                error=str(exc),
+            )
+            await delay(wait)
+    assert last is not None
+    logger.error("temporal_client_connect_failed", host=target, error=str(last))
+    raise last
+
+
+async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
+    """Connect and run the worker until SIGINT/SIGTERM."""
+    from observability.logging import configure_logging
+
+    try:
+        configure_logging()
+    except Exception:  # noqa: BLE001 — logging config must not block the worker
+        pass
+    client = await connect_client()
+    await run_worker(client, task_queue)
+
+
+if __name__ == "__main__":  # pragma: no cover — process entrypoint
+    import os
+
+    asyncio.run(main(os.environ.get("TEMPORAL_TASK_QUEUE") or DEFAULT_TASK_QUEUE))

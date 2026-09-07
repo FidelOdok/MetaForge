@@ -893,11 +893,55 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_twin_viewer(twin)
     init_bom_twin(twin)
 
-    event_bus = create_default_bus(
-        workflow_engine,
-        collector=_collector,
-        knowledge_service=getattr(app.state, "knowledge_service", None),
-    )
+    # MET-197 has been in the tree since 2026-03-08 and nothing ever
+    # constructed the publisher: `KAFKA_BOOTSTRAP_SERVERS` was passed to the
+    # container and read by zero Python code, so the broker ran with **zero
+    # topics ever created** while the in-process bus carried everything. That
+    # made both deposit paths (WORK_PRODUCT_CREATED -> knowledge,
+    # AGENT_TASK_* -> experiences) unreplayable, and it is why they have to be
+    # best-effort: with no durable transport the ingest runs synchronously
+    # inside the request, so a slow embedder must not be allowed to fail the
+    # write it was triggered by.
+    #
+    # The Kafka bus is additive, not a swap: it still dispatches in-process to
+    # every subscriber AND persists to the topic, so replay becomes possible
+    # without needing a separate consumer process first.
+    _kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    _knowledge_service = getattr(app.state, "knowledge_service", None)
+    kafka_publisher: Any = None
+    event_bus = None
+    if _kafka_servers:
+        try:
+            from orchestrator.event_bus.subscribers import create_kafka_bus
+
+            event_bus, kafka_publisher = create_kafka_bus(
+                bootstrap_servers=_kafka_servers,
+                workflow_engine=workflow_engine,
+                knowledge_service=_knowledge_service,
+                collector=_collector,
+            )
+            await kafka_publisher.start()
+            logger.info("event_bus_kafka_initialized", bootstrap_servers=_kafka_servers)
+        except Exception as exc:
+            # A broker that is down must not take the gateway with it -- the
+            # in-process bus is a complete implementation, just not durable.
+            logger.warning(
+                "event_bus_kafka_failed",
+                bootstrap_servers=_kafka_servers,
+                error=str(exc),
+                hint="falling back to the in-process bus; events will not be replayable",
+            )
+            kafka_publisher = None
+            event_bus = None
+
+    if event_bus is None:
+        event_bus = create_default_bus(
+            workflow_engine,
+            collector=_collector,
+            knowledge_service=_knowledge_service,
+        )
+        logger.info("event_bus_in_process_initialized", kafka_configured=bool(_kafka_servers))
+    app.state.kafka_publisher = kafka_publisher
 
     # MET-567: let the twin recorders publish WORK_PRODUCT_CREATED onto this
     # bus. ``KnowledgeConsumer`` has subscribed to that event since MET-307
@@ -1132,6 +1176,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # MET-567: stop the periodic consolidation pass.
     if getattr(app.state, "consolidation_scheduler", None) is not None:
         await app.state.consolidation_scheduler.stop()
+    # Flush and close the Kafka producer so buffered events are not dropped.
+    if getattr(app.state, "kafka_publisher", None) is not None:
+        try:
+            await app.state.kafka_publisher.stop()
+            logger.info("event_bus_kafka_stopped")
+        except Exception as exc:
+            logger.warning("event_bus_kafka_stop_failed", error=str(exc))
     # Close LightRAG service if active
     if hasattr(app.state, "knowledge_service") and app.state.knowledge_service is not None:
         try:
