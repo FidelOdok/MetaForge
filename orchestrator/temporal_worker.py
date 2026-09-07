@@ -7,6 +7,7 @@ a factory function for creating workers bound to a task queue.
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 from typing import Any
 
@@ -289,12 +290,32 @@ async def _bind_consolidation() -> Any:
 
 async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
     """Connect and run the worker until SIGINT/SIGTERM."""
+    from observability.config import ObservabilityConfig
     from observability.logging import configure_logging
 
     try:
-        configure_logging()
-    except Exception:  # noqa: BLE001 — logging config must not block the worker
-        pass
+        # MET-733: this was `configure_logging()` with no argument, and
+        # `configure_logging(config: ObservabilityConfig)` requires one -- so
+        # every call raised TypeError straight into the bare handler below and
+        # the worker has never had its logging configured. It ran on
+        # structlog's defaults instead, which is why its output does not parse
+        # under Loki's `| json` filter and carries no trace context.
+        #
+        # Found by mypy, which nothing ran over this package.
+        #
+        # The service name is the worker's own, not the gateway's: everything
+        # this process emits was otherwise indistinguishable from gateway
+        # output in Loki, since `service_name` is what labels the stream.
+        configure_logging(
+            ObservabilityConfig(
+                service_name="metaforge-temporal-worker",
+                environment=os.environ.get("METAFORGE_ENV", "development"),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — logging config must not block the worker
+        # Not silent: a swallowed failure here is what hid the bug above for
+        # as long as it existed.
+        logger.warning("worker_logging_config_failed", error=str(exc))
     stack = await _bind_consolidation()
     client = await connect_client()
     try:

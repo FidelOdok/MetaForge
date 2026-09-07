@@ -12,6 +12,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from enum import IntEnum
+from functools import partial
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
@@ -188,7 +189,16 @@ class InMemoryScheduler(Scheduler):
             await self._semaphore.acquire()
             task = asyncio.create_task(self._execute_step(step))
             self._active[key] = task
-            task.add_done_callback(lambda _t, _k=key: self._on_step_done(_k))
+            # The ``_k=key`` default in the previous lambda bound the loop
+            # variable per iteration (without it, every callback would close
+            # over the final key) -- but mypy cannot infer a lambda's
+            # parameter types from a default alone. partial binds the key the
+            # same way and keeps the types visible.
+            task.add_done_callback(partial(self._on_step_done_callback, key))
+
+    def _on_step_done_callback(self, key: str, _task: object) -> None:
+        """``add_done_callback`` adapter: it passes the task, we want the key."""
+        self._on_step_done(key)
 
     def _on_step_done(self, key: str) -> None:
         self._semaphore.release()
