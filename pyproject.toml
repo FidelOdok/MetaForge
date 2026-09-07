@@ -84,6 +84,13 @@ dev = [
     # "Library stubs not installed for yaml". The stubs are a type-check
     # dependency, so they belong in the extra that installs the type checker.
     "types-PyYAML>=6.0",
+    # MET-735: the Makefile's integration/e2e targets pass --timeout, which
+    # needs this plugin -- without it pytest rejects the flag outright and the
+    # target fails on a usage error. Worth having rather than dropping: with
+    # tests/integration and tests/e2e now running in CI (MET-730) on a single
+    # self-hosted runner, a hung test should die on its own rather than wedge
+    # the runner for everyone.
+    "pytest-timeout>=2.3",
     "httpx>=0.27",
     # Pulled in so unit tests like ``test_pg_backend.py`` (which use
     # in-process sqlite via ``aiosqlite``) run without extra setup. The
