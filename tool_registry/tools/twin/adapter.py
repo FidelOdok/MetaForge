@@ -894,7 +894,10 @@ class TwinServer(McpToolServer):
                     "NOT unique (it's a per-session counter, not a global id), so "
                     "omitting session_id will not match your prior export even "
                     "though obj_id is correct. (Passing step_base64 directly also "
-                    "works and needs neither id.)"
+                    "works and needs neither id — but when it names an export "
+                    "the server already holds, the server's copy is used, "
+                    "because a copied 30,000-character blob can only be equal "
+                    "or damaged.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -916,7 +919,11 @@ class TwinServer(McpToolServer):
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "step_base64": {
                             "type": "string",
-                            "description": "Base64 STEP (optional if session_id + obj_id given).",
+                            "description": (
+                                "Base64 STEP. Omit when passing session_id + obj_id: "
+                                "the server substitutes its own copy of that export "
+                                "anyway (MET-684)."
+                            ),
                         },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},

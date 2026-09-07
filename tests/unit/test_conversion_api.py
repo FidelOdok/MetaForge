@@ -269,6 +269,59 @@ class TestConversionService:
             assert exc_info.value.status_code == 500
             assert "empty scenes" in exc_info.value.body
 
+    def test_a_converter_that_dies_mid_parse_raises_rather_than_stubbing(
+        self, service: ConversionService
+    ) -> None:
+        """MET-684: a malformed STEP can crash OCCT mid-parse, which arrives as
+        a dropped connection, not an error status.
+
+        Only ``ConnectError`` was handled, so this escaped as an unhandled 500
+        with a stack trace on every request for the node. It must not take the
+        ``converter_unavailable`` stub path either: the service was reachable
+        and *this file* killed it, so serving stub metadata would present a
+        broken blob as a converted model.
+        """
+        import httpx
+
+        from api_gateway.convert.service import ConversionError
+
+        with patch("api_gateway.convert.service.httpx.post") as mock_post:
+            mock_post.side_effect = httpx.RemoteProtocolError(
+                "Server disconnected without sending a response."
+            )
+            with pytest.raises(ConversionError) as exc_info:
+                service.convert(STEP_CONTENT, "corrupt.step", "standard")
+
+        assert "RemoteProtocolError" in str(exc_info.value)
+        assert "malformed" in str(exc_info.value)
+
+    def test_a_converter_timeout_also_raises(self, service: ConversionService) -> None:
+        """Same class as above -- reachable, did not complete. Covered
+        explicitly because ``ReadTimeout`` is a sibling of ``ConnectError``
+        under ``httpx.RequestError`` and it would be easy to re-narrow the
+        except clause to only ``RemoteProtocolError``."""
+        import httpx
+
+        from api_gateway.convert.service import ConversionError
+
+        with patch("api_gateway.convert.service.httpx.post") as mock_post:
+            mock_post.side_effect = httpx.ReadTimeout("timed out")
+            with pytest.raises(ConversionError):
+                service.convert(STEP_CONTENT, "slow.step", "standard")
+
+    def test_an_unreachable_converter_still_stubs(self, service: ConversionService) -> None:
+        """The MET-684 widening must not swallow the ConnectError branch:
+        ``ConnectError`` is a subclass of ``RequestError``, so ordering the
+        except clauses wrongly would turn every dev box without an OCCT
+        container into a hard failure."""
+        import httpx
+
+        with patch("api_gateway.convert.service.httpx.post") as mock_post:
+            mock_post.side_effect = httpx.ConnectError("Connection refused")
+            result = service.convert(STEP_CONTENT, "bracket.step", "standard")
+
+        assert result["metadata"]["converter_unavailable"] is True
+
 
 # ---------------------------------------------------------------------------
 # Route endpoint tests — POST /v1/convert
