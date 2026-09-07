@@ -484,132 +484,32 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     # Insight store prefers pgvector when DATABASE_URL is available.
     app.state.consolidation_orchestrator = None
     app.state.consolidation_insight_store = None
+    app.state.consolidation_stack = None
     if app.state.memory_store is None:
         logger.warning("consolidation_orchestrator_init_skipped", reason="no_memory_store")
     else:
         try:
+            # MET-723: this construction used to live inline here -- about
+            # ninety lines of pgvector / Neo4j / LLM wiring reachable from
+            # nowhere else. That made it impossible for the Temporal worker to
+            # bind the same orchestrator, so a worker serving
+            # ConsolidationWorkflow failed its activity with "orchestrator was
+            # not bound before activity ran". Both processes now share one
+            # factory. The already-open experience store is passed in so a
+            # second pgvector pool is never created for the same data.
             from digital_twin.memory.consolidation import (
-                ConfidenceDecay,
-                ConsolidationOrchestrator,
                 ConsolidationScheduler,
-                ContradictionDetector,
-                DualWriteInsightStore,
-                EventFetcher,
-                EventGrouper,
-                InMemoryEventFetcher,
-                InMemoryInsightStore,
-                InsightStore,
-                InsightSynthesizer,
-                InsightValidator,
-                Neo4jInsightStore,
-                OpenRouterConfig,
-                OpenRouterError,
-                OpenRouterLLMClient,
-                PgVectorEventFetcher,
-                PgVectorInsightStore,
-                SemanticMemoryWriter,
-                StubLLMClient,
+                build_consolidation_stack,
                 interval_seconds_from_env,
-                register_consolidation_activities,
             )
-            from digital_twin.memory.consolidation.llm import LLMClient
 
-            # Insight store — prefer pgvector when DATABASE_URL is set, and
-            # fan out to Neo4j as well (DualWriteInsightStore) when Neo4j
-            # creds are present so the structural graph stays in sync. Falls
-            # back to in-memory when no pgvector backend is available.
-            insight_store: InsightStore
-            pg_insight_store: PgVectorInsightStore | None = None
-            if db_url:
-                try:
-                    dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
-                    pg_insight = PgVectorInsightStore(dsn=dsn)
-                    await pg_insight.initialize()
-                    pg_insight_store = pg_insight
-                    logger.info("consolidation_insight_store_pgvector_initialized")
-                except Exception as exc:
-                    logger.warning("consolidation_insight_store_pgvector_failed", error=str(exc))
-
-            if pg_insight_store is None:
-                insight_store = InMemoryInsightStore()
-                logger.info("consolidation_insight_store_in_memory_initialized")
-            else:
-                insight_store = pg_insight_store
-                # Opt into dual-write when Neo4j is configured. pgvector
-                # stays the read source of truth; Neo4j gets the
-                # structural mirror. A Neo4j connect failure degrades to
-                # pgvector-only rather than failing gateway boot.
-                neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get("METAFORGE_NEO4J_URI")
-                if neo4j_uri:
-                    try:
-                        neo4j_insight = Neo4jInsightStore(
-                            uri=neo4j_uri,
-                            user=(
-                                os.environ.get("NEO4J_USER")
-                                or os.environ.get("METAFORGE_NEO4J_USER")
-                                or "neo4j"
-                            ),
-                            password=(
-                                os.environ.get("NEO4J_PASSWORD")
-                                or os.environ.get("METAFORGE_NEO4J_PASSWORD")
-                                or "password"
-                            ),
-                        )
-                        await neo4j_insight.connect()
-                        insight_store = DualWriteInsightStore(pg_insight_store, neo4j_insight)
-                        logger.info("consolidation_insight_store_dual_write_initialized")
-                    except Exception as exc:
-                        logger.warning(
-                            "consolidation_insight_store_neo4j_failed",
-                            error=str(exc),
-                        )
-
-            # LLM — Open Router when configured, stub otherwise.
-            llm_client: LLMClient
-            try:
-                llm_client = OpenRouterLLMClient(OpenRouterConfig.from_env())
-                logger.info("consolidation_llm_open_router_initialized")
-            except OpenRouterError as exc:
-                logger.warning(
-                    "consolidation_llm_open_router_skipped",
-                    reason=str(exc),
-                )
-                llm_client = StubLLMClient()
-
-            # MET-455: activate the Phase-3 machinery in production —
-            # confidence decay (90-day half-life), JANITOR durable
-            # STALE_WARN marking, and contradiction detection against the
-            # existing corpus during BACKGROUND synthesis. The detector
-            # reuses the same LLM client as the synthesizer.
-            # MET-567: the in-memory fetcher snapshots
-            # ``InMemoryExperienceStore._experiences``, an attribute the
-            # pgvector store does not have — so on every real deployment the
-            # pass fetched zero experiences and synthesised nothing, no matter
-            # how full ``agent_experiences`` was. Pick the fetcher that
-            # matches the store.
-            fetcher: EventFetcher
-            if hasattr(app.state.memory_store, "list_window"):
-                fetcher = PgVectorEventFetcher(app.state.memory_store)
-                logger.info("consolidation_fetcher_selected", backend="pgvector")
-            else:
-                fetcher = InMemoryEventFetcher(app.state.memory_store)
-                logger.info("consolidation_fetcher_selected", backend="in_memory")
-
-            orchestrator = ConsolidationOrchestrator(
-                fetcher=fetcher,
-                grouper=EventGrouper(),
-                synthesizer=InsightSynthesizer(llm_client),
-                validator=InsightValidator(),
-                writer=SemanticMemoryWriter(insight_store),
-                insight_store=insight_store,
-                decay=ConfidenceDecay(),
-                janitor_marks_stale=True,
-                contradiction_detector=ContradictionDetector(llm_client),
+            stack = await build_consolidation_stack(
+                experience_store=app.state.memory_store,
                 collector=getattr(app.state, "collector", None),
             )
-            register_consolidation_activities(orchestrator)
-            app.state.consolidation_orchestrator = orchestrator
-            app.state.consolidation_insight_store = insight_store
+            app.state.consolidation_stack = stack
+            app.state.consolidation_orchestrator = stack.orchestrator
+            app.state.consolidation_insight_store = stack.insight_store
             logger.info("consolidation_orchestrator_initialized")
 
             # MET-567: nothing ever triggered a pass. The pipeline, the
@@ -617,7 +517,7 @@ async def _init_knowledge_store(app: FastAPI) -> None:
             # ``memory.list_insights`` stayed empty in every deployment,
             # because no scheduler and no worker ever called any of them.
             scheduler = ConsolidationScheduler(
-                orchestrator, interval_seconds=interval_seconds_from_env()
+                stack.orchestrator, interval_seconds=interval_seconds_from_env()
             )
             app.state.consolidation_scheduler = scheduler
             scheduler.start()
@@ -1201,6 +1101,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # MET-567: stop the periodic consolidation pass.
     if getattr(app.state, "consolidation_scheduler", None) is not None:
         await app.state.consolidation_scheduler.stop()
+    # MET-723: release only what the factory itself opened (the insight store
+    # pools) -- the experience store was handed in and stays ours to close.
+    if getattr(app.state, "consolidation_stack", None) is not None:
+        await app.state.consolidation_stack.aclose()
     # MET-672: stop the abandoned-run reaper.
     if getattr(app.state, "run_reaper", None) is not None:
         await app.state.run_reaper.stop()
