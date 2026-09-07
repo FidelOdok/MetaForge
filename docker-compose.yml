@@ -380,6 +380,20 @@ services:
       - CONSOLIDATION_MODEL=${CONSOLIDATION_MODEL:-}
       - CONSOLIDATION_FALLBACK_MODEL=${CONSOLIDATION_FALLBACK_MODEL:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # MET-726: the worker reuses the gateway image and so inherited its
+    # HEALTHCHECK, which curls localhost:8000/health. The worker serves no
+    # HTTP, so it reported "unhealthy" from the moment it was added while
+    # running perfectly -- and a container that is always unhealthy teaches
+    # everyone to ignore the one signal that would show a genuinely dead one.
+    # This probe asks the thing that matters: is THIS container polling its
+    # task queue (matched on the poller identity's @hostname, so a dead worker
+    # sharing a queue with a healthy peer still fails).
+    healthcheck:
+      test: ["CMD-SHELL", "python -m orchestrator.worker_healthcheck || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
     depends_on:
       temporal:
         condition: service_healthy
