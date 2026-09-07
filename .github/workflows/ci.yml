@@ -138,6 +138,14 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: cd dashboard && npm ci
       - run: cd dashboard && npx tsc --noEmit
+      # MET-732/736: eslint has been dead here since the flat-config
+      # migration -- `"lint": "eslint ."` had no eslint in the dependencies
+      # and no eslint.config.*, so it could not run at all. Restoring it was
+      # not cosmetic: its first run found two `require()` calls in a Vite ESM
+      # bundle that threw ReferenceError at runtime into a bare `catch`,
+      # silently killing trace-context propagation and error recording
+      # (MET-736). Errors fail the build; the react-hooks warnings do not.
+      - run: cd dashboard && npx eslint .
       # MET-731: this job type-checked and stopped, so the dashboard's 47 test
       # files / 235 tests never ran anywhere. npm ci is already done above, so
       # adding them costs only their runtime. Verified all 235 pass on main

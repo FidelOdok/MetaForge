@@ -75,7 +75,9 @@ fix:
 	ruff check --fix .
 	ruff format .
 
-# Dashboard checks (MET-731: the 235 vitest tests, not just the type check)
+# Dashboard checks (MET-731: the 235 vitest tests, not just the type check;
+# MET-732: and eslint, which could not run at all before)
 dashboard-check:
 	cd dashboard && npx tsc --noEmit
+	cd dashboard && npx eslint .
 	cd dashboard && npx vitest run
