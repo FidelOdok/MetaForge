@@ -11,9 +11,9 @@ Env vars (consumed by :meth:`OpenRouterPropertyConfig.from_env`):
 
 * ``OPEN_ROUTER_API_KEY`` — required (shared with the consolidation client).
 * ``PROPERTY_EXTRACTION_MODEL`` — primary slug. Default
-  ``anthropic/claude-3.5-sonnet``.
+  ``anthropic/claude-sonnet-4.5``.
 * ``PROPERTY_EXTRACTION_FALLBACK_MODEL`` — used on retryable errors.
-  Default ``meta-llama/llama-3-70b-instruct``.
+  Default ``meta-llama/llama-3.3-70b-instruct``.
 * ``PROPERTY_EXTRACTION_TEMPERATURE`` — float, default ``0.0``. Extraction
   is deterministic; temperature stays low.
 * ``PROPERTY_EXTRACTION_MAX_TOKENS`` — int, default ``800``. Single-
@@ -39,8 +39,16 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.openrouter_property_llm")
 
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-3.5-sonnet"
-DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3-70b-instruct"
+# MET-727: the previous defaults, "anthropic/claude-3.5-sonnet" and
+# "meta-llama/llama-3-70b-instruct", were RETIRED from Open Router. Every call
+# 404'd on chat/completions -- primary and fallback both -- and the caller
+# caught it and moved on, so passes completed cleanly having synthesized
+# nothing. Verified against Open Router's own /api/v1/models (430 offered):
+# both slugs GONE. These are the direct successors, and claude-sonnet-4.5
+# carries exactly the price claude-3.5-sonnet did ($3/$15 per Mtok), so the
+# original cost/quality intent is preserved rather than quietly changed.
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-4.5"
+DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_MAX_TOKENS = 800
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
