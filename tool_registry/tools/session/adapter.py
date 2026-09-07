@@ -25,6 +25,43 @@ from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 
 logger = structlog.get_logger(__name__)
+
+
+def _bind_project(project_id: Any) -> bool:
+    """Scope this MCP session to ``project_id``. Returns whether it took effect.
+
+    Best-effort and honest about it: the binding needs the caller to present a
+    stable session identity (stdio ``METAFORGE_SESSION_ID``, or an HTTP
+    ``X-MetaForge-Session`` header). A client supplying neither gets a freshly
+    generated session id per call, so nothing can match later and the caller
+    must keep passing ``project_id`` explicitly -- reported back as
+    ``project_scope_bound: false`` rather than silently pretending.
+    """
+    if not project_id or not isinstance(project_id, str):
+        return False
+    try:
+        from uuid import UUID
+
+        from mcp_core.context import bind_session_project, current_context
+
+        ctx = current_context()
+        bind_session_project(ctx.session_id, UUID(project_id))
+    except Exception as exc:  # noqa: BLE001 — scoping must not fail session.start
+        logger.warning("session_project_bind_failed", error=str(exc))
+        return False
+    return True
+
+
+def _unbind_project() -> None:
+    """Drop this session's project binding (best-effort)."""
+    try:
+        from mcp_core.context import clear_session_project, current_context
+
+        clear_session_project(current_context().session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("session_project_unbind_failed", error=str(exc))
+
+
 tracer = get_tracer("tool_registry.tools.session")
 
 _EVENT_TYPES = ["thought", "action", "decision", "observation", "error", "result"]
@@ -250,8 +287,20 @@ class SessionServer(McpToolServer):
                 title=title if isinstance(title, str) else None,
                 project_id=project_id if isinstance(project_id, str) else None,
             )
-            logger.info("session_mcp_start", session_id=session.id, agent_code=agent_code)
-            return {"session_id": session.id}
+            # MET-680: make the documented behaviour real. Until now
+            # project_id only reached the capture store for attribution, so
+            # "set your active project once" did nothing for the actual tool
+            # calls that followed -- they kept resolving to the default tenant.
+            # Binding is keyed on this call's session_id, so it can never leak
+            # into another client's calls on a shared sidecar.
+            bound = _bind_project(project_id)
+            logger.info(
+                "session_mcp_start",
+                session_id=session.id,
+                agent_code=agent_code,
+                project_bound=bound,
+            )
+            return {"session_id": session.id, "project_scope_bound": bound}
 
     async def handle_log_event(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("session.mcp.log_event") as span:
@@ -290,5 +339,7 @@ class SessionServer(McpToolServer):
                 status=status,
                 summary=summary if isinstance(summary, str) else None,
             )
+            # MET-680: a completed session must not keep scoping later calls.
+            _unbind_project()
             logger.info("session_mcp_complete", session_id=session_id, status=status)
             return {"ok": True}

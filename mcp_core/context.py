@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -137,6 +138,75 @@ def _parse_uuid(value: str | None) -> UUID | None:
         return None
 
 
+# --- Session-scoped project binding (MET-680) --------------------------------
+#
+# CLAUDE.md documents two equivalent ways to "set your active project":
+# `metaforge-capture use <id>` (CLI) or `session.start(project_id=...)`. Only
+# the first worked. `session.start` forwarded project_id into the agent-session
+# capture store for attribution and never touched the MCP call context, so
+# every later knowledge.*/twin.* call in that "session" still resolved to
+# whatever the transport stamped per call -- usually nothing, i.e. the default
+# tenant.
+#
+# The binding is keyed on the call context's ``session_id``, never global.
+# That matters: the HTTP sidecar serves several clients at once, so a
+# process-wide "last project started" would leak one client's project into
+# another's calls -- a correctness bug worse than the one being fixed. Keying
+# on the session means a client that supplies no session identity simply gets
+# no binding (its session_id is freshly generated per call and can never match
+# a stored key), which is the safe failure mode.
+#
+# Consequence, and it is a real limitation: this only takes effect for callers
+# that present a STABLE session -- stdio (``METAFORGE_SESSION_ID``, one
+# process = one session) or HTTP clients sending ``X-MetaForge-Session``. A
+# plain HTTP client that sends neither must still pass ``project_id`` per call.
+
+_MAX_SESSION_BINDINGS = 512
+"""Cap the registry so a long-lived sidecar cannot grow it without bound.
+Oldest binding is evicted first; a session whose binding is evicted degrades to
+per-call project_id rather than to a wrong project."""
+
+_session_projects: OrderedDict[UUID, UUID] = OrderedDict()
+
+
+def bind_session_project(session_id: UUID, project_id: UUID) -> None:
+    """Scope every later call carrying ``session_id`` to ``project_id``."""
+    _session_projects.pop(session_id, None)
+    _session_projects[session_id] = project_id
+    while len(_session_projects) > _MAX_SESSION_BINDINGS:
+        _session_projects.popitem(last=False)
+
+
+def bound_project(session_id: UUID | None) -> UUID | None:
+    """The project bound to ``session_id``, if any."""
+    if session_id is None:
+        return None
+    return _session_projects.get(session_id)
+
+
+def clear_session_project(session_id: UUID) -> None:
+    """Drop a session's binding (called when the session completes)."""
+    _session_projects.pop(session_id, None)
+
+
+def reset_session_projects() -> None:
+    """Clear every binding — tests only."""
+    _session_projects.clear()
+
+
+def _apply_session_binding(fields: dict[str, object], session: UUID | None) -> None:
+    """Fill in a session-bound project when the caller supplied none.
+
+    An explicit per-call project always wins: a caller naming a project on the
+    call is being more specific than a binding made earlier.
+    """
+    if fields.get("project_id") is not None or session is None:
+        return
+    bound = bound_project(session)
+    if bound is not None:
+        fields["project_id"] = bound
+
+
 def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
     """Build a context from HTTP request headers.
 
@@ -159,6 +229,7 @@ def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
         fields["session_id"] = session
     if correlation is not None:
         fields["correlation_id"] = correlation
+    _apply_session_binding(fields, session)
     return McpCallContext(**fields)
 
 
@@ -174,6 +245,7 @@ def context_from_env(env: dict[str, str] | None = None) -> McpCallContext:
         fields["session_id"] = session
     if correlation is not None:
         fields["correlation_id"] = correlation
+    _apply_session_binding(fields, session)
     return McpCallContext(**fields)
 
 
@@ -187,6 +259,9 @@ __all__ = [
     "HEADER_PROJECT",
     "HEADER_SESSION",
     "McpCallContext",
+    "bind_session_project",
+    "bound_project",
+    "clear_session_project",
     "context_from_env",
     "context_from_headers",
     "current_context",
