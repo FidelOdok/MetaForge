@@ -3,6 +3,13 @@
 # Mounts local source into containers so code changes take effect
 # instantly via hot-reload. No rebuild needed.
 #
+# MET-694: the gateway runs with --timeout-graceful-shutdown. Without it a
+# reload-triggered shutdown waits forever for open connections to close, and a
+# single long-lived SSE stream (chat streaming, a dashboard left open) wedges
+# the whole dev gateway at "Waiting for connections to close" — /health stops
+# answering and every consumer goes down with it. A reload that drops one
+# in-flight stream is strictly better than one that never completes.
+#
 # Usage:
 #   docker compose up gateway dashboard-dev   # Gateway + Vite HMR dashboard
 #   docker compose up                         # Same — override is auto-applied
@@ -16,6 +23,7 @@ services:
       uvicorn api_gateway.server:app
       --host 0.0.0.0 --port 8000 --reload
       --ws websockets-sansio
+      --timeout-graceful-shutdown 10
       --reload-dir /app/api_gateway
       --reload-dir /app/orchestrator
       --reload-dir /app/twin_core
