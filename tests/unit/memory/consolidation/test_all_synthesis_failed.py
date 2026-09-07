@@ -14,7 +14,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-import structlog
 
 from digital_twin.memory.consolidation.decay import ConfidenceDecay
 from digital_twin.memory.consolidation.fetcher import InMemoryEventFetcher
@@ -54,21 +53,43 @@ class _FailsOnlyTheFirstGroup:
         return None if self.calls == 1 else self._insight
 
 
+class _RecordingLogger:
+    """Records structlog-style calls without touching global configuration.
+
+    Reconfiguring structlog's processor chain only reaches loggers that have
+    not yet been bound and cached, which makes such a fixture depend on test
+    order -- it passes in isolation and fails once something else has used the
+    module's logger first. Swapping the attribute is order-independent.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def _record(self, level: str):  # noqa: ANN202
+        def _log(event: str, **kw) -> None:  # noqa: ANN003
+            self.calls.append((level, event, kw))
+
+        return _log
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        if name in {"debug", "info", "warning", "error", "critical", "exception"}:
+            return self._record(name)
+        raise AttributeError(name)
+
+
+def _events(recorder: _RecordingLogger, name: str) -> list[dict]:
+    """The kwargs of every call recording ``name``, whatever the level."""
+    return [kw for _lvl, ev, kw in recorder.calls if ev == name]
+
+
 @pytest.fixture
-def captured_logs():
-    """Capture structlog events for this test only."""
-    events: list[dict] = []
+def captured_logs(monkeypatch):
+    """Records what ``orchestrator.py`` logs, as (level, event, kwargs)."""
+    from digital_twin.memory.consolidation import orchestrator as orchestrator_module
 
-    def _sink(_logger, _name, event_dict):
-        events.append(dict(event_dict))
-        raise structlog.DropEvent
-
-    original = structlog.get_config()["processors"]
-    structlog.configure(processors=[_sink])
-    try:
-        yield events
-    finally:
-        structlog.configure(processors=original)
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(orchestrator_module, "logger", recorder)
+    return recorder
 
 
 async def _store_with_experiences(
@@ -123,9 +144,7 @@ class TestTotalFailureIsLoud:
         assert synthesizer.calls > 0, "no groups were formed; test proves nothing"
         assert report.synthesized_count == 0
 
-        warnings = [
-            e for e in captured_logs if e.get("event") == "consolidation_pass_all_synthesis_failed"
-        ]
+        warnings = _events(captured_logs, "consolidation_pass_all_synthesis_failed")
         assert warnings, "a total synthesis failure must not read as a clean pass"
         assert warnings[0]["groups"] == report.group_count
         # The hint has to name the actual diagnosis, or it is just noise.
@@ -140,7 +159,7 @@ class TestTotalFailureIsLoud:
             ConsolidationRunRequest(mode=ConsolidationMode.BACKGROUND)
         )
 
-        completed = [e for e in captured_logs if e.get("event") == "consolidation_pass_completed"]
+        completed = _events(captured_logs, "consolidation_pass_completed")
         assert completed
         assert completed[0]["synthesis_failures"] == report.group_count
 
@@ -152,9 +171,7 @@ class TestTotalFailureIsLoud:
 
         await orchestrator.run_request(ConsolidationRunRequest(mode=ConsolidationMode.BACKGROUND))
 
-        assert not [
-            e for e in captured_logs if e.get("event") == "consolidation_pass_all_synthesis_failed"
-        ]
+        assert not _events(captured_logs, "consolidation_pass_all_synthesis_failed")
 
     @pytest.mark.asyncio
     async def test_a_partial_failure_does_not_warn(self, captured_logs):
@@ -186,6 +203,4 @@ class TestTotalFailureIsLoud:
         )
         assert report.synthesized_count > 0, "at least one group must have succeeded"
 
-        assert not [
-            e for e in captured_logs if e.get("event") == "consolidation_pass_all_synthesis_failed"
-        ]
+        assert not _events(captured_logs, "consolidation_pass_all_synthesis_failed")

@@ -26,6 +26,12 @@ async def _is_loadable(twin: object, wp_id: object) -> bool:
 
     Fail-open when we can't check (no twin / no id) so tests and non-twin setups
     keep their prior behaviour; only a wired twin tightens the gate.
+
+    A lookup that *raises* stays fail-closed -- an unverifiable model must not
+    satisfy a gate -- but it is logged distinctly (MET-728). "The blob is
+    genuinely missing" and "the twin was unreachable" both produced the same
+    ``gate_eval_cad_not_loadable`` line, and they want opposite responses:
+    regenerate the model, versus retry.
     """
     if twin is None or wp_id is None:
         return True
@@ -34,7 +40,13 @@ async def _is_loadable(twin: object, wp_id: object) -> bool:
         return True
     try:
         wp = await getter(UUID(str(wp_id)))
-    except Exception:  # noqa: BLE001 - a lookup failure means "not loadable"
+    except Exception as exc:  # noqa: BLE001 - unverifiable must not pass a gate
+        logger.warning(
+            "gate_eval_loadability_unknown",
+            wp_id=str(wp_id),
+            error=str(exc),
+            consequence="treated as not loadable; the gate will fail closed",
+        )
         return False
     if wp is None:
         return False
@@ -126,7 +138,18 @@ class TwinConstraintChecker:
             return None
         try:
             project = await self._backend.get_project(project_id)
-        except Exception:  # noqa: BLE001 - scoping is best-effort
+        except Exception as exc:  # noqa: BLE001 - scoping is best-effort
+            # MET-728: None means "unscopable", and unscopable means EVERY
+            # violation counts as in-scope -- so the gate gets stricter. Safe
+            # direction, but a design flow could fail its constraint gate
+            # because a project lookup blipped, and nothing recorded that
+            # scoping was even attempted.
+            logger.warning(
+                "gate_eval_project_scoping_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="all violations counted as in-scope; the gate fails closed",
+            )
             return None
         if project is None:
             return None
