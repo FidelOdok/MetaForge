@@ -82,8 +82,13 @@ class OpenRouterLightRAGConfig:
             )
         return cls(
             api_key=api_key,
-            primary_model=os.environ.get("LIGHTRAG_MODEL", DEFAULT_PRIMARY_MODEL),
-            fallback_model=os.environ.get("LIGHTRAG_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL),
+            # MET-724: ``or``, not a ``get`` default -- compose declares these
+            # as ``LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}``, which sets the empty
+            # string rather than leaving the variable absent. Any deployment
+            # without those entries in its .env would otherwise request the
+            # model "" on every ingestion and query.
+            primary_model=os.environ.get("LIGHTRAG_MODEL") or DEFAULT_PRIMARY_MODEL,
+            fallback_model=os.environ.get("LIGHTRAG_FALLBACK_MODEL") or DEFAULT_FALLBACK_MODEL,
             temperature=_env_float("LIGHTRAG_TEMPERATURE", DEFAULT_TEMPERATURE),
             max_tokens=_env_int("LIGHTRAG_MAX_TOKENS", DEFAULT_MAX_TOKENS),
         )

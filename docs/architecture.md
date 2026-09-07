@@ -75,6 +75,20 @@ when you hand it over; it is not yet the execution path for design-flow runs.
 Moving those over is a separate change — the gateway would start a Temporal
 workflow instead of calling the in-house engine.
 
+Both cadence drivers build the tier through one factory,
+`digital_twin.memory.consolidation.bootstrap.build_consolidation_stack()`
+(MET-723). Before that existed the wiring lived inside the gateway's lifespan,
+so a worker would accept `ConsolidationWorkflow` and then fail its activity with
+*"orchestrator was not bound before activity ran"* — the workflow was
+registered but could not run. A worker-driven pass is now measured end to end:
+eight experiences fetched from pgvector, grouped, synthesized, and the
+execution `COMPLETED`.
+
+Because the worker synthesizes in its own process, it needs the same
+`OPEN_ROUTER_API_KEY` the gateway has (MET-724). Without it the tier degrades to
+`StubLLMClient`, which answers confidence `0.0`; the validator then rejects
+every insight, so a pass fetches and synthesizes and still accepts nothing.
+
 The event bus is additive by design: adopting Kafka does not change dispatch
 semantics, it adds a durable log, which is what makes the MET-567 deposit
 paths replayable rather than best-effort.

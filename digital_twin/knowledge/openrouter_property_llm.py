@@ -83,7 +83,9 @@ class OpenRouterPropertyConfig:
             )
         return cls(
             api_key=api_key,
-            primary_model=os.environ.get("PROPERTY_EXTRACTION_MODEL", DEFAULT_PRIMARY_MODEL),
+            # MET-724: ``or``, not a ``get`` default -- see the note in
+            # openrouter_lightrag.py. Compose sets this to "" by default.
+            primary_model=os.environ.get("PROPERTY_EXTRACTION_MODEL") or DEFAULT_PRIMARY_MODEL,
             fallback_model=os.environ.get(
                 "PROPERTY_EXTRACTION_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL
             ),

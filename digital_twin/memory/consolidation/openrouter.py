@@ -75,8 +75,16 @@ class OpenRouterConfig:
             )
         return cls(
             api_key=api_key,
-            primary_model=os.environ.get("CONSOLIDATION_MODEL", DEFAULT_PRIMARY_MODEL),
-            fallback_model=os.environ.get("CONSOLIDATION_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL),
+            # MET-724: ``or`` rather than a ``get`` default, because compose
+            # declares optional config as ``VAR=${VAR:-}`` -- which sets the
+            # variable to the empty string, not absent. A ``get`` default would
+            # then select the model "" and every request would fail. The
+            # sibling ``_env_float``/``_env_int`` helpers below already treat
+            # "" as absent; these two string reads were the exception.
+            primary_model=os.environ.get("CONSOLIDATION_MODEL") or DEFAULT_PRIMARY_MODEL,
+            fallback_model=(
+                os.environ.get("CONSOLIDATION_FALLBACK_MODEL") or DEFAULT_FALLBACK_MODEL
+            ),
             temperature=_env_float("CONSOLIDATION_TEMPERATURE", DEFAULT_TEMPERATURE),
             max_tokens=_env_int("CONSOLIDATION_MAX_TOKENS", DEFAULT_MAX_TOKENS),
         )

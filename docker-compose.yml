@@ -371,6 +371,14 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      # MET-724: the worker synthesizes insights in its own process, so it
+      # needs the same LLM credentials the gateway has. Without the key the
+      # tier degrades to StubLLMClient, which answers confidence 0.0 -- the
+      # validator then rejects every insight, so a worker-driven pass could
+      # fetch, group and synthesize and still accept nothing, forever.
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - CONSOLIDATION_MODEL=${CONSOLIDATION_MODEL:-}
+      - CONSOLIDATION_FALLBACK_MODEL=${CONSOLIDATION_FALLBACK_MODEL:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     depends_on:
       temporal:
