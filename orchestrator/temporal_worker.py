@@ -254,6 +254,38 @@ async def connect_client(
     raise last
 
 
+def _warn_if_consolidation_unbound() -> None:
+    """Say so at startup if the consolidation activity cannot run.
+
+    ``ConsolidationActivities`` raises "orchestrator was not bound before
+    activity ran" when nothing injected a live orchestrator. The **gateway**
+    binds one during its lifespan (``register_consolidation_activities``), but
+    this worker is a separate process, so a worker started on its own serves
+    the workflow and then fails the activity.
+
+    Warning at startup rather than at first execution is deliberate: the whole
+    reason these tiers rotted for six months is that degradation was only
+    observable long after the fact, if at all. Building the orchestrator here
+    needs the gateway's pgvector/Neo4j/LLM construction extracted into a shared
+    factory -- tracked separately.
+    """
+    try:
+        from digital_twin.memory.consolidation.workflow import _DEFAULT_ACTIVITIES
+
+        if _DEFAULT_ACTIVITIES.orchestrator is None:
+            logger.warning(
+                "consolidation_activity_unbound",
+                hint=(
+                    "ConsolidationWorkflow will fail its activity in this process: "
+                    "no orchestrator is bound. Agent workflows are unaffected. "
+                    "Run consolidation from the gateway's scheduler until the "
+                    "orchestrator factory is shared."
+                ),
+            )
+    except Exception as exc:  # noqa: BLE001 — a diagnostic must not block startup
+        logger.warning("consolidation_bind_check_failed", error=str(exc))
+
+
 async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
     """Connect and run the worker until SIGINT/SIGTERM."""
     from observability.logging import configure_logging
@@ -262,6 +294,7 @@ async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
         configure_logging()
     except Exception:  # noqa: BLE001 — logging config must not block the worker
         pass
+    _warn_if_consolidation_unbound()
     client = await connect_client()
     await run_worker(client, task_queue)
 
