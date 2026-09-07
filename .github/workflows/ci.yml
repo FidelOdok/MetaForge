@@ -38,7 +38,7 @@ jobs:
       - run: mypy --follow-imports=silent shared/
 
   test:
-    name: Unit & Contract Tests
+    name: Tests
     runs-on: [self-hosted, linux, fidel-dev]
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +54,26 @@ jobs:
             pytest tests/contract/ -v --tb=short
           else
             echo "No contract tests directory found, skipping"
+          fi
+      # MET-730: integration and e2e existed, were maintained, and were never
+      # run here -- so three assertions rotted unnoticed until someone ran
+      # them by hand. The whole pair takes ~18s (91 of the tests skip
+      # themselves without live containers), so there was never a cost
+      # argument for leaving them out. Not -x: with these suites newly
+      # visible, seeing every failure at once beats stopping at the first.
+      - name: Run integration tests (if they exist)
+        run: |
+          if [ -d "tests/integration" ]; then
+            pytest tests/integration/ --tb=short -q
+          else
+            echo "No integration tests directory found, skipping"
+          fi
+      - name: Run e2e tests (if they exist)
+        run: |
+          if [ -d "tests/e2e" ]; then
+            pytest tests/e2e/ --tb=short -q
+          else
+            echo "No e2e tests directory found, skipping"
           fi
 
   changes:
