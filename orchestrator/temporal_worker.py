@@ -290,32 +290,50 @@ async def _bind_consolidation() -> Any:
 
 async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
     """Connect and run the worker until SIGINT/SIGTERM."""
-    from observability.config import ObservabilityConfig
+    from observability.bootstrap import init_observability, shutdown_observability
+    from observability.config import ObservabilityConfig, OtlpExporterConfig
     from observability.logging import configure_logging
 
+    # MET-733: `configure_logging()` was called with no argument, and it
+    # requires one -- so every call raised TypeError into the handler below
+    # and the worker never had its logging configured at all.
+    #
+    # MET-734: and `configure_logging` alone was never enough. It builds the
+    # structlog chain and a console handler; `init_observability` is what
+    # constructs the OTLP exporters and attaches the OTel LoggingHandler. The
+    # worker called neither, so it emitted nothing to the collector -- no
+    # logs in Loki, no spans in Tempo, no metrics -- while
+    # docker-compose.yml passed it OTEL_EXPORTER_OTLP_ENDPOINT that no code
+    # in this process read. The same dead-config shape as MET-197/MET-186.
+    #
+    # The service name is the worker's own so its telemetry is
+    # distinguishable from the gateway's, which is what `service_name`
+    # labels the Loki stream with.
+    otel_config = ObservabilityConfig(
+        service_name="metaforge-temporal-worker",
+        environment=os.environ.get("METAFORGE_ENV", "development"),
+        otlp=OtlpExporterConfig(
+            endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+        ),
+    )
+
     try:
-        # MET-733: this was `configure_logging()` with no argument, and
-        # `configure_logging(config: ObservabilityConfig)` requires one -- so
-        # every call raised TypeError straight into the bare handler below and
-        # the worker has never had its logging configured. It ran on
-        # structlog's defaults instead, which is why its output does not parse
-        # under Loki's `| json` filter and carries no trace context.
-        #
-        # Found by mypy, which nothing ran over this package.
-        #
-        # The service name is the worker's own, not the gateway's: everything
-        # this process emits was otherwise indistinguishable from gateway
-        # output in Loki, since `service_name` is what labels the stream.
-        configure_logging(
-            ObservabilityConfig(
-                service_name="metaforge-temporal-worker",
-                environment=os.environ.get("METAFORGE_ENV", "development"),
-            )
-        )
+        configure_logging(otel_config)
     except Exception as exc:  # noqa: BLE001 — logging config must not block the worker
-        # Not silent: a swallowed failure here is what hid the bug above for
-        # as long as it existed.
+        # Not silent: a swallowed failure here is what hid MET-733 for as
+        # long as it existed.
         logger.warning("worker_logging_config_failed", error=str(exc))
+
+    otel_state = None
+    try:
+        # Honours METAFORGE_OTEL_EXPORT=off and OTEL_SDK_DISABLED (MET-701),
+        # so this stays inert under test and on a box with no collector
+        # rather than costing ~33s of shutdown flush.
+        otel_state = init_observability(otel_config)
+        logger.info("worker_observability_initialised", active=otel_state.is_active)
+    except Exception as exc:  # noqa: BLE001 — telemetry must not block the worker
+        logger.warning("worker_observability_init_failed", error=str(exc))
+
     stack = await _bind_consolidation()
     client = await connect_client()
     try:
@@ -323,6 +341,13 @@ async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
     finally:
         if stack is not None:
             await stack.aclose()
+        if otel_state is not None:
+            # Flush the batch processors, or the last spans and logs of a
+            # shutting-down worker never leave the process.
+            try:
+                shutdown_observability(otel_state)
+            except Exception as exc:  # noqa: BLE001 — shutdown is best-effort
+                logger.warning("worker_observability_shutdown_failed", error=str(exc))
 
 
 if __name__ == "__main__":  # pragma: no cover — process entrypoint

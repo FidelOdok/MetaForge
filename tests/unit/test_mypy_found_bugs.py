@@ -149,3 +149,131 @@ class TestACancelledStepDoesNotCrashTheWorkflow:
         assert "isinstance(result, Exception)" not in source, (
             "an Exception-only narrowing has come back; CancelledError escapes it"
         )
+
+
+class TestWorkerExportsItsTelemetry:
+    """MET-734: `configure_logging` alone was never enough.
+
+    It builds the structlog chain and a console handler. `init_observability`
+    is what constructs the OTLP exporters and attaches the OTel
+    LoggingHandler. The worker called neither, so it emitted nothing to the
+    collector -- while docker-compose.yml passed it an
+    OTEL_EXPORTER_OTLP_ENDPOINT that no code in the process read.
+
+    Found by checking a claim I had made in MET-733's commit message rather
+    than assuming it: Loki's service_name values were still only
+    ["metaforge-gateway"] after that deploy.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_worker_initialises_observability(self, monkeypatch):
+        import orchestrator.temporal_worker as worker
+
+        seen: list[object] = []
+
+        def _spy(config):  # noqa: ANN001, ANN202
+            seen.append(config)
+
+            class _State:
+                is_active = False
+
+            return _State()
+
+        monkeypatch.setattr("observability.bootstrap.init_observability", _spy)
+
+        async def _stop(*_a: object, **_k: object):
+            raise RuntimeError("stop here")
+
+        monkeypatch.setattr(worker, "_bind_consolidation", _stop)
+
+        with pytest.raises(RuntimeError, match="stop here"):
+            await worker.main()
+
+        assert seen, "init_observability was never called; the worker exports nothing"
+        assert getattr(seen[0], "service_name", None) == "metaforge-temporal-worker"
+
+    @pytest.mark.asyncio
+    async def test_the_endpoint_from_the_environment_is_used(self, monkeypatch):
+        """The variable compose passes must actually reach the exporter --
+        being passed and unread is the whole bug."""
+        import orchestrator.temporal_worker as worker
+
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.example:4317")
+
+        seen: list[object] = []
+        monkeypatch.setattr(
+            "observability.bootstrap.init_observability",
+            lambda config: (seen.append(config), type("S", (), {"is_active": False}))[1],
+        )
+
+        async def _stop(*_a: object, **_k: object):
+            raise RuntimeError("stop here")
+
+        monkeypatch.setattr(worker, "_bind_consolidation", _stop)
+
+        with pytest.raises(RuntimeError, match="stop here"):
+            await worker.main()
+
+        assert seen
+        assert seen[0].otlp.endpoint == "http://collector.example:4317"
+
+    @pytest.mark.asyncio
+    async def test_telemetry_is_flushed_on_shutdown(self, monkeypatch):
+        """Without the flush, a shutting-down worker's last spans and logs
+        never leave the process -- which is the failure mode that looks like
+        'the worker just stops logging near the end'."""
+        import orchestrator.temporal_worker as worker
+
+        flushed: list[object] = []
+
+        class _State:
+            is_active = True
+
+        monkeypatch.setattr("observability.bootstrap.init_observability", lambda _c: _State())
+        monkeypatch.setattr(
+            "observability.bootstrap.shutdown_observability",
+            lambda state: flushed.append(state),
+        )
+
+        async def _no_stack(*_a: object, **_k: object):
+            return None
+
+        async def _client(*_a: object, **_k: object):
+            return object()
+
+        async def _run(*_a: object, **_k: object) -> None:
+            return None
+
+        monkeypatch.setattr(worker, "_bind_consolidation", _no_stack)
+        monkeypatch.setattr(worker, "connect_client", _client)
+        monkeypatch.setattr(worker, "run_worker", _run)
+
+        await worker.main()
+
+        assert flushed, "shutdown_observability was never called; telemetry is lost on exit"
+
+    @pytest.mark.asyncio
+    async def test_a_failing_init_does_not_stop_the_worker(self, monkeypatch):
+        """Telemetry is not worth refusing to run agent workflows over -- but
+        the failure is reported, not swallowed."""
+        import orchestrator.temporal_worker as worker
+
+        def _boom(_config):  # noqa: ANN001, ANN202
+            raise RuntimeError("collector unreachable")
+
+        monkeypatch.setattr("observability.bootstrap.init_observability", _boom)
+
+        warned: list[str] = []
+        monkeypatch.setattr(worker.logger, "warning", lambda event, **_kw: warned.append(event))
+
+        async def _stop(*_a: object, **_k: object):
+            raise RuntimeError("stop here")
+
+        monkeypatch.setattr(worker, "_bind_consolidation", _stop)
+
+        # Reaching _bind_consolidation at all proves init's failure did not
+        # propagate.
+        with pytest.raises(RuntimeError, match="stop here"):
+            await worker.main()
+
+        assert "worker_observability_init_failed" in warned
