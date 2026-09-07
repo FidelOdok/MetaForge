@@ -186,3 +186,22 @@ services:
     networks:
       - metaforge
     restart: unless-stopped
+
+  # ── Temporal Worker: dev source mounts ──────────────────────────
+  # Same pattern as gateway/mcp-http above: mount the source so a code change
+  # takes effect on `docker compose restart temporal-worker` instead of
+  # requiring a full image rebuild. The worker has no --reload equivalent
+  # (it is not uvicorn), so a restart is the reload.
+  temporal-worker:
+    volumes:
+      - ./api_gateway:/app/api_gateway
+      - ./orchestrator:/app/orchestrator
+      - ./twin_core:/app/twin_core
+      - ./digital_twin:/app/digital_twin
+      - ./shared:/app/shared
+      - ./skill_registry:/app/skill_registry
+      - ./mcp_core:/app/mcp_core
+      - ./tool_registry:/app/tool_registry
+      - ./domain_agents:/app/domain_agents
+      - ./observability:/app/observability
+      - ./pyproject.toml:/app/pyproject.toml:ro
