@@ -22,6 +22,12 @@ from digital_twin.memory.consolidation.archiver import (
     ExperienceArchive,
     InMemoryExperienceArchive,
 )
+from digital_twin.memory.consolidation.bootstrap import (
+    ConsolidationStack,
+    build_consolidation_stack,
+    build_llm_client,
+    select_fetcher,
+)
 from digital_twin.memory.consolidation.contradiction_detector import (
     MAX_COMPARISON_INSIGHTS,
     ContradictionDetector,
@@ -121,6 +127,7 @@ __all__ = [
     "ConsolidationReport",
     "ConsolidationRunRequest",
     "ConsolidationScheduler",
+    "ConsolidationStack",
     "ConsolidationTheme",
     "DEFAULT_FALLBACK_MODEL",
     "DEFAULT_HALF_LIFE_DAYS",
@@ -146,7 +153,10 @@ __all__ = [
     "OpenRouterLLMClient",
     "PgVectorEventFetcher",
     "WindowedExperienceStore",
+    "build_consolidation_stack",
+    "build_llm_client",
     "interval_seconds_from_env",
+    "select_fetcher",
     "ConsolidationActivities",
     "ConsolidationActivityInput",
     "ConsolidationActivityOutput",

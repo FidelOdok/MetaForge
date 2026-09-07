@@ -254,36 +254,37 @@ async def connect_client(
     raise last
 
 
-def _warn_if_consolidation_unbound() -> None:
-    """Say so at startup if the consolidation activity cannot run.
+async def _bind_consolidation() -> Any:
+    """Build and bind a consolidation orchestrator for THIS process (MET-723).
 
     ``ConsolidationActivities`` raises "orchestrator was not bound before
-    activity ran" when nothing injected a live orchestrator. The **gateway**
-    binds one during its lifespan (``register_consolidation_activities``), but
-    this worker is a separate process, so a worker started on its own serves
-    the workflow and then fails the activity.
+    activity ran" unless something injects a live orchestrator. The gateway
+    does that during its lifespan, but this worker is a separate process --
+    so without this the worker would accept ``ConsolidationWorkflow`` and then
+    fail its activity. The construction is shared with the gateway rather than
+    duplicated (``digital_twin.memory.consolidation.bootstrap``).
 
-    Warning at startup rather than at first execution is deliberate: the whole
-    reason these tiers rotted for six months is that degradation was only
-    observable long after the fact, if at all. Building the orchestrator here
-    needs the gateway's pgvector/Neo4j/LLM construction extracted into a shared
-    factory -- tracked separately.
+    Returns the stack so the caller can close its pools on shutdown, or
+    ``None`` when the tier could not be built -- a worker must still serve the
+    agent workflows even if consolidation is unavailable, so this warns instead
+    of refusing to start.
     """
     try:
-        from digital_twin.memory.consolidation.workflow import _DEFAULT_ACTIVITIES
+        from digital_twin.memory.consolidation import build_consolidation_stack
 
-        if _DEFAULT_ACTIVITIES.orchestrator is None:
-            logger.warning(
-                "consolidation_activity_unbound",
-                hint=(
-                    "ConsolidationWorkflow will fail its activity in this process: "
-                    "no orchestrator is bound. Agent workflows are unaffected. "
-                    "Run consolidation from the gateway's scheduler until the "
-                    "orchestrator factory is shared."
-                ),
-            )
-    except Exception as exc:  # noqa: BLE001 — a diagnostic must not block startup
-        logger.warning("consolidation_bind_check_failed", error=str(exc))
+        stack = await build_consolidation_stack()
+    except Exception as exc:  # noqa: BLE001 — agent workflows must still run
+        logger.warning(
+            "consolidation_bind_failed",
+            error=str(exc),
+            hint=(
+                "ConsolidationWorkflow will fail its activity in this process; "
+                "agent workflows are unaffected."
+            ),
+        )
+        return None
+    logger.info("consolidation_activity_bound")
+    return stack
 
 
 async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
@@ -294,9 +295,13 @@ async def main(task_queue: str = DEFAULT_TASK_QUEUE) -> None:
         configure_logging()
     except Exception:  # noqa: BLE001 — logging config must not block the worker
         pass
-    _warn_if_consolidation_unbound()
+    stack = await _bind_consolidation()
     client = await connect_client()
-    await run_worker(client, task_queue)
+    try:
+        await run_worker(client, task_queue)
+    finally:
+        if stack is not None:
+            await stack.aclose()
 
 
 if __name__ == "__main__":  # pragma: no cover — process entrypoint
