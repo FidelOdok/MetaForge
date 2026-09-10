@@ -2,24 +2,51 @@
   "id": "chat_tool_dedupe",
   "title": "Multi-tool turn completes without duplicate identical calls (system-prompt tool discipline)",
   "scope": "assistant",
-  "rubric": ["chat_tooluse"],
+  "rubric": [
+    "chat_tooluse"
+  ],
   "variants": [
-    { "name": "native", "provider": null, "model": null }
+    {
+      "name": "native",
+      "provider": null,
+      "model": null
+    }
   ],
   "turns": [
     {
       "say": "Create a new project called 'Eval Dedupe Probe $RUN_TAG' using your project tools, then record one design decision in that new project titled 'MCU: ESP32-S3' with rationale 'integrated wifi and vendor support'. Do both, then confirm what you did.",
       "checks": [
-        { "id": "project_created", "type": "tool_called", "tool": "mcp_project_create" },
-        { "id": "decision_recorded", "type": "tool_called", "tool": "mcp_twin_record_decision" },
-        { "id": "no_dup_calls_in_turn", "type": "no_duplicate_tool_calls" },
-        { "id": "dedupe_reply_not_fallback", "type": "reply_is_not_fallback" }
+        {
+          "id": "project_created",
+          "type": "tool_called",
+          "tool": "mcp_project_create"
+        },
+        {
+          "id": "decision_recorded",
+          "type": "tool_called",
+          "tool": "mcp_twin_record_decision"
+        },
+        {
+          "id": "no_dup_calls_in_turn",
+          "type": "no_duplicate_tool_calls"
+        },
+        {
+          "id": "no_dup_executions_in_turn",
+          "type": "no_duplicate_tool_executions"
+        },
+        {
+          "id": "dedupe_reply_not_fallback",
+          "type": "reply_is_not_fallback"
+        }
       ]
     },
     {
       "say": "What is the id of the project you just created? Answer with just the id.",
       "checks": [
-        { "id": "created_id_reply_not_fallback", "type": "reply_is_not_fallback" }
+        {
+          "id": "created_id_reply_not_fallback",
+          "type": "reply_is_not_fallback"
+        }
       ]
     }
   ]

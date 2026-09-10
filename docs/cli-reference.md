@@ -78,7 +78,7 @@ subcommand name:
 | Flag | Default | Purpose |
 |---|---|---|
 | `--format {table,json,compact}` | `table` | Output rendering |
-| `--gateway-url <url>` | `$METAFORGE_GATEWAY_URL` or `http://localhost:8000` | Override gateway base URL |
+| `--gateway-url <url>` | `$METAFORGE_GATEWAY_URL`, then the saved config, then `http://localhost:8000` | Override gateway base URL |
 
 ```bash
 python -m cli.forge_cli --format json --gateway-url http://gateway.local:8000 proposals
@@ -196,8 +196,23 @@ forge config set model claude-sonnet-5       # or set values directly
 forge config show
 ```
 
-Precedence: an explicit CLI flag wins over the config file, which wins over the
-`METAFORGE_GATEWAY_URL` env var, which wins over the built-in default.
+Precedence, highest first: an explicit CLI flag, then the
+`METAFORGE_GATEWAY_URL` env var, then the config file, then the built-in
+default.
+
+!!! warning "This changed in MET-729"
+    The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
+    usual convention — an environment variable exists to override persisted
+    config for a single invocation — and it had a real cost: a unit test that
+    set `METAFORGE_GATEWAY_URL` to a dead port to keep itself local was
+    silently ignored, and instead ingested documents into a shared dev
+    gateway on every run (11 such writes in one week, found in that
+    deployment's own logs).
+
+    If you relied on the old order, note that `forge config set gateway_url`
+    still works exactly as before whenever the env var is unset — which is the
+    normal case. Only a shell that exports `METAFORGE_GATEWAY_URL` now behaves
+    differently, and in that case the export is the more specific instruction.
 
 !!! note "What this does and doesn't configure"
     `config` stores *your client's* choice of gateway and the per-turn

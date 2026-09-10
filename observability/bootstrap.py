@@ -126,6 +126,47 @@ class ObservabilityState:
 # ---- public API ------------------------------------------------------------
 
 
+_TRUTHY = {"true", "1", "yes", "on"}
+_FALSY = {"false", "0", "no", "off"}
+
+
+def sdk_disabled_by_env() -> bool:
+    """Honour ``OTEL_SDK_DISABLED``, the OpenTelemetry-standard kill switch.
+
+    Reading it here, before any provider is constructed, is stronger than
+    leaving it to the SDK: the SDK checks it late enough that the export
+    threads are still created, they simply never receive records.
+
+    Accepts the spec's ``true`` plus the spellings people actually type.
+    """
+    import os
+
+    return os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in _TRUTHY
+
+
+def export_disabled_by_env() -> bool:
+    """``METAFORGE_OTEL_EXPORT=off`` -- build no exporters (MET-701).
+
+    Distinct from ``OTEL_SDK_DISABLED`` on purpose, and the distinction is the
+    whole point of this switch. Disabling the *SDK* also makes it hand out
+    NoOp tracers, so code under test records nothing and the instrumentation
+    tests cannot verify the spans they exist to verify. This switch leaves
+    tracing fully functional and only declines to stand up OTLP exporters.
+
+    That matters because the exporters are the expensive part. Aimed at
+    ``http://localhost:4317`` with nothing listening -- a test run, a laptop
+    without the observability stack -- the batch processors spend about **33
+    seconds** at interpreter shutdown trying to flush (measured 33.12s and
+    33.15s across alternating runs, against 0.39s with them absent). That is
+    the stall near the end of ``pytest tests/unit`` that read as a deadlock:
+    sleeping on ``futex_wait_queue``, progress stuck at 98%, wall clock still
+    climbing.
+    """
+    import os
+
+    return os.environ.get("METAFORGE_OTEL_EXPORT", "").strip().lower() in _FALSY
+
+
 def init_observability(config: ObservabilityConfig) -> ObservabilityState:
     """Initialise OpenTelemetry providers based on *config*.
 
@@ -138,6 +179,14 @@ def init_observability(config: ObservabilityConfig) -> ObservabilityState:
 
     if not config.enabled:
         logger.info("Observability disabled by configuration")
+        return ObservabilityState()
+
+    if sdk_disabled_by_env():
+        logger.info("Observability disabled by OTEL_SDK_DISABLED")
+        return ObservabilityState()
+
+    if export_disabled_by_env():
+        logger.info("Observability exporters disabled by METAFORGE_OTEL_EXPORT=off")
         return ObservabilityState()
 
     if not _otel_fully_available():

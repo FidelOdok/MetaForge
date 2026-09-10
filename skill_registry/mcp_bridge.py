@@ -7,11 +7,18 @@ from typing import Any
 
 
 class McpToolError(Exception):
-    """Raised when an MCP tool call fails."""
+    """Raised when an MCP tool call fails.
 
-    def __init__(self, tool_id: str, details: str) -> None:
+    ``payload`` carries the adapter's own error envelope when there was one
+    (MET-569). The harness passes it through to the model as structured JSON,
+    so a hint like "adapter container is down" survives instead of being
+    flattened into a single message string the model can only guess at.
+    """
+
+    def __init__(self, tool_id: str, details: str, payload: dict[str, Any] | None = None) -> None:
         self.tool_id = tool_id
         self.details = details
+        self.payload = payload or {}
         super().__init__(f"MCP tool '{tool_id}' failed: {details}")
 
 

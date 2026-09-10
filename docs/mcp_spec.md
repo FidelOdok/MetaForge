@@ -751,6 +751,29 @@ ENTRYPOINT ["python", "server.py"]
 
 Corrected from a stale table that listed `freecad.export_mesh`/`freecad.export_step`/`freecad.measure` — those tool ids don't exist in the current adapter. See [`capability-matrix.md`](capability-matrix.md#cad-kernel-capability-contract) for the 5-capability contract shared with CadQuery, and `tool_registry/tools/freecad/adapter.py` for the full tool list; it's large enough (33 tools across both surfaces) that duplicating it here would drift again.
 
+#### Committing authored geometry: the stash is authoritative
+
+`freecad.export_model` returns a multi-KB base64 STEP, and `twin.commit_geometry`
+needs those bytes. Agents cannot reliably thread a value that large between two
+tool calls, so both MCP dispatch seams — the unified sidecar and the in-process
+registry bridge the gateway chat uses — keep a bounded LRU of each export's blob
+keyed by `(session_id, obj_id)` (`skill_registry/geometry_stash.py`). A commit
+that names those two ids gets the blob filled in server-side.
+
+**When the stash has an entry for the named export, its copy is used even if the
+call also carried a `step_base64`.** The stashed value came straight off the
+adapter; anything carried back in is a copy of it, and a copy can only be equal
+or wrong. This precedence used to be the other way round, which let a single
+mistyped character in a 30,000-character base64 string silently replace a
+pristine blob (MET-684): a committed STEP contained `NAMED_URIT(*)` where the
+fixed OCCT boilerplate reads `NAMED_UNIT(*)`, and the OCCT converter crashed
+parsing it. A divergence is repaired and logged as
+`geometry_commit_blob_diverged`, never silently.
+
+A stash **miss** leaves a supplied `step_base64` untouched — geometry produced
+some other way (a raw CadQuery script, an upload) has no export to reference and
+must still commit.
+
 ### KiCad Adapter (`tool_registry/tools/kicad/`)
 
 | Property | Details |

@@ -75,6 +75,20 @@ class RegistryMcpBridge(McpBridge):
                     session_id=params.get("session_id"),
                     obj_id=params.get("obj_id"),
                 )
+            elif filled.diverged:
+                # MET-684: the caller carried a step_base64 back that does not
+                # match the export it names. The pristine blob has been
+                # substituted, so the commit succeeds -- but the divergence is
+                # the signal that a large value is being damaged in transit,
+                # and silently repairing it without saying so would hide that.
+                logger.warning(
+                    "geometry_commit_blob_diverged",
+                    session_id=params.get("session_id"),
+                    obj_id=params.get("obj_id"),
+                    stashed_chars=filled.stashed_chars,
+                    supplied_chars=filled.supplied_chars,
+                    resolution="used_stashed_export",
+                )
 
         request = ToolCallRequest(
             tool_id=tool_id,
@@ -88,7 +102,12 @@ class RegistryMcpBridge(McpBridge):
             raise McpToolError(tool_id, str(exc)) from exc
 
         if result.status != "success":
-            raise McpToolError(tool_id, f"Tool returned status: {result.status}")
+            # MET-569: the adapter's envelope (its error object, code, and any
+            # hint about what to do instead) lives in ``result.data``. Dropping
+            # it here left the model with only "Tool returned status: error".
+            envelope = result.data if isinstance(result.data, dict) else {}
+            detail = str(envelope.get("error") or f"Tool returned status: {result.status}")
+            raise McpToolError(tool_id, detail, payload=envelope)
 
         # Remember an export's STEP so a later commit can reference it.
         if tool_id == "freecad.export_model" and isinstance(result.data, dict):

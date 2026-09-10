@@ -7,6 +7,7 @@ can be imported and tested without a real FreeCAD installation.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from pathlib import Path
@@ -126,7 +127,17 @@ _SAFE_BUILTINS = {
     "NotImplementedError",
 }
 _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
-_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the namespace
+# MET-688: `Import` (FreeCAD's own STEP/IGES import-export module -- the tool
+# that preserves multi-part Labels, per MET-616's "raw Shape.exportStep()
+# collapses everything into one anonymous PRODUCT" finding) grants no
+# capability `Part` doesn't already have -- both do file I/O through FreeCAD's
+# native layer regardless of the sandbox's blocked Python builtins (`open`
+# etc.), which is exactly why the module docstring already says the real
+# isolation boundary is the container, not this allowlist. Confirmed live: a
+# script correctly reached for `import Import` to re-load a STEP file
+# label-preserving, got rejected, and fell back to `Part.Shape().read()`
+# (which flattens to one anonymous shape, losing per-part structure).
+_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "Import", "math"}  # injected into the namespace
 # MET-645: FreeCAD scripts overwhelmingly reach for these bare (not
 # FreeCAD.Vector-qualified) -- binding them directly avoids a
 # NameError-then-fallback-to-raw-primitives round trip on the model's very
@@ -258,7 +269,13 @@ def _sandboxed_import(
     top_level = name.split(".", 1)[0]
     if top_level not in _SANDBOX_MODULES:
         raise ImportError(f"import of {name!r} is not permitted in this sandbox")
-    resolved = {"FreeCAD": FreeCAD, "App": FreeCAD, "Part": Part, "math": _math_module}[top_level]
+    resolved = {
+        "FreeCAD": FreeCAD,
+        "App": FreeCAD,
+        "Part": Part,
+        "Import": Import,
+        "math": _math_module,
+    }[top_level]
     # Bare `import FreeCAD.Base` (no fromlist) and `from FreeCAD import Base`
     # (fromlist=("Base",)) both resolve to the same already-injected object --
     # this sandbox doesn't model real submodule attribute access, it just
@@ -543,10 +560,18 @@ class FreecadOperations:
                 duration_s=round(elapsed, 3),
             )
 
+            with open(output_path, "rb") as f:  # noqa: PTH123
+                step_base64 = base64.b64encode(f.read()).decode("ascii")
+
             return {
                 "output_file": output_path,
                 "file_size_bytes": file_size,
                 "format": "step",
+                # MET-489: without this, freecad.export_geometry output had no
+                # path into twin.commit_geometry (unlike freecad.export_model,
+                # which already returns step_base64) and was lost when the
+                # adapter container recreated.
+                "step_base64": step_base64,
             }
 
     def generate_mesh(
@@ -1069,6 +1094,33 @@ class FreecadOperations:
         document.recompute()
         return mir
 
+    @staticmethod
+    def _resolve_execute_code_result(document: Any, raw_result: Any) -> Any:
+        """Recover a usable FreeCAD object from ``execute_code``'s ``result``
+        variable when the script assigned a *description* of the object
+        (a dict with an id/name field) instead of the object itself.
+
+        Confirmed live (MET-687): scripts repeatedly write
+        ``result = {'obj_id': model.Name, ...}`` -- a plain dict has no
+        ``.Shape``, so the caller's ``hasattr(result, "Shape")`` registration
+        check silently drops it, leaving the script's own claimed ``obj_id``
+        unusable for a later commit-by-reference. If ``raw_result`` already
+        has a ``.Shape`` (the documented, correct contract), it's returned
+        unchanged -- this only kicks in for the dict-shaped mistake.
+        """
+        if raw_result is None or hasattr(raw_result, "Shape"):
+            return raw_result
+        if not isinstance(raw_result, dict):
+            return raw_result
+        for key in ("obj_id", "obj_name", "name", "model_name", "Name"):
+            candidate = raw_result.get(key)
+            if not isinstance(candidate, str):
+                continue
+            for obj in document.Objects:
+                if getattr(obj, "Name", None) == candidate and hasattr(obj, "Shape"):
+                    return obj
+        return raw_result
+
     def execute_code(
         self,
         document: Any,
@@ -1079,11 +1131,17 @@ class FreecadOperations:
     ) -> Any:
         """Run a sandboxed FreeCAD Python script against the session ``doc``.
 
-        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``math``,
-        the active ``doc``, and the geometry value types ``Vector``,
+        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``Import``
+        (MET-688 -- use ``Import.insert(path, doc.Name)``/``Import.export(objs,
+        path)`` over ``Part.Shape().read(...)`` when Labels/multi-part
+        structure matter), ``math``, the active ``doc``, and the geometry
+        value types ``Vector``,
         ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
         ``FreeCAD.Vector``, though that also works). Assign the object to
         surface to a variable named ``result`` (it gets registered + returned).
+        A script that instead assigns a dict describing the object (e.g.
+        ``{'obj_id': model.Name}``) is tolerated -- ``document.Objects`` is
+        searched by that name and the real object substituted (MET-687).
         Blocked names (cannot appear anywhere in the script, including in
         strings/comments): ``open``, ``__import__``, ``os``, ``sys``,
         ``subprocess``, ``eval``, ``exec``, ``compile``. Source-level guarding
@@ -1127,6 +1185,7 @@ class FreecadOperations:
             "FreeCAD": FreeCAD,
             "App": FreeCAD,
             "Part": Part,
+            "Import": Import,
             "math": math,
             "doc": document,
             # MET-649: a no-op stub for the common CQ-editor/CQGI
@@ -1175,7 +1234,7 @@ class FreecadOperations:
                         signal.signal(signal.SIGALRM, old_handler)
 
         document.recompute()
-        return namespace.get("result")
+        return self._resolve_execute_code_result(document, namespace.get("result"))
 
     def shell_solid(
         self, document: Any, body: Any, thickness: float, faces: list[str] | None = None

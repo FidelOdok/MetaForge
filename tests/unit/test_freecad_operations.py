@@ -5,6 +5,8 @@ All tests mock FreeCAD internals since FreeCAD is not available in CI.
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -537,6 +539,67 @@ class TestExecuteCodeNamespaceConvenienceNames:
             result = ops.execute_code(doc, "show_object(42)\nresult = 'ok'")
         assert result == "ok"
 
+
+class _FakeExecCodeResultShape:
+    pass
+
+
+class _FakeFreecadObject:
+    def __init__(self, name: str) -> None:
+        self.Name = name
+        self.Shape = _FakeExecCodeResultShape()
+
+
+class TestExecuteCodeResultDictFallback:
+    """MET-687: a script writing ``result = {'obj_id': model.Name, ...}``
+    (a description of the object) instead of the object itself must still
+    resolve to a real, registerable object -- confirmed live: the adapter's
+    caller only registers a ``result`` with a ``.Shape`` attribute, so a
+    dict silently vanished, leaving a script-claimed obj_id nothing could
+    later commit-by-reference against."""
+
+    def test_dict_result_with_obj_id_resolves_to_the_real_object(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        doc.Objects = [_FakeFreecadObject("Kitchen_Table_v1_Modified")]
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(
+                doc,
+                "result = {'obj_id': 'Kitchen_Table_v1_Modified', 'leg_count': 6}",
+            )
+        assert result is doc.Objects[0]
+        assert hasattr(result, "Shape")
+
+    def test_dict_result_with_unresolvable_name_returns_dict_unchanged(self) -> None:
+        """No matching object -- fall through to the dict as-is (a genuinely
+        broken script) rather than raising or fabricating an object."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        doc.Objects = [_FakeFreecadObject("SomethingElse")]
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            result = ops.execute_code(doc, "result = {'obj_id': 'NoSuchObject'}")
+        assert result == {"obj_id": "NoSuchObject"}
+
+    def test_object_result_is_returned_unchanged(self) -> None:
+        """The documented, correct contract (result IS the object) must keep
+        working exactly as before -- this fallback is additive only."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        doc.Objects = []
+        obj = _FakeFreecadObject("Direct")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+        ):
+            namespace_result = ops._resolve_execute_code_result(doc, obj)
+        assert namespace_result is obj
+
     def test_logs_script_before_running_it(self) -> None:
         """MET-643: a native crash inside exec() kills the adapter process
         with no Python traceback ever logged, leaving no way to tell what
@@ -628,6 +691,31 @@ class TestExecuteCodeSandboxedImport:
         with pytest.raises(ScriptSandboxError, match="__import__"):
             ops.execute_code(None, "result = __import__('math')")
 
+    def test_import_module_is_allowed_and_bare_name_pre_bound(self) -> None:
+        """MET-688: found live -- a script correctly reached for FreeCAD's
+        Import module (the one that preserves STEP Labels/multi-part
+        structure, per MET-616) to re-load a work product, and got
+        "import of 'Import' is not permitted in this sandbox", forcing a
+        fallback to Part.Shape().read() (which flattens to one anonymous
+        shape). Import grants no capability Part doesn't already have (both
+        do file I/O through FreeCAD's native layer regardless of the
+        sandbox's blocked Python builtins) -- the real isolation boundary is
+        the container, per this module's own existing design note."""
+        ops = FreecadOperations()
+        doc = _FakeDocForExec()
+        fake_import_module = SimpleNamespace(insert=lambda *a, **k: None)
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", _FakeFreeCADModule()),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import_module),
+        ):
+            # Bare name (no import statement needed, matching FreeCAD/Part/math).
+            result = ops.execute_code(doc, "result = Import is not None")
+            assert result is True
+            # Explicit `import Import` statement must also resolve, not raise.
+            result = ops.execute_code(doc, "import Import\nresult = Import is not None")
+            assert result is True
+
 
 class TestExecuteCodeExceptionTypes:
     """Exception types were entirely missing from _SAFE_BUILTINS -- a pure
@@ -662,3 +750,63 @@ class TestExecuteCodeExceptionTypes:
                 "IndexError, AttributeError, RuntimeError)\nresult = 'ok'",
             )
         assert result == "ok"
+
+
+# ---------------------------------------------------------------------------
+# 11. export_step includes step_base64 (MET-489)
+# ---------------------------------------------------------------------------
+
+
+class _FakeExportShape:
+    """Fakes the .exportStep() entry point export_step needs."""
+
+    def exportStep(self, output_path: str) -> None:  # noqa: N802
+        with open(output_path, "wb") as f:  # noqa: PTH123
+            f.write(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+
+class _FakeExportObject:
+    def __init__(self) -> None:
+        self.Shape = _FakeExportShape()
+
+
+class _FakeExportDoc:
+    def __init__(self) -> None:
+        self.Name = "doc1"
+        self.Objects = [_FakeExportObject()]
+
+
+class _FakeFreeCADForExport:
+    def __init__(self) -> None:
+        self.closed: list[str] = []
+
+    def openDocument(self, _path: str) -> _FakeExportDoc:  # noqa: N802
+        return _FakeExportDoc()
+
+    def closeDocument(self, name: str) -> None:  # noqa: N802
+        self.closed.append(name)
+
+
+class TestExportStepStepBase64:
+    """MET-489: freecad.export_geometry (-> export_step) had no path into
+    twin.commit_geometry -- unlike freecad.export_model, which already
+    returns step_base64 -- so its output was lost when the adapter
+    container recreated."""
+
+    def test_export_step_includes_step_base64(self, tmp_path) -> None:
+        import base64
+
+        ops = FreecadOperations()
+        output_path = str(tmp_path / "out.step")
+        freecad = _FakeFreeCADForExport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", freecad),
+        ):
+            result = ops.export_step("/workspace/part.fcstd", output_path)
+
+        assert result["format"] == "step"
+        assert "step_base64" in result
+        decoded = base64.b64decode(result["step_base64"])
+        assert decoded == Path(output_path).read_bytes()
+        assert freecad.closed == ["doc1"]

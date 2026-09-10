@@ -83,6 +83,11 @@ Your work is captured for review:
 correctly: run `metaforge-capture use <project_id>` (CLI) or call session.start \
 with the project_id. If you don't know which project, ask the user. With no \
 active project, capture stays unbound.
+- session.start also scopes your later tool calls to that project, but only \
+when your client presents a stable session (stdio, or an X-MetaForge-Session \
+header). It tells you which happened: if it returns \
+`project_scope_bound: false`, keep passing project_id explicitly on calls \
+that take it.
 - Record design choices with twin.record_decision (title, rationale, alternatives) \
 so they persist as typed, reviewable decisions.
 - Capturing your reasoning (not just actions) is an optional client-side add-on \
@@ -443,6 +448,20 @@ class UnifiedMcpServer:
                         session_id=args.get("session_id"),
                         obj_id=args.get("obj_id"),
                     )
+                elif filled.diverged:
+                    # MET-684: see the matching branch in
+                    # skill_registry/registry_bridge.py. The blob the caller
+                    # carried back does not match the export it names, so the
+                    # pristine one was substituted -- logged rather than
+                    # silently repaired.
+                    logger.warning(
+                        "geometry_commit_blob_diverged",
+                        session_id=args.get("session_id"),
+                        obj_id=args.get("obj_id"),
+                        stashed_chars=filled.stashed_chars,
+                        supplied_chars=filled.supplied_chars,
+                        resolution="used_stashed_export",
+                    )
 
         # Delegate to the adapter's own JSON-RPC dispatcher so its
         # per-tool error handling, timing, and structlog records all
@@ -528,6 +547,8 @@ async def build_unified_server(
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
     blob_stager: Any = None,
+    component_catalog_store: Any = None,
+    component_intent_llm: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -552,6 +573,12 @@ async def build_unified_server(
     True *and* ``agent_session_store`` is supplied, every tool call is
     recorded as an action/error event in an agent session, so MCP/CLI work
     shows up in ``/sessions`` with no client cooperation.
+
+    ``component_catalog_store`` + ``component_intent_llm`` (MET-436):
+    the ``component`` adapter (component.search_parametric +
+    component.search_intent) registers only when both are supplied,
+    together with ``knowledge_service`` (reused for the intent-search
+    fuzzy fallback) — same runtime-injected pattern as ``knowledge``.
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -566,6 +593,8 @@ async def build_unified_server(
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder,
         blob_stager=blob_stager,
+        component_catalog_store=component_catalog_store,
+        component_intent_llm=component_intent_llm,
     )
     capture = (
         SessionCapture(agent_session_store)

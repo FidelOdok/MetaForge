@@ -10,7 +10,20 @@ from typing import Any
 import structlog
 from pydantic import ValidationError
 
-from domain_agents.shared.freecad_lowering import LoweringError, lower_design_ir_freecad
+from domain_agents.shared.cadquery_lowering import (
+    CadqueryLoweringResult,
+    lower_design_ir_cadquery,
+)
+from domain_agents.shared.cadquery_lowering import (
+    LoweringError as CadqueryLoweringError,
+)
+from domain_agents.shared.freecad_lowering import (
+    FreecadLoweringResult,
+    lower_design_ir_freecad,
+)
+from domain_agents.shared.freecad_lowering import (
+    LoweringError as FreecadLoweringError,
+)
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 from twin_core.design_ir import DesignIR
@@ -25,21 +38,27 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
     """Generates CAD geometry from a Design IR document (requirements doc §6).
 
     This is FR-1's structured path: agents emit typed, id-addressed feature
-    entities, not a script, and this skill lowers them against FreeCAD's
-    session API (``domain_agents/shared/freecad_lowering.py``, §6.6.2).
+    entities, not a script, and this skill lowers them against one of two
+    real compilers (§6.6.2), selected by ``input_data.adapter``:
 
-    FreeCAD only for now, single exportable terminal entity per document —
-    see ``freecad_lowering``'s module docstring for the exact v1 scope cuts
-    (no ``create_parametric``, no assembly export, no incremental re-lowering).
-    The sandboxed script path (``generate_cad_script``) remains available for
-    anything this skill doesn't cover yet.
+    - ``"freecad"`` (default): session-based, one MCP call per entity, full
+      v1 op coverage (``domain_agents/shared/freecad_lowering.py``).
+    - ``"cadquery"``: a real compiler -- flattens the document into one
+      generated script, executed via a single MCP call. Narrower v1 op
+      subset than FreeCAD's (``domain_agents/shared/cadquery_lowering.py``;
+      see its docstring for the exact cut).
+
+    Single exportable terminal entity per document either way -- see each
+    lowering module's docstring for its exact v1 scope cuts. The sandboxed
+    script path (``generate_cad_script``) remains available for anything
+    neither lowering pass covers yet.
     """
 
     input_type = GenerateCadIrInput
     output_type = GenerateCadIrOutput
 
     async def validate_preconditions(self, input_data: GenerateCadIrInput) -> list[str]:
-        """Check that the work_product exists and the FreeCAD session API is available."""
+        """Check that the work_product exists and the selected adapter's tool is available."""
         errors: list[str] = []
 
         if input_data.work_product_id is not None:
@@ -49,23 +68,34 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             if work_product is None:
                 errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
-        if not await self.context.mcp.is_available("freecad.open_session"):
-            errors.append("FreeCAD session API is not available (generate_cad_ir is FreeCAD-only)")
+        if input_data.adapter == "cadquery":
+            if not await self.context.mcp.is_available("cadquery.execute_script"):
+                errors.append(
+                    "CadQuery script API is not available (adapter='cadquery' requires "
+                    "cadquery.execute_script)"
+                )
+        elif not await self.context.mcp.is_available("freecad.open_session"):
+            errors.append(
+                "FreeCAD session API is not available (adapter='freecad' requires "
+                "freecad.open_session)"
+            )
 
         return errors
 
     async def execute(self, input_data: GenerateCadIrInput) -> GenerateCadIrOutput:
-        """Validate the Design IR, lower it against FreeCAD, export, and best-effort commit."""
+        """Validate the Design IR, lower it via the selected adapter, then export and commit."""
         with tracer.start_as_current_span("generate_cad_ir") as span:
             span.set_attribute("skill.name", "generate_cad_ir")
             span.set_attribute("skill.domain", "mechanical")
             span.set_attribute("entity_count", len(input_data.entities))
+            span.set_attribute("adapter", input_data.adapter)
 
             self.logger.info(
                 "Generating CAD from Design IR",
                 work_product_id=str(input_data.work_product_id),
                 entity_count=len(input_data.entities),
                 material=input_data.material,
+                adapter=input_data.adapter,
             )
 
             start = time.monotonic()
@@ -75,9 +105,13 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             except ValidationError as exc:
                 raise ValueError(f"Invalid Design IR document: {exc}") from exc
 
+            result: CadqueryLoweringResult | FreecadLoweringResult
             try:
-                result = await lower_design_ir_freecad(self.context.mcp, doc)
-            except LoweringError as exc:
+                if input_data.adapter == "cadquery":
+                    result = await lower_design_ir_cadquery(self.context.mcp, doc)
+                else:
+                    result = await lower_design_ir_freecad(self.context.mcp, doc)
+            except (FreecadLoweringError, CadqueryLoweringError) as exc:
                 span.record_exception(exc)
                 raise ValueError(str(exc)) from exc
 

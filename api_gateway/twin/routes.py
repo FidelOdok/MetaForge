@@ -6,6 +6,7 @@ Endpoints live under ``/v1/twin``.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -320,7 +321,16 @@ async def get_node_model(
         span.set_attribute("model.filename", filename)
 
         try:
-            result = ConversionService().convert(content, filename, quality)
+            # MET-725: ConversionService.convert is synchronous and does a
+            # blocking httpx.post with a 120s timeout. Called directly from
+            # this async route it held the event loop for the whole
+            # conversion, so ONE slow CAD conversion served nothing else at
+            # all -- no /health (hence "unhealthy" containers), no chat, no
+            # SSE, and no shutdown progress. to_thread copies the context, so
+            # the OTel span above stays the parent.
+            result = await asyncio.to_thread(
+                ConversionService().convert, content, filename, quality
+            )
         except ConversionError as exc:
             # MET-652: this is a client-facing "this content can't be
             # converted" case (e.g. a STEP with no exportable solids), not a

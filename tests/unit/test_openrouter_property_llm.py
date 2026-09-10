@@ -184,3 +184,14 @@ async def test_complete_raises_on_empty_content():
 
     with pytest.raises(OpenRouterPropertyError, match="empty content"):
         await llm.complete("anything")
+
+
+def test_an_empty_model_env_falls_back_to_the_default(monkeypatch):
+    """MET-724: compose sets ``PROPERTY_EXTRACTION_MODEL=${...:-}`` — empty,
+    not absent. See the matching note in test_openrouter_lightrag.py."""
+    monkeypatch.setenv("OPEN_ROUTER_API_KEY", "sk-env")
+    monkeypatch.setenv("PROPERTY_EXTRACTION_MODEL", "")
+
+    cfg = OpenRouterPropertyConfig.from_env()
+
+    assert cfg.primary_model == DEFAULT_PRIMARY_MODEL
