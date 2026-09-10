@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import {
@@ -11,6 +11,17 @@ import {
 } from '../../hooks/use-cad-export';
 import { toDownloadHref, type ExportFile, type JointType } from '../../api/endpoints/cad-export';
 import type { TwinNode } from '../../types/twin';
+
+// MET-737: code-split — urdf-loader + @dimforge/rapier3d-compat (WASM) are
+// only needed once a user actually opens a preview, not on every import of
+// this panel. Eager-importing them here measurably slowed down unrelated
+// tests that merely render AssemblyExportPanel (confirmed: the MET-720
+// TwinViewerPage suite went from ~2s to timing out under full-suite
+// parallel load once this was a top-level import) — this is also a real
+// production bundle-size concern, not just a test artifact.
+const UrdfPreviewPanel = lazy(() =>
+  import('./UrdfPreviewPanel').then((m) => ({ default: m.UrdfPreviewPanel })),
+);
 
 // Kinetic Console palette — same rationale as BooleanCutPanel.tsx (this file
 // predates the token set living anywhere shared/importable).
@@ -104,6 +115,7 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
   const [staticFlag, setStaticFlag] = useState(false);
   const [result, setResult] = useState<{ outputFile: ExportFile; meshFiles: ExportFile[] } | null>(null);
   const [launchFile, setLaunchFile] = useState<ExportFile | null>(null);
+  const [previewUrdf, setPreviewUrdf] = useState<ExportFile | null>(null);
 
   const [sessionIdInput, setSessionIdInput] = useState('');
   const [fetchedSessionId, setFetchedSessionId] = useState('');
@@ -172,19 +184,19 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
     toast.success(`Imported ${imported.length} joint(s) from session`);
   };
 
-  const handleSubmit = () => {
+  const validateParts = (): boolean => {
     if (parts.length === 0) {
       toast.error('Add at least one part');
-      return;
+      return false;
     }
     if (parts.some((p) => !p.nodeId || !p.linkName.trim())) {
       toast.error('Every part needs both a Twin node and a link name');
-      return;
+      return false;
     }
+    return true;
+  };
 
-    setResult(null);
-    setLaunchFile(null);
-
+  const buildPayload = () => {
     const apiParts = parts.map((p) => ({
       node_id: p.nodeId,
       link_name: p.linkName.trim(),
@@ -203,6 +215,16 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
           ? { lower: Number(j.limitsLower), upper: Number(j.limitsUpper) }
           : undefined,
     }));
+    return { apiParts, apiJoints };
+  };
+
+  const handleSubmit = () => {
+    if (!validateParts()) return;
+
+    setResult(null);
+    setLaunchFile(null);
+
+    const { apiParts, apiJoints } = buildPayload();
 
     const onSuccess = (data: { output_file: ExportFile; mesh_files: ExportFile[] }) => {
       setResult({ outputFile: data.output_file, meshFiles: data.mesh_files });
@@ -236,6 +258,25 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
     }
   };
 
+  /** MET-737: always exports a fresh URDF (mesh_format forced to 'stl',
+   * independent of the format/xacro the user has selected for their actual
+   * download) purely to drive the preview — see UrdfPreviewPanel's
+   * docstring for why the preview always uses URDF as a stand-in for
+   * SDF/USD, and AssemblyExportPanel's own comment above on why joints
+   * aren't durably persisted (so this always re-derives from the current
+   * form state, never from a prior export's result). */
+  const handlePreview = () => {
+    if (!validateParts()) return;
+    const { apiParts, apiJoints } = buildPayload();
+    urdfAssembly.mutate(
+      { parts: apiParts, joints: apiJoints, robot_name: robotName || undefined, mesh_format: 'stl', xacro: false },
+      {
+        onSuccess: (data) => setPreviewUrdf(data.output_file),
+        onError: (err) => toast.error(getErrorDetail(err, 'Preview export failed')),
+      },
+    );
+  };
+
   const handleGenerateLaunch = () => {
     if (!result) return;
     ros2Launch.mutate(
@@ -251,16 +292,22 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
   };
 
   return (
-    <div
-      className="rounded flex flex-col overflow-hidden"
-      style={{
-        background: KC_SURFACE,
-        backdropFilter: 'blur(16px)',
-        border: `1px solid ${KC_BORDER_MID}`,
-        width: 380,
-        maxHeight: 'calc(100vh - 88px)',
-      }}
-    >
+    <div className="flex items-start gap-2">
+      {previewUrdf && (
+        <Suspense fallback={<div className="font-mono text-xs p-2" style={{ color: KC_ON_SURFACE_VARIANT }}>Loading preview…</div>}>
+          <UrdfPreviewPanel urdfFile={previewUrdf} onClose={() => setPreviewUrdf(null)} />
+        </Suspense>
+      )}
+      <div
+        className="rounded flex flex-col overflow-hidden"
+        style={{
+          background: KC_SURFACE,
+          backdropFilter: 'blur(16px)',
+          border: `1px solid ${KC_BORDER_MID}`,
+          width: 380,
+          maxHeight: 'calc(100vh - 88px)',
+        }}
+      >
       <div
         className="flex items-center justify-between px-3 flex-shrink-0"
         style={{ height: 36, borderBottom: `1px solid ${KC_BORDER}` }}
@@ -538,9 +585,21 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
           )}
         </div>
 
-        <Button variant="primary" size="sm" onClick={handleSubmit} disabled={pending} className="text-xs w-full">
-          {pending ? 'Exporting…' : `Export ${format.toUpperCase()} assembly`}
-        </Button>
+        <div className="flex gap-1.5">
+          <Button variant="primary" size="sm" onClick={handleSubmit} disabled={pending} className="text-xs" style={{ flex: 1 }}>
+            {pending ? 'Exporting…' : `Export ${format.toUpperCase()} assembly`}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handlePreview}
+            disabled={urdfAssembly.isPending}
+            className="text-xs"
+            title="Preview (always URDF-based, regardless of the format above — see panel for why)"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 13 }}>visibility</span>
+          </Button>
+        </div>
 
         {result && (
           <div className="flex flex-col gap-1.5">
@@ -575,6 +634,7 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
