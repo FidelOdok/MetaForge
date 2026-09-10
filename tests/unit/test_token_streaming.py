@@ -106,9 +106,7 @@ async def test_openai_events_sanitizes_dotted_tool_names_round_trip() -> None:
     action_events = [e for e in events if e["type"] == "action_started"]
     assert action_events == [{"type": "action_started", "name": "twin.commit_geometry"}]
     result = events[-1]["result"]
-    assert result["tool_calls"] == [
-        {"id": "c1", "name": "twin.commit_geometry", "arguments": {}}
-    ]
+    assert result["tool_calls"] == [{"id": "c1", "name": "twin.commit_geometry", "arguments": {}}]
 
 
 @pytest.mark.asyncio

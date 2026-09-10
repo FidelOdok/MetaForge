@@ -57,9 +57,7 @@ def _openai_resp(text: str) -> object:
 
 
 def _openai_tool_call_resp(name: str) -> object:
-    tc = SimpleNamespace(
-        id="call_1", function=SimpleNamespace(name=name, arguments="{}")
-    )
+    tc = SimpleNamespace(id="call_1", function=SimpleNamespace(name=name, arguments="{}"))
     msg = SimpleNamespace(content=None, tool_calls=[tc])
     return SimpleNamespace(choices=[SimpleNamespace(message=msg)], model="gpt-5")
 
