@@ -37,12 +37,13 @@ class TestRegistryMcpBridge:
         offers, registers unconditionally — no required collaborator),
         bringing it to 62. MET-706 adds seven cadquery export tools
         (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
-        bringing it to 69. MET-633 added Gazebo's 3 tools (run_simulation,
-        validate_world, extract_results) for 72.
+        bringing it to 69. MET-634 adds the OpenUSD conversion adapter's
+        3 tools, bringing it to 72. MET-633 adds Gazebo's 3 tools
+        (run_simulation, validate_world, extract_results) for 75.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 72
+        assert len(tools) == 75
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

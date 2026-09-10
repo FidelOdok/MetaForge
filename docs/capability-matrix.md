@@ -8,13 +8,14 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (58 across 14 adapters)
+## MCP tools (61 across 15 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
 `knowledge,twin,constraint,cadquery,calculix` (22 tools). FreeCAD, KiCad,
-and Gazebo are opt-in; `project`, `memory`, and `session` are
-runtime-injected (registered when the gateway supplies their backend).
+Gazebo, and the OpenUSD conversion adapter are opt-in; `project`,
+`memory`, and `session` are runtime-injected (registered when the
+gateway supplies their backend).
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
@@ -69,6 +70,9 @@ runtime-injected (registered when the gateway supplies their backend).
 | `gazebo` (opt-in) | `gazebo.run_simulation` | Headless physics/dynamics simulation of an SDF/world file | _none yet_ |
 | `gazebo` | `gazebo.validate_world` | Validate an SDF/world file's basic structure before simulating | _none yet_ |
 | `gazebo` | `gazebo.extract_results` | Parse an existing Gazebo stats JSON file | _none yet_ |
+| `omniverse_usd` (opt-in) | `omniverse_usd.convert_glb_to_usd` | Convert a GLB (from cadquery/freecad/occt-converter) into an OpenUSD stage, preserving part names and transforms | _none yet_ |
+| `omniverse_usd` | `omniverse_usd.validate_usd_minimum` | Cheap structural viability gate on a USD stage (default prim, mesh count, metersPerUnit) before downstream simulation dispatch | _none yet_ |
+| `omniverse_usd` | `omniverse_usd.describe_stage` | Basic structural info about a USD stage (up axis, scale, prim paths, mesh count) | _none yet_ |
 | `project` (injected) | `project.create` | Create a project (rejects a case-insensitive duplicate name) | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.list` | List projects the caller can see | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |
 | `project` | `project.get` | Fetch a project by id or name | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |

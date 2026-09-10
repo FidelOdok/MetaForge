@@ -529,7 +529,8 @@ MetaForge/
 │       ├── freecad/            # CAD operations
 │       ├── kicad/              # PCB/schematic validation
 │       ├── spice/              # Circuit simulation
-│       └── gazebo/             # ROS-native physics/dynamics simulation
+│       ├── gazebo/             # ROS-native physics/dynamics simulation
+│       └── omniverse_usd/      # GLB -> OpenUSD conversion
 │
 ├── ide_assistants/             # Layer 7: IDE integrations
 │   ├── vscode_extension/       # VS Code (firmware development)
