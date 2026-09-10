@@ -88,12 +88,14 @@ class TestBootstrapToolRegistry:
         'omniverse-usd' extra is installed) for 6 adapters. MET-633 added
         Gazebo (3 tools, opt-in like freecad/kicad -- registers regardless
         of whether a real `gz` binary is present) for 7 adapters.
+        MET-635/636 added the Isaac Sim adapter (2 tools, opt-in like
+        freecad/kicad) for 8.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 7
+        assert len(adapters) == 8
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -103,6 +105,7 @@ class TestBootstrapToolRegistry:
             "offer_resolver",
             "omniverse_usd",
             "gazebo",
+            "isaac_sim",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -110,7 +113,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 7
+        assert len(registry.list_adapters()) == 8
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -207,12 +210,13 @@ class TestBootstrapToolRegistry:
         bringing it to 69. MET-634 adds the OpenUSD conversion adapter's
         3 tools (convert_glb_to_usd, validate_usd_minimum, describe_stage)
         for 72. MET-633 adds Gazebo's 3 tools (run_simulation,
-        validate_world, extract_results) for 75.
+        validate_world, extract_results) for 75. MET-635/636 adds the
+        Isaac Sim adapter's 2 tools (run_physics, render_scene) for 77.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 75
+        assert len(tools) == 77
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

@@ -1,0 +1,9 @@
+# Isaac Sim MCP adapter dependencies
+# This adapter is a thin coordinator -- it does NOT bundle Isaac Sim or
+# require a GPU itself. It dispatches to a separate nvcr.io/nvidia/isaac-sim
+# container via tool_registry.compute_providers.resolve_runtime().
+aiohttp>=3.9
+pydantic>=2.0
+structlog>=24.0
+opentelemetry-api>=1.20
+httpx>=0.27

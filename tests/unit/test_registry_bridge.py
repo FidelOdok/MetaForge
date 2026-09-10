@@ -40,10 +40,11 @@ class TestRegistryMcpBridge:
         bringing it to 69. MET-634 adds the OpenUSD conversion adapter's
         3 tools, bringing it to 72. MET-633 adds Gazebo's 3 tools
         (run_simulation, validate_world, extract_results) for 75.
+        MET-635/636 adds the Isaac Sim adapter's 2 tools for 77.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 75
+        assert len(tools) == 77
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""
