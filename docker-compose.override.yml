@@ -95,6 +95,16 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
+      # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
+      # register with live credentials — the gateway service (docker-compose.yml)
+      # already had this passthrough; this sidecar never did, so distributor
+      # tools always skipped with "missing env vars" here regardless of .env.
+      - DIGIKEY_CLIENT_ID=${DIGIKEY_CLIENT_ID:-}
+      - DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET:-}
+      - DIGIKEY_BASE_URL=${DIGIKEY_BASE_URL:-}
+      - MOUSER_API_KEY=${MOUSER_API_KEY:-}
+      - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
+      - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       # MET-478 follow-up: without this, kicad.* tools ran in-process inside
