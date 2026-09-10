@@ -82,22 +82,32 @@ class TestBootstrapToolRegistry:
         (distributors.resolve_offers) joins them with no ``adapter_ids``
         scoping and no required collaborator, so it registers even with
         zero distributor credentials configured -- "no offers found" is
-        its normal degraded response, not a missing-tool situation.
+        its normal degraded response, not a missing-tool situation. MET-634
+        added the OpenUSD conversion adapter (3 tools, opt-in like
+        freecad/kicad -- registers regardless of whether the
+        'omniverse-usd' extra is installed) for 6 adapters.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 5
+        assert len(adapters) == 6
         adapter_ids = {a.adapter_id for a in adapters}
-        assert adapter_ids == {"cadquery", "freecad", "calculix", "kicad", "offer_resolver"}
+        assert adapter_ids == {
+            "cadquery",
+            "freecad",
+            "calculix",
+            "kicad",
+            "offer_resolver",
+            "omniverse_usd",
+        }
 
     async def test_bootstrap_with_existing_registry(self):
         """Bootstrap populates an existing registry instance."""
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 5
+        assert len(registry.list_adapters()) == 6
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -191,12 +201,14 @@ class TestBootstrapToolRegistry:
         61. MET-436 adds offer_resolver's one tool (distributors.resolve_
         offers), bringing it to 62. MET-706 adds seven cadquery export tools
         (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
-        bringing it to 69.
+        bringing it to 69. MET-634 adds the OpenUSD conversion adapter's
+        3 tools (convert_glb_to_usd, validate_usd_minimum, describe_stage)
+        for 72.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 69
+        assert len(tools) == 72
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
