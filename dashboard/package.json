@@ -14,6 +14,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.12.0",
     "@grafana/faro-web-sdk": "^1.19.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/context-zone": "^2.6.0",
@@ -39,6 +40,7 @@
     "react-router-dom": "^7.1.0",
     "tailwind-merge": "^2.6.0",
     "three": "^0.172.0",
+    "urdf-loader": "^0.13.1",
     "web-vitals": "^5.1.0",
     "zustand": "^5.0.0"
   },
