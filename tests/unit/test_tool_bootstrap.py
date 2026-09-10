@@ -85,13 +85,15 @@ class TestBootstrapToolRegistry:
         its normal degraded response, not a missing-tool situation. MET-634
         added the OpenUSD conversion adapter (3 tools, opt-in like
         freecad/kicad -- registers regardless of whether the
-        'omniverse-usd' extra is installed) for 6 adapters.
+        'omniverse-usd' extra is installed) for 6 adapters. MET-633 added
+        Gazebo (3 tools, opt-in like freecad/kicad -- registers regardless
+        of whether a real `gz` binary is present) for 7 adapters.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 6
+        assert len(adapters) == 7
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -100,6 +102,7 @@ class TestBootstrapToolRegistry:
             "kicad",
             "offer_resolver",
             "omniverse_usd",
+            "gazebo",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -107,7 +110,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 6
+        assert len(registry.list_adapters()) == 7
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -203,12 +206,13 @@ class TestBootstrapToolRegistry:
         (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
         bringing it to 69. MET-634 adds the OpenUSD conversion adapter's
         3 tools (convert_glb_to_usd, validate_usd_minimum, describe_stage)
-        for 72.
+        for 72. MET-633 adds Gazebo's 3 tools (run_simulation,
+        validate_world, extract_results) for 75.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 72
+        assert len(tools) == 75
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
