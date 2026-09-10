@@ -87,6 +87,29 @@ async def test_openai_events_assemble_text_and_fragmented_tool_calls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_events_sanitizes_dotted_tool_names_round_trip() -> None:
+    """MET-738: dotted MetaForge tool ids must survive the OpenAI-family
+    streaming path — sanitized (dot -> __) on the way out (the SDK/API
+    rejects names outside ^[a-zA-Z0-9_-]+$), desanitized back on the way in
+    so the native loop never sees the substitution."""
+    client = _FakeOpenAI(
+        [_chunk(tool_calls=[_tc(0, id="c1", name="twin__commit_geometry", args="{}")])]
+    )
+    tools = [{"type": "function", "function": {"name": "twin.commit_geometry", "parameters": {}}}]
+    events = [
+        e
+        async for e in openai_stream_events(
+            SPEC, {"messages": [{"role": "user", "content": "go"}], "tools": tools}, client=client
+        )
+    ]
+    assert client.kwargs["tools"][0]["function"]["name"] == "twin__commit_geometry"
+    action_events = [e for e in events if e["type"] == "action_started"]
+    assert action_events == [{"type": "action_started", "name": "twin.commit_geometry"}]
+    result = events[-1]["result"]
+    assert result["tool_calls"] == [{"id": "c1", "name": "twin.commit_geometry", "arguments": {}}]
+
+
+@pytest.mark.asyncio
 async def test_openai_events_text_only_response() -> None:
     client = _FakeOpenAI([_chunk(content="hello")])
     events = [

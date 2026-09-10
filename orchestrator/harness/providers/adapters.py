@@ -150,6 +150,33 @@ def _to_anthropic_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+_OPENAI_NAME_DOT = "__"
+
+
+def _sanitize_openai_tool_names(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace the dot in each MetaForge tool id with a double underscore.
+
+    OpenAI-family APIs reject ``function.name`` values that don't match
+    ``^[a-zA-Z0-9_-]+$`` — every MetaForge tool id is dotted
+    (``namespace.action``), so an unmodified schema is always rejected.
+    Every tool id has exactly one dot and none already contains "__", so
+    this is a safe, fully reversible mapping; :func:`_desanitize_openai_tool_name`
+    undoes it when a tool call comes back in the response.
+    """
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        fn = t.get("function")
+        if not isinstance(fn, dict) or "name" not in fn:
+            out.append(t)
+            continue
+        out.append({**t, "function": {**fn, "name": fn["name"].replace(".", _OPENAI_NAME_DOT)}})
+    return out
+
+
+def _desanitize_openai_tool_name(name: str) -> str:
+    return name.replace(_OPENAI_NAME_DOT, ".")
+
+
 def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Translate OpenAI-canonical messages to Anthropic content-block form.
 
@@ -281,7 +308,7 @@ async def openai_invoke(
     }
     tools = request.get("tools") if isinstance(request, dict) else None
     if tools:
-        kwargs["tools"] = tools
+        kwargs["tools"] = _sanitize_openai_tool_names(tools)
         kwargs["tool_choice"] = request.get("tool_choice", "auto")
     try:
         resp = await client.chat.completions.create(**kwargs)
@@ -299,7 +326,7 @@ async def openai_invoke(
         tool_calls.append(
             {
                 "id": tc.id,
-                "name": tc.function.name,
+                "name": _desanitize_openai_tool_name(tc.function.name),
                 "arguments": args if isinstance(args, dict) else {},
             }
         )
@@ -789,7 +816,7 @@ async def openai_stream_events(
     }
     tools = request.get("tools") if isinstance(request, dict) else None
     if tools:
-        kwargs["tools"] = tools
+        kwargs["tools"] = _sanitize_openai_tool_names(tools)
         kwargs["tool_choice"] = request.get("tool_choice", "auto")
 
     text_parts: list[str] = []
@@ -822,7 +849,10 @@ async def openai_stream_events(
                 # moment its NAME is known — long before arguments finish.
                 if slot["name"] and idx not in announced:
                     announced.add(idx)
-                    yield {"type": "action_started", "name": slot["name"]}
+                    yield {
+                        "type": "action_started",
+                        "name": _desanitize_openai_tool_name(slot["name"]),
+                    }
     except ProviderError:
         raise
     except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
@@ -838,7 +868,7 @@ async def openai_stream_events(
         tool_calls.append(
             {
                 "id": slot["id"],
-                "name": slot["name"],
+                "name": _desanitize_openai_tool_name(slot["name"]),
                 "arguments": args if isinstance(args, dict) else {},
             }
         )
