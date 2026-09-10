@@ -68,6 +68,27 @@ def _export_dir(export_id: str) -> Path:
     return _workspace_root() / _EXPORTS_SUBDIR / export_id
 
 
+def _make_export_dir(export_id: str) -> Path:
+    """Create (and return) a fresh export directory that the *adapter*
+    container can write into, not just this gateway process.
+
+    ``adapter-workspace`` is a Docker volume shared between the gateway
+    (which creates this directory) and the cadquery adapter (which writes
+    the actual export files into it) — two different containers running as
+    different, unrelated UIDs (no shared group). ``Path.mkdir`` alone
+    leaves the directory owned by whichever UID the gateway runs as with
+    mode narrowed by umask, which the adapter's UID then can't write into
+    (``PermissionError``). ``chmod`` isn't subject to umask, so it's used
+    here to force the directory world-writable after creation — acceptable
+    because this is a throwaway per-export scratch directory, not
+    security-sensitive content (see this module's docstring).
+    """
+    out_dir = _export_dir(export_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.chmod(0o777)
+    return out_dir
+
+
 def _export_file(export_id: str, path: str) -> ExportFile:
     filename = Path(path).name
     download_url = f"/v1/cad-export/download/{export_id}/{filename}"
@@ -140,8 +161,7 @@ async def _export_single(
     """Stage a single part and call a single-part cadquery export tool."""
     file_path = await _stage_part(bridge, node_id)
     export_id = uuid4().hex
-    out_dir = _export_dir(export_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _make_export_dir(export_id)
     output_path = str(out_dir / f"model.{ext}")
     args = {"input_file": file_path, "output_path": output_path, **params}
     data = await _invoke(bridge, tool_id, args)
@@ -159,8 +179,7 @@ async def _export_assembly(
     """Stage every part and call an assembly cadquery export tool."""
     staged_parts = await _stage_parts(bridge, parts)
     export_id = uuid4().hex
-    out_dir = _export_dir(export_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _make_export_dir(export_id)
     output_path = str(out_dir / f"model.{ext}")
     args = {
         "parts": staged_parts,
@@ -351,8 +370,7 @@ async def generate_ros2_launch(body: Ros2LaunchRequest) -> Ros2LaunchResponse:
 
     bridge = get_mcp_bridge()
     export_id = uuid4().hex
-    out_dir = _export_dir(export_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _make_export_dir(export_id)
     output_path = str(out_dir / f"{body.robot_name}.launch.py")
     data = await _invoke(
         bridge,
