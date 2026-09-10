@@ -9,7 +9,9 @@ import pytest
 from orchestrator.harness.providers import ProviderSpec, adapters, anthropic_invoke, openai_invoke
 from orchestrator.harness.providers.adapters import (
     _classify_error,
+    _desanitize_openai_tool_name,
     _normalize_request,
+    _sanitize_openai_tool_names,
     default_invoke,
 )
 from orchestrator.harness.providers.pipeline import ProviderError
@@ -52,6 +54,14 @@ def _openai_resp(text: str) -> object:
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=text))], model="gpt-5"
     )
+
+
+def _openai_tool_call_resp(name: str) -> object:
+    tc = SimpleNamespace(
+        id="call_1", function=SimpleNamespace(name=name, arguments="{}")
+    )
+    msg = SimpleNamespace(content=None, tool_calls=[tc])
+    return SimpleNamespace(choices=[SimpleNamespace(message=msg)], model="gpt-5")
 
 
 # --- classifier ------------------------------------------------------------
@@ -152,3 +162,36 @@ async def test_default_invoke_dispatches_by_family(monkeypatch: pytest.MonkeyPat
     await default_invoke(OPENAI, {"prompt": "x"})
     await default_invoke(ProviderSpec(name="openrouter", model="z"), {"prompt": "x"})
     assert seen == ["anthropic", "openai", "openai"]
+
+
+# --- MET-738: OpenAI-family tool-name sanitization -------------------------
+# OpenAI's function-calling API rejects `function.name` values that don't
+# match ^[a-zA-Z0-9_-]+$, but every MetaForge tool id is dotted
+# (`namespace.action`, e.g. `twin.commit_geometry`). openai_invoke /
+# openai_stream_events must sanitize outgoing schemas and desanitize
+# incoming tool_calls so the round trip is invisible to the native loop.
+def test_sanitize_openai_tool_names_replaces_dot() -> None:
+    tools = [{"type": "function", "function": {"name": "twin.commit_geometry", "parameters": {}}}]
+    out = _sanitize_openai_tool_names(tools)
+    assert out[0]["function"]["name"] == "twin__commit_geometry"
+    # original list/dicts left untouched (no in-place mutation)
+    assert tools[0]["function"]["name"] == "twin.commit_geometry"
+
+
+def test_sanitize_openai_tool_names_passes_through_malformed_entries() -> None:
+    tools = [{"x": 1}, {"function": "not-a-dict"}]
+    assert _sanitize_openai_tool_names(tools) == tools
+
+
+def test_desanitize_openai_tool_name_round_trip() -> None:
+    assert _desanitize_openai_tool_name("cadquery__export_urdf") == "cadquery.export_urdf"
+
+
+@pytest.mark.asyncio
+async def test_openai_invoke_sanitizes_outgoing_tool_names_and_desanitizes_reply() -> None:
+    client = FakeOpenAI(resp=_openai_tool_call_resp("twin__commit_geometry"))
+    tools = [{"type": "function", "function": {"name": "twin.commit_geometry", "parameters": {}}}]
+    out = await openai_invoke(OPENAI, {"prompt": "go", "tools": tools}, client=client)
+    sent = client.chat.completions.calls[0]["tools"]
+    assert sent[0]["function"]["name"] == "twin__commit_geometry"
+    assert out["tool_calls"] == [{"id": "call_1", "name": "twin.commit_geometry", "arguments": {}}]
