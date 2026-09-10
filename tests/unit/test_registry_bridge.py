@@ -32,13 +32,17 @@ class TestRegistryMcpBridge:
         """List all tools returns expected count.
 
         Grows as adapters gain tools; freecad reached 44 with
-        describe_step_file (MET-629), bringing the cross-adapter total to 61.
-        MET-633 added Gazebo's 3 tools (run_simulation, validate_world,
-        extract_results) for 64.
+        describe_step_file (MET-629), bringing the cross-adapter total to
+        61. MET-436 adds offer_resolver's one tool (distributors.resolve_
+        offers, registers unconditionally — no required collaborator),
+        bringing it to 62. MET-706 adds seven cadquery export tools
+        (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
+        bringing it to 69. MET-633 added Gazebo's 3 tools (run_simulation,
+        validate_world, extract_results) for 72.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 64
+        assert len(tools) == 72
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

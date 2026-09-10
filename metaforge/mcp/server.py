@@ -83,6 +83,11 @@ Your work is captured for review:
 correctly: run `metaforge-capture use <project_id>` (CLI) or call session.start \
 with the project_id. If you don't know which project, ask the user. With no \
 active project, capture stays unbound.
+- session.start also scopes your later tool calls to that project, but only \
+when your client presents a stable session (stdio, or an X-MetaForge-Session \
+header). It tells you which happened: if it returns \
+`project_scope_bound: false`, keep passing project_id explicitly on calls \
+that take it.
 - Record design choices with twin.record_decision (title, rationale, alternatives) \
 so they persist as typed, reviewable decisions.
 - Capturing your reasoning (not just actions) is an optional client-side add-on \
@@ -107,10 +112,15 @@ class UnifiedMcpServer:
         adapters: list[McpToolServer],
         version: str = "0.1.0",
         session_capture: SessionCapture | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._adapters = list(adapters)
         self._version = version
         self._start_time = datetime.now(UTC)
+        # Held only so the process shutdown path can call close_all() and
+        # release remote adapters' aiohttp ClientSessions -- unused by
+        # dispatch, which goes through _tool_index/_adapters below.
+        self.tool_registry = tool_registry
         # MET-496: when set, every tool call is recorded into the agent
         # session store as an action/error event. None = capture off.
         self._capture = session_capture
@@ -416,8 +426,42 @@ class UnifiedMcpServer:
         # blob. Explicit step_base64 always wins.
         if tool_id == "twin.commit_geometry":
             args = params.get("arguments")
-            if isinstance(args, dict) and self._geom_stash.fill(args):
-                logger.info("geometry_commit_by_reference", obj_id=args.get("obj_id"))
+            if isinstance(args, dict):
+                had_explicit_blob = bool(args.get("step_base64"))
+                filled = self._geom_stash.fill(args)
+                # MET-642 S4 finding: a commit-by-reference miss (no matching
+                # prior export for this session_id/obj_id, and no explicit
+                # step_base64 either) previously surfaced only as
+                # commit_geometry's generic "no geometry" error, with no way
+                # to tell from logs whether the ids just never matched a real
+                # export_model call. Logging the attempt either way closes
+                # that gap. Not a "miss" if the caller passed step_base64
+                # directly -- fill() correctly no-ops in that case.
+                if not had_explicit_blob:
+                    event = (
+                        "geometry_commit_by_reference"
+                        if filled
+                        else "geometry_commit_by_reference_miss"
+                    )
+                    logger.info(
+                        event,
+                        session_id=args.get("session_id"),
+                        obj_id=args.get("obj_id"),
+                    )
+                elif filled.diverged:
+                    # MET-684: see the matching branch in
+                    # skill_registry/registry_bridge.py. The blob the caller
+                    # carried back does not match the export it names, so the
+                    # pristine one was substituted -- logged rather than
+                    # silently repaired.
+                    logger.warning(
+                        "geometry_commit_blob_diverged",
+                        session_id=args.get("session_id"),
+                        obj_id=args.get("obj_id"),
+                        stashed_chars=filled.stashed_chars,
+                        supplied_chars=filled.supplied_chars,
+                        resolution="used_stashed_export",
+                    )
 
         # Delegate to the adapter's own JSON-RPC dispatcher so its
         # per-tool error handling, timing, and structlog records all
@@ -449,7 +493,15 @@ class UnifiedMcpServer:
         if tool_id == "freecad.export_model":
             args = params.get("arguments")
             if isinstance(args, dict) and isinstance(result, dict):
-                self._geom_stash.remember(args, result)
+                remembered = self._geom_stash.remember(args, result)
+                event = (
+                    "geometry_export_remembered" if remembered else "geometry_export_not_remembered"
+                )
+                logger.info(
+                    event,
+                    session_id=args.get("session_id"),
+                    obj_id=args.get("obj_id"),
+                )
         return result
 
     async def _health_check(self) -> dict[str, Any]:
@@ -495,6 +547,8 @@ async def build_unified_server(
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
     blob_stager: Any = None,
+    component_catalog_store: Any = None,
+    component_intent_llm: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -519,6 +573,12 @@ async def build_unified_server(
     True *and* ``agent_session_store`` is supplied, every tool call is
     recorded as an action/error event in an agent session, so MCP/CLI work
     shows up in ``/sessions`` with no client cooperation.
+
+    ``component_catalog_store`` + ``component_intent_llm`` (MET-436):
+    the ``component`` adapter (component.search_parametric +
+    component.search_intent) registers only when both are supplied,
+    together with ``knowledge_service`` (reused for the intent-search
+    fuzzy fallback) — same runtime-injected pattern as ``knowledge``.
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -533,10 +593,14 @@ async def build_unified_server(
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder,
         blob_stager=blob_stager,
+        component_catalog_store=component_catalog_store,
+        component_intent_llm=component_intent_llm,
     )
     capture = (
         SessionCapture(agent_session_store)
         if capture_sessions and agent_session_store is not None
         else None
     )
-    return UnifiedMcpServer(adapters=registry.list_adapter_servers(), session_capture=capture)
+    return UnifiedMcpServer(
+        adapters=registry.list_adapter_servers(), session_capture=capture, tool_registry=registry
+    )

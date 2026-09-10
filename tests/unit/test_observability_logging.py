@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import structlog
 
 from observability.config import ObservabilityConfig
-from observability.logging import add_trace_context, configure_logging
+from observability.logging import (
+    _ConsoleHandler,
+    add_trace_context,
+    configure_logging,
+    ensure_console_handler,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -271,3 +277,69 @@ class TestConfigureLogging:
         assert result["event"] == "my-event"
         assert result["user_id"] == "abc123"
         assert result["request_id"] == "req-456"
+
+
+# ---------------------------------------------------------------------------
+# ensure_console_handler (MET-646)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureConsoleHandler:
+    """A console sink must always exist, independent of OTel state.
+
+    Regression coverage for MET-646: on fidel-dev, application logs emitted
+    after startup were invisible in ``docker logs`` because the only handler
+    ever attached to the root logger was the OTel exporter -- and it silently
+    swallows records when its collector is unreachable. These tests assert
+    the fallback sink is always present and idempotent, not that OTel export
+    itself works (that's covered by the bootstrap tests).
+    """
+
+    def setup_method(self) -> None:
+        root = logging.getLogger()
+        self._saved_handlers = list(root.handlers)
+        self._saved_level = root.level
+        for h in list(root.handlers):
+            if isinstance(h, _ConsoleHandler):
+                root.removeHandler(h)
+
+    def teardown_method(self) -> None:
+        root = logging.getLogger()
+        for h in list(root.handlers):
+            if isinstance(h, _ConsoleHandler):
+                root.removeHandler(h)
+        root.handlers[:] = self._saved_handlers
+        root.setLevel(self._saved_level)
+
+    def test_attaches_a_console_handler(self) -> None:
+        root = logging.getLogger()
+        assert not any(isinstance(h, _ConsoleHandler) for h in root.handlers)
+        ensure_console_handler()
+        assert any(isinstance(h, _ConsoleHandler) for h in root.handlers)
+
+    def test_idempotent_does_not_stack_handlers(self) -> None:
+        ensure_console_handler()
+        ensure_console_handler()
+        ensure_console_handler()
+        root = logging.getLogger()
+        assert sum(1 for h in root.handlers if isinstance(h, _ConsoleHandler)) == 1
+
+    def test_lowers_root_level_to_info_if_stricter(self) -> None:
+        root = logging.getLogger()
+        root.setLevel(logging.ERROR)
+        ensure_console_handler()
+        assert root.level <= logging.INFO
+
+    def test_does_not_raise_root_level_if_already_permissive(self) -> None:
+        root = logging.getLogger()
+        root.setLevel(logging.DEBUG)
+        ensure_console_handler()
+        assert root.level == logging.DEBUG
+
+    def test_configure_logging_always_wires_a_console_handler(self) -> None:
+        """The real bug: OTel disabled must not mean zero output anywhere."""
+        cfg = ObservabilityConfig(enable_logs=False)
+        with patch("observability.logging._otel_available", return_value=False):
+            configure_logging(cfg)
+        root = logging.getLogger()
+        assert any(isinstance(h, _ConsoleHandler) for h in root.handlers)

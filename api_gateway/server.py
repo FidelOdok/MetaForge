@@ -18,7 +18,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.bom.routes import router as bom_router
 from api_gateway.cad.routes import router as cad_router
+from api_gateway.cad_export.routes import router as cad_export_router
 from api_gateway.chat.routes import router as chat_router
+from api_gateway.chat.tool_approvals import router as tool_approvals_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
@@ -288,6 +290,8 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     app.state.knowledge_reranker_enabled = reranker_enabled
 
     knowledge_service = None
+    component_catalog_store: Any = None
+    component_intent_llm: Any = None
     if db_url:
         try:
             dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -350,22 +354,45 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                     prop_llm = OpenRouterPropertyLLM(prop_cfg)
                     knowledge_service.set_property_llm(prop_llm)  # type: ignore[attr-defined]
                     property_llm_provider = prop_cfg.primary_model
+                    # MET-436: the same client satisfies component.search_intent's
+                    # IntentLLM Protocol structurally (both are a single
+                    # async def complete(prompt) -> str) — no second client.
+                    component_intent_llm = prop_llm
                 except Exception as prop_exc:  # noqa: BLE001
                     logger.warning(
                         "knowledge_service_property_llm_wiring_failed",
                         error=str(prop_exc),
                     )
 
+            # MET-436: the parametric component catalog. Same DATABASE_URL
+            # gating as knowledge_service above; failure here must not take
+            # down knowledge_service (already initialized) — component.*
+            # just stays unregistered (component_mcp_adapter_skipped).
+            try:
+                from digital_twin.catalog import ComponentCatalogStore
+
+                component_catalog_store = ComponentCatalogStore(dsn=dsn)
+                await component_catalog_store.initialize()
+            except Exception as cc_exc:  # noqa: BLE001
+                logger.warning(
+                    "component_catalog_store_init_failed",
+                    error=str(cc_exc),
+                )
+                component_catalog_store = None
+
             logger.info(
                 "knowledge_service_lightrag_initialized",
                 reranker_enabled=reranker_enabled,
                 llm_provider=llm_provider,
                 property_llm_provider=property_llm_provider,
+                component_catalog_store_active=component_catalog_store is not None,
             )
         except Exception as exc:
             logger.warning("knowledge_service_lightrag_failed", error=str(exc))
             knowledge_service = None
     app.state.knowledge_service = knowledge_service
+    app.state.component_catalog_store = component_catalog_store
+    app.state.component_intent_llm = component_intent_llm
 
     # ----- Legacy store (still consumed by skills + routes) ----------
     knowledge_store = None
@@ -434,7 +461,16 @@ async def _init_knowledge_store(app: FastAPI) -> None:
                 logger.info("memory_store_in_memory_initialized")
 
             app.state.memory_store = memory_store
-            app.state.memory_client = MemoryClient(memory_store, app.state.embedding_service)
+            # MET-567: pass the knowledge service through. Without it
+            # ``search_design_rationale`` / ``get_component_context`` raise,
+            # so ``POST /v1/memory/search`` and
+            # ``GET /v1/memory/components/{name}`` answered 503 forever even
+            # on a fully-configured deployment.
+            app.state.memory_client = MemoryClient(
+                memory_store,
+                app.state.embedding_service,
+                knowledge_service=getattr(app.state, "knowledge_service", None),
+            )
         except Exception as exc:
             logger.warning("memory_client_init_failed", error=str(exc))
             app.state.memory_store = None
@@ -448,115 +484,43 @@ async def _init_knowledge_store(app: FastAPI) -> None:
     # Insight store prefers pgvector when DATABASE_URL is available.
     app.state.consolidation_orchestrator = None
     app.state.consolidation_insight_store = None
+    app.state.consolidation_stack = None
     if app.state.memory_store is None:
         logger.warning("consolidation_orchestrator_init_skipped", reason="no_memory_store")
     else:
         try:
+            # MET-723: this construction used to live inline here -- about
+            # ninety lines of pgvector / Neo4j / LLM wiring reachable from
+            # nowhere else. That made it impossible for the Temporal worker to
+            # bind the same orchestrator, so a worker serving
+            # ConsolidationWorkflow failed its activity with "orchestrator was
+            # not bound before activity ran". Both processes now share one
+            # factory. The already-open experience store is passed in so a
+            # second pgvector pool is never created for the same data.
             from digital_twin.memory.consolidation import (
-                ConfidenceDecay,
-                ConsolidationOrchestrator,
-                ContradictionDetector,
-                DualWriteInsightStore,
-                EventGrouper,
-                InMemoryEventFetcher,
-                InMemoryInsightStore,
-                InsightStore,
-                InsightSynthesizer,
-                InsightValidator,
-                Neo4jInsightStore,
-                OpenRouterConfig,
-                OpenRouterError,
-                OpenRouterLLMClient,
-                PgVectorInsightStore,
-                SemanticMemoryWriter,
-                StubLLMClient,
-                register_consolidation_activities,
+                ConsolidationScheduler,
+                build_consolidation_stack,
+                interval_seconds_from_env,
             )
-            from digital_twin.memory.consolidation.llm import LLMClient
 
-            # Insight store — prefer pgvector when DATABASE_URL is set, and
-            # fan out to Neo4j as well (DualWriteInsightStore) when Neo4j
-            # creds are present so the structural graph stays in sync. Falls
-            # back to in-memory when no pgvector backend is available.
-            insight_store: InsightStore
-            pg_insight_store: PgVectorInsightStore | None = None
-            if db_url:
-                try:
-                    dsn = db_url.replace("postgresql+asyncpg://", "postgresql://")
-                    pg_insight = PgVectorInsightStore(dsn=dsn)
-                    await pg_insight.initialize()
-                    pg_insight_store = pg_insight
-                    logger.info("consolidation_insight_store_pgvector_initialized")
-                except Exception as exc:
-                    logger.warning("consolidation_insight_store_pgvector_failed", error=str(exc))
-
-            if pg_insight_store is None:
-                insight_store = InMemoryInsightStore()
-                logger.info("consolidation_insight_store_in_memory_initialized")
-            else:
-                insight_store = pg_insight_store
-                # Opt into dual-write when Neo4j is configured. pgvector
-                # stays the read source of truth; Neo4j gets the
-                # structural mirror. A Neo4j connect failure degrades to
-                # pgvector-only rather than failing gateway boot.
-                neo4j_uri = os.environ.get("NEO4J_URI") or os.environ.get("METAFORGE_NEO4J_URI")
-                if neo4j_uri:
-                    try:
-                        neo4j_insight = Neo4jInsightStore(
-                            uri=neo4j_uri,
-                            user=(
-                                os.environ.get("NEO4J_USER")
-                                or os.environ.get("METAFORGE_NEO4J_USER")
-                                or "neo4j"
-                            ),
-                            password=(
-                                os.environ.get("NEO4J_PASSWORD")
-                                or os.environ.get("METAFORGE_NEO4J_PASSWORD")
-                                or "password"
-                            ),
-                        )
-                        await neo4j_insight.connect()
-                        insight_store = DualWriteInsightStore(pg_insight_store, neo4j_insight)
-                        logger.info("consolidation_insight_store_dual_write_initialized")
-                    except Exception as exc:
-                        logger.warning(
-                            "consolidation_insight_store_neo4j_failed",
-                            error=str(exc),
-                        )
-
-            # LLM — Open Router when configured, stub otherwise.
-            llm_client: LLMClient
-            try:
-                llm_client = OpenRouterLLMClient(OpenRouterConfig.from_env())
-                logger.info("consolidation_llm_open_router_initialized")
-            except OpenRouterError as exc:
-                logger.warning(
-                    "consolidation_llm_open_router_skipped",
-                    reason=str(exc),
-                )
-                llm_client = StubLLMClient()
-
-            # MET-455: activate the Phase-3 machinery in production —
-            # confidence decay (90-day half-life), JANITOR durable
-            # STALE_WARN marking, and contradiction detection against the
-            # existing corpus during BACKGROUND synthesis. The detector
-            # reuses the same LLM client as the synthesizer.
-            orchestrator = ConsolidationOrchestrator(
-                fetcher=InMemoryEventFetcher(app.state.memory_store),
-                grouper=EventGrouper(),
-                synthesizer=InsightSynthesizer(llm_client),
-                validator=InsightValidator(),
-                writer=SemanticMemoryWriter(insight_store),
-                insight_store=insight_store,
-                decay=ConfidenceDecay(),
-                janitor_marks_stale=True,
-                contradiction_detector=ContradictionDetector(llm_client),
+            stack = await build_consolidation_stack(
+                experience_store=app.state.memory_store,
                 collector=getattr(app.state, "collector", None),
             )
-            register_consolidation_activities(orchestrator)
-            app.state.consolidation_orchestrator = orchestrator
-            app.state.consolidation_insight_store = insight_store
+            app.state.consolidation_stack = stack
+            app.state.consolidation_orchestrator = stack.orchestrator
+            app.state.consolidation_insight_store = stack.insight_store
             logger.info("consolidation_orchestrator_initialized")
+
+            # MET-567: nothing ever triggered a pass. The pipeline, the
+            # Temporal workflow, and the REST trigger all existed while
+            # ``memory.list_insights`` stayed empty in every deployment,
+            # because no scheduler and no worker ever called any of them.
+            scheduler = ConsolidationScheduler(
+                stack.orchestrator, interval_seconds=interval_seconds_from_env()
+            )
+            app.state.consolidation_scheduler = scheduler
+            scheduler.start()
         except Exception as exc:
             logger.warning("consolidation_orchestrator_init_failed", error=str(exc))
             app.state.consolidation_orchestrator = None
@@ -665,8 +629,17 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Shares the same DATABASE_URL-selected backend as the rest of the
     # gateway; read by the /v1/sessions routes via app.state.
     from api_gateway.sessions.backend import create_agent_session_store as _create_ass
+    from api_gateway.sessions.experience_bridge import wrap_with_experience_bridge
 
-    app.state.agent_session_store = await _create_ass()
+    # MET-567: wrap the store so completing a session also deposits one
+    # experience row. All three completion paths (REST route, session.complete
+    # MCP tool, sidecar idle rollover) go through the store, so this is the
+    # single seam that catches them.
+    app.state.agent_session_store = wrap_with_experience_bridge(
+        await _create_ass(),
+        getattr(app.state, "memory_store", None),
+        getattr(app.state, "embedding_service", None),
+    )
 
     # Bootstrap tool adapters into the registry and create real MCP bridge.
     # The knowledge MCP adapter is included only when a KnowledgeService is
@@ -712,6 +685,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # file (STEP, mesh, ...) by node id once its authoring session is
         # gone, unknown, or was never its own.
         blob_stager=make_blob_stager(twin),
+        # MET-436: the parametric component catalog + the intent-translation
+        # LLM (reused from the property-extraction Tier-2 wiring above).
+        # component.* registers only when both are supplied, together with
+        # knowledge_service (used for the intent-search fuzzy fallback).
+        component_catalog_store=getattr(app.state, "component_catalog_store", None),
+        component_intent_llm=getattr(app.state, "component_intent_llm", None),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -748,7 +727,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.bom.routes import init_twin as init_bom_twin
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.context_adapter import init_context_assembler
-    from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_twin
+    from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_metrics, init_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
     from api_gateway.twin.routes import init_twin as init_twin_viewer
@@ -760,10 +739,30 @@ async def _init_orchestrator(app: FastAPI) -> None:
         backend="postgres" if type(chat_backend).__name__ == "PgChatBackend" else "in_memory",
     )
 
+    from api_gateway.chat.experience_adapter import init_chat_experience_recorder
     from api_gateway.chat.turn_capture import init_turn_capture
 
     # MET-594: tee live chat steps into the agent-session event log.
     init_turn_capture(getattr(app.state, "agent_session_store", None))
+
+    # MET-567: give chat turns an experience recorder. Until now only
+    # MechanicalAgent had one, so no amount of chat traffic filled the store
+    # the memory tier reads from.
+    init_chat_experience_recorder(
+        getattr(app.state, "memory_store", None),
+        getattr(app.state, "embedding_service", None),
+    )
+
+    # MET-672: HeartbeatMonitor has existed since MET-547 Phase 4 with no
+    # production caller -- its docstring describes "a cron/heartbeat job" that
+    # was never built, so an abandoned run sat non-terminal forever. Observed
+    # live: three `awaiting_approval` runs left behind by a client killed
+    # mid-turn, still listed as pending long afterwards.
+    from api_gateway.chat.tool_approvals import get_approval_store
+    from orchestrator.harness.heartbeat import RunReaper
+
+    app.state.run_reaper = RunReaper(get_approval_store())
+    app.state.run_reaper.start()
 
     init_project_backend(project_backend)
     logger.info(
@@ -776,6 +775,24 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # Wire the active bridge and twin into chat routes and projects routes
     init_mcp_bridge(active_bridge)
     init_twin(twin)
+    # Production-harness audit follow-up: give the chat harness loop the
+    # gateway's real MetricsCollector (was previously never wired at all).
+    init_metrics(_collector)
+    # Production-harness audit follow-up: the /v1/runs store was always
+    # process-local despite a real SQLite ledger existing for exactly this
+    # ("persistence lands in Phase 4" — never actually connected). Disabled
+    # via METAFORGE_RUNS_LEDGER_DISABLE for tests/environments that don't
+    # want a file touched.
+    if (os.environ.get("METAFORGE_RUNS_LEDGER_DISABLE", "").strip().lower()) not in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        from api_gateway.runs.routes import init_run_ledger
+        from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
+
+        init_run_ledger(SqliteRunLedger(str(default_ledger_path())))
     # MET-566: chat-turn context assembly (knowledge fragments with
     # attribution/staleness/conflicts). No-op when LightRAG isn't configured.
     init_context_assembler(
@@ -787,11 +804,77 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_twin_viewer(twin)
     init_bom_twin(twin)
 
-    event_bus = create_default_bus(
-        workflow_engine,
-        collector=_collector,
-        knowledge_service=getattr(app.state, "knowledge_service", None),
-    )
+    # MET-197 has been in the tree since 2026-03-08 and nothing ever
+    # constructed the publisher: `KAFKA_BOOTSTRAP_SERVERS` was passed to the
+    # container and read by zero Python code, so the broker ran with **zero
+    # topics ever created** while the in-process bus carried everything. That
+    # made both deposit paths (WORK_PRODUCT_CREATED -> knowledge,
+    # AGENT_TASK_* -> experiences) unreplayable, and it is why they have to be
+    # best-effort: with no durable transport the ingest runs synchronously
+    # inside the request, so a slow embedder must not be allowed to fail the
+    # write it was triggered by.
+    #
+    # The Kafka bus is additive, not a swap: it still dispatches in-process to
+    # every subscriber AND persists to the topic, so replay becomes possible
+    # without needing a separate consumer process first.
+    _kafka_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    _knowledge_service = getattr(app.state, "knowledge_service", None)
+    kafka_publisher: Any = None
+    event_bus = None
+    if _kafka_servers:
+        try:
+            from orchestrator.event_bus.subscribers import create_kafka_bus
+
+            event_bus, kafka_publisher = create_kafka_bus(
+                bootstrap_servers=_kafka_servers,
+                workflow_engine=workflow_engine,
+                knowledge_service=_knowledge_service,
+                collector=_collector,
+            )
+            await kafka_publisher.start()
+            # `start()` never raises -- a missing SDK or an unreachable broker
+            # degrades internally -- so "did it actually attach a producer?"
+            # has to be asked explicitly. Caught live: without this check the
+            # gateway logged `event_bus_kafka_initialized` while `aiokafka`
+            # was absent from the image and every event was being dropped,
+            # which is the same false-positive that let this tier stay dark
+            # for six months.
+            if not kafka_publisher.started:
+                raise RuntimeError(
+                    "Kafka producer did not start (missing aiokafka, or broker "
+                    "unreachable) -- see the kafka_producer_start_failed log line"
+                )
+            logger.info("event_bus_kafka_initialized", bootstrap_servers=_kafka_servers)
+        except Exception as exc:
+            # A broker that is down must not take the gateway with it -- the
+            # in-process bus is a complete implementation, just not durable.
+            logger.warning(
+                "event_bus_kafka_failed",
+                bootstrap_servers=_kafka_servers,
+                error=str(exc),
+                hint="falling back to the in-process bus; events will not be replayable",
+            )
+            if kafka_publisher is not None:
+                await kafka_publisher.stop()
+            kafka_publisher = None
+            event_bus = None
+
+    if event_bus is None:
+        event_bus = create_default_bus(
+            workflow_engine,
+            collector=_collector,
+            knowledge_service=_knowledge_service,
+        )
+        logger.info("event_bus_in_process_initialized", kafka_configured=bool(_kafka_servers))
+    app.state.kafka_publisher = kafka_publisher
+
+    # MET-567: let the twin recorders publish WORK_PRODUCT_CREATED onto this
+    # bus. ``KnowledgeConsumer`` has subscribed to that event since MET-307
+    # but nothing ever published one, so a recorded design decision never
+    # became searchable knowledge.
+    from api_gateway.twin.work_product_events import init_work_product_events
+
+    init_work_product_events(event_bus)
 
     # MET-453: subscribe the ExperienceConsumer so AGENT_TASK_* events
     # actually flow into the experience store (the rest of the memory
@@ -910,6 +993,52 @@ async def _init_orchestrator(app: FastAPI) -> None:
         get_health_checker().register_check("neo4j", _neo4j_health)
         logger.info("neo4j_health_check_registered")
 
+    # MET-710: the check above is registered ONLY when the twin is already
+    # Neo4j-backed -- so the one signal that would reveal a degraded twin
+    # disappears in exactly the case it is needed. A boot DNS race put this
+    # gateway on the in-memory backend for 43h, ignoring 623 persisted nodes,
+    # while /health reported "healthy" with no neo4j component at all.
+    # This component is always registered and reports the *intent* mismatch:
+    # configured for Neo4j, running on memory.
+    from api_gateway.health import ComponentHealth, DependencyStatus, get_health_checker
+
+    _twin_backend = twin_backend
+    _neo4j_configured = (
+        bool(neo4j_uri) or os.environ.get("METAFORGE_GRAPH_BACKEND", "").lower() == "neo4j"
+    )
+
+    async def _twin_backend_health() -> ComponentHealth:
+        if _twin_backend != "in_memory":
+            return ComponentHealth(
+                name="twin_backend",
+                status=DependencyStatus.HEALTHY,
+                message=f"{_twin_backend} (persistent)",
+            )
+        if _neo4j_configured:
+            return ComponentHealth(
+                name="twin_backend",
+                status=DependencyStatus.DEGRADED,
+                message=(
+                    "configured for Neo4j but running in_memory -- twin writes "
+                    "are process-local and will be lost on restart; any "
+                    "persisted graph is invisible. Restart once Neo4j is "
+                    "reachable, or set METAFORGE_REQUIRE_NEO4J=true to fail fast."
+                ),
+            )
+        # No Neo4j configured at all: in-memory is the intended local-dev mode.
+        return ComponentHealth(
+            name="twin_backend",
+            status=DependencyStatus.HEALTHY,
+            message="in_memory (no Neo4j configured)",
+        )
+
+    get_health_checker().register_check("twin_backend", _twin_backend_health)
+    logger.info(
+        "twin_backend_health_check_registered",
+        backend=_twin_backend,
+        neo4j_configured=_neo4j_configured,
+    )
+
     logger.info(
         "orchestrator_initialized",
         workflows=list(ACTION_WORKFLOWS.keys()),
@@ -923,6 +1052,13 @@ def _reattach_otel_log_handler() -> None:
     Uvicorn's ``configure_logging()`` calls ``dictConfig`` which clears the
     root logger handlers.  We re-attach the handler so structlog events
     (which flow through stdlib ``LoggerFactory``) reach the OTLP exporter.
+
+    This runs after ``configure_logging()`` (observability/logging.py), which
+    has already called ``ensure_console_handler()`` -- so a stdout sink exists
+    regardless of what happens here. MET-646: previously this OTel handler was
+    the *only* sink, so a down/unreachable collector meant every application
+    log vanished (not in ``docker logs``, not in Loki, nowhere), which is
+    exactly what happened on fidel-dev during the MET-642 eval.
     """
     import logging as _logging
 
@@ -958,13 +1094,42 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     logger.info("gateway_stopping")
     await file_watcher.stop()
+    if hasattr(app.state, "tool_registry"):
+        await app.state.tool_registry.close_all()
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
+    # MET-567: stop the periodic consolidation pass.
+    if getattr(app.state, "consolidation_scheduler", None) is not None:
+        await app.state.consolidation_scheduler.stop()
+    # MET-723: release only what the factory itself opened (the insight store
+    # pools) -- the experience store was handed in and stays ours to close.
+    if getattr(app.state, "consolidation_stack", None) is not None:
+        await app.state.consolidation_stack.aclose()
+    # MET-672: stop the abandoned-run reaper.
+    if getattr(app.state, "run_reaper", None) is not None:
+        await app.state.run_reaper.stop()
+    # Flush and close the Kafka producer so buffered events are not dropped.
+    if getattr(app.state, "kafka_publisher", None) is not None:
+        try:
+            await app.state.kafka_publisher.stop()
+            logger.info("event_bus_kafka_stopped")
+        except Exception as exc:
+            logger.warning("event_bus_kafka_stop_failed", error=str(exc))
     # Close LightRAG service if active
     if hasattr(app.state, "knowledge_service") and app.state.knowledge_service is not None:
         try:
             await app.state.knowledge_service.close()
             logger.info("knowledge_service_closed")
+        except Exception:
+            pass
+    # Close the component catalog store if active (MET-436)
+    if (
+        hasattr(app.state, "component_catalog_store")
+        and app.state.component_catalog_store is not None
+    ):
+        try:
+            await app.state.component_catalog_store.close()
+            logger.info("component_catalog_store_closed")
         except Exception:
             pass
     # Close PgVector knowledge store if active
@@ -1047,7 +1212,9 @@ def create_app(
     app.include_router(sessions_router)
     app.include_router(projects_router)
     app.include_router(runs_router)
+    app.include_router(tool_approvals_router)
     app.include_router(cad_router)
+    app.include_router(cad_export_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
     app.include_router(bom_router)

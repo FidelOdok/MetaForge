@@ -7,11 +7,18 @@ from typing import Any
 
 
 class McpToolError(Exception):
-    """Raised when an MCP tool call fails."""
+    """Raised when an MCP tool call fails.
 
-    def __init__(self, tool_id: str, details: str) -> None:
+    ``payload`` carries the adapter's own error envelope when there was one
+    (MET-569). The harness passes it through to the model as structured JSON,
+    so a hint like "adapter container is down" survives instead of being
+    flattened into a single message string the model can only guess at.
+    """
+
+    def __init__(self, tool_id: str, details: str, payload: dict[str, Any] | None = None) -> None:
         self.tool_id = tool_id
         self.details = details
+        self.payload = payload or {}
         super().__init__(f"MCP tool '{tool_id}' failed: {details}")
 
 
@@ -75,6 +82,7 @@ class InMemoryMcpBridge(McpBridge):
         self._responses: dict[str, dict[str, Any]] = {}
         self._available: set[str] = set()
         self._tools: list[dict[str, Any]] = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def register_tool_response(self, tool_id: str, response: dict[str, Any]) -> None:
         """Register a mock response for a tool."""
@@ -110,6 +118,7 @@ class InMemoryMcpBridge(McpBridge):
         params: dict[str, Any],
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        self.calls.append((tool_id, params))
         if tool_id not in self._responses:
             raise McpToolError(tool_id, f"No mock response registered for {tool_id}")
         return self._responses[tool_id]

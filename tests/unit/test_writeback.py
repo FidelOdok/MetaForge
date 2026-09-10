@@ -89,6 +89,54 @@ class TestWritebackCad:
         assert fetched is not None
         assert fetched.id == wp.id
 
+    async def test_sets_project_id_field_visible_to_project_scoped_list(
+        self, twin: InMemoryTwinAPI, session_id
+    ):  # type: ignore[no-untyped-def]
+        # Regression (MET-676): a node created via generate_cad/generate_cad_script
+        # only had project_id stashed in metadata, never on the WorkProduct's own
+        # project_id field -- the field GET /v1/twin/nodes?project_id= actually
+        # filters on. Such a node showed up in a project's work_products list
+        # (Postgres junction) but was invisible to the twin's project-scoped node
+        # list, a live-confirmed data-integrity split between the two views.
+        project_id = uuid4()
+        skill_output = {"cad_file": "/out/bracket.step", "shape_type": "bracket"}
+
+        wp = await writeback_cad(twin, session_id, "main", skill_output, project_id=str(project_id))
+
+        assert wp.project_id == project_id
+        scoped = await twin.list_work_products(branch="main", project_id=project_id)
+        assert any(w.id == wp.id for w in scoped)
+
+    async def test_no_project_id_leaves_field_unset(self, twin: InMemoryTwinAPI, session_id):  # type: ignore[no-untyped-def]
+        skill_output = {"cad_file": "/out/plate.step", "shape_type": "plate"}
+
+        wp = await writeback_cad(twin, session_id, "main", skill_output)
+
+        assert wp.project_id is None
+
+    async def test_non_uuid_project_id_does_not_raise_or_drop_the_write(
+        self, twin: InMemoryTwinAPI, session_id
+    ):  # type: ignore[no-untyped-def]
+        # Regression (MET-681): the MET-676 fix passed the raw project_id
+        # string straight into WorkProduct(project_id=...), which raises a
+        # pydantic ValidationError for anything that isn't a well-formed
+        # UUID. project_id is never validated upstream (it flows in from
+        # request parameters or an inherited source WorkProduct's metadata,
+        # e.g. a pre-MET-676 node), so a malformed value -- confirmed live
+        # by tests/e2e/test_cadquery_e2e.py's "test-project-001" fixture --
+        # made the caller's broad except-Exception swallow the whole write,
+        # not just the project scoping: the generated CAD file existed on
+        # disk but was never registered in the twin at all.
+        skill_output = {"cad_file": "/out/bracket.step", "shape_type": "bracket"}
+
+        wp = await writeback_cad(
+            twin, session_id, "main", skill_output, project_id="not-a-real-uuid"
+        )
+
+        assert wp.project_id is None
+        fetched = await twin.get_work_product(wp.id, branch="main")
+        assert fetched is not None
+
 
 # ---------------------------------------------------------------------------
 # writeback_mesh
@@ -132,6 +180,35 @@ class TestWritebackMesh:
 
         assert wp.metadata["session_id"] == str(session_id)
         assert "timestamp" in wp.metadata
+
+    async def test_sets_project_id_field_visible_to_project_scoped_list(
+        self, twin: InMemoryTwinAPI, session_id
+    ):  # type: ignore[no-untyped-def]
+        # Regression (MET-676): same gap as writeback_cad.
+        project_id = uuid4()
+        skill_output = {"mesh_file": "/out/m.inp", "algorithm_used": "gmsh"}
+
+        wp = await writeback_mesh(
+            twin, session_id, "main", skill_output, project_id=str(project_id)
+        )
+
+        assert wp.project_id == project_id
+        scoped = await twin.list_work_products(branch="main", project_id=project_id)
+        assert any(w.id == wp.id for w in scoped)
+
+    async def test_non_uuid_project_id_does_not_raise_or_drop_the_write(
+        self, twin: InMemoryTwinAPI, session_id
+    ):  # type: ignore[no-untyped-def]
+        # Regression (MET-681): same gap as writeback_cad.
+        skill_output = {"mesh_file": "/out/m.inp", "algorithm_used": "gmsh"}
+
+        wp = await writeback_mesh(
+            twin, session_id, "main", skill_output, project_id="not-a-real-uuid"
+        )
+
+        assert wp.project_id is None
+        fetched = await twin.get_work_product(wp.id, branch="main")
+        assert fetched is not None
 
 
 # ---------------------------------------------------------------------------

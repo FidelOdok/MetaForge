@@ -225,3 +225,21 @@ def test_from_env_recovers_from_bad_float(monkeypatch):
     monkeypatch.setenv("CONSOLIDATION_TEMPERATURE", "not-a-float")
     config = OpenRouterConfig.from_env()
     assert config.temperature == pytest.approx(0.7)
+
+
+def test_an_empty_model_env_falls_back_to_the_default(monkeypatch):
+    """MET-724: compose sets ``CONSOLIDATION_MODEL=${CONSOLIDATION_MODEL:-}``.
+
+    That leaves the variable *present and empty*, not absent -- so the
+    ``get(name, default)`` form this used to use returned "" and every request
+    would have named the model "". ``test_from_env_defaults_to_module_constants``
+    above only covers deletion, which was never the failing case.
+    """
+    monkeypatch.setenv("OPEN_ROUTER_API_KEY", "sk-env")
+    monkeypatch.setenv("CONSOLIDATION_MODEL", "")
+    monkeypatch.setenv("CONSOLIDATION_FALLBACK_MODEL", "")
+
+    config = OpenRouterConfig.from_env()
+
+    assert config.primary_model == DEFAULT_PRIMARY_MODEL
+    assert config.fallback_model == DEFAULT_FALLBACK_MODEL

@@ -56,7 +56,39 @@ class RegistryMcpBridge(McpBridge):
 
         # Fill a commit-by-reference geometry commit from the last export.
         if tool_id == "twin.commit_geometry":
-            self._geom_stash.fill(params)
+            had_explicit_blob = bool(params.get("step_base64"))
+            filled = self._geom_stash.fill(params)
+            # MET-642 S4 finding: this is the chat harness's actual dispatch
+            # seam (unlike metaforge/mcp/server.py's, which is the standalone
+            # sidecar used by external MCP clients) -- a miss here previously
+            # surfaced only as commit_geometry's generic "no geometry" error,
+            # with no way to tell whether the (session_id, obj_id) pair ever
+            # matched a real export_model call.
+            if not had_explicit_blob:
+                event = (
+                    "geometry_commit_by_reference"
+                    if filled
+                    else "geometry_commit_by_reference_miss"
+                )
+                logger.info(
+                    event,
+                    session_id=params.get("session_id"),
+                    obj_id=params.get("obj_id"),
+                )
+            elif filled.diverged:
+                # MET-684: the caller carried a step_base64 back that does not
+                # match the export it names. The pristine blob has been
+                # substituted, so the commit succeeds -- but the divergence is
+                # the signal that a large value is being damaged in transit,
+                # and silently repairing it without saying so would hide that.
+                logger.warning(
+                    "geometry_commit_blob_diverged",
+                    session_id=params.get("session_id"),
+                    obj_id=params.get("obj_id"),
+                    stashed_chars=filled.stashed_chars,
+                    supplied_chars=filled.supplied_chars,
+                    resolution="used_stashed_export",
+                )
 
         request = ToolCallRequest(
             tool_id=tool_id,
@@ -70,11 +102,21 @@ class RegistryMcpBridge(McpBridge):
             raise McpToolError(tool_id, str(exc)) from exc
 
         if result.status != "success":
-            raise McpToolError(tool_id, f"Tool returned status: {result.status}")
+            # MET-569: the adapter's envelope (its error object, code, and any
+            # hint about what to do instead) lives in ``result.data``. Dropping
+            # it here left the model with only "Tool returned status: error".
+            envelope = result.data if isinstance(result.data, dict) else {}
+            detail = str(envelope.get("error") or f"Tool returned status: {result.status}")
+            raise McpToolError(tool_id, detail, payload=envelope)
 
         # Remember an export's STEP so a later commit can reference it.
         if tool_id == "freecad.export_model" and isinstance(result.data, dict):
-            self._geom_stash.remember(params, result.data)
+            remembered = self._geom_stash.remember(params, result.data)
+            logger.info(
+                "geometry_export_remembered" if remembered else "geometry_export_not_remembered",
+                session_id=params.get("session_id"),
+                obj_id=params.get("obj_id"),
+            )
 
         return result.data
 

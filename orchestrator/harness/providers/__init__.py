@@ -49,6 +49,11 @@ from orchestrator.harness.providers.pipeline import (
     RoleModelSlots,
     StreamInvoke,
 )
+from orchestrator.harness.providers.pricing import (
+    DEFAULT_PRICING,
+    TokenPricing,
+    estimate_cost_usd,
+)
 from orchestrator.harness.providers.registry import (
     ProviderProfile,
     UnknownProviderError,
@@ -71,7 +76,10 @@ __all__ = [
     "ConfigError",
     "Credential",
     "CredentialStore",
+    "DEFAULT_PRICING",
     "NoHealthyCredentialsError",
+    "TokenPricing",
+    "estimate_cost_usd",
     "RotationStrategy",
     "default_credentials_path",
     "next_cooldown",

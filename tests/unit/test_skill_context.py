@@ -32,7 +32,7 @@ def test_overlay_carries_procedures_and_respects_budget() -> None:
     overlay = procedural_overlay(mech)
     assert "Reference procedures" in overlay
     assert "validate_stress" in overlay  # a real skill's SKILL.md is inlined
-    # Budget is enforced (mechanical has 7 skills; a tiny budget trims + notes it).
+    # Budget is enforced (mechanical has 8 skills; a tiny budget trims + notes it).
     tiny = procedural_overlay(mech, budget_chars=400)
     assert len(tiny) <= 900  # header + one block + omission note, not all 7
     assert "omitted for context budget" in tiny

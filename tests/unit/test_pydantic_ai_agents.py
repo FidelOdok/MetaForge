@@ -192,8 +192,9 @@ class TestResultModels:
 class TestAgentFactory:
     """Test _get_or_create_pydantic_agent() factory for each domain."""
 
-    def test_mechanical_agent_has_4_tools(self):
-        """ME agent: validate_stress, generate_mesh, check_tolerance, generate_cad_script."""
+    def test_mechanical_agent_has_5_tools(self):
+        """ME agent: validate_stress, generate_mesh, check_tolerance, \
+        generate_cad_script, generate_cad_ir."""
         import domain_agents.mechanical.agent as mod
 
         with patch.object(mod, "get_llm_model", return_value="test"):
@@ -204,6 +205,7 @@ class TestAgentFactory:
             assert "generate_mesh" in tool_names
             assert "check_tolerance" in tool_names
             assert "generate_cad_script" in tool_names
+            assert "generate_cad_ir" in tool_names
 
     def test_electronics_agent_has_3_tools(self):
         """EE agent: run_erc, run_drc, check_power_budget."""

@@ -69,6 +69,27 @@ def _summarize(older: Sequence[ReActStep]) -> str:
     return f"[{len(older)} earlier steps compressed — tools: {tool_desc}; errors: {errors}]"
 
 
+def summarize_trajectory(steps: Sequence[ReActStep]) -> str:
+    """A hand-off summary of what a loop attempted before stopping without a
+    real answer (step cap / wall-clock timeout) — production-harness audit
+    follow-up. Replaces a bare "I couldn't converge" string, which threw away
+    the full trajectory even though it was sitting right there in memory.
+    """
+    if not steps:
+        return "I ran out of turns before I could take any actions."
+    lines = ["I ran out of turns before finishing. Here's what I did:"]
+    for i, step in enumerate(steps, 1):
+        if step.tool_call is None:
+            continue
+        name = step.tool_call.name
+        if step.error is not None:
+            lines.append(f"{i}. {name} — failed: {step.error}")
+        else:
+            lines.append(f"{i}. {name} — succeeded")
+    lines.append("Ask me to continue and I'll pick up from here.")
+    return "\n".join(lines)
+
+
 def _render_all(goal: str, synopsis: str | None, steps: Sequence[ReActStep]) -> str:
     lines = [f"goal: {goal}"]
     if synopsis is not None:
@@ -115,7 +136,7 @@ def _shrink_structurally(
     else:
         list_keys = [k for k, v in value.items() if isinstance(v, list) and v]
         if not list_keys:
-            return None
+            return _omit_largest_string_field(value, max_chars, render=render)
         key = max(list_keys, key=lambda k: len(value[k]))
         items = value[key]
 
@@ -140,6 +161,39 @@ def _shrink_structurally(
         else:
             hi = mid - 1
     return render(candidate(lo))
+
+
+def _omit_largest_string_field(
+    value: dict[str, Any], max_chars: int, *, render: Callable[[Any], str]
+) -> str | None:
+    """Replace an oversized plain-string field with an explicit marker.
+
+    A dict whose oversized field is a plain string (e.g. a base64-encoded
+    file blob, not a list) has nothing for ``_shrink_structurally`` to trim
+    -- the previous behavior fell through to a blind character slice on the
+    whole rendered dict, which can (and, live-caught, did) land MID-STRING.
+    A truncated base64 blob isn't "partially usable" the way a truncated
+    list is -- it decodes to garbage or fails outright -- so a model that
+    reuses a mid-string-truncated value verbatim in a later tool call (e.g.
+    handing a cut ``step_base64`` to ``twin.commit_geometry``) gets a
+    confusing "not valid base64" error instead of an honest "this was too
+    large" signal. Dropping the whole field with an explicit marker is
+    strictly safer than any partial prefix. Returns ``None`` (falls back to
+    the pre-existing blind slice) only when even the marker itself doesn't
+    fit the budget.
+    """
+    str_keys = [k for k, v in value.items() if isinstance(v, str) and v]
+    if not str_keys:
+        return None
+    key = max(str_keys, key=lambda k: len(value[k]))
+    out = dict(value)
+    out[key] = (
+        f"<omitted: {len(value[key])} chars, too large to include in the trace -- "
+        "do not reuse a partial value; reference the result by its session_id/obj_id "
+        "(or re-run the export) instead>"
+    )
+    rendered = render(out)
+    return rendered if len(rendered) <= max_chars else None
 
 
 def truncate_observation_value(

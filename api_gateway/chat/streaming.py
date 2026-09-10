@@ -46,6 +46,7 @@ class StreamEventType(StrEnum):
     AGENT_DONE = "agent.done"
     CONTEXT_STATS = "context.stats"
     SCOPE_CHANGED = "scope.changed"
+    TOOL_APPROVAL_REQUESTED = "tool.approval_requested"
     ERROR = "error"
 
 
@@ -323,6 +324,23 @@ async def notify_agent_done(thread_id: str, agent_id: str = "agent") -> int:
     event = StreamEvent(
         event=StreamEventType.AGENT_DONE,
         data={"agent_id": agent_id},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_tool_approval_requested(
+    thread_id: str, run_id: str, tool: str, arguments: dict[str, Any]
+) -> int:
+    """Push a ``tool.approval_requested`` event — a `requires_approval` tool
+    call (production-harness audit follow-up) is paused, waiting on a
+    decision at ``POST /v1/chat/tool_approvals/{run_id}``. No dashboard UI
+    consumes this yet (out of scope for the backend mechanism pass) — the
+    event and the endpoint are both real and functional for any client that
+    wants to build one."""
+    event = StreamEvent(
+        event=StreamEventType.TOOL_APPROVAL_REQUESTED,
+        data={"run_id": run_id, "tool": tool, "arguments": arguments},
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)

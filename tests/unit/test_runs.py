@@ -8,6 +8,7 @@ from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
     InvalidTransition,
+    Run,
     RunNotFoundError,
     RunStatus,
 )
@@ -111,3 +112,42 @@ def test_list_returns_all_runs() -> None:
     store.create({}, run_id="a")
     store.create({}, run_id="b")
     assert {r.id for r in store.list()} == {"a", "b"}
+
+
+def test_restore_reinserts_a_recovered_run() -> None:
+    """Production-harness audit follow-up: rehydrating a run recovered from
+    durable storage after a process restart bypasses transition validation
+    entirely — restore() is not a transition, it's recovering prior state."""
+    store = _store()
+    recovered = Run(
+        id="recovered-1",
+        status=RunStatus.AWAITING_APPROVAL,
+        request={"goal": "resume me"},
+        created_at=1.0,
+        updated_at=2.0,
+        approval_reason="needs a human",
+        history=[RunStatus.AWAITING_APPROVAL],
+    )
+    store.restore(recovered)
+    got = store.get("recovered-1")
+    assert got.status is RunStatus.AWAITING_APPROVAL
+    assert got.request == {"goal": "resume me"}
+    # A restored run resumes real lifecycle transitions normally afterward.
+    approved = store.submit_approval("recovered-1", ApprovalDecision.APPROVE)
+    assert approved.status is RunStatus.RUNNING
+
+
+def test_restore_overwrites_an_existing_run_by_id() -> None:
+    store = _store()
+    store.create({}, run_id="r1")
+    replacement = Run(
+        id="r1",
+        status=RunStatus.RUNNING,
+        request={"goal": "replaced"},
+        created_at=1.0,
+        updated_at=2.0,
+        history=[RunStatus.QUEUED, RunStatus.RUNNING],
+    )
+    store.restore(replacement)
+    assert store.get("r1").status is RunStatus.RUNNING
+    assert store.get("r1").request == {"goal": "replaced"}

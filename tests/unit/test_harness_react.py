@@ -147,3 +147,26 @@ async def test_exhausts_at_max_steps() -> None:
     assert result.status == "exhausted"
     assert result.output is None
     assert len(result.steps) == 3
+    # Production-harness audit follow-up: an honest, unambiguous stop signal
+    # alongside the pre-existing `status`.
+    assert result.stop_reason == "max_steps"
+
+
+@pytest.mark.asyncio
+async def test_final_sets_stop_reason_done() -> None:
+    rt = HarnessRuntime.build()
+    policy = ScriptedPolicy([ReActAction(thought="done", final_output="answer")])
+    result = await run_react(rt, policy, "goal")
+    assert result.stop_reason == "done"
+
+
+@pytest.mark.asyncio
+async def test_deadline_stops_before_max_steps() -> None:
+    """A deadline already in the past ends the loop before the policy is ever
+    consulted, so a step budget never actually matters if time already ran out."""
+    rt = _runtime_with_tool()
+    policy = ScriptedPolicy([ReActAction(thought="loop", tool_call=ToolCall("double", {"x": 1}))])
+    result = await run_react(rt, policy, "goal", max_steps=10, deadline=0.0)
+    assert result.stop_reason == "timeout"
+    assert result.status == "exhausted"
+    assert result.steps == []

@@ -818,7 +818,13 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Structured change. Include an 'action' "
                                 "(e.g. 'record_decision' | 'regenerate_geometry' | "
-                                "'update_properties') plus its parameters."
+                                "'update_properties') plus its parameters. For "
+                                "'regenerate_geometry': 'script_source' (required — the "
+                                "full edited script text), 'name', 'parameters' (optional "
+                                "structured values, purely informational), and 'cad_tool' "
+                                "('cadquery', the default, or 'freecad' — state which "
+                                "dialect script_source is written in; they are not "
+                                "interchangeable and this is never auto-detected)."
                             ),
                         },
                         "work_products_affected": {
@@ -881,9 +887,17 @@ class TwinServer(McpToolServer):
                     "product: stores the STEP blob in MinIO, creates a twin node, "
                     "and links it to a project so it renders in the 3D viewer. "
                     "PREFER commit-by-reference: after freecad.export_model, call "
-                    "this with the SAME session_id and obj_id (plus name) and the "
+                    "this with the SAME session_id AND obj_id (plus name) and the "
                     "server fills the STEP itself — you do NOT need to copy the "
-                    "large base64 string. (Passing step_base64 directly also works.)"
+                    "large base64 string. BOTH session_id and obj_id are required "
+                    "together on every call, including retries — obj_id alone is "
+                    "NOT unique (it's a per-session counter, not a global id), so "
+                    "omitting session_id will not match your prior export even "
+                    "though obj_id is correct. (Passing step_base64 directly also "
+                    "works and needs neither id — but when it names an export "
+                    "the server already holds, the server's copy is used, "
+                    "because a copied 30,000-character blob can only be equal "
+                    "or damaged.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -905,7 +919,11 @@ class TwinServer(McpToolServer):
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "step_base64": {
                             "type": "string",
-                            "description": "Base64 STEP (optional if session_id + obj_id given).",
+                            "description": (
+                                "Base64 STEP. Omit when passing session_id + obj_id: "
+                                "the server substitutes its own copy of that export "
+                                "anyway (MET-684)."
+                            ),
                         },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
@@ -933,6 +951,18 @@ class TwinServer(McpToolServer):
                                 "metadata alongside 'parameters'."
                             ),
                         },
+                        "source_tool": {
+                            "type": "string",
+                            "description": (
+                                "Which authoring tool produced this geometry, e.g. "
+                                "'cadquery.execute_script' or 'freecad.export_model'. "
+                                "Recorded as the work product's provenance "
+                                "(authored_by/created_by). Defaults to "
+                                "'freecad.export_model', so pass it explicitly when the "
+                                "geometry came from CadQuery — otherwise the node claims "
+                                "a tool that never touched it (MET-693)."
+                            ),
+                        },
                     },
                     "required": ["name"],
                 },
@@ -956,6 +986,31 @@ class TwinServer(McpToolServer):
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
         if not step_base64 or not isinstance(step_base64, str):
+            # MET-642 S4 finding: reproduced live TWICE with the identical
+            # mechanism -- the model retried commit_geometry with obj_id but
+            # WITHOUT session_id (confirmed via the new geometry_stash logging
+            # below: "session_id": null). The stash keys on (session_id,
+            # obj_id) together -- not obj_id alone -- because obj_id is a
+            # per-session sequential counter (f"{kind}_{n}", see
+            # FreecadSessionStore.register_object), not a globally-unique id;
+            # dropping session_id from the lookup would risk a cross-session
+            # collision, so the fix is a sharper error, not a looser stash.
+            given_obj_id = arguments.get("obj_id")
+            given_session_id = arguments.get("session_id")
+            logger.warning(
+                "commit_geometry_missing_step_base64",
+                session_id=given_session_id,
+                obj_id=given_obj_id,
+                name=name,
+            )
+            if given_obj_id and not given_session_id:
+                raise ValueError(
+                    "twin.commit_geometry: you passed obj_id but no session_id -- "
+                    "commit-by-reference requires BOTH, exactly as given to the "
+                    "freecad.export_model call that produced this obj_id (obj_id "
+                    "alone is not unique across sessions). Re-call with the same "
+                    "session_id you used for export_model, or pass step_base64 directly."
+                )
             raise ValueError(
                 "twin.commit_geometry: no geometry to commit — call freecad.export_model "
                 "first, then commit with the same session_id + obj_id (or pass step_base64)."
@@ -970,6 +1025,15 @@ class TwinServer(McpToolServer):
         parameters = arguments.get("parameters")
         properties = arguments.get("properties")
         script_source = script_source if isinstance(script_source, str) and script_source else None
+        # MET-693: the recorder's `source_tool` defaults to
+        # "freecad.export_model", and this handler never passed one -- so every
+        # commit was stamped as FreeCAD-authored, including CadQuery geometry.
+        # The provenance of a work product has to be accurate: it is what a
+        # reviewer reads to know how the artifact was produced, and script-as-
+        # SSOT diffing (MET-630) depends on knowing which authoring tool the
+        # stored script belongs to.
+        source_tool = arguments.get("source_tool")
+        source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -980,6 +1044,7 @@ class TwinServer(McpToolServer):
             script_source=script_source,
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
+            **({"source_tool": source_tool} if source_tool else {}),
         )
 
     def _register_stage_work_product_file(self) -> None:

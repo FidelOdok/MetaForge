@@ -127,20 +127,56 @@ def mcp_with_cadquery_responses() -> InMemoryMcpBridge:
 class TestRegistryBootstrapE2E:
     """Verify the full bootstrap -> registry -> bridge path."""
 
-    async def test_all_adapters_registered(self, registry: ToolRegistry):
-        """All 3 adapters (cadquery, freecad, calculix) register successfully."""
-        adapters = registry.list_adapters()
-        adapter_ids = {a.adapter_id for a in adapters}
-        assert adapter_ids == {"cadquery", "freecad", "calculix"}
+    async def test_the_cad_adapters_this_file_exercises_are_registered(
+        self, registry: ToolRegistry
+    ):
+        """MET-730: this asserted an exact set of three and broke when kicad
+        (MET-478) and offer_resolver joined the bootstrap -- neither of which
+        this file has anything to do with.
 
-    async def test_cadquery_tools_discoverable(self, registry: ToolRegistry):
-        """All 7 CadQuery tools are discoverable in the registry."""
-        cq_tools = [t for t in registry.list_tools() if t.adapter_id == "cadquery"]
-        assert len(cq_tools) == 7
-        tool_ids = {t.tool_id for t in cq_tools}
-        assert "cadquery.create_parametric" in tool_ids
-        assert "cadquery.execute_script" in tool_ids
-        assert "cadquery.boolean_operation" in tool_ids
+        A superset check states the actual requirement: the adapters these
+        tests drive must be present. Nothing here has an opinion about which
+        *other* adapters exist.
+        """
+        adapter_ids = {a.adapter_id for a in registry.list_adapters()}
+
+        required = {"cadquery", "freecad", "calculix"}
+        assert required <= adapter_ids, (
+            f"missing CAD/sim adapters: {sorted(required - adapter_ids)}"
+        )
+
+    async def test_every_cadquery_tool_the_adapter_declares_is_discoverable(
+        self, registry: ToolRegistry
+    ):
+        """Registry contents match the adapter's own declaration.
+
+        MET-730: this asserted ``len(cq_tools) == 7`` and was 14 by the time
+        anyone ran it. Comparing against the adapter's own ``tool_ids`` tests
+        the property that actually matters -- the registry reflects the
+        adapter -- and stays true however many tools cadquery grows.
+        """
+        server = registry.get_adapter_server("cadquery")
+        assert server is not None, "cadquery adapter did not register"
+
+        registered = {t.tool_id for t in registry.list_tools() if t.adapter_id == "cadquery"}
+        declared = set(server.tool_ids)
+
+        # Two empty sets are equal, so the comparison below would pass having
+        # tested nothing at all.
+        assert declared, "the cadquery adapter declares no tools"
+
+        assert registered == declared, (
+            f"registry/adapter mismatch — only in registry: "
+            f"{sorted(registered - declared)}; only in adapter: {sorted(declared - registered)}"
+        )
+        # The three the rest of this file drives, named so their removal fails
+        # here rather than somewhere less obvious.
+        for tool_id in (
+            "cadquery.create_parametric",
+            "cadquery.execute_script",
+            "cadquery.boolean_operation",
+        ):
+            assert tool_id in registered, f"{tool_id} is gone"
 
     async def test_capability_discovery(self, registry: ToolRegistry):
         """cad_generation capability returns both cadquery and freecad tools."""

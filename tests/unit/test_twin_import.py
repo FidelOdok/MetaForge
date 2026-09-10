@@ -6,6 +6,7 @@ import io
 import zipfile
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from api_gateway.twin.import_service import (
@@ -296,6 +297,65 @@ class TestImportServiceMetadata:
 # ---------------------------------------------------------------------------
 # Import endpoint (integration-style)
 # ---------------------------------------------------------------------------
+
+
+class TestOcctDegradation:
+    """A reachable-but-broken OCCT converter must not fail the import (MET-705).
+
+    ``_extract_cad_metadata`` caught only ``httpx.ConnectError``, so a
+    converter that accepted and then dropped the connection (ReadError), hung
+    (ReadTimeout, on a 120s budget), or broke protocol escaped the method and
+    failed the whole import -- even though its own non-200 branch and its
+    ``_basic_metadata`` fallback show extraction is meant to be best-effort.
+
+    That is what made ``test_import_stamps_project_id_for_twin_scoping`` fail
+    on this sandbox: something answers on :8100 and drops, so the ASGI stack
+    surfaced the handler's own outbound failure as a transport read error.
+    """
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            httpx.ReadError("peer closed connection"),
+            httpx.ReadTimeout("timed out"),
+            httpx.ConnectError("refused"),
+            httpx.RemoteProtocolError("bad framing"),
+        ],
+        ids=["read_error", "read_timeout", "connect_error", "protocol_error"],
+    )
+    async def test_transport_failures_degrade_to_basic_metadata(self, exc) -> None:
+        from api_gateway.twin.import_service import ImportService
+
+        async def _boom(*args, **kwargs):
+            raise exc
+
+        svc = ImportService()
+        with patch("httpx.AsyncClient.post", new=_boom):
+            meta = await svc.extract_metadata(b"ISO-10303-21;\nfake\nENDSEC;\n", "part.step")
+
+        # Degraded, not raised: the import keeps its file and its node.
+        assert meta["source"] == "basic"
+        assert meta["file_size"] > 0
+
+    async def test_a_200_with_a_non_json_body_degrades_too(self) -> None:
+        # resp.json() raises ValueError; nothing caught it before.
+        from api_gateway.twin.import_service import ImportService
+
+        class _Resp:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                raise ValueError("not json")
+
+        async def _ok(*args, **kwargs):
+            return _Resp()
+
+        svc = ImportService()
+        with patch("httpx.AsyncClient.post", new=_ok):
+            meta = await svc.extract_metadata(b"STEP", "part.step")
+
+        assert meta["source"] == "basic"
 
 
 class TestImportEndpoint:

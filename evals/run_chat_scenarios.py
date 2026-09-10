@@ -129,6 +129,57 @@ class StreamListener:
         return list(self.events[start_idx:])
 
 
+class ToolApprovalApprover:
+    """Background approver for `requires_approval` tool calls (MET-570 fu).
+
+    The runs suite has always "auto-approved every gate" so an unattended
+    scenario can finish; the chat suite had no equivalent for the *tool*
+    approval tier added later (`_REQUIRES_APPROVAL_TOOL_IDS` --
+    twin.commit_geometry, twin.record_decision, project.create/update/delete).
+    Without this, any scenario touching one of those parks for
+    METAFORGE_CHAT_APPROVAL_TIMEOUT_SECONDS (default 1800s) and then fails on
+    deny-by-default -- measured live at 200s/turn with hand-approval versus
+    16s for an approval-free scenario, and 4 of 8 scenarios are affected.
+
+    Gate approval lives on /v1/runs/{id}/approve; tool approval is a different
+    endpoint (/v1/chat/tool_approvals/{run_id}), which is why the existing
+    `gateway_action: approve_run` step does not cover it.
+    """
+
+    def __init__(self, base: str, poll_s: float = 1.5) -> None:
+        self._base = base
+        self._poll_s = poll_s
+        self.approved: list[dict[str, Any]] = []
+        self.stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> ToolApprovalApprover:
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self.stopped.is_set():
+            try:
+                pending = api(self._base, "GET", "/v1/chat/tool_approvals", timeout=10)
+                for run in pending.get("runs", []):
+                    run_id = run.get("id")
+                    if not run_id:
+                        continue
+                    api(
+                        self._base,
+                        "POST",
+                        f"/v1/chat/tool_approvals/{run_id}",
+                        {"decision": "approve"},
+                        timeout=10,
+                    )
+                    self.approved.append(
+                        {"run_id": run_id, "tool": (run.get("request") or {}).get("tool")}
+                    )
+            except Exception:  # noqa: BLE001 - approver is best-effort
+                pass
+            self.stopped.wait(self._poll_s)
+
+
 _RUN_ID_RE = re.compile(r"run_[0-9a-f]{8,}")
 
 
@@ -257,6 +308,7 @@ def run_conversation(
         read_timeout=max_turn_s,
     ).start()
     sse_up = listener.connected.wait(timeout=10.0)
+    approver = ToolApprovalApprover(base).start() if not args.no_auto_approve_tools else None
 
     # $RUN_TAG uniquifies artifact names the agent is asked to create, so
     # re-runs don't collide with a previous run's artifacts (MET-579).
@@ -338,6 +390,10 @@ def run_conversation(
         rec["turns"].append(record)
 
     listener.stopped.set()
+    if approver is not None:
+        approver.stopped.set()
+        if approver.approved:
+            rec["tool_approvals_auto_approved"] = approver.approved
 
     # --- scoring -----------------------------------------------------------
     declared = evaluate_declared(rec["turns"])
@@ -433,6 +489,16 @@ def main() -> int:
         "--strict",
         action="store_true",
         help="exit 1 on any unexpected check failure (threshold gate)",
+    )
+    ap.add_argument(
+        "--no-auto-approve-tools",
+        action="store_true",
+        help=(
+            "do NOT auto-approve `requires_approval` tool calls. Off by default: "
+            "an unattended run otherwise parks 30 min per approval-tier call "
+            "(project.create, twin.record_decision, ...) and then fails on "
+            "deny-by-default -- the same reason the runs suite auto-approves gates."
+        ),
     )
     ap.add_argument("--out", default=os.path.join(HERE, "chat_report.json"))
     args = ap.parse_args()

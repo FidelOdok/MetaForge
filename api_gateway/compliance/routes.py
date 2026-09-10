@@ -3,7 +3,9 @@
 Provides REST endpoints for compliance checklist generation,
 evidence linking, and coverage reporting.
 
-Endpoints live under ``/api/v1/compliance``.
+Endpoints live under ``/v1/compliance`` (the dashboard's apiClient
+baseURL of ``/api/v1`` supplies the ``/api`` prefix -- see every other
+router in this package for the same convention).
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.compliance")
 
-router = APIRouter(prefix="/api/v1/compliance", tags=["compliance"])
+router = APIRouter(prefix="/v1/compliance", tags=["compliance"])
 
 # Module-level agent instance (stateful in-memory for now)
 _agent = ComplianceAgent()

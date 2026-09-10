@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tool_registry.bootstrap import (
     _ADAPTER_REGISTRY,
@@ -78,24 +78,36 @@ class TestBootstrapToolRegistry:
 
         Post-MET-478: KiCad joined cadquery/freecad/calculix in the
         bootstrap registry (cadquery=7, freecad=5, calculix=4,
-        kicad=6 = 22 tools across 4 adapters). MET-633 added Gazebo
-        (3 tools, opt-in like freecad/kicad -- registers regardless
-        of whether a real `gz` binary is present) for 5 adapters.
+        kicad=6 = 22 tools across 4 adapters). Post-MET-436: offer_resolver
+        (distributors.resolve_offers) joins them with no ``adapter_ids``
+        scoping and no required collaborator, so it registers even with
+        zero distributor credentials configured -- "no offers found" is
+        its normal degraded response, not a missing-tool situation.
+        MET-633 added Gazebo (3 tools, opt-in like freecad/kicad --
+        registers regardless of whether a real `gz` binary is present)
+        for 6 adapters.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 5
+        assert len(adapters) == 6
         adapter_ids = {a.adapter_id for a in adapters}
-        assert adapter_ids == {"cadquery", "freecad", "calculix", "kicad", "gazebo"}
+        assert adapter_ids == {
+            "cadquery",
+            "freecad",
+            "calculix",
+            "kicad",
+            "offer_resolver",
+            "gazebo",
+        }
 
     async def test_bootstrap_with_existing_registry(self):
         """Bootstrap populates an existing registry instance."""
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 5
+        assert len(registry.list_adapters()) == 6
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -121,6 +133,35 @@ class TestBootstrapToolRegistry:
         """Unknown adapter IDs are reported as failed, not crash."""
         registry = await bootstrap_tool_registry(adapter_ids=["nonexistent"])
         assert len(registry.list_adapters()) == 0
+
+    async def test_runtime_injected_adapter_id_in_adapter_ids_is_not_flagged_unknown(self):
+        """A runtime-injected adapter (knowledge/twin/memory/etc.) has no
+        static factory in _ADAPTER_REGISTRY -- it's registered by its own
+        dedicated block further down bootstrap_tool_registry(). When the
+        caller also lists it explicitly in ``adapter_ids`` (the normal case,
+        e.g. ``--adapters knowledge,twin,...``), the generic loop must not
+        log a false "Unknown adapter ID" warning or double-count it as
+        failed: the real fidel-dev bootstrap summary showed 'knowledge',
+        'memory', 'twin', 'project', 'constraint', and 'digikey' in BOTH
+        the failed list and the registered/skipped list on every restart."""
+        with patch("tool_registry.bootstrap.logger") as mock_logger:
+            registry = await bootstrap_tool_registry(
+                adapter_ids=["knowledge"], knowledge_service=MagicMock()
+            )
+
+        mock_logger.warning.assert_not_called()
+        assert "knowledge" in {a.adapter_id for a in registry.list_adapters()}
+
+    async def test_runtime_injected_adapter_id_without_its_dependency_is_not_flagged_unknown(
+        self,
+    ):
+        """Same false-warning bug, but for the case where the dependency
+        (knowledge_service) isn't supplied -- the dedicated block correctly
+        marks it 'skipped', and the generic loop must not also warn/fail it."""
+        with patch("tool_registry.bootstrap.logger") as mock_logger:
+            await bootstrap_tool_registry(adapter_ids=["knowledge"])
+
+        mock_logger.warning.assert_not_called()
 
     async def test_remote_url_unreachable_falls_back_to_in_process(self):
         """MET-477 G2: when ``METAFORGE_ADAPTER_<ID>_URL`` points at a
@@ -156,14 +197,17 @@ class TestBootstrapToolRegistry:
         """Verify total tool count across all adapters.
 
         Grows as adapters gain tools; freecad reached 44 with
-        describe_step_file (MET-629), bringing the cross-adapter total to 61.
-        MET-633 added Gazebo's 3 tools (run_simulation, validate_world,
-        extract_results) for 64.
+        describe_step_file (MET-629), bringing the cross-adapter total to
+        61. MET-436 adds offer_resolver's one tool (distributors.resolve_
+        offers), bringing it to 62. MET-706 adds seven cadquery export tools
+        (URDF/SDF/USD tier-1 + tier-2a assembly variants, ROS2 launch),
+        bringing it to 69. MET-633 added Gazebo's 3 tools (run_simulation,
+        validate_world, extract_results) for 72.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 64
+        assert len(tools) == 72
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
@@ -178,4 +222,4 @@ class TestBootstrapToolRegistry:
 
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
-        assert health.tools_available == 7
+        assert health.tools_available == 14

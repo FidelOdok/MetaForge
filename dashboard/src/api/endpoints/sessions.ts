@@ -36,7 +36,7 @@ function mapSession(raw: SessionResponseRaw): AgentSession {
     events: raw.events.map((e) => ({
       id: e.id,
       timestamp: e.timestamp,
-      type: e.type as 'task_started' | 'task_completed' | 'task_failed' | 'proposal_created',
+      type: e.type,
       agentCode: e.agent_code,
       message: e.message,
       data: e.data,

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
 
@@ -439,12 +440,25 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(1)
 
-    # Client-side config: explicit --gateway-url wins, else the saved config's
-    # gateway_url, else ForgeClient's own env/default fallback. The loaded config
-    # is attached to args so handlers (e.g. chat) can read default provider/model.
+    # Client-side config, in the conventional order: explicit --gateway-url,
+    # then METAFORGE_GATEWAY_URL, then the saved config, then ForgeClient's
+    # own default. The loaded config is attached to args so handlers (e.g.
+    # chat) can read default provider/model.
+    #
+    # MET-729: the env var used to sit BELOW the saved config, because
+    # ForgeClient only consults it when base_url is falsy and the saved value
+    # was passed in unconditionally. So a caller that set
+    # METAFORGE_GATEWAY_URL to isolate itself was silently ignored, which is
+    # backwards -- an environment variable exists to override persisted
+    # config for one invocation. Live consequence: a unit test that pinned
+    # the URL to a dead port ingested documents into the shared dev gateway
+    # on every run (11 knowledge_document_ingested events in a week, from
+    # pytest temp paths, plus 18 lightrag_ingest_not_persisted errors).
     config = ForgeConfig.load()
     args.forge_config = config
-    effective_gateway = args.gateway_url or config.gateway_url
+    effective_gateway = (
+        args.gateway_url or os.environ.get("METAFORGE_GATEWAY_URL") or config.gateway_url
+    )
     client = ForgeClient(base_url=effective_gateway)
 
     try:

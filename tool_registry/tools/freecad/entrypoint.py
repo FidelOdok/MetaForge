@@ -38,7 +38,12 @@ async def main() -> None:
 
     work_dir = os.environ.get("FREECAD_WORK_DIR", "/workspace")
     freecad_binary = os.environ.get("FREECAD_BINARY", "freecadcmd")
-    config = FreecadConfig(freecad_binary=freecad_binary, work_dir=work_dir)
+    config_kwargs: dict[str, object] = {"freecad_binary": freecad_binary, "work_dir": work_dir}
+    if (ttl := os.environ.get("FREECAD_SESSION_TTL_SECONDS")) is not None:
+        config_kwargs["session_ttl_seconds"] = float(ttl)
+    if (max_sessions := os.environ.get("FREECAD_MAX_SESSIONS")) is not None:
+        config_kwargs["max_sessions"] = int(max_sessions)
+    config = FreecadConfig(**config_kwargs)
     server = FreecadServer(config=config)
 
     # Startup self-check: surface the FreeCAD-availability state up front so a
@@ -52,6 +57,8 @@ async def main() -> None:
         has_freecad=_ops.HAS_FREECAD,
         has_partdesign=_ops.HAS_PARTDESIGN,
         work_dir=work_dir,
+        session_ttl_seconds=config.session_ttl_seconds,
+        max_sessions=config.max_sessions,
     )
 
     if os.environ.get("FREECAD_TRANSPORT", "http").lower() == "stdio":

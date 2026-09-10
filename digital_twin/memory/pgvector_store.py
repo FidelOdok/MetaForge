@@ -285,6 +285,79 @@ class PgVectorExperienceStore(ExperienceStore):
                 logger.error("pgvector_experience_search_failed", error=str(exc))
                 raise
 
+    async def list_window(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        project_id: UUID | None = None,
+        agent_code: str | None = None,
+        min_importance: float = 0.0,
+        limit: int = 500,
+    ) -> list[ExperienceMemory]:
+        """Return experiences in a time window, newest first (MET-567).
+
+        The consolidation tier needs to walk a *batch* of experiences, not the
+        nearest neighbours of a query vector — a fundamentally different read
+        than :meth:`search`, and the one thing this store could not do before.
+        Without it ``PgVectorEventFetcher`` had nothing to call, so
+        consolidation fetched from the in-memory adapter's private dict, which
+        a pgvector deployment never populates (insights stayed empty forever).
+
+        Ordering is ``timestamp DESC`` so a ``limit`` cut keeps the most
+        recent events rather than an arbitrary slice.
+        """
+        with tracer.start_as_current_span("pgvector_experience.list_window") as span:
+            span.set_attribute("memory.limit", limit)
+            try:
+                clauses: list[str] = []
+                params: list[Any] = []
+                if since is not None:
+                    params.append(since)
+                    clauses.append(f"timestamp >= ${len(params)}")
+                if until is not None:
+                    params.append(until)
+                    clauses.append(f"timestamp <= ${len(params)}")
+                if project_id is not None:
+                    params.append(project_id)
+                    clauses.append(f"project_id = ${len(params)}")
+                if agent_code is not None:
+                    params.append(agent_code)
+                    clauses.append(f"agent_code = ${len(params)}")
+                if min_importance > 0.0:
+                    params.append(min_importance)
+                    clauses.append(f"importance >= ${len(params)}")
+                params.append(max(0, limit))
+
+                where_clause = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+                query = f"""
+                    SELECT id, run_id, step_id, agent_code, task_type, success,
+                           duration_seconds, result_summary, error, project_id,
+                           timestamp, importance, confidence,
+                           embedding::text, metadata
+                    FROM agent_experiences
+                    {where_clause}
+                    ORDER BY timestamp DESC
+                    LIMIT ${len(params)}
+                """
+                async with self._pool.acquire() as conn:
+                    rows = await conn.fetch(query, *params)
+                out = [_row_to_experience(row) for row in rows]
+                span.set_attribute("memory.result_count", len(out))
+                logger.info(
+                    "pgvector_experience_list_window_completed",
+                    result_count=len(out),
+                    project_id=str(project_id) if project_id else None,
+                    since=since.isoformat() if since else None,
+                    until=until.isoformat() if until else None,
+                    min_importance=min_importance,
+                )
+                return out
+            except Exception as exc:
+                span.record_exception(exc)
+                logger.error("pgvector_experience_list_window_failed", error=str(exc))
+                raise
+
     async def get(self, experience_id: UUID) -> ExperienceMemory | None:
         try:
             async with self._pool.acquire() as conn:

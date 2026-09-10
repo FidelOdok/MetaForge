@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from api_gateway.chat.harness_backend import mcp_tools_from_bridge, run_chat_turn
+from api_gateway.chat.harness_backend import _build_context, mcp_tools_from_bridge, run_chat_turn
+from api_gateway.chat.tool_approvals import get_approval_store, reset_approval_store
 from orchestrator.harness.providers import CredentialStore, ProviderSpec
+from orchestrator.harness.runs import ApprovalDecision
+from orchestrator.harness.tools import ApprovalDeniedError
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 
 
@@ -22,6 +25,28 @@ async def test_mcp_tools_from_bridge_builds_defs() -> None:
     assert server == "calculix"  # split from tool_id
     assert td.name == "run_fea"
     assert "calculix.run_fea" in td.description
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_from_bridge_tags_the_starter_approval_tier() -> None:
+    """Production-harness audit follow-up: a conservative starter set of
+    persistent-write tool ids require approval; everything else is auto-allow."""
+    bridge = InMemoryMcpBridge()
+    bridge.register_tool("twin.commit_geometry", capability="twin_write")
+    bridge.register_tool("twin.record_decision", capability="twin_write")
+    bridge.register_tool("project.create", capability="project_write")
+    bridge.register_tool("project.update", capability="project_write")
+    bridge.register_tool("project.delete", capability="project_write")
+    bridge.register_tool("project.get", capability="project_read")
+    bridge.register_tool("freecad.pad_sketch", capability="cad_author")
+    defs = {td.name: td for _server, td in await mcp_tools_from_bridge(bridge)}
+
+    for gated in ("commit_geometry", "record_decision"):
+        assert defs[gated].requires_approval is True
+    for gated in ("create", "update", "delete"):
+        assert defs[gated].requires_approval is True
+    assert defs["get"].requires_approval is False
+    assert defs["pad_sketch"].requires_approval is False
 
 
 @pytest.mark.asyncio
@@ -95,3 +120,55 @@ async def test_chat_harness_invokes_mcp_tool(
     )
     assert out == "Mass is 42 g"
     assert calls["n"] == 2  # tool step + final step — the tool was actually driven
+
+
+class TestChatHarnessApprovalWiring:
+    """Production-harness audit follow-up: `_build_context` shares the SAME
+    process-level approval store `get_approval_store()` returns, so a
+    separate request (simulated here, the real one is the REST endpoint in
+    `tool_approvals.py`) can resolve a tool call this turn paused on."""
+
+    @pytest.fixture(autouse=True)
+    def _reset(self) -> None:
+        reset_approval_store()
+        yield
+        reset_approval_store()
+
+    @pytest.mark.asyncio
+    async def test_requires_approval_tool_resolves_via_the_shared_store(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.commit_geometry", capability="twin_write")
+        bridge.register_tool_response("twin.commit_geometry", {"committed": True})
+
+        ctx = await _build_context("thread-1", CredentialStore(), bridge)
+        # Speed the poll up for the test — no real wall-clock wait needed to
+        # prove the wiring, same seam HarnessRuntime's own tests use.
+        approved_ids: list[str] = []
+
+        async def fast_sleep(seconds: float) -> None:
+            if not approved_ids:
+                run = get_approval_store().list()[0]
+                get_approval_store().submit_approval(run.id, ApprovalDecision.APPROVE)
+                approved_ids.append(run.id)
+
+        ctx.runtime.approval_sleep = fast_sleep
+        result = await ctx.runtime.call_tool("mcp_twin_commit_geometry", {})
+        assert result == {"committed": True}
+        # The SAME store `_build_context` wired in is the one that resolved it.
+        assert get_approval_store().list()[0].status.value == "running"
+
+    @pytest.mark.asyncio
+    async def test_requires_approval_tool_denied_via_the_shared_store(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.commit_geometry", capability="twin_write")
+        bridge.register_tool_response("twin.commit_geometry", {"committed": True})
+
+        ctx = await _build_context("thread-1", CredentialStore(), bridge)
+
+        async def fast_sleep(seconds: float) -> None:
+            run = get_approval_store().list()[0]
+            get_approval_store().submit_approval(run.id, ApprovalDecision.REJECT)
+
+        ctx.runtime.approval_sleep = fast_sleep
+        with pytest.raises(ApprovalDeniedError, match="rejected"):
+            await ctx.runtime.call_tool("mcp_twin_commit_geometry", {})

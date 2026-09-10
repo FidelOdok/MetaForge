@@ -63,4 +63,47 @@ describe('SessionDetailPage', () => {
     expect(screen.getByText('validate stress')).toBeInTheDocument();
     expect(screen.getByText('Started stress validation')).toBeInTheDocument();
   });
+
+  it('renders the session status exactly once, not duplicated', () => {
+    // Regression (MET-675): the header rendered both an inline dot+text
+    // status label (verbatim lowercase, e.g. "completed") AND a StatusBadge
+    // ("Completed") right next to it -- the same status shown twice in two
+    // different visual styles. Matched exact-case so this doesn't collide
+    // with the unrelated "COMPLETED" meta-row field label.
+    mockUseSession.mockReturnValue({
+      data: SESSION_WITH_EVENTS,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useSession>);
+    render(<SessionDetailPage />);
+    expect(screen.queryByText('completed')).not.toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+  });
+
+  it('renders an icon for real MCP-capture event types, not just the legacy workflow-run ones', () => {
+    // Regression (MET-675): AgentEvent['type'] was a closed union of legacy
+    // workflow-run values (task_started/task_completed/task_failed/
+    // proposal_created), but real captured sessions use the MCP capture
+    // vocabulary (thought/action/decision/observation/error/result) --
+    // EVENT_ICON/EVENT_COLOR lookups returned undefined for every real
+    // event, silently rendering a blank icon for effectively every session
+    // in the system.
+    mockUseSession.mockReturnValue({
+      data: {
+        ...SESSION_WITH_EVENTS,
+        events: [
+          {
+            id: 'e3',
+            timestamp: new Date().toISOString(),
+            type: 'action',
+            agentCode: 'MECH',
+            message: 'twin.find_by_property failed',
+          },
+        ],
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useSession>);
+    render(<SessionDetailPage />);
+    const icon = document.querySelector('.material-symbols-outlined');
+    expect(icon?.textContent).toBeTruthy();
+  });
 });

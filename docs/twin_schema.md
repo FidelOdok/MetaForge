@@ -814,8 +814,12 @@ Closing the loop from "a parameter is stored in the graph" to "a human can chang
 
 - `GET /v1/twin/nodes/{id}` returns `geometryParameters` (the node's `geometry_features`, unflattened — kept separate from the generic scalar-only `properties` map) and `hasScript` (whether a git-versioned generation script backs this node).
 - `GET /v1/twin/nodes/{id}/script` returns the node's current script text, read live from its project's git repo — used to seed an edit form with what's there today rather than asking a human to retype it.
-- `POST /v1/assistant/proposals` lets a human create a `DesignChangeProposal` directly (previously only an agent's `twin.propose_change` MCP call could) — e.g. `{"diff": {"action": "regenerate_geometry", "script_source": "<edited script>", "parameters": {...}}}`.
-- On approval, the apply executor's `regenerate_geometry` action (`api_gateway/twin/regenerate_geometry.py`) is no longer a no-op: it drives `cadquery.execute_script` over the shared `McpBridge`, reads the result STEP from the `ADAPTER_WORKSPACE_DIR` volume the gateway and adapter containers share (mirroring `boolean_ops.py`), and commits it through the same `geometry_recorder` path — so the new node gets git-versioned script history, `geometry_features` metadata, *and* a `SUPERSEDES` link to the part it replaces (below).
+- `POST /v1/assistant/proposals` lets a human create a `DesignChangeProposal` directly (previously only an agent's `twin.propose_change` MCP call could) — e.g. `{"diff": {"action": "regenerate_geometry", "script_source": "<edited script>", "parameters": {...}, "cad_tool": "cadquery"}}`.
+- On approval, the apply executor's `regenerate_geometry` action (`api_gateway/twin/regenerate_geometry.py`) is no longer a no-op, and supports **both** CAD scripting tools this codebase generates from — they work fundamentally differently, so `diff.cad_tool` states which one `script_source` is written in (never auto-detected):
+  - `"cadquery"` (default): one self-contained call — `cadquery.execute_script` writes a STEP file to the shared `ADAPTER_WORKSPACE_DIR` volume the gateway and adapter containers share (mirrors `boolean_ops.py`).
+  - `"freecad"`: a stateful session lifecycle — `open_session` → `execute_code` (runs against that session's live document, returns an `obj_id`, not a file) → `export_model` (session_id + obj_id → `step_base64` returned directly) → `close_session`. FreeCAD is in fact the more commonly used tool in this codebase (`geometry_recorder.py`'s own default is `source_tool="freecad.export_model"`), so this path matters more than the CadQuery one it shipped alongside first.
+
+  Either way, the result commits through the same `geometry_recorder` path — so the new node gets git-versioned script history, `geometry_features` metadata, *and* a `SUPERSEDES` link to the part it replaces (below).
 
 ### Regeneration history in the graph: SUPERSEDES chains (MET-630)
 

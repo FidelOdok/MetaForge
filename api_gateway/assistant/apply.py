@@ -89,6 +89,7 @@ async def _apply_regenerate_geometry(
         }
     name = str(diff.get("name") or proposal.description)
     parameters = diff.get("parameters") if isinstance(diff.get("parameters"), dict) else None
+    cad_tool = str(diff.get("cad_tool") or "cadquery")
 
     try:
         result = await perform_regenerate_geometry(
@@ -99,8 +100,9 @@ async def _apply_regenerate_geometry(
             project_id=proposal.project_id,
             domain=str(diff.get("domain") or "mechanical"),
             parameters=parameters,
+            cad_tool=cad_tool,
         )
-    except RegenerateGeometryError as exc:
+    except (RegenerateGeometryError, ValueError) as exc:
         logger.warning(
             "proposal_apply_regenerate_failed",
             change_id=str(proposal.change_id),

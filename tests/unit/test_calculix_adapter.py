@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -10,6 +11,29 @@ import pytest
 
 from tool_registry.tools.calculix.adapter import CalculixServer
 from tool_registry.tools.calculix.config import CalculixConfig
+
+REAL_CCX_THERMAL_FRD = """\
+    1C
+    1UMAT    1STEEL
+    2C                             8                                     1
+ -1         1 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         2 1.00000E+01 0.00000E+00 0.00000E+00
+ -3
+    1PSTEP                         1           1           1
+  100CL  101 1.000000000           8                     0    1           1
+ -4  NDTEMP      1    1
+ -5  T           1    1    0    0
+ -1         1 2.00000E+01
+ -1         2 2.00000E+01
+ -1         3 2.00000E+01
+ -1         4 2.00000E+01
+ -1         5 1.00000E+02
+ -1         6 1.00000E+02
+ -1         7 1.00000E+02
+ -1         8 1.00000E+02
+ -3
+ 9999
+"""
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -249,6 +273,33 @@ class TestValidateMesh:
 # ---------------------------------------------------------------------------
 # TestUnmockedSolverRaisesNotImplemented
 # ---------------------------------------------------------------------------
+
+
+class TestExecuteThermalSolverParsesRealResults:
+    """MET-661 follow-up: _execute_thermal_solver previously discarded the
+    real solver output and always returned hardcoded max/min_temperature=0.0
+    and an empty distribution, regardless of what ccx actually solved."""
+
+    async def test_returns_real_parsed_temperatures_not_hardcoded_zeros(
+        self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        frd_path = tmp_path / "test_thermal.frd"
+        frd_path.write_text(REAL_CCX_THERMAL_FRD, encoding="utf-8")
+
+        async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
+            return {"solver_time_s": 0.01, "result_files": [str(frd_path)]}
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        result = await server._execute_thermal_solver(
+            "/models/test.inp", {"ambient_temp": 20.0}, "steady_state"
+        )
+
+        assert result["max_temperature"] == pytest.approx(100.0)
+        assert result["min_temperature"] == pytest.approx(20.0)
+        assert result["temperature_distribution"], "must contain real per-node data"
 
 
 class TestUnmockedSolverRaisesOnMissingFiles:

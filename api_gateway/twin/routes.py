@@ -6,6 +6,7 @@ Endpoints live under ``/v1/twin``.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -13,7 +14,7 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
-from api_gateway.convert.service import ConversionService
+from api_gateway.convert.service import ConversionError, ConversionService
 from api_gateway.twin.boolean_ops import (
     BooleanOpError,
     InvalidFormatError,
@@ -154,10 +155,24 @@ async def list_twin_nodes(
 
 
 @router.get("/relationships", response_model=TwinRelationshipListResponse)
-async def list_twin_relationships() -> TwinRelationshipListResponse:
-    """List all edges in the Digital Twin graph."""
+async def list_twin_relationships(
+    project_id: str | None = None,
+) -> TwinRelationshipListResponse:
+    """List edges in the Digital Twin graph.
+
+    ``project_id`` scopes the view to a single project (MET-491), matching
+    ``list_twin_nodes``. Omitted or empty returns every edge (including
+    unscoped legacy nodes) — preserving the prior global behaviour.
+    """
     with tracer.start_as_current_span("twin.list_relationships") as span:
-        work_products = await _twin.list_work_products()
+        scoped_project: UUID | None = None
+        if project_id:
+            try:
+                scoped_project = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("twin.filter.project_id", project_id)
+        work_products = await _twin.list_work_products(project_id=scoped_project)
         edges = []
         seen: set[str] = set()
         for wp in work_products:
@@ -181,7 +196,7 @@ async def list_twin_relationships() -> TwinRelationshipListResponse:
                     )
                 )
         span.set_attribute("twin.relationships_count", len(edges))
-        logger.info("twin_relationships_listed", count=len(edges))
+        logger.info("twin_relationships_listed", count=len(edges), project_id=project_id)
         return TwinRelationshipListResponse(relationships=edges, total=len(edges))
 
 
@@ -305,7 +320,31 @@ async def get_node_model(
         content, filename = _resolve_blob(wp)
         span.set_attribute("model.filename", filename)
 
-        result = ConversionService().convert(content, filename, quality)
+        try:
+            # MET-725: ConversionService.convert is synchronous and does a
+            # blocking httpx.post with a 120s timeout. Called directly from
+            # this async route it held the event loop for the whole
+            # conversion, so ONE slow CAD conversion served nothing else at
+            # all -- no /health (hence "unhealthy" containers), no chat, no
+            # SSE, and no shutdown progress. to_thread copies the context, so
+            # the OTel span above stays the parent.
+            result = await asyncio.to_thread(
+                ConversionService().convert, content, filename, quality
+            )
+        except ConversionError as exc:
+            # MET-652: this is a client-facing "this content can't be
+            # converted" case (e.g. a STEP with no exportable solids), not a
+            # server fault — previously an unhandled 500 with a full stack
+            # trace on every request for this node.
+            span.record_exception(exc)
+            logger.warning(
+                "node_model_conversion_rejected",
+                node_id=node_id,
+                filename=filename,
+                occt_status=exc.status_code,
+                occt_body=exc.body,
+            )
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.info(
             "node_model_converted",
             node_id=node_id,

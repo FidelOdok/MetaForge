@@ -8,10 +8,12 @@ This package holds the stage-by-stage implementation:
 
 * ``themes`` — ``ConsolidationTheme`` enum + rule-based classifier
 * ``grouper`` — ``EventGrouper`` clusters experiences by theme
-* ``fetcher`` — ``EventFetcher`` Protocol + in-memory adapter
+* ``fetcher`` — ``EventFetcher`` Protocol + in-memory / pgvector adapters
 * ``synthesizer`` / ``validator`` / ``writer`` — synthesize, gate, persist
 * ``archiver`` — ``EventArchiver`` moves consolidated experiences to cold
   storage and clears hot memory (stage 6)
+* ``scheduler`` — ``ConsolidationScheduler`` runs a pass per interval so the
+  pipeline actually fires in a deployment (MET-567)
 """
 
 from digital_twin.memory.consolidation.archiver import (
@@ -19,6 +21,12 @@ from digital_twin.memory.consolidation.archiver import (
     EventArchiver,
     ExperienceArchive,
     InMemoryExperienceArchive,
+)
+from digital_twin.memory.consolidation.bootstrap import (
+    ConsolidationStack,
+    build_consolidation_stack,
+    build_llm_client,
+    select_fetcher,
 )
 from digital_twin.memory.consolidation.contradiction_detector import (
     MAX_COMPARISON_INSIGHTS,
@@ -34,6 +42,8 @@ from digital_twin.memory.consolidation.dual_write import DualWriteInsightStore
 from digital_twin.memory.consolidation.fetcher import (
     EventFetcher,
     InMemoryEventFetcher,
+    PgVectorEventFetcher,
+    WindowedExperienceStore,
 )
 from digital_twin.memory.consolidation.grouper import EventGrouper, ExperienceGroup
 from digital_twin.memory.consolidation.insight import (
@@ -68,6 +78,10 @@ from digital_twin.memory.consolidation.orchestrator import (
 )
 from digital_twin.memory.consolidation.pgvector_insight_store import (
     PgVectorInsightStore,
+)
+from digital_twin.memory.consolidation.scheduler import (
+    ConsolidationScheduler,
+    interval_seconds_from_env,
 )
 from digital_twin.memory.consolidation.staleness import (
     InvalidationResult,
@@ -112,6 +126,8 @@ __all__ = [
     "ConsolidationOrchestrator",
     "ConsolidationReport",
     "ConsolidationRunRequest",
+    "ConsolidationScheduler",
+    "ConsolidationStack",
     "ConsolidationTheme",
     "DEFAULT_FALLBACK_MODEL",
     "DEFAULT_HALF_LIFE_DAYS",
@@ -135,6 +151,12 @@ __all__ = [
     "OpenRouterConfig",
     "OpenRouterError",
     "OpenRouterLLMClient",
+    "PgVectorEventFetcher",
+    "WindowedExperienceStore",
+    "build_consolidation_stack",
+    "build_llm_client",
+    "interval_seconds_from_env",
+    "select_fetcher",
     "ConsolidationActivities",
     "ConsolidationActivityInput",
     "ConsolidationActivityOutput",

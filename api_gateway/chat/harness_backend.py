@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -23,9 +24,13 @@ from typing import Any
 import structlog
 
 from api_gateway.chat.backend import ChatBackend
+from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
+from api_gateway.chat.skill_tools import skill_tools_from_registry
+from api_gateway.chat.tool_approvals import get_approval_store
+from observability.metrics import MetricsCollector
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
-from orchestrator.harness.compression import default_token_count
+from orchestrator.harness.compression import default_token_count, summarize_trajectory
 from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
 from orchestrator.harness.policy import ModelPolicy
 from orchestrator.harness.providers import (
@@ -45,6 +50,7 @@ from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
 from orchestrator.harness.react import run_react
+from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import Handler
 from skill_registry.mcp_bridge import McpBridge
 
@@ -140,6 +146,71 @@ def make_set_project_scope_tool(thread_id: str, backend: ChatBackend) -> NativeT
     )
 
 
+# Three-tier permissions, "ask" (production-harness audit follow-up): a
+# starter, conservative set of tool ids that mutate persistent state outside
+# the ephemeral adapter workspace. Everything else stays auto-allow. Deliberately
+# narrow for v1 -- expanding tier assignment to more tools (or to skill-layer
+# tools, which currently bypass this since they call twin.commit_geometry
+# internally rather than as a separately model-callable step) is flagged as
+# a real, known gap, not silently dropped.
+_REQUIRES_APPROVAL_TOOL_IDS = frozenset(
+    {
+        "twin.commit_geometry",
+        "twin.record_decision",
+        "project.create",
+        "project.update",
+        "project.delete",
+    }
+)
+
+
+# MET-569: gate names the chat runtime evaluates. The harness has had gate
+# plumbing since MET-547 (``ToolSpec.required_gates`` ->
+# ``ToolRegistry.invoke`` -> ``GateBlockedError``) and nothing ever declared a
+# gate, so the mechanism was dead code and "read-only by default" described the
+# MCP sidecar's CLI flag only -- chat itself could always write.
+GATE_TWIN_WRITE = "twin_write"
+GATE_PROJECT_WRITE = "project_write"
+
+_GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
+    # Persistent twin mutations: these create or change work products the twin
+    # owns, which is exactly what the Prime Rule says must stay reviewable.
+    "twin.commit_geometry": (GATE_TWIN_WRITE,),
+    "twin.record_decision": (GATE_TWIN_WRITE,),
+    "twin.record_constraint_set": (GATE_TWIN_WRITE,),
+    "twin.record_document": (GATE_TWIN_WRITE,),
+    "twin.propose_change": (GATE_TWIN_WRITE,),
+    "twin.stage_work_product_file": (GATE_TWIN_WRITE,),
+    "project.create": (GATE_PROJECT_WRITE,),
+    "project.update": (GATE_PROJECT_WRITE,),
+    "project.delete": (GATE_PROJECT_WRITE,),
+}
+
+# Both gates default to SATISFIED, so declaring them changes nothing about what
+# today's deployments can do -- an operator who wants a read-only chat surface
+# now has a switch where before there was none. The gate is a static
+# precondition; the per-call human decision for the same tools remains the
+# separate "ask" tier (``_REQUIRES_APPROVAL_TOOL_IDS``).
+_GATE_ENV = {
+    GATE_TWIN_WRITE: "METAFORGE_CHAT_TWIN_WRITES",
+    GATE_PROJECT_WRITE: "METAFORGE_CHAT_PROJECT_WRITES",
+}
+
+
+def chat_gate_check(gate: str) -> bool:
+    """Whether ``gate`` is satisfied for chat-driven tool calls.
+
+    An unknown gate is never satisfied: a tool declaring a gate nobody
+    evaluates must not run — the same fail-safe discipline ``ToolRegistry``
+    applies when no evaluator is wired at all.
+    """
+    env_var = _GATE_ENV.get(gate)
+    if env_var is None:
+        logger.warning("chat_gate_unknown", gate=gate)
+        return False
+    return os.environ.get(env_var, "").strip().lower() not in _FALSY
+
+
 async def mcp_tools_from_bridge(
     bridge: McpBridge, enabled: set[str] | None = None
 ) -> list[tuple[str, NativeToolDef]]:
@@ -195,6 +266,8 @@ async def mcp_tools_from_bridge(
                     description=description,
                     input_schema=input_schema,
                     handler=_make_handler(tool_id),
+                    required_gates=_GATED_TOOL_IDS.get(tool_id, ()),
+                    requires_approval=tool_id in _REQUIRES_APPROVAL_TOOL_IDS,
                 ),
             )
         )
@@ -231,7 +304,20 @@ def chat_harness_enabled() -> bool:
     return os.environ.get("METAFORGE_CHAT_HARNESS", "").strip().lower() in _TRUTHY
 
 
+def chat_skills_enabled() -> bool:
+    """True when skill-layer tools (generate_cad_ir, etc.) are exposed to the
+    harness loop, alongside its existing raw MCP/adapter tools (env flag).
+
+    Independent of ``chat_harness_enabled`` -- this is newer, less-tested code
+    that touches the Digital Twin directly, so it must be separately
+    toggleable/rollback-able without disabling the harness entirely.
+    """
+    return os.environ.get("METAFORGE_CHAT_SKILLS", "").strip().lower() in _TRUTHY
+
+
 _DEFAULT_CHAT_MAX_STEPS = 24
+_DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS = 1800.0
+_DEFAULT_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS = 10.0
 
 
 def trace_token_budget(provider: str | None, model: str | None) -> int:
@@ -255,6 +341,106 @@ def chat_max_steps() -> int:
     if raw.isdigit() and int(raw) > 0:
         return int(raw)
     return _DEFAULT_CHAT_MAX_STEPS
+
+
+def chat_wall_clock_seconds() -> float | None:
+    """Hard wall-clock budget for a chat turn (``METAFORGE_CHAT_WALL_CLOCK_SECONDS``).
+
+    Production-harness audit follow-up: only step-count and context-size were
+    ever bounded — a turn stuck in slow-but-not-erroring calls had no ceiling
+    at all. ``None`` (the default) keeps the historical unbounded behavior;
+    this is opt-in, not a surprise behavior change for existing deployments.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_WALL_CLOCK_SECONDS") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def chat_max_cost_usd() -> float | None:
+    """Hard dollar-spend budget for a chat turn (``METAFORGE_CHAT_MAX_COST_USD``).
+
+    Production-harness audit follow-up. Only enforced on the native-tools
+    path (the default for Anthropic/OpenAI-family providers) — ``run_react``
+    never tallies provider-reported token usage at all today, a separate,
+    pre-existing gap this doesn't fix. Priced against
+    ``orchestrator.harness.providers.pricing.DEFAULT_PRICING`` (illustrative,
+    not authoritative — see that module). ``None`` (the default) keeps the
+    historical unbounded behavior.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_MAX_COST_USD") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def chat_approval_timeout_seconds() -> float:
+    """How long a `requires_approval` tool call (``twin.commit_geometry``,
+    etc.) waits for a decision before denying by default
+    (``METAFORGE_CHAT_APPROVAL_TIMEOUT_SECONDS``, default 1800 = 30 minutes).
+
+    The prior 120s default (``HarnessRuntime``'s own fallback) assumed a live
+    approval UI a human could click within two minutes -- none exists yet on
+    either the dashboard or the TUI (both surfaces only show the *result* of
+    a chat turn, not a mid-turn approval prompt), so every real interactive
+    session's `twin.commit_geometry` call was silently denied on a timer the
+    user had no way to beat. Confirmed live: a TUI user's multi-part CAD
+    commit was denied twice in one session, forcing a full geometry rebuild
+    each time. Deny-by-default itself is correct (fail-safe, never silently
+    proceeds) -- this only widens the window a human realistically has to
+    notice and approve out-of-band (e.g. via a polling script) before that
+    fail-safe kicks in.
+    """
+    raw = (os.environ.get("METAFORGE_CHAT_APPROVAL_TIMEOUT_SECONDS") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS
+    return value if value > 0 else _DEFAULT_CHAT_APPROVAL_TIMEOUT_SECONDS
+
+
+def design_flow_approval_timeout_seconds() -> float:
+    """How long a `requires_approval` tool call waits before denying by
+    default when the turn was launched by the design-flow (`/v1/runs`)
+    executor, not a live chat session (``METAFORGE_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS``,
+    default 10s).
+
+    Design-flow (`ReActPhaseBrain`, ``api_gateway/runs/flow_brain.py``) drives
+    phases through this same `run_chat_turn` harness, but it is a fully
+    unattended surface -- nothing ever polls or resolves
+    `/v1/chat/tool_approvals/{run_id}` for a design-flow-originated call, so
+    the wait is *always* a timeout, never a real decision. Design-flow's own
+    phase-level gate (`awaiting_approval` on the `/v1/runs` resource,
+    resolved via `/v1/runs/{id}/approval`) is the actual human-in-the-loop
+    checkpoint for this surface (MET-707). Inheriting chat's 1800s default
+    here (tuned for a human who might click "approve" any time in the next
+    half hour) means every phase that records a decision -- normal, expected
+    agent behavior, not an edge case -- stalls for up to 30 minutes before
+    even getting the chance to fail gracefully and continue. Kept short but
+    non-zero (not bypassed outright) so the fail-safe "never silently
+    proceed" property still holds.
+    """
+    raw = (os.environ.get("METAFORGE_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS
+    return value if value > 0 else _DEFAULT_DESIGN_FLOW_APPROVAL_TIMEOUT_SECONDS
+
+
+def _cost_target(ctx: AgentContext) -> tuple[str, str]:
+    """The (provider, model) this turn's primary candidate resolves to, for
+    spend-cap pricing lookup. A mid-turn provider fallback would be priced
+    against this same pair — a documented approximation, not exact billing."""
+    try:
+        primary = ctx.runtime.providers.resolve("generator")[0]
+    except (KeyError, IndexError):
+        return "", ""
+    return primary.name, primary.model
 
 
 def rotation_strategy_from_env() -> RotationStrategy:
@@ -346,6 +532,10 @@ def provider_config_from_env(
         stored = store.get_credential(name)
         if stored is not None:
             spec = replace(spec, api_key=stored.api_key, base_url=stored.base_url or spec.base_url)
+        # MET-655 remainder: so the pipeline can skip a later fallback candidate
+        # whose window is provably too small too, instead of resending the same
+        # oversized request and getting an identical context-length rejection.
+        spec = replace(spec, max_context_tokens=context_window_for(name, model_))
         return spec
 
     candidates = [_spec_for(prov, mdl)]
@@ -463,6 +653,10 @@ async def _build_context(
     model: str | None = None,
     enabled_tools: list[str] | None = None,
     chat_backend: ChatBackend | None = None,
+    twin: Any = None,
+    metrics: MetricsCollector | None = None,
+    on_approval_request: OnApprovalRequest | None = None,
+    approval_timeout_seconds: float | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -472,19 +666,46 @@ async def _build_context(
     ``chat.set_project_scope`` (MET-580) closed over THIS turn's ``session_id`` —
     which is the live chat thread's id — so the agent can rescope its own
     thread on a clear user request without ever being trusted to supply (or
-    possibly mis-supply) which thread that is."""
+    possibly mis-supply) which thread that is. ``twin``, when given and
+    ``chat_skills_enabled()``, also registers the mechanical skill-layer tools
+    (``generate_cad_ir``, etc. — MET-548 follow-up) alongside the MCP tools.
+    ``metrics``, when given, instruments every model/tool call the resulting
+    runtime makes (production-harness audit follow-up). The resulting
+    runtime always shares the process-level tool-approval store
+    (``get_approval_store()``) so a `requires_approval` tool call can be
+    resolved by a separate ``POST /v1/chat/tool_approvals/{run_id}`` request;
+    ``on_approval_request``, when given, is notified the moment such a call
+    pauses. ``approval_timeout_seconds``, when given, overrides
+    :func:`chat_approval_timeout_seconds` -- design-flow (MET-707) passes a
+    short value here since its unattended turns have no approver to wait
+    for."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
     mcp_tools = await mcp_tools_from_bridge(mcp_bridge, enabled) if mcp_bridge is not None else []
     native_tools = (
         [make_set_project_scope_tool(session_id, chat_backend)] if chat_backend is not None else []
     )
+    if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
+        native_tools = native_tools + await skill_tools_from_registry(
+            twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
+        )
     return build_agent_runtime(
         provider_config_from_env(provider=provider, model=model),
         credentials=store,
         session_id=session_id,
+        # MET-569: without an evaluator a gated tool never runs (fail safe),
+        # so declaring gates and wiring this are one change, not two.
+        gate_check=chat_gate_check,
         rotation_strategy=rotation_strategy_from_env(),
         native_tools=native_tools,
         mcp_tools=mcp_tools,
+        metrics=metrics,
+        runs=get_approval_store(),
+        on_approval_request=on_approval_request,
+        approval_timeout_seconds=(
+            approval_timeout_seconds
+            if approval_timeout_seconds is not None
+            else chat_approval_timeout_seconds()
+        ),
     )
 
 
@@ -503,6 +724,11 @@ async def run_chat_turn(
     project_brief: str | None = None,
     context_block: str | None = None,
     chat_backend: ChatBackend | None = None,
+    twin: Any = None,
+    metrics: MetricsCollector | None = None,
+    wall_clock_seconds: float | None = None,
+    approval_timeout_seconds: float | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -514,10 +740,22 @@ async def run_chat_turn(
     ``history`` is the prior conversation so multi-turn chats keep context.
     ``project_brief`` / ``context_block`` are placed per path (MET-566) — see
     ``_apply_turn_context``. ``chat_backend``, when given, registers
-    ``chat.set_project_scope`` (MET-580).
+    ``chat.set_project_scope`` (MET-580). ``twin``, when given, also registers
+    the skill-layer tools when ``chat_skills_enabled()`` (MET-548 follow-up).
+    ``metrics``, when given, records a turn-duration metric. ``wall_clock_seconds``
+    (defaults to :func:`chat_wall_clock_seconds`) hard-bounds the loop.
+    ``approval_timeout_seconds`` (defaults to :func:`chat_approval_timeout_seconds`)
+    overrides how long a `requires_approval` tool call waits before denying by
+    default -- see :func:`design_flow_approval_timeout_seconds`.
+    ``project_id`` scopes the turn's memory deposit (MET-567) to a project;
+    tool-using turns are recorded as experiences so the memory tier learns from
+    chat, not just from the orchestrator's Temporal path.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
+    turn_start = time.monotonic()
+    wall_clock = wall_clock_seconds if wall_clock_seconds is not None else chat_wall_clock_seconds()
+    deadline = turn_start + wall_clock if wall_clock is not None else None
     ctx = await _build_context(
         session_id,
         store,
@@ -526,6 +764,9 @@ async def run_chat_turn(
         model=model,
         enabled_tools=enabled_tools,
         chat_backend=chat_backend,
+        twin=twin,
+        metrics=metrics,
+        approval_timeout_seconds=approval_timeout_seconds,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
@@ -538,6 +779,7 @@ async def run_chat_turn(
         context_block=context_block,
     )
     if native:
+        cost_provider, cost_model = _cost_target(ctx)
         result = await run_native_tools(
             ctx.runtime,
             user_content,
@@ -549,6 +791,10 @@ async def run_chat_turn(
             # MET-568: bound within-turn growth; older tool exchanges fold
             # into a synopsis once the estimate crosses the budget.
             max_context_tokens=trace_token_budget(provider, model),
+            deadline=deadline,
+            max_cost_usd=chat_max_cost_usd(),
+            cost_provider=cost_provider,
+            cost_model=cost_model,
         )
     else:
         policy = ModelPolicy(
@@ -558,11 +804,44 @@ async def run_chat_turn(
             history=full_history,
             trace_token_budget=trace_token_budget(provider, model),
         )
-        result = await run_react(ctx.runtime, policy, user_content, max_steps=steps)
-    logger.info("chat_harness_turn", status=result.status, steps=len(result.steps))
-    if result.status == "completed":
-        return str(result.output)
-    return "I couldn't converge on an answer within the step budget."
+        result = await run_react(
+            ctx.runtime, policy, user_content, max_steps=steps, deadline=deadline
+        )
+    logger.info(
+        "chat_harness_turn",
+        status=result.status,
+        steps=len(result.steps),
+        stop_reason=result.stop_reason,
+    )
+    if metrics is not None:
+        try:
+            metrics.record_harness_turn(
+                "native" if native else "react", result.stop_reason, time.monotonic() - turn_start
+            )
+        except Exception:  # noqa: BLE001 - metrics must never break a turn
+            pass
+    if result.output:
+        answer = str(result.output)
+    elif result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
+        answer = summarize_trajectory(result.steps)
+    else:
+        answer = _FALLBACK_ANSWER
+    # MET-567: deposit the trajectory into the experience store (no-op unless
+    # the turn called a tool and a recorder is wired).
+    await record_chat_experience(
+        thread_id=session_id,
+        user_content=user_content,
+        reply=answer,
+        steps=result.steps,
+        status=result.status,
+        stop_reason=result.stop_reason,
+        duration_seconds=time.monotonic() - turn_start,
+        project_id=project_id,
+        provider=provider,
+        model=model,
+        path="native" if native else "react",
+    )
+    return answer
 
 
 _FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
@@ -650,6 +929,16 @@ _MODEL_WINDOWS: tuple[tuple[str, int], ...] = (
     ("gpt-4", 8_192),
 )
 _DEFAULT_WINDOW = 128_000
+# MET-655: live-caught the `openai-codex` provider rejecting a 137k-token
+# request with "input exceeds the context window" while the harness's own
+# budget (derived from the raw model's advertised window below) thought it
+# had 240k of headroom to work with. `context_window_for` matches on MODEL
+# only, so "gpt-5.5" always resolved to the raw API's 400k figure even
+# through this provider's own, apparently much smaller, effective limit.
+# 100k is a conservative placeholder comfortably under the observed failure
+# point (137k) -- not a confirmed number from OpenAI Codex docs, since none
+# were found; tighten once the real limit is known.
+_PROVIDER_WINDOWS: tuple[tuple[str, int], ...] = (("codex", 100_000),)
 _BRIEF_MARKER = "[project context]"
 _CONTEXT_MARKER = "[retrieved context]"
 
@@ -658,11 +947,17 @@ def context_window_for(provider: str | None, model: str | None) -> int:
     """Best-effort context-window size (tokens) for a provider/model.
 
     ``METAFORGE_CONTEXT_WINDOW`` overrides everything (for local/unknown models);
-    otherwise the first matching model-id substring wins, else a safe default.
+    otherwise a provider-specific override wins (a provider can enforce a
+    materially smaller real limit than the underlying model's advertised
+    window), then the first matching model-id substring, else a safe default.
     """
     override = os.getenv("METAFORGE_CONTEXT_WINDOW", "").strip()
     if override.isdigit():
         return int(override)
+    p = (provider or "").lower()
+    for key, window in _PROVIDER_WINDOWS:
+        if key in p:
+            return window
     m = (model or "").lower()
     for key, window in _MODEL_WINDOWS:
         if key in m:
@@ -793,6 +1088,7 @@ async def run_chat_turn_streaming(
     on_thinking: Callable[[str, str], Awaitable[None]] | None = None,
     on_action_started: Callable[[str], Awaitable[None]] | None = None,
     on_context: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_approval_request: OnApprovalRequest | None = None,
     invoke: Invoke = default_invoke,
     stream_invoke: StreamInvoke = default_stream,
     max_steps: int | None = None,
@@ -807,6 +1103,10 @@ async def run_chat_turn_streaming(
     project_brief: str | None = None,
     context_block: str | None = None,
     chat_backend: ChatBackend | None = None,
+    twin: Any = None,
+    metrics: MetricsCollector | None = None,
+    wall_clock_seconds: float | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -824,10 +1124,21 @@ async def run_chat_turn_streaming(
     on the native path (history-pair fallback on ReAct); retrieved context is
     a trailing history pair on both. ``chat_backend``, when given, registers
     ``chat.set_project_scope`` (MET-580) so the agent can rescope THIS thread
-    on a clear user request.
+    on a clear user request. ``twin``, when given, also registers the
+    skill-layer tools when ``chat_skills_enabled()`` (MET-548 follow-up).
+    ``metrics``, when given, records a turn-duration metric.
+    ``wall_clock_seconds`` (defaults to :func:`chat_wall_clock_seconds`)
+    hard-bounds the loop. ``on_approval_request`` (production-harness audit
+    follow-up), when given, is notified ``(run_id, tool, arguments)`` the
+    moment a `requires_approval` tool call pauses — resolved by a separate
+    ``POST /v1/chat/tool_approvals/{run_id}`` request, never by this turn.
+    ``project_id`` scopes this turn's memory deposit (MET-567).
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
+    turn_start = time.monotonic()
+    wall_clock = wall_clock_seconds if wall_clock_seconds is not None else chat_wall_clock_seconds()
+    deadline = turn_start + wall_clock if wall_clock is not None else None
     ctx = await _build_context(
         session_id,
         store,
@@ -836,6 +1147,9 @@ async def run_chat_turn_streaming(
         model=model,
         enabled_tools=enabled_tools,
         chat_backend=chat_backend,
+        twin=twin,
+        metrics=metrics,
+        on_approval_request=on_approval_request,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
@@ -869,6 +1183,10 @@ async def run_chat_turn_streaming(
                 project_brief=project_brief,
                 context_block=context_block,
             )
+            # Production-harness audit follow-up: this was only ever pushed
+            # live over SSE — if no client was listening, it was computed and
+            # thrown away. Logging it means the data survives regardless.
+            logger.info("chat_context_stats", phase="pre", **stats)
             await on_context(stats)
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_failed", error=str(exc))
@@ -903,6 +1221,7 @@ async def run_chat_turn_streaming(
                 logger.warning("chat_step_emit_failed", index=index, error=str(exc))
 
     if native:
+        cost_provider, cost_model = _cost_target(ctx)
         result = await run_native_tools(
             ctx.runtime,
             user_content,
@@ -920,6 +1239,10 @@ async def run_chat_turn_streaming(
             # providers only; others fall back to the non-streaming invoke).
             on_stream_event=stream_event_cb,
             stream_events=default_stream_events if stream_event_cb is not None else None,
+            deadline=deadline,
+            max_cost_usd=chat_max_cost_usd(),
+            cost_provider=cost_provider,
+            cost_model=cost_model,
         )
     else:
         policy = ModelPolicy(
@@ -930,9 +1253,21 @@ async def run_chat_turn_streaming(
             trace_token_budget=trace_token_budget(provider, model),
         )
         result = await run_react(
-            ctx.runtime, policy, user_content, max_steps=steps, on_step=live_step
+            ctx.runtime, policy, user_content, max_steps=steps, on_step=live_step, deadline=deadline
         )
-    logger.info("chat_harness_stream_turn", status=result.status, steps=len(result.steps))
+    logger.info(
+        "chat_harness_stream_turn",
+        status=result.status,
+        steps=len(result.steps),
+        stop_reason=result.stop_reason,
+    )
+    if metrics is not None:
+        try:
+            metrics.record_harness_turn(
+                "native" if native else "react", result.stop_reason, time.monotonic() - turn_start
+            )
+        except Exception:  # noqa: BLE001 - metrics must never break a turn
+            pass
 
     # MET-568: re-emit context stats AFTER the loop so the meter reflects what
     # the turn actually consumed (the pre-loop snapshot can't see tool-result
@@ -965,6 +1300,9 @@ async def run_chat_turn_streaming(
             final_stats["available"] = max(
                 0, int(final_stats.get("window", 0)) - int(final_stats["used"])
             )
+            # Production-harness audit follow-up: persist this even when no
+            # SSE client is listening (see the pre-loop stats block above).
+            logger.info("chat_context_stats", **final_stats)
             await on_context(final_stats)
         except Exception as exc:  # noqa: BLE001 — telemetry must not break the turn
             logger.warning("chat_context_stats_final_failed", error=str(exc))
@@ -972,16 +1310,39 @@ async def run_chat_turn_streaming(
     # MET-590: steps were already streamed live during the loop (live_step),
     # so no post-loop re-emit — duplicates would double-render the timeline.
 
-    if result.status != "completed":
-        await on_delta(_FALLBACK_ANSWER)
-        return _FALLBACK_ANSWER
+    async def _record_turn_experience(final_answer: str) -> None:
+        # MET-567: deposit this turn's trajectory into the experience store.
+        # No-op unless the turn called a tool and a recorder is wired.
+        await record_chat_experience(
+            thread_id=session_id,
+            user_content=user_content,
+            reply=final_answer,
+            steps=result.steps,
+            status=result.status,
+            stop_reason=result.stop_reason,
+            duration_seconds=time.monotonic() - turn_start,
+            project_id=project_id,
+            provider=provider,
+            model=model,
+            path="native" if native else "react",
+        )
 
-    answer = str(result.output).strip()
+    answer = str(result.output or "").strip()
     # Never stream an empty answer — a completed turn with no final text (weak
-    # model, or an empty `final`) must still say something, not render blank.
+    # model, or an empty `final`), or one that hit the step cap / wall-clock
+    # deadline without ever producing output, must still say something real
+    # rather than a bare non-answer (production-harness audit follow-up: this
+    # used to throw away the full trajectory even though it was in memory).
     if not answer:
-        await on_delta(_FALLBACK_ANSWER)
-        return _FALLBACK_ANSWER
+        answer = (
+            summarize_trajectory(result.steps)
+            if result.stop_reason in ("max_steps", "timeout", "budget_exceeded")
+            else _FALLBACK_ANSWER
+        )
+        await _record_turn_experience(answer)
+        await on_delta(answer)
+        return answer
+    await _record_turn_experience(answer)
     # Emit the loop's own answer as chunked deltas. This used to re-generate
     # the final text with a second, context-free model call (no history, no
     # tool results), and stream THAT — which could drift from or hallucinate

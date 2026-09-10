@@ -1101,6 +1101,66 @@
         "title": "CreateProjectRequest",
         "type": "object"
       },
+      "CreateProposalRequest": {
+        "description": "Body for ``POST /api/v1/assistant/proposals`` (MET-630).\n\nLets a human create a design-change proposal directly from the\ndashboard (e.g. a parameter-panel \"Regenerate\" button) \u2014 previously\nproposals could only be created by an agent calling the\n``twin.propose_change`` MCP tool.",
+        "properties": {
+          "agent_code": {
+            "default": "human",
+            "description": "Code identifying who/what is proposing the change",
+            "minLength": 1,
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "What the change does",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "diff": {
+            "additionalProperties": true,
+            "description": "Structured diff (e.g. {'action': 'regenerate_geometry'})",
+            "title": "Diff",
+            "type": "object"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "work_products_affected": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Work Products Affected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "CreateProposalRequest",
+        "type": "object"
+      },
       "CreateRunRequest": {
         "description": "Body for ``POST /v1/runs``.",
         "properties": {
@@ -1388,6 +1448,25 @@
         ],
         "title": "EvidenceType",
         "type": "string"
+      },
+      "ExportFile": {
+        "description": "A generated file, fetched via ``GET /v1/cad-export/download/{export_id}/{filename}``.",
+        "properties": {
+          "download_url": {
+            "title": "Download Url",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "download_url"
+        ],
+        "title": "ExportFile",
+        "type": "object"
       },
       "FieldDelta": {
         "description": "Change for a single metadata field.",
@@ -2058,6 +2137,81 @@
         "title": "IterateRequest",
         "type": "object"
       },
+      "JointSpec": {
+        "description": "One joint between two parts \u2014 the same shape FreeCAD's\n``add_assembly_joint``/``list_joints`` already produce, so a caller can\npass through what MET-721 reads from a live session, or supply a saved\njoint list manually.",
+        "properties": {
+          "anchor": {
+            "description": "Anchor point (mm).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Anchor",
+            "type": "array"
+          },
+          "axis": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Axis",
+            "type": "array"
+          },
+          "base": {
+            "description": "Link name of the base part.",
+            "title": "Base",
+            "type": "string"
+          },
+          "follower": {
+            "description": "Link name of the follower part.",
+            "title": "Follower",
+            "type": "string"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for 'slider' joints \u2014 {lower, upper, effort?, velocity?}.",
+            "title": "Limits"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "fixed",
+              "slider",
+              "revolute",
+              "cylindrical",
+              "ball"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "base",
+          "follower",
+          "axis",
+          "anchor"
+        ],
+        "title": "JointSpec",
+        "type": "object"
+      },
       "KnowledgeEntryResponse": {
         "description": "API response model for a single knowledge entry.",
         "properties": {
@@ -2708,6 +2862,50 @@
         "title": "OkResponse",
         "type": "object"
       },
+      "PartRef": {
+        "description": "One part of an assembly, referencing a Twin STEP work product.",
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "link_name": {
+            "minLength": 1,
+            "title": "Link Name",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "link_name"
+        ],
+        "title": "PartRef",
+        "type": "object"
+      },
       "ProjectListResponse": {
         "description": "List of projects.",
         "properties": {
@@ -2950,6 +3148,59 @@
         "title": "RevisionDiff",
         "type": "object"
       },
+      "Ros2LaunchRequest": {
+        "properties": {
+          "default_urdf_path": {
+            "description": "Default 'urdf_path' launch argument \u2014 e.g. a just-exported URDF's download_url.",
+            "minLength": 1,
+            "title": "Default Urdf Path",
+            "type": "string"
+          },
+          "include_joint_state_publisher_gui": {
+            "default": true,
+            "title": "Include Joint State Publisher Gui",
+            "type": "boolean"
+          },
+          "include_rviz": {
+            "default": true,
+            "title": "Include Rviz",
+            "type": "boolean"
+          },
+          "robot_name": {
+            "minLength": 1,
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "robot_name",
+          "default_urdf_path"
+        ],
+        "title": "Ros2LaunchRequest",
+        "type": "object"
+      },
+      "Ros2LaunchResponse": {
+        "properties": {
+          "default_urdf_path": {
+            "title": "Default Urdf Path",
+            "type": "string"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_name": {
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_file",
+          "robot_name",
+          "default_urdf_path"
+        ],
+        "title": "Ros2LaunchResponse",
+        "type": "object"
+      },
       "RotationDelta": {
         "description": "Single-axis rotation delta of a dragged group (MET-611).",
         "properties": {
@@ -3129,6 +3380,225 @@
           "factor"
         ],
         "title": "ScaleDelta",
+        "type": "object"
+      },
+      "SdfAssemblyExportRequest": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointSpec"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "model_name": {
+            "default": "model",
+            "title": "Model Name",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "static": {
+            "default": false,
+            "title": "Static",
+            "type": "boolean"
+          },
+          "world_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "World Name"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "SdfAssemblyExportRequest",
+        "type": "object"
+      },
+      "SdfAssemblyExportResponse": {
+        "properties": {
+          "joint_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Names",
+            "type": "array"
+          },
+          "link_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Link Names",
+            "type": "array"
+          },
+          "mesh_files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "title": "Mesh Files",
+            "type": "array"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_files",
+          "model_name",
+          "link_names",
+          "joint_names"
+        ],
+        "title": "SdfAssemblyExportResponse",
+        "type": "object"
+      },
+      "SdfExportRequest": {
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "link_name": {
+            "default": "link",
+            "title": "Link Name",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "model_name": {
+            "default": "model",
+            "title": "Model Name",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "static": {
+            "default": false,
+            "title": "Static",
+            "type": "boolean"
+          },
+          "world_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "World Name"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "SdfExportRequest",
+        "type": "object"
+      },
+      "SdfExportResponse": {
+        "properties": {
+          "center_of_mass_m": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Center Of Mass M",
+            "type": "object"
+          },
+          "density_kg_m3": {
+            "title": "Density Kg M3",
+            "type": "number"
+          },
+          "inertia_kgm2": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inertia Kgm2",
+            "type": "object"
+          },
+          "link_name": {
+            "title": "Link Name",
+            "type": "string"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "mesh_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_file",
+          "model_name",
+          "link_name",
+          "density_kg_m3",
+          "mass_kg",
+          "center_of_mass_m",
+          "inertia_kgm2"
+        ],
+        "title": "SdfExportResponse",
         "type": "object"
       },
       "SearchResponse": {
@@ -3384,6 +3854,73 @@
         "title": "SessionEventResponse",
         "type": "object"
       },
+      "SessionJoint": {
+        "properties": {
+          "anchor": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Anchor",
+            "type": "array"
+          },
+          "axis": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Axis",
+            "type": "array"
+          },
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "follower": {
+            "title": "Follower",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "fixed",
+              "slider",
+              "revolute",
+              "cylindrical",
+              "ball"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "base",
+          "follower",
+          "axis",
+          "anchor"
+        ],
+        "title": "SessionJoint",
+        "type": "object"
+      },
+      "SessionJointsResponse": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/SessionJoint"
+            },
+            "title": "Joints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "joints"
+        ],
+        "title": "SessionJointsResponse",
+        "type": "object"
+      },
       "SessionListResponse": {
         "description": "List of sessions.",
         "properties": {
@@ -3404,6 +3941,34 @@
           "total"
         ],
         "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionObject": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "obj_id": {
+            "title": "Obj Id",
+            "type": "string"
+          },
+          "order": {
+            "title": "Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "obj_id",
+          "kind",
+          "name",
+          "order"
+        ],
+        "title": "SessionObject",
         "type": "object"
       },
       "SessionResponse": {
@@ -3500,6 +4065,37 @@
           "started_at"
         ],
         "title": "SessionResponse",
+        "type": "object"
+      },
+      "SessionSummary": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "object_count": {
+            "title": "Object Count",
+            "type": "integer"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/SessionObject"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "name",
+          "object_count",
+          "objects"
+        ],
+        "title": "SessionSummary",
         "type": "object"
       },
       "SessionUpdateRequest": {
@@ -4072,6 +4668,23 @@
             "title": "Domain",
             "type": "string"
           },
+          "geometryParameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometryparameters"
+          },
+          "hasScript": {
+            "default": false,
+            "title": "Hasscript",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4123,6 +4736,52 @@
           "updatedAt"
         ],
         "title": "TwinNodeResponse",
+        "type": "object"
+      },
+      "TwinNodeScriptResponse": {
+        "description": "The current generation script text for a CAD_MODEL node (MET-630).",
+        "properties": {
+          "git_commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit Sha"
+          },
+          "git_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Path"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "script_node_id": {
+            "title": "Script Node Id",
+            "type": "string"
+          },
+          "script_source": {
+            "title": "Script Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "script_node_id",
+          "script_source"
+        ],
+        "title": "TwinNodeScriptResponse",
         "type": "object"
       },
       "TwinRelationshipListResponse": {
@@ -4245,6 +4904,367 @@
         "title": "UpdateThreadScopeRequest",
         "type": "object"
       },
+      "UrdfAssemblyExportRequest": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointSpec"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "mesh_uri_prefix": {
+            "default": "",
+            "title": "Mesh Uri Prefix",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "robot_name": {
+            "default": "robot",
+            "title": "Robot Name",
+            "type": "string"
+          },
+          "xacro": {
+            "default": false,
+            "title": "Xacro",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "UrdfAssemblyExportRequest",
+        "type": "object"
+      },
+      "UrdfAssemblyExportResponse": {
+        "properties": {
+          "joint_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Names",
+            "type": "array"
+          },
+          "link_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Link Names",
+            "type": "array"
+          },
+          "mesh_files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "title": "Mesh Files",
+            "type": "array"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_name": {
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_files",
+          "robot_name",
+          "link_names",
+          "joint_names"
+        ],
+        "title": "UrdfAssemblyExportResponse",
+        "type": "object"
+      },
+      "UrdfExportRequest": {
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "link_name": {
+            "default": "base_link",
+            "title": "Link Name",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "mesh_format": {
+            "default": "stl",
+            "enum": [
+              "stl",
+              "obj"
+            ],
+            "title": "Mesh Format",
+            "type": "string"
+          },
+          "mesh_uri_prefix": {
+            "default": "",
+            "title": "Mesh Uri Prefix",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "xacro": {
+            "default": false,
+            "title": "Xacro",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "UrdfExportRequest",
+        "type": "object"
+      },
+      "UrdfExportResponse": {
+        "properties": {
+          "center_of_mass_m": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Center Of Mass M",
+            "type": "object"
+          },
+          "density_kg_m3": {
+            "title": "Density Kg M3",
+            "type": "number"
+          },
+          "inertia_kgm2": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inertia Kgm2",
+            "type": "object"
+          },
+          "link_name": {
+            "title": "Link Name",
+            "type": "string"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "mesh_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_file",
+          "link_name",
+          "density_kg_m3",
+          "mass_kg",
+          "center_of_mass_m",
+          "inertia_kgm2"
+        ],
+        "title": "UrdfExportResponse",
+        "type": "object"
+      },
+      "UsdAssemblyExportRequest": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointSpec"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "robot_name": {
+            "default": "robot",
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "UsdAssemblyExportRequest",
+        "type": "object"
+      },
+      "UsdAssemblyExportResponse": {
+        "properties": {
+          "joint_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Joint Names",
+            "type": "array"
+          },
+          "link_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Link Names",
+            "type": "array"
+          },
+          "mesh_files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "title": "Mesh Files",
+            "type": "array"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_name": {
+            "title": "Robot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_files",
+          "robot_name",
+          "link_names",
+          "joint_names"
+        ],
+        "title": "UsdAssemblyExportResponse",
+        "type": "object"
+      },
+      "UsdExportRequest": {
+        "properties": {
+          "density_kg_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Kg M3"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "node_id": {
+            "description": "Twin work-product node id (STEP file).",
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "prim_name": {
+            "default": "model",
+            "title": "Prim Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "UsdExportRequest",
+        "type": "object"
+      },
+      "UsdExportResponse": {
+        "properties": {
+          "center_of_mass_m": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Center Of Mass M",
+            "type": "object"
+          },
+          "density_kg_m3": {
+            "title": "Density Kg M3",
+            "type": "number"
+          },
+          "inertia_kgm2": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inertia Kgm2",
+            "type": "object"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "mesh_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "output_file": {
+            "$ref": "#/components/schemas/ExportFile"
+          },
+          "prim_name": {
+            "title": "Prim Name",
+            "type": "string"
+          },
+          "triangle_count": {
+            "title": "Triangle Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "output_file",
+          "mesh_file",
+          "prim_name",
+          "triangle_count",
+          "density_kg_m3",
+          "mass_kg",
+          "center_of_mass_m",
+          "inertia_kgm2"
+        ],
+        "title": "UsdExportResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -4356,213 +5376,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/compliance/{project_id}/checklist": {
-      "get": {
-        "description": "Generate a compliance checklist for the given project and markets.\n\nMarkets are provided as a comma-separated query parameter, e.g.\n``?markets=UKCA,CE,FCC``.",
-        "operationId": "get_checklist_api_v1_compliance__project_id__checklist_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Comma-separated regime codes",
-            "in": "query",
-            "name": "markets",
-            "required": false,
-            "schema": {
-              "default": "UKCA,CE",
-              "description": "Comma-separated regime codes",
-              "title": "Markets",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChecklistResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Checklist",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
-    "/api/v1/compliance/{project_id}/coverage": {
-      "get": {
-        "description": "Get evidence coverage statistics for a project.",
-        "operationId": "get_coverage_api_v1_compliance__project_id__coverage_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CoverageResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Coverage",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
-    "/api/v1/compliance/{project_id}/evidence": {
-      "post": {
-        "description": "Link a piece of evidence to a compliance checklist item.",
-        "operationId": "link_evidence_api_v1_compliance__project_id__evidence_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinkEvidenceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EvidenceResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Link Evidence",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
-    "/api/v1/compliance/{project_id}/evidence/{item_id}": {
-      "get": {
-        "description": "Retrieve all evidence records for a checklist item.",
-        "operationId": "get_evidence_api_v1_compliance__project_id__evidence__item_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "title": "Project Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "item_id",
-            "required": true,
-            "schema": {
-              "title": "Item Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/EvidenceResponse"
-                  },
-                  "title": "Response Get Evidence Api V1 Compliance  Project Id  Evidence  Item Id  Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Evidence",
-        "tags": [
-          "compliance"
-        ]
-      }
-    },
     "/health": {
       "get": {
         "description": "Return the aggregated health of the gateway and its dependencies.",
@@ -4647,6 +5460,46 @@
           }
         },
         "summary": "List Proposals",
+        "tags": [
+          "assistant"
+        ]
+      },
+      "post": {
+        "description": "Create a design-change proposal directly from a human (MET-630).\n\nSame underlying ``ApprovalWorkflow.propose_change`` an agent's\n``twin.propose_change`` MCP call uses \u2014 a human (e.g. via a dashboard\nparameter panel) can submit one just as well, and it goes through the\nidentical review/apply pipeline (``decide`` \u2192 apply executor).",
+        "operationId": "create_proposal_v1_assistant_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignChangeProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Proposal",
         "tags": [
           "assistant"
         ]
@@ -4924,6 +5777,426 @@
         "summary": "List Bom",
         "tags": [
           "bom"
+        ]
+      }
+    },
+    "/v1/cad-export/download/{export_id}/{filename}": {
+      "get": {
+        "operationId": "download_export_file_v1_cad_export_download__export_id___filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Export File",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/ros2-launch": {
+      "post": {
+        "operationId": "generate_ros2_launch_v1_cad_export_ros2_launch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Ros2LaunchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ros2LaunchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Ros2 Launch",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sdf": {
+      "post": {
+        "operationId": "export_sdf_v1_cad_export_sdf_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SdfExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdfExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Sdf",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sdf-assembly": {
+      "post": {
+        "operationId": "export_sdf_assembly_v1_cad_export_sdf_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SdfAssemblyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdfAssemblyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Sdf Assembly",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sessions/{session_id}": {
+      "get": {
+        "operationId": "get_session_summary_v1_cad_export_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Summary",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/sessions/{session_id}/joints": {
+      "get": {
+        "operationId": "get_session_joints_v1_cad_export_sessions__session_id__joints_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionJointsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Joints",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/urdf": {
+      "post": {
+        "operationId": "export_urdf_v1_cad_export_urdf_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrdfExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrdfExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Urdf",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/urdf-assembly": {
+      "post": {
+        "operationId": "export_urdf_assembly_v1_cad_export_urdf_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrdfAssemblyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrdfAssemblyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Urdf Assembly",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/usd": {
+      "post": {
+        "operationId": "export_usd_v1_cad_export_usd_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsdExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsdExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Usd",
+        "tags": [
+          "cad-export"
+        ]
+      }
+    },
+    "/v1/cad-export/usd-assembly": {
+      "post": {
+        "operationId": "export_usd_assembly_v1_cad_export_usd_assembly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsdAssemblyExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsdAssemblyExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Usd Assembly",
+        "tags": [
+          "cad-export"
         ]
       }
     },
@@ -5429,6 +6702,327 @@
         "summary": "Stream Thread Events",
         "tags": [
           "chat"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals": {
+      "get": {
+        "description": "All tool-call approvals currently awaiting a decision.",
+        "operationId": "list_pending_approvals_v1_chat_tool_approvals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Pending Approvals",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals/{run_id}": {
+      "get": {
+        "operationId": "get_approval_v1_chat_tool_approvals__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      },
+      "post": {
+        "operationId": "submit_tool_approval_v1_chat_tool_approvals__run_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Tool Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/checklist": {
+      "get": {
+        "description": "Generate a compliance checklist for the given project and markets.\n\nMarkets are provided as a comma-separated query parameter, e.g.\n``?markets=UKCA,CE,FCC``.",
+        "operationId": "get_checklist_v1_compliance__project_id__checklist_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated regime codes",
+            "in": "query",
+            "name": "markets",
+            "required": false,
+            "schema": {
+              "default": "UKCA,CE",
+              "description": "Comma-separated regime codes",
+              "title": "Markets",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Checklist",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/coverage": {
+      "get": {
+        "description": "Get evidence coverage statistics for a project.",
+        "operationId": "get_coverage_v1_compliance__project_id__coverage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Coverage",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/evidence": {
+      "post": {
+        "description": "Link a piece of evidence to a compliance checklist item.",
+        "operationId": "link_evidence_v1_compliance__project_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Evidence",
+        "tags": [
+          "compliance"
+        ]
+      }
+    },
+    "/v1/compliance/{project_id}/evidence/{item_id}": {
+      "get": {
+        "description": "Retrieve all evidence records for a checklist item.",
+        "operationId": "get_evidence_v1_compliance__project_id__evidence__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceResponse"
+                  },
+                  "title": "Response Get Evidence V1 Compliance  Project Id  Evidence  Item Id  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evidence",
+        "tags": [
+          "compliance"
         ]
       }
     },
@@ -6049,7 +7643,7 @@
     },
     "/v1/knowledge/search": {
       "get": {
-        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents`` (MET-390).",
+        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents`` (MET-390).\n\n``project_id`` (MET-670) mirrors the ``projectId`` filter already\non ``/sources`` and ``/ingest``: without it, ``KnowledgeService.search``\nfalls back to the ``default`` tenant, so a project-scoped ingest was\nnever searchable from a project-scoped UI \u2014 the search box silently\nreturned whatever unrelated content happened to live under\n``default`` instead of the active project's own sources.",
         "operationId": "search_knowledge_v1_knowledge_search_get",
         "parameters": [
           {
@@ -6080,6 +7674,25 @@
               ],
               "description": "Filter by knowledge type",
               "title": "Knowledgetype"
+            }
+          },
+          {
+            "description": "Scope search to a project UUID",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Scope search to a project UUID",
+              "title": "Projectid"
             }
           },
           {
@@ -7953,6 +9566,50 @@
         ]
       }
     },
+    "/v1/twin/nodes/{node_id}/script": {
+      "get": {
+        "description": "The current git-versioned generation script for a CAD_MODEL node (MET-630).\n\nLets a dashboard parameter panel seed a regeneration proposal with the\nscript as it stands today, rather than the user retyping it from scratch.\n404 when the node has no linked script (imported geometry, or the git\nbackend isn't configured).",
+        "operationId": "get_node_script_v1_twin_nodes__node_id__script_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinNodeScriptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Node Script",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/nodes/{node_id}/sync": {
       "post": {
         "description": "Manually trigger a sync for a linked work product.\n\nRe-reads the source file, extracts metadata, and updates the Twin\nnode if the file has changed.",
@@ -8044,8 +9701,26 @@
     },
     "/v1/twin/relationships": {
       "get": {
-        "description": "List all edges in the Digital Twin graph.",
+        "description": "List edges in the Digital Twin graph.\n\n``project_id`` scopes the view to a single project (MET-491), matching\n``list_twin_nodes``. Omitted or empty returns every edge (including\nunscoped legacy nodes) \u2014 preserving the prior global behaviour.",
         "operationId": "list_twin_relationships_v1_twin_relationships_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8056,6 +9731,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Twin Relationships",

@@ -11,12 +11,34 @@ import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
+import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel, nodeFileUrl, fetchNodeFileText } from '../api/endpoints/twin';
+import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
+import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
+import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
+
+// MET-720: names the cadquery adapter's material density table
+// (tool_registry/tools/cadquery/materials.py) actually recognizes.
+const CAD_EXPORT_MATERIALS = [
+  'aluminum_6061', 'aluminum', 'steel', 'stainless_steel', 'titanium', 'brass',
+  'copper', 'abs', 'pla', 'petg', 'nylon', 'polycarbonate', 'acrylic', 'wood',
+  'carbon_fiber', 'rubber',
+];
+
+// MET-683: same response.data.detail extraction pattern as
+// ProjectDetailPage.tsx's getErrorMessage, applied to a failed model load.
+function getModelLoadErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { data?: { detail?: string } } }).response;
+    if (typeof response?.data?.detail === 'string') return response.data.detail;
+  }
+  return 'This work product has no viewable 3D model yet.';
+}
 
 // ── KC tokens ────────────────────────────────────────────────────────────────
 const KC = {
@@ -220,11 +242,230 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
   );
 }
 
+// ── Export for robotics sim (MET-720) ────────────────────────────────────────
+const _EXPORT_FORMATS = ['urdf', 'sdf', 'usd'] as const;
+type _ExportFormat = (typeof _EXPORT_FORMATS)[number];
+
+const _exportInputStyle: React.CSSProperties = {
+  fontSize: 11,
+  background: '#1e1f26',
+  border: `1px solid ${KC.border}`,
+  color: KC.onSurface,
+};
+
+function ExportForSimSection({ node, onClose }: { node: TwinNode; onClose: () => void }) {
+  const toast = useToast();
+  const urdfExport = useExportUrdf();
+  const sdfExport = useExportSdf();
+  const usdExport = useExportUsd();
+
+  const [format, setFormat] = useState<_ExportFormat>('urdf');
+  const [material, setMaterial] = useState('');
+  const [density, setDensity] = useState('');
+  const [linkName, setLinkName] = useState('base_link');
+  const [modelName, setModelName] = useState('model');
+  const [primName, setPrimName] = useState('model');
+  const [xacro, setXacro] = useState(false);
+  const [worldName, setWorldName] = useState('');
+  const [staticFlag, setStaticFlag] = useState(false);
+  const [result, setResult] = useState<{ outputFile: ExportFile; meshFile: ExportFile } | null>(null);
+
+  const pending = urdfExport.isPending || sdfExport.isPending || usdExport.isPending;
+  const densityKgM3 = density.trim() ? Number(density) : undefined;
+
+  const handleSubmit = () => {
+    setResult(null);
+    const onSuccess = (data: { output_file: ExportFile; mesh_file: ExportFile }) => {
+      setResult({ outputFile: data.output_file, meshFile: data.mesh_file });
+      toast.success(`Exported ${data.output_file.filename}`);
+    };
+    const onError = () => toast.error(`${format.toUpperCase()} export failed`);
+
+    if (format === 'urdf') {
+      urdfExport.mutate(
+        {
+          node_id: node.id,
+          link_name: linkName || undefined,
+          material: material || undefined,
+          density_kg_m3: densityKgM3,
+          xacro,
+        },
+        { onSuccess, onError },
+      );
+    } else if (format === 'sdf') {
+      sdfExport.mutate(
+        {
+          node_id: node.id,
+          model_name: modelName || undefined,
+          link_name: linkName || undefined,
+          material: material || undefined,
+          density_kg_m3: densityKgM3,
+          static: staticFlag,
+          world_name: worldName || undefined,
+        },
+        { onSuccess, onError },
+      );
+    } else {
+      usdExport.mutate(
+        {
+          node_id: node.id,
+          prim_name: primName || undefined,
+          material: material || undefined,
+          density_kg_m3: densityKgM3,
+        },
+        { onSuccess, onError },
+      );
+    }
+  };
+
+  return (
+    <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+          Export for robotics sim
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{ background: 'transparent', border: 'none', color: KC.onSurfaceVariant, cursor: 'pointer', padding: 2 }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+        </button>
+      </div>
+
+      <div className="flex gap-1 mb-2">
+        {_EXPORT_FORMATS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => { setFormat(f); setResult(null); }}
+            className="font-mono rounded px-2 py-1 uppercase"
+            style={{
+              fontSize: 10,
+              background: format === f ? KC.orangeFaint : 'transparent',
+              border: `1px solid ${format === f ? KC.orangeBorder : KC.border}`,
+              color: format === f ? KC.orange : KC.onSurfaceVariant,
+              cursor: 'pointer',
+            }}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5 mb-2">
+        <div className="flex gap-1.5">
+          <select
+            value={material}
+            onChange={(e) => setMaterial(e.target.value)}
+            className="font-mono rounded px-2 py-1 flex-1"
+            style={_exportInputStyle}
+          >
+            <option value="">No material (density only)</option>
+            {CAD_EXPORT_MATERIALS.map((m) => (
+              <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            placeholder="density kg/m³"
+            value={density}
+            onChange={(e) => setDensity(e.target.value)}
+            className="font-mono rounded px-2 py-1"
+            style={{ ..._exportInputStyle, width: 110 }}
+          />
+        </div>
+
+        {format === 'urdf' && (
+          <div className="flex gap-1.5 items-center">
+            <input
+              type="text"
+              placeholder="link name"
+              value={linkName}
+              onChange={(e) => setLinkName(e.target.value)}
+              className="font-mono rounded px-2 py-1 flex-1"
+              style={_exportInputStyle}
+            />
+            <label className="font-mono flex items-center gap-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+              <input type="checkbox" checked={xacro} onChange={(e) => setXacro(e.target.checked)} />
+              xacro
+            </label>
+          </div>
+        )}
+
+        {format === 'sdf' && (
+          <>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                placeholder="model name"
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                className="font-mono rounded px-2 py-1 flex-1"
+                style={_exportInputStyle}
+              />
+              <input
+                type="text"
+                placeholder="link name"
+                value={linkName}
+                onChange={(e) => setLinkName(e.target.value)}
+                className="font-mono rounded px-2 py-1 flex-1"
+                style={_exportInputStyle}
+              />
+            </div>
+            <div className="flex gap-1.5 items-center">
+              <input
+                type="text"
+                placeholder="world name (optional)"
+                value={worldName}
+                onChange={(e) => setWorldName(e.target.value)}
+                className="font-mono rounded px-2 py-1 flex-1"
+                style={_exportInputStyle}
+              />
+              <label className="font-mono flex items-center gap-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+                <input type="checkbox" checked={staticFlag} onChange={(e) => setStaticFlag(e.target.checked)} />
+                static
+              </label>
+            </div>
+          </>
+        )}
+
+        {format === 'usd' && (
+          <input
+            type="text"
+            placeholder="prim name"
+            value={primName}
+            onChange={(e) => setPrimName(e.target.value)}
+            className="font-mono rounded px-2 py-1"
+            style={_exportInputStyle}
+          />
+        )}
+      </div>
+
+      <Button variant="primary" size="sm" onClick={handleSubmit} disabled={pending} className="text-xs w-full">
+        {pending ? 'Exporting…' : `Export ${format.toUpperCase()}`}
+      </Button>
+
+      {result && (
+        <div className="flex gap-1.5 mt-2" style={{ flexWrap: 'wrap' }}>
+          <a href={toDownloadHref(result.outputFile.download_url)} download style={{ textDecoration: 'none' }}>
+            <FileActionBtn icon="download" label={result.outputFile.filename} />
+          </a>
+          <a href={toDownloadHref(result.meshFile.download_url)} download style={{ textDecoration: 'none' }}>
+            <FileActionBtn icon="download" label={result.meshFile.filename} />
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
   const loadModel = useViewerStore((s) => s.loadModel);
   const setViewMode = useViewerStore((s) => s.setViewMode);
   const openBooleanCut = useViewerStore((s) => s.openBooleanCut);
   const [loading3d, setLoading3d] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const isCAD = node.properties.wp_type === 'cad_model';
 
   const handleView3D = useCallback(async () => {
@@ -311,7 +552,21 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             >
               <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>content_cut</span>
             </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setExportOpen((v) => !v)}
+              className="text-xs"
+              title="Export for robotics sim (URDF/SDF/USD)"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>precision_manufacturing</span>
+            </Button>
           </div>
+        )}
+
+        {/* Export for robotics sim (MET-720) */}
+        {isCAD && exportOpen && (
+          <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
         )}
 
         {/* File: worktype + path + download / open / preview (MET-483) */}
@@ -518,6 +773,7 @@ export function TwinViewerPage() {
   // ── state ──
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [assemblyExportOpen, setAssemblyExportOpen] = useState(false);
   const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
   const [quality, setQuality] = useState('standard');
   const [showTree, setShowTree] = useState(true);
@@ -538,6 +794,11 @@ export function TwinViewerPage() {
   }
   // Track which node's model is loaded so the auto-loader (MET-505) doesn't refetch.
   const [loadedModelNodeId, setLoadedModelNodeId] = useState<string | null>(null);
+  // MET-683: distinguish "nothing loaded yet" from "we tried and the backend
+  // rejected it" -- previously a failed conversion (e.g. an empty/invalid
+  // STEP) silently fell back to the generic upload placeholder with no
+  // indication a model was ever attempted, console.error only.
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   // Deep-link: /twin?node=<id> preselects a node (e.g. from a project's work
   // product list, MET-514).
   const [searchParams] = useSearchParams();
@@ -550,7 +811,7 @@ export function TwinViewerPage() {
   // ── data ──
   const { data: nodes, isLoading, isFetching, dataUpdatedAt } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  const { data: relationships = [] } = useTwinRelationships();
+  const { data: relationships = [] } = useTwinRelationships(activeProjectId ?? undefined);
   const items = nodes ?? [];
 
   // ── viewer store ──
@@ -561,14 +822,42 @@ export function TwinViewerPage() {
   const selectPart = useViewerStore((s) => s.selectPart);
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const loadModel = useViewerStore((s) => s.loadModel);
+  const clearModel = useViewerStore((s) => s.clearModel);
 
   const uploadMutation = useUploadAndConvert();
 
-  // MET-514: preselect a node from the ?node= deep link.
+  // MET-514: sync the selected node with the ?node= deep link. Symmetric --
+  // clears the selection when the param disappears too (e.g. the sidebar's
+  // plain /twin link doesn't remount this page, only re-renders it with
+  // empty searchParams; MET-686 fixed a stale-selection bug where the
+  // previous work product's detail panel and breadcrumb kept showing).
   useEffect(() => {
-    const nodeParam = searchParams.get('node');
-    if (nodeParam) setSelectedId(nodeParam);
+    setSelectedId(searchParams.get('node'));
   }, [searchParams]);
+
+  // MET-674: clear the selected node (and its cached model) when the active
+  // project changes -- otherwise the detail panel and breadcrumb keep
+  // showing the PREVIOUS project's node after the node list/canvas has
+  // already updated to the new project. Guarded to skip the null -> X
+  // transition (MET-686): on a cold session (no project ever persisted),
+  // useActiveProject's own "auto-select the newest project" effect can land
+  // a moment after mount, racing the ?node= deep-link effect above and
+  // wiping the just-navigated-to node before the user ever sees it.
+  const prevProjectIdRef = useRef(activeProjectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current !== null && prevProjectIdRef.current !== activeProjectId) {
+      setSelectedId(null);
+      setLoadedModelNodeId(null);
+    }
+    prevProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
+  // MET-683: a stale error from a previously-selected node must not linger
+  // once the user picks a different node (including a non-CAD one, which
+  // never re-enters the load effect below to clear it itself).
+  useEffect(() => {
+    setModelLoadError(null);
+  }, [selectedNode?.id]);
 
   // MET-505: in MODEL view, auto-load the selected node's geometry. Previously
   // the viewer only loaded via the graph-mode "View in 3D" button, so picking a
@@ -578,6 +867,13 @@ export function TwinViewerPage() {
     const n = selectedNode;
     if (!n || n.properties.wp_type !== 'cad_model') return;
     if (loadedModelNodeId === n.id) return;
+    // MET-683: clear any PREVIOUS node's geometry before attempting this
+    // node's load -- otherwise a failed load left the prior node's model on
+    // screen under the new node's breadcrumb, with no error overlay (it was
+    // gated on `!glbUrl`, which a stale-but-present model kept satisfying as
+    // false), silently misleading the user rather than showing nothing/an
+    // error for the node they actually just selected.
+    clearModel();
     let cancelled = false;
     (async () => {
       try {
@@ -597,15 +893,23 @@ export function TwinViewerPage() {
         const url = result.glb_url.startsWith('/v1/') ? `/api${result.glb_url}` : result.glb_url;
         loadModel(url, m);
         setLoadedModelNodeId(n.id);
+        setModelLoadError(null);
       } catch (err) {
-        // No GLB for this node yet — leave the placeholder, don't crash.
-        if (!cancelled) console.error('Failed to auto-load 3D model:', err);
+        // MET-683: this used to be swallowed to a console.error only, leaving
+        // the generic "Upload a STEP file..." placeholder up with no sign a
+        // load was ever attempted -- confirmed live against a real node whose
+        // STEP export was empty (OCCT 422 "Can't export empty scenes!"), the
+        // dashboard gave zero indication anything was wrong.
+        if (!cancelled) {
+          console.error('Failed to auto-load 3D model:', err);
+          setModelLoadError(getModelLoadErrorMessage(err));
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [viewMode, selectedNode, loadedModelNodeId, loadModel]);
+  }, [viewMode, selectedNode, loadedModelNodeId, loadModel, clearModel]);
 
   useEffect(() => {
     if (!uploadMutation.isPending) {
@@ -695,6 +999,40 @@ export function TwinViewerPage() {
           /* 3D model mode */
           <>
             <R3FViewer onPartClick={handlePartClick} onBooleanCutComplete={setSelectedId} />
+            {!glbUrl && modelLoadError && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 46,
+                  maxWidth: 420,
+                  textAlign: 'center',
+                  pointerEvents: 'none',
+                  // MET-683: an opaque backdrop so this overlay fully covers
+                  // R3FViewer's own "Upload a STEP file..." placeholder text
+                  // underneath instead of visually overlapping it.
+                  background: KC.surface,
+                  border: `1px solid ${KC.border}`,
+                  borderRadius: 6,
+                  padding: '20px 24px',
+                }}
+              >
+                <span
+                  className="material-symbols-outlined"
+                  style={{ fontSize: 22, color: '#ffb4ab', display: 'block', marginBottom: 6 }}
+                >
+                  error
+                </span>
+                <p className="font-mono text-xs" style={{ color: '#ffb4ab', marginBottom: 4 }}>
+                  Model failed to load
+                </p>
+                <p className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+                  {modelLoadError}
+                </p>
+              </div>
+            )}
             {glbUrl && (
               <div
                 style={{
@@ -931,6 +1269,29 @@ export function TwinViewerPage() {
           IMPORT
         </button>
 
+        {/* Export assembly for sim (MET-721) — only meaningful with a node list to pick parts from */}
+        {isGraphMode && items.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setAssemblyExportOpen((p) => !p)}
+            className="flex items-center gap-1.5 rounded px-2"
+            style={{
+              height: 28,
+              background: assemblyExportOpen ? KC.orangeFaint : 'rgba(30,31,38,0.85)',
+              backdropFilter: 'blur(16px)',
+              border: `1px solid ${assemblyExportOpen ? KC.orangeBorder : KC.borderMid}`,
+              color: assemblyExportOpen ? KC.orange : KC.onSurfaceVariant,
+              fontSize: 11,
+              cursor: 'pointer',
+              letterSpacing: '0.06em',
+              fontFamily: "'Roboto Mono', monospace",
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>precision_manufacturing</span>
+            ASSEMBLY
+          </button>
+        )}
+
         {/* MODEL | GRAPH segmented toggle */}
         <div
           className="flex items-center rounded overflow-hidden"
@@ -1029,6 +1390,12 @@ export function TwinViewerPage() {
       {/* ═══════════════════════════════════════════
           IMPORT PANEL (slide-in under top bar)
       ════════════════════════════════════════════ */}
+      {assemblyExportOpen && (
+        <div style={{ position: 'absolute', top: 52, right: 16, zIndex: 50 }}>
+          <AssemblyExportPanel items={items} onClose={() => setAssemblyExportOpen(false)} />
+        </div>
+      )}
+
       {importOpen && (
         <GlassPanel
           style={{
