@@ -16,6 +16,7 @@ from uuid import UUID
 import structlog
 
 from api_gateway.projects.backend import ProjectBackend
+from orchestrator.design_flow.executor import ConstraintReport
 
 logger = structlog.get_logger(__name__)
 
@@ -25,6 +26,12 @@ async def _is_loadable(twin: object, wp_id: object) -> bool:
 
     Fail-open when we can't check (no twin / no id) so tests and non-twin setups
     keep their prior behaviour; only a wired twin tightens the gate.
+
+    A lookup that *raises* stays fail-closed -- an unverifiable model must not
+    satisfy a gate -- but it is logged distinctly (MET-728). "The blob is
+    genuinely missing" and "the twin was unreachable" both produced the same
+    ``gate_eval_cad_not_loadable`` line, and they want opposite responses:
+    regenerate the model, versus retry.
     """
     if twin is None or wp_id is None:
         return True
@@ -33,7 +40,13 @@ async def _is_loadable(twin: object, wp_id: object) -> bool:
         return True
     try:
         wp = await getter(UUID(str(wp_id)))
-    except Exception:  # noqa: BLE001 - a lookup failure means "not loadable"
+    except Exception as exc:  # noqa: BLE001 - unverifiable must not pass a gate
+        logger.warning(
+            "gate_eval_loadability_unknown",
+            wp_id=str(wp_id),
+            error=str(exc),
+            consequence="treated as not loadable; the gate will fail closed",
+        )
         return False
     if wp is None:
         return False
@@ -103,3 +116,78 @@ class ProjectGateEvaluator:
             since_ts=since_ts,
         )
         return present
+
+
+class TwinConstraintChecker:
+    """`ConstraintChecker` backed by the twin's constraint engine (MET-583).
+
+    Evaluates all constraints on the main branch, then scopes violations to
+    the run's project where the data allows it: a violation citing
+    ``work_product_ids`` counts only if at least one of them belongs to the
+    project; a violation citing none is global and always counts. (The engine
+    itself is not project-scoped today — see MET-583.)
+    """
+
+    def __init__(self, twin: object, backend: ProjectBackend | None = None) -> None:
+        self._twin = twin
+        self._backend = backend
+
+    async def _project_wp_ids(self, project_id: str | None) -> set[str] | None:
+        """The project's work-product ids, or None when unscopable."""
+        if not project_id or self._backend is None:
+            return None
+        try:
+            project = await self._backend.get_project(project_id)
+        except Exception as exc:  # noqa: BLE001 - scoping is best-effort
+            # MET-728: None means "unscopable", and unscopable means EVERY
+            # violation counts as in-scope -- so the gate gets stricter. Safe
+            # direction, but a design flow could fail its constraint gate
+            # because a project lookup blipped, and nothing recorded that
+            # scoping was even attempted.
+            logger.warning(
+                "gate_eval_project_scoping_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="all violations counted as in-scope; the gate fails closed",
+            )
+            return None
+        if project is None:
+            return None
+        return {str(getattr(wp, "id", "")) for wp in project.work_products}
+
+    async def check(self, project_id: str | None) -> ConstraintReport:
+        evaluate = getattr(self._twin, "evaluate_constraints", None)
+        if evaluate is None:
+            return ConstraintReport(checked=False)
+        result = await evaluate(branch="main")
+        scope = await self._project_wp_ids(project_id)
+
+        def _in_scope(violation: object) -> bool:
+            wp_ids = [str(w) for w in getattr(violation, "work_product_ids", []) or []]
+            if not wp_ids or scope is None:
+                return True  # global violation, or nothing to scope against
+            return any(w in scope for w in wp_ids)
+
+        def _fmt(violation: object) -> str:
+            name = getattr(violation, "constraint_name", "?")
+            message = getattr(violation, "message", "")
+            return f"{name}: {message}" if message else str(name)
+
+        violations = [_fmt(v) for v in result.violations if _in_scope(v)]
+        warnings = [_fmt(v) for v in result.warnings if _in_scope(v)]
+        report = ConstraintReport(
+            checked=True,
+            passed=not violations,
+            evaluated_count=int(getattr(result, "evaluated_count", 0)),
+            violations=violations,
+            warnings=warnings,
+        )
+        logger.info(
+            "gate_eval_constraints",
+            project_id=project_id,
+            passed=report.passed,
+            violations=len(violations),
+            warnings=len(warnings),
+            evaluated=report.evaluated_count,
+        )
+        return report

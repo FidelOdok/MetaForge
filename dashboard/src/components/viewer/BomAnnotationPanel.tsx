@@ -3,9 +3,7 @@ import { ExternalLink, Package } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useBom } from '../../hooks/use-bom';
 import { useTwinNode } from '../../hooks/use-twin';
-import { useScopedChat } from '../../hooks/use-scoped-chat';
 import { StatusBadge } from '../shared/StatusBadge';
-import { NodeChatPanel } from '../chat/integrations/NodeChatPanel';
 import { NodeProposals } from './NodeProposals';
 
 export function BomAnnotationPanel() {
@@ -45,22 +43,6 @@ export function BomAnnotationPanel() {
       null
     );
   }, [partInfo, bomComponents]);
-
-  const chat = useScopedChat({
-    scopeKind: 'digital-twin-node',
-    entityId: nodeId ?? selectedMeshName ?? '',
-    label: partInfo?.name ?? 'Selected Part',
-  });
-
-  // Prepend the selected-part context so the in-loop agent knows exactly which
-  // part the comment is about (name, mesh, twin node) — this is what makes
-  // "click a part + comment → agent" collaboration work (MET-548).
-  const sendWithPartContext = (content: string) => {
-    const ctx =
-      `[Design context — the user is commenting on part "${partInfo?.name}" ` +
-      `(mesh ${selectedMeshName}${nodeId ? `, twin node ${nodeId}` : ''}) in the 3D model.]`;
-    chat.sendMessage(`${ctx}\n\n${content}`);
-  };
 
   if (!selectedMeshName || !partInfo) {
     return (
@@ -158,25 +140,6 @@ export function BomAnnotationPanel() {
 
       {/* Pending design-change proposals affecting this node (gated apply) */}
       <NodeProposals nodeId={nodeId} />
-
-      {/* Chat panel scoped to node — comments carry the selected-part context */}
-      <div className="flex flex-1 flex-col p-4">
-        <div className="mb-2 flex items-center gap-1.5 rounded-md bg-blue-500/10 px-2 py-1 text-xs text-blue-500 dark:text-blue-300">
-          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
-            chat
-          </span>
-          Commenting on <span className="font-semibold">{partInfo.name}</span> — the agent sees this part
-        </div>
-        <NodeChatPanel
-          nodeId={nodeId ?? selectedMeshName}
-          nodeName={partInfo.name}
-          thread={chat.thread}
-          messages={chat.messages}
-          isTyping={chat.isTyping}
-          onSendMessage={sendWithPartContext}
-          onCreateThread={chat.createThread}
-        />
-      </div>
     </div>
   );
 }

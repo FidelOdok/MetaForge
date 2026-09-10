@@ -87,7 +87,7 @@ export function TwinView({
         {loaded && projects.length === 0 && !err ? (
           <EmptyState
             title="No projects yet."
-            hints={["Start a design in chat (^T), and projects show up here"]}
+            hints={["Start a design in chat (Ctrl+T), and projects show up here"]}
           />
         ) : null}
         {projects.slice(0, 6).map((p, i) => (

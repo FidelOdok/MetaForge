@@ -96,6 +96,34 @@ class GateEvaluator(Protocol):
     async def present_types(self, project_id: str | None, since_ts: float) -> set[str]: ...
 
 
+@dataclass
+class ConstraintReport:
+    """Constraint-engine state at a gate (MET-583).
+
+    ``checked`` is False when no checker was wired or evaluation failed —
+    constraint state must never crash a run, so an unchecked report always
+    reads as passing.
+    """
+
+    checked: bool = False
+    passed: bool = True
+    evaluated_count: int = 0
+    violations: list[str] = field(default_factory=list)  # ERROR severity
+    warnings: list[str] = field(default_factory=list)
+
+
+@runtime_checkable
+class ConstraintChecker(Protocol):
+    """Evaluates a project's recorded constraints for gate review (MET-583).
+
+    Backed in production by the twin's constraint engine
+    (``TwinAPI.evaluate_constraints``); ``project_id`` scopes the violations
+    to the run's project where the constraint data allows it.
+    """
+
+    async def check(self, project_id: str | None) -> ConstraintReport: ...
+
+
 class GateCoordinator:
     """Bridges async gate waits to synchronous run-store transitions.
 
@@ -142,7 +170,12 @@ class GateCoordinator:
             fut.set_exception(FlowCanceled(run_id))
 
 
-def _gate_reason(phase: Phase, outcome: PhaseOutcome, readiness: ReadinessReport) -> str:
+def _gate_reason(
+    phase: Phase,
+    outcome: PhaseOutcome,
+    readiness: ReadinessReport,
+    constraints: ConstraintReport | None = None,
+) -> str:
     """Human-facing reason shown while a run waits at a gate."""
     gate = phase.gate
     label = gate.name if gate else phase.title
@@ -154,6 +187,21 @@ def _gate_reason(phase: Phase, outcome: PhaseOutcome, readiness: ReadinessReport
             f" | Deliverables present: {readiness.present or '—'};"
             f" missing: {readiness.missing or 'none'}"
         )
+    # MET-583: surface real constraint state to the approver at every gate,
+    # whether or not this gate enforces it.
+    if constraints is not None and constraints.checked:
+        if constraints.violations or constraints.warnings:
+            parts = []
+            if constraints.violations:
+                parts.append(
+                    f"{len(constraints.violations)} violation(s): "
+                    + "; ".join(constraints.violations[:5])
+                )
+            if constraints.warnings:
+                parts.append(f"{len(constraints.warnings)} warning(s)")
+            head += " | Constraints: " + " — ".join(parts)
+        else:
+            head += f" | Constraints: OK ({constraints.evaluated_count} evaluated)"
     return head[:2000]
 
 
@@ -172,11 +220,13 @@ class DesignFlowExecutor:
         brain: PhaseBrain,
         coordinator: GateCoordinator,
         gate_evaluator: GateEvaluator | None = None,
+        constraint_checker: ConstraintChecker | None = None,
     ) -> None:
         self._store = store
         self._brain = brain
         self._coordinator = coordinator
         self._evaluator = gate_evaluator
+        self._constraint_checker = constraint_checker
 
     async def run(self, run_id: str) -> None:
         """Drive ``run_id`` through its flow to a terminal state.
@@ -246,10 +296,31 @@ class DesignFlowExecutor:
                 self._store.fail(run_id, msg)
                 return
 
+            # MET-583 constraint-as-gate-criteria: evaluate the project's
+            # recorded constraints. Surfaced in the gate reason at every gate;
+            # gates with enforce_constraints fail-fast on ERROR violations,
+            # same contract as missing deliverables.
+            constraints = await self._constraints(ctx)
+            if gate.enforce_constraints and constraints.checked and not constraints.passed:
+                msg = (
+                    f"Gate '{gate.name}' not ready — {len(constraints.violations)} "
+                    f"constraint violation(s): {'; '.join(constraints.violations[:10])}"
+                )
+                logger.warning(
+                    "design_flow_gate_constraints_failed",
+                    run_id=run_id,
+                    gate=gate.name,
+                    violations=len(constraints.violations),
+                )
+                self._store.fail(run_id, msg)
+                return
+
             # Register the waiter BEFORE moving to awaiting_approval so a fast
             # approval can't race ahead of the future.
             self._coordinator.register(run_id)
-            self._store.request_approval(run_id, reason=_gate_reason(phase, outcome, readiness))
+            self._store.request_approval(
+                run_id, reason=_gate_reason(phase, outcome, readiness, constraints)
+            )
             logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name)
             decision = await self._coordinator.wait(run_id)
             if decision is ApprovalDecision.REJECT:
@@ -281,6 +352,16 @@ class DesignFlowExecutor:
             missing=missing,
             checked=True,
         )
+
+    async def _constraints(self, ctx: FlowContext) -> ConstraintReport:
+        """Evaluate the project's constraints for gate review (best-effort)."""
+        if self._constraint_checker is None:
+            return ConstraintReport(checked=False)
+        try:
+            return await self._constraint_checker.check(ctx.project_id)
+        except Exception as exc:  # noqa: BLE001 - constraint state must not crash the run
+            logger.warning("design_flow_constraint_check_error", error=str(exc))
+            return ConstraintReport(checked=False)
 
     @staticmethod
     def _summarize(flow: FlowDefinition, ctx: FlowContext) -> dict[str, object]:

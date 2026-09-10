@@ -90,6 +90,16 @@ class ChatBackend(ABC):
     @abstractmethod
     async def update_thread_timestamp(self, thread_id: str, timestamp: datetime) -> None: ...
 
+    @abstractmethod
+    async def update_thread_scope(
+        self,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None: ...
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation
@@ -224,6 +234,22 @@ class InMemoryChatBackend(ChatBackend):
         if thread is not None:
             thread.last_message_at = timestamp
 
+    async def update_thread_scope(
+        self,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None:
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            return None
+        thread.channel_id = channel_id
+        thread.scope_kind = scope_kind
+        thread.scope_entity_id = scope_entity_id
+        return thread
+
 
 # ---------------------------------------------------------------------------
 # PostgreSQL implementation
@@ -353,6 +379,25 @@ class PgChatBackend(ChatBackend):
 
         async with get_session() as session:
             await self._repo.update_thread_timestamp(session, thread_id, timestamp)
+
+    async def update_thread_scope(
+        self,
+        thread_id: str,
+        *,
+        channel_id: str,
+        scope_kind: str,
+        scope_entity_id: str,
+    ) -> ChatThreadRecord | None:
+        from api_gateway.db.engine import get_session
+
+        async with get_session() as session:
+            return await self._repo.update_thread_scope(
+                session,
+                thread_id,
+                channel_id=channel_id,
+                scope_kind=scope_kind,
+                scope_entity_id=scope_entity_id,
+            )
 
 
 # ---------------------------------------------------------------------------

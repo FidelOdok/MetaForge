@@ -38,6 +38,78 @@ If you need fallback to fail loudly instead of silently, set
 in the gateway environment — the server then refuses to start
 without them.
 
+## `knowledge.ingest` reports success but `knowledge.search` finds nothing
+
+**Symptom:** An ingest returns `chunks_indexed = N` (N > 0), yet a
+follow-up `knowledge.search` for the same content returns zero hits.
+
+**Cause:** LightRAG's `ainsert` can fail to persist the chunk vectors
+*without raising* — an embedding or KG-extraction error inside its
+pipeline is swallowed and the call still returns normally. `ingest`
+used to report `chunks_indexed` straight from the submitted chunk list,
+so a silent write failure was indistinguishable from success.
+
+**Behaviour now:** `LightRAGKnowledgeService.ingest` reads the store
+back after `ainsert` (`_count_persisted_chunks`) and confirms the
+chunks actually landed:
+
+- **0 persisted** while chunks were produced → ingest raises and logs
+  `lightrag_ingest_not_persisted` (with `expected_chunks` /
+  `persisted_chunks`), so the tool surfaces an error envelope instead of
+  a phantom success. Retry, or check why the write failed.
+- **Fewer persisted than produced** → ingest still succeeds but logs
+  `lightrag_ingest_partial_persist` for observability.
+
+**Diagnosis:** query the store directly and check LightRAG's doc status:
+
+```sql
+SELECT count(*) FROM lightrag_vdb_chunks
+WHERE workspace = 'lightrag'
+  AND file_path::jsonb->>'src' = '<your source_path>';
+
+SELECT id, status, error_msg FROM lightrag_doc_status
+WHERE workspace = 'lightrag' ORDER BY updated_at DESC LIMIT 10;
+```
+
+If the embedding worker is the culprit, the gateway logs a matching
+error around the ingest — filter Loki on
+`scope_name = "digital_twin.knowledge.lightrag_service"`.
+
+## Every `knowledge.search` fails with `invalid input syntax for type json`
+
+**Symptom:** all knowledge searches in a workspace error out with a
+Postgres message like `invalid input syntax for type json … Token "…" is
+invalid`, regardless of query or filters.
+
+**Cause:** a row in `lightrag_vdb_chunks` whose `file_path` is not the
+encoded-JSON metadata blob the read paths parse. The known writer of
+such rows is **lightrag-hku 1.5.x**, which basenames `file_path` on
+write (keeps only the part after the last `/`) — `pyproject.toml` pins
+`lightrag-hku>=1.4,<1.5` for exactly this reason (MET-577). One bad row
+used to make every `file_path::jsonb` cast in the workspace fatal.
+
+**Behaviour now:** the casting queries prefilter to JSON-shaped rows
+(`_JSON_FILE_PATH_GUARD` in `lightrag_service.py`), so garbage rows are
+invisible rather than fatal, and the post-ingest persistence read-back
+matches on chunk **id** without casting at all.
+
+**Diagnosis / cleanup:** find (and, after inspection, remove) mangled
+rows:
+
+```sql
+SELECT id, left(file_path, 80) FROM lightrag_vdb_chunks
+WHERE file_path !~ '^\s*[\[{"]';
+```
+
+Also verify the installed LightRAG version matches the pin in **every**
+container that ingests (gateway *and* `mcp-http` sidecar — they build
+from the same Dockerfile but may have been built at different times):
+
+```bash
+docker exec metaforge-gateway-1 pip show lightrag-hku | grep Version
+docker exec metaforge-mcp-http-1 pip show lightrag-hku | grep Version
+```
+
 ## `.mcp.json` drift breaks `test_mcp_json_config`
 
 **Symptom:** `pytest tests/unit/test_mcp_json_config.py` fails with:
@@ -202,6 +274,44 @@ version. Common after switching branches or pulling.
 find . -name __pycache__ -type d -prune -exec rm -rf {} +
 pytest
 ```
+
+## `pytest` stalls near the very end (98%+), then finishes
+
+**Symptom:** `pytest tests/unit` reaches ~98%, then sits there for
+30-50 seconds with the wall clock climbing but no CPU time accruing.
+`/proc/<pid>` shows state `S`, blocked on `futex_wait_queue`, with a
+pile of threads alive. It reads exactly like a deadlock, but the run
+does eventually finish.
+
+**Cause:** `api_gateway/server.py` calls `init_observability()` at
+**module** scope, so merely importing the app stands up three live OTLP
+exporters aimed at `OTEL_EXPORTER_OTLP_ENDPOINT`, which defaults to
+`http://localhost:4317`. With no collector listening — a test run, a
+laptop without the observability stack — the batch span/metric/log
+processors spend the whole of interpreter shutdown trying to flush to a
+dead endpoint. Measured on the full unit suite: **202s with export on,
+101s with it off**, on identical code.
+
+**Fix:** none needed; `tests/conftest.py` sets
+`METAFORGE_OTEL_EXPORT=off` before any app import. If you see this
+stall, check that line still exists —
+`test_export_is_off_for_this_run` fails loudly if it is removed.
+
+To profile telemetry deliberately, set `METAFORGE_OTEL_EXPORT=on` and
+expect the suite to take about twice as long.
+
+## Telemetry env switches
+
+Two switches, and the difference matters:
+
+| Variable | Effect | Use it when |
+|----------|--------|-------------|
+| `METAFORGE_OTEL_EXPORT=off` | Builds no exporters. Tracing stays fully functional, so instrumentation still records spans — anything that installs its own span processor keeps working. | You have no collector: tests, local dev, CI |
+| `OTEL_SDK_DISABLED=true` | The OpenTelemetry-standard kill switch. Turns the SDK off entirely, so code records **nothing**. | You want no telemetry at all |
+
+Reaching for `OTEL_SDK_DISABLED` when you only meant "don't export" is
+the trap: it also makes the SDK hand out no-op tracers, which silently
+breaks any test that asserts on span attributes.
 
 ## When to escalate
 

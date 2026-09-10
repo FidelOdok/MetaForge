@@ -50,6 +50,17 @@ class GenerateCadInput(BaseModel):
         default="cadquery",
         description="CAD backend to use. CadQuery is lighter and recommended; FreeCAD as fallback.",
     )
+    project_id: str | None = Field(
+        default=None,
+        description="Project UUID to link the resulting work product to, when committed",
+    )
+    commit: bool = Field(
+        default=True,
+        description=(
+            "Persist the generated geometry into the Twin via twin.commit_geometry "
+            "immediately (best-effort — failure is reported on the output, not raised)"
+        ),
+    )
 
 
 class GenerateCadOutput(BaseModel):
@@ -67,3 +78,17 @@ class GenerateCadOutput(BaseModel):
         default_factory=dict, description="Parameters passed to FreeCAD"
     )
     material: str = Field(..., description="Material used")
+    committed: bool = Field(
+        default=False,
+        description="Whether the geometry was persisted into the Twin as a cad_model work product",
+    )
+    twin_node_id: str | None = Field(
+        default=None, description="Twin node ID of the committed cad_model, when committed"
+    )
+    model_url: str | None = Field(
+        default=None, description="Viewer URL of the committed cad_model, when committed"
+    )
+    commit_error: str | None = Field(
+        default=None,
+        description="Set when commit=True was requested but persistence was skipped or failed",
+    )

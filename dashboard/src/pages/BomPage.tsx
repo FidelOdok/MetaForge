@@ -2,89 +2,46 @@ import { useState, useMemo } from 'react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { useBom } from '../hooks/use-bom';
-import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
-import { useScopedChat } from '../hooks/use-scoped-chat';
-import { ComponentChatPanel } from '../components/chat/integrations/ComponentChatPanel';
+import { useActiveProject } from '../hooks/use-active-project';
 import type { BomComponent } from '../types/bom';
 
 type SortField = 'designator' | 'partNumber' | 'description' | 'manufacturer' | 'quantity' | 'unitPrice' | 'status';
 type SortDir = 'asc' | 'desc';
 
 function BomRow({ component }: { component: BomComponent }) {
-  const [chatOpen, setChatOpen] = useState(false);
-
-  const chat = useScopedChat({
-    scopeKind: 'bom-entry',
-    entityId: component.id,
-    defaultAgentCode: 'SC',
-    label: component.partNumber,
-  });
-
   return (
-    <>
-      <tr
-        className="hover:bg-[#282a30] cursor-default"
-        style={{ height: '36px', borderBottom: '1px solid rgba(65,72,90,0.1)' }}
-      >
-        <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
-          {component.designator}
-        </td>
-        <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
-          {component.partNumber}
-        </td>
-        <td className="px-3 text-xs text-on-surface-variant">
-          {component.description}
-        </td>
-        <td className="px-3 text-xs text-on-surface-variant whitespace-nowrap">
-          {component.manufacturer}
-        </td>
-        <td className="px-3 text-right font-mono text-xs text-on-surface">
-          {component.quantity}
-        </td>
-        <td className="px-3 text-right font-mono text-xs text-on-surface">
-          ${component.unitPrice.toFixed(2)}
-        </td>
-        <td className="px-3">
-          <StatusBadge status={component.status} />
-        </td>
-        <td className="px-3">
-          <button
-            type="button"
-            onClick={() => setChatOpen(!chatOpen)}
-            className="flex items-center gap-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-              {chatOpen ? 'chat_bubble' : 'chat_bubble_outline'}
-            </span>
-          </button>
-        </td>
-      </tr>
-      {chatOpen && (
-        <tr>
-          <td
-            colSpan={8}
-            className="px-3 py-2"
-            style={{ borderBottom: '1px solid rgba(65,72,90,0.1)' }}
-          >
-            <ComponentChatPanel
-              componentId={component.id}
-              componentName={component.partNumber}
-              thread={chat.thread}
-              messages={chat.messages}
-              isTyping={chat.isTyping}
-              onSendMessage={chat.sendMessage}
-              onCreateThread={chat.createThread}
-            />
-          </td>
-        </tr>
-      )}
-    </>
+    <tr
+      className="hover:bg-[#282a30] cursor-default"
+      style={{ height: '36px', borderBottom: '1px solid rgba(65,72,90,0.1)' }}
+    >
+      <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
+        {component.designator}
+      </td>
+      <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
+        {component.partNumber}
+      </td>
+      <td className="px-3 text-xs text-on-surface-variant">
+        {component.description}
+      </td>
+      <td className="px-3 text-xs text-on-surface-variant whitespace-nowrap">
+        {component.manufacturer}
+      </td>
+      <td className="px-3 text-right font-mono text-xs text-on-surface">
+        {component.quantity}
+      </td>
+      <td className="px-3 text-right font-mono text-xs text-on-surface">
+        ${component.unitPrice.toFixed(2)}
+      </td>
+      <td className="px-3">
+        <StatusBadge status={component.status} />
+      </td>
+    </tr>
   );
 }
 
 export function BomPage() {
-  const [projectId, setProjectId] = useState('');
-  const { data: components, isLoading } = useBom(projectId || undefined);
+  const { activeProjectId } = useActiveProject();
+  const { data: components, isLoading } = useBom(activeProjectId ?? undefined);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -237,7 +194,6 @@ export function BomPage() {
             <option value="alternate_needed">Alternate Needed</option>
           </select>
         </div>
-        <ProjectScopePicker value={projectId} onChange={setProjectId} />
         {(search || statusFilter) && (
           <span className="font-mono text-xs text-on-surface-variant">
             {sorted.length} of {items.length}
@@ -272,7 +228,11 @@ export function BomPage() {
       {!isLoading && items.length === 0 && (
         <EmptyState
           title="No components"
-          description="BOM components will appear here when a project is loaded."
+          description={
+            activeProjectId
+              ? 'This project has no BOM components yet.'
+              : 'Select a project, or run an agent, to populate the bill of materials.'
+          }
         />
       )}
 
@@ -317,10 +277,6 @@ export function BomPage() {
                     <SortIcon field={field} />
                   </th>
                 ))}
-                <th
-                  className="px-3"
-                  style={{ height: '32px', borderBottom: '1px solid rgba(65,72,90,0.2)', width: '40px' }}
-                />
               </tr>
             </thead>
             <tbody>

@@ -5,16 +5,25 @@ import * as THREE from 'three';
 import { useViewerStore } from '../../store/viewer-store';
 import { useTransientTransform } from '../../store/transient-transform-store';
 import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
+import { computeExplodeOffset } from '../../lib/explode';
 import { TransformGizmo } from './TransformGizmo';
+import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
 const HIGHLIGHT_COLOR = new THREE.Color(0x3b82f6);
 const HIGHLIGHT_OPACITY = 0.4;
+const IDENTITY_QUATERNION = new THREE.Quaternion();
+const IDENTITY_SCALE_VECTOR = new THREE.Vector3(1, 1, 1);
 
 interface SceneContentsProps {
   glbUrl: string;
   manifest: ModelManifest;
   onPartClick?: (part: PartInfo) => void;
+  /** Boolean-cut cutter preview (MET-612): when set, every mesh renders with
+   * this shared translucent material instead of its normal per-part one —
+   * Tinkercad's translucent-red hole preview. Implies non-interactive: a
+   * tinted overlay is a passive preview, so clicks don't select/highlight. */
+  overlayTint?: { color: string; opacity: number };
 }
 
 interface MeshEntry {
@@ -23,9 +32,10 @@ interface MeshEntry {
   meshName: string;
   originalMaterial: THREE.Material | THREE.Material[];
   center: THREE.Vector3;
+  boundingBox: { min: [number, number, number]; max: [number, number, number] };
 }
 
-export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsProps) {
+export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: SceneContentsProps) {
   const { scene } = useGLTF(glbUrl);
   const groupRef = useRef<THREE.Group>(null);
   const meshMapRef = useRef<Map<string, MeshEntry>>(new Map());
@@ -33,6 +43,7 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
   const explodeFactor = useViewerStore((s) => s.explodeFactor);
+  const explodeDirection = useViewerStore((s) => s.explodeDirection);
 
   // Rigid-group manipulation (MET-519). Groups resolve against the *actual*
   // GLB scene mesh names (captured below), not the manifest part names — the
@@ -47,7 +58,15 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   );
   const selectedGroup = useTransientTransform((s) => s.selectedGroup);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
+  const gizmoMode = useTransientTransform((s) => s.mode);
   const setDelta = useTransientTransform((s) => s.setDelta);
+  const setRotationDelta = useTransientTransform((s) => s.setRotationDelta);
+  const setScaleDelta = useTransientTransform((s) => s.setScaleDelta);
+  const handleGizmoChange = (mode: TransformMode, value: Vec3) => {
+    if (mode === 'translate') setDelta(value);
+    else if (mode === 'rotate') setRotationDelta(value);
+    else setScaleDelta(value);
+  };
   const [gizmoCentroid, setGizmoCentroid] = useState<[number, number, number] | null>(null);
 
   const memberMeshes = useMemo(() => {
@@ -66,18 +85,57 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
     [],
   );
 
-  // Compute assembly center for exploded view
-  const assemblyCenter = useMemo(() => {
+  const tintMaterial = useMemo(
+    () =>
+      overlayTint
+        ? new THREE.MeshStandardMaterial({
+            color: overlayTint.color,
+            transparent: true,
+            opacity: overlayTint.opacity,
+            depthWrite: false,
+          })
+        : null,
+    [overlayTint?.color, overlayTint?.opacity],
+  );
+
+  // Whole-scene bounding box — backs both the exploded-view center below and
+  // modelBounds (camera auto-fit + grid sizing), so it's computed once.
+  const assemblyBox = useMemo(() => {
     const box = new THREE.Box3();
     scene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         box.expandByObject(child);
       }
     });
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    return center;
+    return box;
   }, [scene]);
+
+  // Compute assembly center for exploded view
+  const assemblyCenter = useMemo(() => {
+    const center = new THREE.Vector3();
+    assemblyBox.getCenter(center);
+    return center;
+  }, [assemblyBox]);
+
+  // Publish the model's real extent so the camera can fit itself to whatever
+  // is actually loaded, and the ground grid can be sized/positioned to match
+  // — previously both were fixed regardless of the model, which could make an
+  // orbit look like the (large, static) grid was rotating rather than the
+  // (possibly off-center or oddly scaled) object (MET-620). Only the primary
+  // model drives this — a boolean-cut cutter preview is a secondary overlay.
+  const setModelBounds = useViewerStore((s) => s.setModelBounds);
+  useEffect(() => {
+    if (overlayTint || assemblyBox.isEmpty()) return;
+    const center = new THREE.Vector3();
+    assemblyBox.getCenter(center);
+    const size = new THREE.Vector3();
+    assemblyBox.getSize(size);
+    setModelBounds({
+      center: [center.x, center.y, center.z],
+      radius: Math.max(size.length() / 2, 1),
+      groundY: assemblyBox.min.y,
+    });
+  }, [assemblyBox, overlayTint, setModelBounds]);
 
   // Build mesh map on mount
   useEffect(() => {
@@ -106,6 +164,10 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
           meshName,
           originalMaterial: mesh.material,
           center,
+          boundingBox: {
+            min: [box.min.x, box.min.y, box.min.z],
+            max: [box.max.x, box.max.y, box.max.z],
+          },
         });
         orderedNames.push(meshName);
       }
@@ -116,17 +178,19 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
     setSceneMeshNames(orderedNames);
   }, [scene, manifest]);
 
-  // Update highlight and visibility
+  // Update highlight, visibility, and tint
   useEffect(() => {
     for (const [name, entry] of meshMapRef.current) {
       entry.mesh.visible = !hiddenMeshes.has(name);
-      if (name === selectedMeshName) {
+      if (tintMaterial) {
+        entry.mesh.material = tintMaterial;
+      } else if (name === selectedMeshName) {
         entry.mesh.material = highlightMaterial;
       } else {
         entry.mesh.material = entry.originalMaterial;
       }
     }
-  }, [selectedMeshName, hiddenMeshes, highlightMaterial]);
+  }, [selectedMeshName, hiddenMeshes, highlightMaterial, tintMaterial]);
 
   // Gizmo centroid = mean of the selected group's member-mesh centers (MET-519).
   useEffect(() => {
@@ -153,24 +217,38 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
   useEffect(() => {
     const targets = new Map<string, THREE.Vector3>();
     for (const [name, entry] of meshMapRef.current) {
-      const offset = entry.center.clone().sub(assemblyCenter).multiplyScalar(explodeFactor * 2);
-      targets.set(name, offset);
+      const fromCenter = entry.center.clone().sub(assemblyCenter);
+      // Toggling direction in ExplodedViewControls used to change the label
+      // only -- the explosion itself always ran the radial math regardless.
+      const offset = computeExplodeOffset(fromCenter, explodeDirection, explodeFactor);
+      targets.set(name, new THREE.Vector3(offset.x, offset.y, offset.z));
     }
     targetPositions.current = targets;
-  }, [explodeFactor, assemblyCenter]);
+  }, [explodeFactor, explodeDirection, assemblyCenter]);
+
+  const tmpEuler = useRef(new THREE.Euler());
+  const tmpQuat = useRef(new THREE.Quaternion());
+  const tmpScale = useRef(new THREE.Vector3());
 
   useFrame(() => {
-    // Read the live drag delta without subscribing (avoids per-frame React renders).
-    const delta = useTransientTransform.getState().delta;
+    // Read the live drag deltas without subscribing (avoids per-frame React renders).
+    const { delta, rotationDelta, scaleDelta } = useTransientTransform.getState();
+    const targetQuat = tmpQuat.current.setFromEuler(
+      tmpEuler.current.set(rotationDelta[0], rotationDelta[1], rotationDelta[2]),
+    );
+    const targetScale = tmpScale.current.set(scaleDelta[0], scaleDelta[1], scaleDelta[2]);
     for (const [name, entry] of meshMapRef.current) {
       const base = targetPositions.current.get(name);
       const t = tmpTarget.current.set(base?.x ?? 0, base?.y ?? 0, base?.z ?? 0);
-      if (memberMeshes.has(name)) {
+      const isMember = memberMeshes.has(name);
+      if (isMember) {
         t.x += delta[0];
         t.y += delta[1];
         t.z += delta[2];
       }
       entry.mesh.position.lerp(t, 0.3);
+      entry.mesh.quaternion.slerp(isMember ? targetQuat : IDENTITY_QUATERNION, 0.3);
+      entry.mesh.scale.lerp(isMember ? targetScale : IDENTITY_SCALE_VECTOR, 0.3);
     }
   });
 
@@ -187,15 +265,17 @@ export function SceneContents({ glbUrl, manifest, onPartClick }: SceneContentsPr
         meshName,
         name: entry.name,
         nodeId,
-        boundingBox: entry.center ? undefined : undefined,
+        boundingBox: entry.boundingBox,
       });
     }
   };
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} onClick={handleClick} />
-      {gizmoCentroid && <TransformGizmo centroid={gizmoCentroid} onDelta={setDelta} />}
+      <primitive object={scene} onClick={overlayTint ? undefined : handleClick} />
+      {gizmoCentroid && (
+        <TransformGizmo centroid={gizmoCentroid} mode={gizmoMode} onChange={handleGizmoChange} />
+      )}
     </group>
   );
 }

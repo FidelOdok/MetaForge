@@ -1,0 +1,28 @@
+{
+  "id": "l0_shelf_design",
+  "level": 0,
+  "title": "Equipment shelf (default design_v1 vertical)",
+  "flow": "design_v1",
+  "goal": "A flat aluminum equipment shelf, 200 mm x 120 mm, that carries a 1.5 kg bench instrument inside a 19-inch rack drawer. It must survive 4x the static instrument load with a safety factor >= 2.0 and keep mass under 150 g. Use the CAD tools to author and commit the shelf geometry, and validate it with FEA.",
+  "definition_of_done": {
+    "requirements": [
+      "static load quantified",
+      "safety-factor target >= 2 stated",
+      "mass budget stated"
+    ],
+    "design": [
+      "shelf geometry authored and committed to the twin as a viewable cad_model",
+      "material (aluminum grade) and thickness chosen with rationale"
+    ],
+    "simulation": [
+      "analysis run on the shelf",
+      "max stress / safety factor extracted",
+      "pass-fail verdict recorded against the SF>=2 requirement"
+    ]
+  },
+  "expected_deliverables": {
+    "design_decision": 1,
+    "cad_model": 1
+  },
+  "rubric": "mechanical"
+}

@@ -5,6 +5,7 @@
  */
 
 import { log } from "../log.js";
+import { NO_RUNTIME_IDLE_TIMEOUT } from "./client.js";
 
 export interface AgentStep {
   index?: number;
@@ -36,12 +37,29 @@ export interface ContextStats {
   utilization: number | null;
   components: ContextComponent[];
   estimated: boolean;
+  /** Real provider-reported turn usage (MET-596); present on the final emit. */
+  usage?: { input_tokens: number; output_tokens: number };
+  phase?: string;
+}
+
+/** The thread's scope was rescoped IN PLACE (MET-580) — by `/project`-equivalent
+ * on the gateway, or by the agent's `chat.set_project_scope` tool. Unlike a
+ * scope switch this client initiates, it can arrive mid-turn with no local
+ * trigger, so the client must render it from the event, not assume its own
+ * `/project` handler is the only source of a scope change. */
+export interface ScopeChanged {
+  scope_kind: string;
+  scope_entity_id: string;
+  project_name: string | null;
 }
 
 export type ChatEvent =
   | { type: "message.delta"; delta: string }
+  | { type: "agent.thinking"; delta: string; kind: "draft" | "reasoning" }
+  | { type: "agent.action_started"; tool: string }
   | { type: "agent.step"; step: AgentStep }
   | { type: "context.stats"; stats: ContextStats }
+  | { type: "scope.changed"; scope: ScopeChanged }
   | { type: "agent.done" }
   | { type: "error"; error: string }
   | { type: "other"; event: string; data: unknown };
@@ -70,10 +88,31 @@ export function parseEvent(raw: string): ChatEvent | null {
   switch (event) {
     case "message.delta":
       return { type: "message.delta", delta: String(data.delta ?? "") };
+    case "agent.thinking":
+      // MET-591/592: live typed model-text deltas — ephemeral (renders in
+      // the thinking line; the final message stays authoritative).
+      return {
+        type: "agent.thinking",
+        delta: String(data.delta ?? ""),
+        kind: data.kind === "reasoning" ? "reasoning" : "draft",
+      };
+    case "agent.action_started":
+      // MET-592: the model committed to a tool call — name known before
+      // arguments finish streaming or execution starts.
+      return { type: "agent.action_started", tool: String(data.tool ?? "") };
     case "agent.step":
       return { type: "agent.step", step: (data.step as AgentStep) ?? {} };
     case "context.stats":
       return { type: "context.stats", stats: data as unknown as ContextStats };
+    case "scope.changed":
+      return {
+        type: "scope.changed",
+        scope: {
+          scope_kind: String(data.scope_kind ?? ""),
+          scope_entity_id: String(data.scope_entity_id ?? ""),
+          project_name: data.project_name == null ? null : String(data.project_name),
+        },
+      };
     case "agent.done":
       return { type: "agent.done" };
     case "error":
@@ -93,11 +132,21 @@ export async function* streamThread(
   threadId: string,
   signal: AbortSignal,
   onOpen?: () => void,
+  // MET-593: resume cursor shared across reconnects — the caller keeps one
+  // object per conversation; we read lastId on connect and update it as
+  // id-stamped events arrive, so a reconnect replays exactly the gap.
+  resume?: { lastId: string | null },
 ): AsyncGenerator<ChatEvent> {
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  if (resume?.lastId) headers["Last-Event-ID"] = resume.lastId;
   const res = await fetch(`${base}/v1/chat/threads/${threadId}/stream`, {
     signal,
-    headers: { Accept: "text/event-stream" },
-  });
+    headers,
+    // MET-610: disable Bun's 5-min fetch idle timeout — a silent model call
+    // (codex lane streams no tokens) would otherwise sever the stream and
+    // force a reconnect cycle. Node's fetch ignores the unknown option.
+    ...NO_RUNTIME_IDLE_TIMEOUT,
+  } as RequestInit);
   if (!res.ok || !res.body) throw new Error(`chat stream -> ${res.status}`);
   onOpen?.();
 
@@ -113,6 +162,10 @@ export async function* streamThread(
       const raw = buf.slice(0, sep);
       buf = buf.slice(sep + 2);
       log.debug("sse.frame", { raw });
+      if (resume) {
+        const idLine = raw.split("\n").find((l) => l.startsWith("id:"));
+        if (idLine) resume.lastId = idLine.slice(3).trim();
+      }
       const ev = parseEvent(raw);
       // A delta event that parsed to no text is the fingerprint of an SSE
       // payload/parse mismatch — surface it loudly rather than silently drop it.

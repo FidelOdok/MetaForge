@@ -29,6 +29,78 @@ from twin_core.models.relationship import SubGraph
 from twin_core.models.version import Version, VersionDiff
 from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
+from twin_core.versioning.git_backend import GitVersionEngine
+
+DEFAULT_NEO4J_CONNECT_ATTEMPTS = 5
+"""Connect attempts before falling back (MET-710).
+
+A live incident: the gateway and Neo4j restarted together, the gateway resolved
+``neo4j`` a moment before its DNS entry existed, and it ran on the in-memory
+twin for 43 hours — ignoring 623 persisted nodes, with ``/health`` still
+reporting healthy. The proof that a retry is the right fix is in the same boot
+log: the *consolidation insight store*, which connects to the same URI slightly
+later in the lifespan, succeeded. The name was resolvable seconds afterwards.
+
+Five attempts with the backoff below span ~7.5s, which covers a container-DNS
+race without meaningfully delaying a boot where Neo4j is genuinely absent."""
+
+_NEO4J_CONNECT_BACKOFF = (0.5, 1.0, 2.0, 4.0)
+
+
+def neo4j_connect_attempts() -> int:
+    """Configured connect attempts; ``METAFORGE_NEO4J_CONNECT_ATTEMPTS``."""
+    raw = os.environ.get("METAFORGE_NEO4J_CONNECT_ATTEMPTS", "").strip()
+    if not raw:
+        return DEFAULT_NEO4J_CONNECT_ATTEMPTS
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_NEO4J_CONNECT_ATTEMPTS
+
+
+async def _connect_with_retry(
+    graph: Any,
+    uri: str,
+    logger: Any,
+    *,
+    attempts: int | None = None,
+    sleep: Any = None,
+) -> None:
+    """Connect to Neo4j, retrying transient failures. Re-raises the last error.
+
+    The caller decides what a final failure means (``create_from_env``'s
+    contract is to propagate, and the gateway then either fails fast or falls
+    back per ``METAFORGE_REQUIRE_NEO4J``) — this only removes the case where a
+    *momentary* DNS or startup race is treated as a permanent absence.
+    """
+    import asyncio
+
+    total = attempts if attempts is not None else neo4j_connect_attempts()
+    delay = sleep if sleep is not None else asyncio.sleep
+    last: Exception | None = None
+    for attempt in range(total):
+        try:
+            await graph.connect()
+            if attempt:
+                logger.info("neo4j_connect_recovered", uri=uri, attempt=attempt + 1)
+            return
+        except Exception as exc:  # noqa: BLE001 — retried, then re-raised below
+            last = exc
+            if attempt == total - 1:
+                break
+            wait = _NEO4J_CONNECT_BACKOFF[min(attempt, len(_NEO4J_CONNECT_BACKOFF) - 1)]
+            logger.warning(
+                "neo4j_connect_retrying",
+                uri=uri,
+                attempt=attempt + 1,
+                of=total,
+                retry_in_s=wait,
+                error=str(exc),
+            )
+            await delay(wait)
+    assert last is not None
+    logger.error("neo4j_connect_exhausted", uri=uri, attempts=total, error=str(last))
+    raise last
 
 
 @dataclass
@@ -285,6 +357,17 @@ class TwinAPI(ABC):
         """
         ...
 
+    @property
+    @abstractmethod
+    def graph(self) -> GraphEngine:
+        """The live graph engine.
+
+        Exposed (MET-630) so gateway bootstrap can construct a
+        ``GitRepoRegistry``/``GitVersionEngine`` against the same backing
+        graph without reaching into private state.
+        """
+        ...
+
     # --- Lifecycle ---
 
     @abstractmethod
@@ -339,6 +422,10 @@ class InMemoryTwinAPI(TwinAPI):
     @property
     def constraints(self) -> ConstraintEngine:
         return self._constraints
+
+    @property
+    def graph(self) -> GraphEngine:
+        return self._graph
 
     async def aclose(self) -> None:
         close = getattr(self._graph, "close", None)
@@ -401,6 +488,10 @@ class InMemoryTwinAPI(TwinAPI):
         - ``NEO4J_PASSWORD`` / ``METAFORGE_NEO4J_PASSWORD`` (default: ``password``)
         - ``METAFORGE_GRAPH_BACKEND`` — set to ``"neo4j"`` to force Neo4j even
           without ``NEO4J_URI``.
+        - ``METAFORGE_VERSION_BACKEND`` — set to ``"git"`` to back versioning
+          with a real git repository (see ``GitVersionEngine``) instead of
+          the default in-memory Version DAG. Requires
+          ``METAFORGE_VERSION_GIT_ROOT`` to point at a writable directory.
         """
         import structlog
 
@@ -424,13 +515,26 @@ class InMemoryTwinAPI(TwinAPI):
                 user=user,
                 password=password,
             )
-            await graph.connect()  # type: ignore[attr-defined]
+            await _connect_with_retry(graph, uri, _logger)
             _logger.info("twin_api_neo4j_connected", uri=uri)
         else:
             graph = InMemoryGraphEngine(collector=collector)
             _logger.info("twin_api_using_in_memory_backend")
 
-        version = InMemoryVersionEngine(graph)
+        version_backend = os.environ.get("METAFORGE_VERSION_BACKEND", "memory").lower()
+        version: VersionEngine
+        if version_backend == "git":
+            git_root = os.environ.get("METAFORGE_VERSION_GIT_ROOT")
+            if not git_root:
+                raise ValueError(
+                    "METAFORGE_VERSION_BACKEND=git requires METAFORGE_VERSION_GIT_ROOT "
+                    "to point at a writable directory for the version repo"
+                )
+            version = GitVersionEngine(graph, git_root)
+            _logger.info("twin_api_using_git_version_backend", repo_path=git_root)
+        else:
+            version = InMemoryVersionEngine(graph)
+
         constraints = InMemoryConstraintEngine(graph, collector=collector)
         return cls(graph=graph, version=version, constraints=constraints, collector=collector)
 
@@ -714,10 +818,11 @@ class InMemoryTwinAPI(TwinAPI):
     # --- Versioning ---
 
     async def create_branch(self, name: str, from_branch: str = "main") -> str:
-        if from_branch in self._version._branches:  # type: ignore[attr-defined]
-            head_id = self._version._branches[from_branch]  # type: ignore[attr-defined]
-            return await self._version.create_branch(name, from_version=head_id)
-        return await self._version.create_branch(name)
+        try:
+            head = await self._version.get_head(from_branch)
+        except KeyError:
+            return await self._version.create_branch(name)
+        return await self._version.create_branch(name, from_version=head.id)
 
     async def commit(self, branch: str, message: str, author: str) -> Version:
         return await self._version.commit(branch, message, [], author)

@@ -1,15 +1,25 @@
-"""Assembly export resolution (MET-10).
+"""Assembly export resolution (MET-10) and STEP export (MET-616).
 
 `export_model` on an `App::Part` assembly used to crash with
 `'App.Part' object has no attribute 'Shape'` — the container has no `.Shape` of
 its own. `_shape_leaves` flattens a container into its child leaf shapes so the
-export/measure path can build a compound. FreeCAD isn't in CI, so these exercise
-the pure traversal with duck-typed fakes (no FreeCAD, no `Part`).
+read-only measure/describe path can build a compound (MET-10).
+
+`export_object_step_bytes` (the STEP export path) does NOT use that compound:
+FreeCAD's raw `Shape.exportStep()` has no concept of Labels, so exporting a
+flattened compound collapsed every assembly into one anonymous STEP PRODUCT
+(MET-616). It instead passes the live object straight to the document-aware
+`Import.export()`, which writes one PRODUCT per object and preserves the
+assembly hierarchy.
+
+FreeCAD isn't in CI, so these exercise the pure traversal / call shape with
+duck-typed fakes (no FreeCAD, no `Part`, no `Import`).
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -93,3 +103,145 @@ class TestResolveShape:
         with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True):
             with pytest.raises(ValueError, match="no exportable geometry"):
                 ops._resolve_shape(_part(label="EmptyRig"))
+
+
+class _FakeImport:
+    """Records the object list `Import.export` was called with and writes a
+    marker file, so tests can assert on both without real FreeCAD."""
+
+    def __init__(self, written: bytes = b"STEP;fake-export;MANIFOLD_SOLID_BREP") -> None:
+        self.calls: list[list[object]] = []
+        self._written = written
+
+    def export(self, objs: list[object], path: str) -> None:
+        self.calls.append(objs)
+        with open(path, "wb") as fh:
+            fh.write(self._written)
+
+
+class _FakeReadShape:
+    """Stand-in for ``Part.Shape()`` used by the post-export roundtrip read."""
+
+    def __init__(self, solid_count: int) -> None:
+        self.Solids = [object()] * solid_count
+
+    def read(self, path: str) -> None:  # noqa: ARG002 -- path unused, path presence is the point
+        pass
+
+
+def _fake_part(solid_count: int) -> SimpleNamespace:
+    return SimpleNamespace(Shape=lambda: _FakeReadShape(solid_count))
+
+
+class TestExportObjectStepBytes:
+    """MET-616: export must go through the object-list ``Import`` module, not a
+    raw ``Shape.exportStep()`` on a flattened compound — the raw shape writer
+    has no concept of FreeCAD Labels, so an assembly's children all landed in
+    one anonymous PRODUCT and the multi-part structure was lost.
+    """
+
+    def test_requires_freecad(self, ops: FreecadOperations) -> None:
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.export_object_step_bytes(_leaf(_Shape()))
+
+    def test_empty_assembly_raises_before_exporting(self, ops: FreecadOperations) -> None:
+        fake_import = _FakeImport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(_part(label="EmptyRig"))
+        assert fake_import.calls == []  # never attempted the export
+
+    def test_exports_the_object_itself_not_a_flattened_compound(
+        self, ops: FreecadOperations
+    ) -> None:
+        """The whole point of MET-616: pass the live object (assembly or leaf)
+        straight to Import.export so it can write one PRODUCT per child,
+        instead of pre-flattening to a compound that has no Label identity."""
+        assembly = _part(_leaf(_Shape()), _leaf(_Shape()), label="TableAssembly")
+        fake_import = _FakeImport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(1)),
+        ):
+            result = ops.export_object_step_bytes(assembly)
+
+        assert fake_import.calls == [[assembly]]  # the container, not its leaves
+        assert result == b"STEP;fake-export;MANIFOLD_SOLID_BREP"
+
+    def test_single_leaf_object_also_goes_through_import_export(
+        self, ops: FreecadOperations
+    ) -> None:
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(1)),
+        ):
+            ops.export_object_step_bytes(leaf)
+
+        assert fake_import.calls == [[leaf]]
+
+    def test_written_step_with_no_solid_geometry_raises(self, ops: FreecadOperations) -> None:
+        """MET-652: live-caught a case where the source object's .Shape
+        looked valid (so the pre-export _shape_leaves check passed), but
+        Import.export wrote a STEP with only placement/context boilerplate --
+        a dangling SHAPE_REPRESENTATION referencing entities that were never
+        defined, no MANIFOLD_SOLID_BREP anywhere. That file was accepted as a
+        "successful" export and later broke every attempt to view it. The
+        written bytes must be checked too, not just the source object."""
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(
+            written=b"ISO-10303-21;HEADER;...no solids here...END-ISO-10303-21;"
+        )
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
+
+    def test_marker_present_but_roundtrip_read_finds_no_solids_raises(
+        self, ops: FreecadOperations
+    ) -> None:
+        """MET-652 (reopened): live re-caught the gap after the regex fix
+        shipped -- a 23,361-byte STEP that matched _STEP_SOLID_MARKER_RE (a
+        MANIFOLD_SOLID_BREP entity was present in the DATA section) yet
+        opened with zero solids, because the geometry that entity referenced
+        was itself dangling/undefined. The regex alone cannot catch this;
+        reading the file back through the kernel and counting real solids is
+        the only authoritative check."""
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(written=b"STEP;dangling-ref;MANIFOLD_SOLID_BREP")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(0)),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
+
+    def test_roundtrip_read_failure_is_treated_as_no_solids(self, ops: FreecadOperations) -> None:
+        """A STEP file so malformed the kernel can't even open it is exactly
+        as unusable as one with zero solids -- must not be swallowed as a
+        false "success"."""
+
+        class _BrokenPart:
+            @staticmethod
+            def Shape() -> Any:
+                raise RuntimeError("corrupt STEP")
+
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(written=b"STEP;fake-export;MANIFOLD_SOLID_BREP")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _BrokenPart),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)

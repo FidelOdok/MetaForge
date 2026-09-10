@@ -182,7 +182,10 @@ class TestMcpProtocol:
     def test_tool_execution_error(self) -> None:
         err = ToolExecutionError("calc.fea", "Mesh failed", duration_ms=123.4)
         assert err.code == TOOL_EXECUTION_ERROR
-        assert err.message == "Tool execution failed"
+        # MET-579: details ride in the message so every str(exc) consumer
+        # (bridge, agent observation, eval trace) sees the real cause.
+        assert err.message == "Tool execution failed: Mesh failed"
+        assert "Mesh failed" in str(err)
         assert err.data is not None
         assert err.data.tool_id == "calc.fea"
         assert err.data.details == "Mesh failed"

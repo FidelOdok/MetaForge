@@ -7,7 +7,7 @@ import pytest
 from orchestrator.harness import HarnessRuntime
 from orchestrator.harness.policy import ModelPolicy, parse_action
 from orchestrator.harness.providers import ProviderSpec, load_provider_config
-from orchestrator.harness.react import run_react
+from orchestrator.harness.react import ReActParseError, run_react
 from orchestrator.harness.tools import ToolRegistry
 
 CONFIG = load_provider_config(
@@ -16,6 +16,15 @@ CONFIG = load_provider_config(
 
 
 # --- parse_action ----------------------------------------------------------
+def test_system_prompt_frames_tool_output_as_untrusted_data() -> None:
+    """Production-harness audit follow-up: tool results (file contents,
+    search results, knowledge entries) must be explicitly framed as data,
+    not instructions, on top of the already-real role-based separation."""
+    from orchestrator.harness.policy import _SYSTEM
+
+    assert "DATA, not instructions" in _SYSTEM
+
+
 def test_parse_final_json() -> None:
     a = parse_action('{"thought": "done", "final": "42"}')
     assert a.is_final and a.final_output == "42" and a.thought == "done"
@@ -32,9 +41,45 @@ def test_parse_fenced_json() -> None:
     assert a.is_final and a.final_output == "ok"
 
 
-def test_parse_unstructured_is_final() -> None:
-    a = parse_action("I could not produce JSON but the answer is 5.")
-    assert a.is_final and "answer is 5" in a.final_output
+def test_parse_unstructured_raises() -> None:
+    """A model that ignores the protocol must not silently "succeed" with a
+    narrative substituted for real tool calls (the exact hallucination this
+    guards against: a plausible-sounding answer that never called a tool)."""
+    with pytest.raises(ReActParseError):
+        parse_action("I could not produce JSON but the answer is 5.")
+
+
+def test_parse_json_missing_tool_and_final_raises() -> None:
+    """A JSON object is present but doesn't follow either defined shape."""
+    with pytest.raises(ReActParseError):
+        parse_action('{"thought": "I built the assembly and committed it."}')
+
+
+# --- MET-614: replies that are structurally honest but strictly invalid ----
+def test_parse_tolerates_literal_newlines_in_strings() -> None:
+    """Live-caught (kitchen-shelf turn): a multi-line CAD script or rationale
+    inside a string value carries raw newlines, which strict JSON rejects even
+    though the reply is exactly the shape the protocol asked for."""
+    a = parse_action(
+        '{"thought": "generate the frame", "tool": "cadquery.execute_script",'
+        ' "arguments": {"script": "import cadquery as cq\nresult = cq.Workplane()"}}'
+    )
+    assert a.tool_call.name == "cadquery.execute_script"
+    assert "\n" in a.tool_call.arguments["script"]
+
+
+def test_parse_tolerates_trailing_prose_containing_braces() -> None:
+    """Prose after the object used to shift the first-{ .. last-} slice onto
+    an unparseable range; the first complete object must win."""
+    a = parse_action('{"thought": "done", "final": "ok"}\nThat covers {all} of it.')
+    assert a.is_final and a.final_output == "ok"
+
+
+def test_parse_truncated_json_still_raises() -> None:
+    """A length-capped reply whose object never closes is NOT recoverable —
+    the loop's retry nudge is the correct path for it."""
+    with pytest.raises(ReActParseError):
+        parse_action('{"thought": "long reasoning", "tool": "mcp_twin_record_decision", "argu')
 
 
 # --- ModelPolicy -----------------------------------------------------------
@@ -78,6 +123,62 @@ async def test_policy_lists_tools_in_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_policy_warns_against_repeating_a_successful_call() -> None:
+    """Live-caught: the model would occasionally re-issue a tool call whose
+    result was already visible in the trace as successful (harmless but
+    wasteful — extra steps, extra latency). The system prompt already warned
+    against repeating a FAILED call; this checks the matching warning for an
+    already-SUCCEEDED one is present too."""
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["system"] = request["system"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    system = seen["system"]
+    assert isinstance(system, str)
+    assert "already SUCCEEDED" in system
+
+
+@pytest.mark.asyncio
+async def test_policy_includes_argument_schema_in_prompt() -> None:
+    """Live-caught: without a schema, a ReAct-path model has no way to know a
+    tool's real argument names and guesses wrong (missing/misnamed required
+    fields) — every attempted tool call then fails. The catalog must carry the
+    same input_schema the native tool-calling path already sends."""
+    tools = ToolRegistry()
+
+    async def _h(args: dict[str, object]) -> dict[str, object]:
+        return {"result": args.get("kind")}
+
+    tools.register_native(
+        "freecad.create_primitive",
+        description="Create a primitive solid",
+        input_schema={
+            "type": "object",
+            "properties": {"kind": {"type": "string"}, "session_id": {"type": "string"}},
+            "required": ["kind", "session_id"],
+        },
+        handler=_h,
+    )
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["system"] = request["system"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    system = seen["system"]
+    assert isinstance(system, str)
+    assert '"required":["kind","session_id"]' in system.replace(" ", "")
+
+
+@pytest.mark.asyncio
 async def test_model_policy_drives_react_loop() -> None:
     """End to end: model calls a tool, sees the result, then finalizes."""
     tools = ToolRegistry()
@@ -99,3 +200,140 @@ async def test_model_policy_drives_react_loop() -> None:
     assert result.status == "completed"
     assert result.output == "the answer is 42"
     assert result.steps[0].observation == {"result": 42}
+
+
+@pytest.mark.asyncio
+async def test_rendered_trace_includes_prior_call_arguments() -> None:
+    """MET-650: a prior tool call's ARGUMENTS were never shown back to the
+    model on later turns — only its name and result. Live-caught on a
+    commit-by-reference retry: freecad.export_model's result doesn't echo
+    session_id, so once that call scrolled past the current turn the model
+    had no way to recall which session_id it had used and fabricated a
+    placeholder instead. The rendered trace must carry the original
+    arguments forward, not just the observation."""
+    tools = ToolRegistry()
+
+    async def _export(args: dict[str, object]) -> dict[str, object]:
+        return {"obj_id": "assembly_8"}  # deliberately omits session_id
+
+    tools.register_native("export", description="export", input_schema={}, handler=_export)
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+
+    prompts: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        prompts.append(request["messages"][0]["content"])  # type: ignore[index]
+        if len(prompts) == 1:
+            return {
+                "text": (
+                    '{"thought": "export", "tool": "export", '
+                    '"arguments": {"session_id": "f0c854a74cf846628cd94b7e69572cf5"}}'
+                ),
+                "model": spec.model,
+            }
+        return {"text": '{"thought": "done", "final": "done"}', "model": spec.model}
+
+    policy = ModelPolicy(rt, invoke=invoke)
+    result = await run_react(rt, policy, "export then commit", max_steps=5)
+    assert result.status == "completed"
+    # The second prompt (deciding what to do after the export) must still
+    # show the session_id the FIRST call used — not just "called export ->
+    # {result}" with the argument that produced it thrown away.
+    assert "f0c854a74cf846628cd94b7e69572cf5" in prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_react_recovers_from_a_malformed_reply_instead_of_hallucinating() -> None:
+    """The exact scenario this fix targets: the model narrates a result in
+    plain prose instead of calling the tool it was asked to use. The loop must
+    NOT accept that narrative as the final answer — it should feed back a
+    parse error and give the model another chance, which then calls the real
+    tool and finalizes correctly."""
+    tools = ToolRegistry()
+
+    async def _double(args: dict[str, object]) -> dict[str, object]:
+        return {"result": args["x"] * 2}  # type: ignore[operator]
+
+    tools.register_native("double", description="x2", input_schema={}, handler=_double)
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+
+    policy = ModelPolicy(
+        rt,
+        invoke=_scripted_invoke(
+            "Sure! I ran the tool and the result is 42.",  # malformed: no JSON at all
+            '{"thought": "for real this time", "tool": "double", "arguments": {"x": 21}}',
+            '{"thought": "report", "final": "the answer is 42"}',
+        ),
+    )
+    result = await run_react(rt, policy, "double 21", max_steps=5)
+
+    assert result.status == "completed"
+    assert result.output == "the answer is 42"
+    # The malformed first reply is recorded as a step with an error, NOT
+    # silently accepted as the final answer — and the real tool call that
+    # followed actually ran.
+    assert result.steps[0].tool_call.name == "(invalid_reply)"
+    assert result.steps[0].error is not None
+    assert result.steps[1].observation == {"result": 42}
+
+
+@pytest.mark.asyncio
+async def test_policy_renders_history_into_prompt() -> None:
+    """MET-565: the ReAct path used to drop conversation history entirely —
+    every non-native-tools provider answered each turn with total amnesia.
+    History handed to the policy must reach the model, rendered as text inside
+    the goal message (not as real chat turns, which would teach the JSON-only
+    protocol to answer in prose)."""
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["content"] = request["messages"][0]["content"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    history = [
+        {"role": "user", "content": "my bracket is 40mm wide"},
+        {"role": "assistant", "content": "Noted — a 40mm-wide bracket."},
+    ]
+    await ModelPolicy(rt, invoke=invoke, history=history).next_action("how wide is it?", [])
+
+    content = seen["content"]
+    assert isinstance(content, str)
+    assert "my bracket is 40mm wide" in content
+    assert "Conversation so far:" in content
+    assert content.index("40mm") < content.index("Goal:")  # history precedes the goal
+
+
+@pytest.mark.asyncio
+async def test_policy_without_history_omits_preamble() -> None:
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["content"] = request["messages"][0]["content"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    assert "Conversation so far:" not in str(seen["content"])
+
+
+@pytest.mark.asyncio
+async def test_policy_forbids_claiming_unmade_actions() -> None:
+    """MET-579 (live-caught): after a partial failure the model claimed
+    "…and recorded the design decision" with no such tool call in the
+    trace. The protocol prompt must forbid claiming actions the trace
+    doesn't show — a truthful partial result beats a fabricated one."""
+    rt = HarnessRuntime.build(CONFIG)
+
+    seen: dict[str, object] = {}
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        seen["system"] = request["system"]  # type: ignore[index]
+        return {"text": '{"final": "done"}', "model": spec.model}
+
+    await ModelPolicy(rt, invoke=invoke).next_action("goal", [])
+    system = str(seen["system"])
+    assert "NEVER claim" in system
+    assert "actually performed it" in system

@@ -54,15 +54,25 @@ fi
 
 echo "Installing forge ($asset, $VERSION) -> $BIN_DIR/forge"
 mkdir -p "$BIN_DIR"
+# Download to a temp file IN THE SAME DIRECTORY, then rename into place.
+# Writing straight onto the destination fails with ETXTBSY (curl error 23)
+# whenever a forge session is running — a rename replaces the directory
+# entry instead (running sessions keep the old inode; the next launch gets
+# the new binary) — and an interrupted download can no longer leave a
+# truncated binary at the destination (MET-609).
+tmp="$BIN_DIR/.forge.download.$$"
+trap 'rm -f "$tmp"' EXIT INT TERM
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$url" -o "$BIN_DIR/forge"
+  curl -fsSL "$url" -o "$tmp"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$BIN_DIR/forge" "$url"
+  wget -qO "$tmp" "$url"
 else
   echo "Need curl or wget to download." >&2
   exit 1
 fi
-chmod +x "$BIN_DIR/forge"
+chmod +x "$tmp"
+mv -f "$tmp" "$BIN_DIR/forge"
+trap - EXIT INT TERM
 
 echo "Installed forge to $BIN_DIR/forge"
 echo "  forge          -> interactive TUI (run bare in a terminal)"

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -41,8 +41,12 @@ class StreamEventType(StrEnum):
     MESSAGE_DELTA = "message.delta"
     AGENT_TYPING = "agent.typing"
     AGENT_STEP = "agent.step"
+    AGENT_THINKING = "agent.thinking"
+    AGENT_ACTION_STARTED = "agent.action_started"
     AGENT_DONE = "agent.done"
     CONTEXT_STATS = "context.stats"
+    SCOPE_CHANGED = "scope.changed"
+    TOOL_APPROVAL_REQUESTED = "tool.approval_requested"
     ERROR = "error"
 
 
@@ -65,6 +69,10 @@ class StreamEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     thread_id: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # MET-593: per-thread monotonic id, assigned by the manager at broadcast.
+    # Lets a reconnecting client resume via the standard Last-Event-ID header
+    # instead of silently losing whatever was broadcast during the gap.
+    event_id: int | None = None
 
     def to_sse(self) -> str:
         """Format as an SSE wire-protocol string.
@@ -81,7 +89,8 @@ class StreamEvent(BaseModel):
             "thread_id": self.thread_id,
             "timestamp": self.timestamp.isoformat(),
         }
-        return f"event: {self.event.value}\ndata: {json.dumps(payload)}\n\n"
+        id_line = f"id: {self.event_id}\n" if self.event_id is not None else ""
+        return f"{id_line}event: {self.event.value}\ndata: {json.dumps(payload)}\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -98,8 +107,15 @@ class ChatStreamManager:
     given thread.
     """
 
+    # Recent-event ring per thread (MET-593). Sized for the largest realistic
+    # reconnect gap (a long CAD turn's steps + thinking bursts); in-memory and
+    # per-process, matching the broadcast singleton's scope.
+    _RING_SIZE = 256
+
     def __init__(self) -> None:
         self._connections: dict[str, list[asyncio.Queue[StreamEvent | None]]] = defaultdict(list)
+        self._next_id: dict[str, int] = defaultdict(int)
+        self._recent: dict[str, deque[StreamEvent]] = {}
 
     # -- connection lifecycle -----------------------------------------------
 
@@ -153,6 +169,10 @@ class ChatStreamManager:
             span.set_attribute("event_type", event.event.value)
 
             thread_id = event.thread_id
+            # MET-593: assign the resume id and remember the event.
+            self._next_id[thread_id] += 1
+            event.event_id = self._next_id[thread_id]
+            self._recent.setdefault(thread_id, deque(maxlen=self._RING_SIZE)).append(event)
             conns = self._connections.get(thread_id, [])
             count = 0
             for queue in conns:
@@ -173,8 +193,18 @@ class ChatStreamManager:
             )
             return count
 
+    def replay_since(self, thread_id: str, last_event_id: int) -> list[StreamEvent]:
+        """Buffered events with id > ``last_event_id`` (MET-593 resume)."""
+        return [
+            e
+            for e in self._recent.get(thread_id, ())
+            if e.event_id is not None and e.event_id > last_event_id
+        ]
+
     async def close_all(self, thread_id: str) -> None:
         """Send a sentinel (``None``) to all listeners on *thread_id* and clean up."""
+        self._recent.pop(thread_id, None)
+        self._next_id.pop(thread_id, None)
         conns = self._connections.pop(thread_id, [])
         for queue in conns:
             try:
@@ -242,6 +272,38 @@ async def notify_agent_typing(thread_id: str, agent_id: str = "agent") -> int:
     return await stream_manager.broadcast(event)
 
 
+async def notify_agent_thinking(thread_id: str, delta: str, kind: str = "draft") -> int:
+    """Push an ``agent.thinking`` event — a live text delta from the model
+    WHILE it generates (MET-591). Ephemeral typing-indicator-grade content:
+    clients render it in the thinking line; the persisted final message stays
+    authoritative (a rendered thinking draft may become a tool-call preamble
+    rather than the answer).
+
+    ``kind`` types the delta (MET-592, Claude block-tag pattern): ``draft``
+    for ordinary response text mid-loop, ``reasoning`` for extended-thinking
+    blocks — clients may render them differently.
+    """
+    event = StreamEvent(
+        event=StreamEventType.AGENT_THINKING,
+        data={"delta": delta, "kind": kind},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_agent_action_started(thread_id: str, tool: str) -> int:
+    """Push an ``agent.action_started`` event — the model committed to a tool
+    call and its NAME is known, before arguments finish streaming and before
+    execution (MET-592 "typed from step zero"). The completed ``agent.step``
+    for the same call follows once it executes."""
+    event = StreamEvent(
+        event=StreamEventType.AGENT_ACTION_STARTED,
+        data={"tool": tool},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
 async def notify_agent_step(thread_id: str, step: dict[str, Any], agent_id: str = "agent") -> int:
     """Push an ``agent.step`` event — one ReAct step (tool call / result / thought).
 
@@ -267,6 +329,23 @@ async def notify_agent_done(thread_id: str, agent_id: str = "agent") -> int:
     return await stream_manager.broadcast(event)
 
 
+async def notify_tool_approval_requested(
+    thread_id: str, run_id: str, tool: str, arguments: dict[str, Any]
+) -> int:
+    """Push a ``tool.approval_requested`` event — a `requires_approval` tool
+    call (production-harness audit follow-up) is paused, waiting on a
+    decision at ``POST /v1/chat/tool_approvals/{run_id}``. No dashboard UI
+    consumes this yet (out of scope for the backend mechanism pass) — the
+    event and the endpoint are both real and functional for any client that
+    wants to build one."""
+    event = StreamEvent(
+        event=StreamEventType.TOOL_APPROVAL_REQUESTED,
+        data={"run_id": run_id, "tool": tool, "arguments": arguments},
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
 async def notify_context_stats(thread_id: str, stats: dict[str, Any]) -> int:
     """Push a ``context.stats`` event — the state of the model's context window.
 
@@ -279,6 +358,33 @@ async def notify_context_stats(thread_id: str, stats: dict[str, Any]) -> int:
     event = StreamEvent(
         event=StreamEventType.CONTEXT_STATS,
         data=stats,
+        thread_id=thread_id,
+    )
+    return await stream_manager.broadcast(event)
+
+
+async def notify_scope_changed(
+    thread_id: str,
+    *,
+    scope_kind: str,
+    scope_entity_id: str,
+    project_name: str | None = None,
+) -> int:
+    """Push a ``scope.changed`` event — the thread's scope was rescoped in place.
+
+    Emitted by ``chat/scope.py::apply_thread_scope`` (MET-580), the single path
+    both the human ``/project``-equivalent route and the agent-callable
+    ``chat.set_project_scope`` tool go through. A client renders this itself
+    (e.g. a transcript notice) rather than relying on the model's prose to
+    mention the change — the notice must appear whether or not the model says so.
+    """
+    event = StreamEvent(
+        event=StreamEventType.SCOPE_CHANGED,
+        data={
+            "scope_kind": scope_kind,
+            "scope_entity_id": scope_entity_id,
+            "project_name": project_name,
+        },
         thread_id=thread_id,
     )
     return await stream_manager.broadcast(event)
@@ -302,6 +408,7 @@ async def notify_error(thread_id: str, error: str) -> int:
 async def stream_thread(
     thread_id: str,
     manager: ChatStreamManager | None = None,
+    last_event_id: int | None = None,
 ) -> Any:
     """Async generator that yields SSE-formatted strings for *thread_id*.
 
@@ -319,14 +426,24 @@ async def stream_thread(
     mgr = manager or stream_manager
     queue = mgr.subscribe(thread_id)
 
-    logger.info("stream_started", thread_id=thread_id)
+    logger.info("stream_started", thread_id=thread_id, resume_from=last_event_id)
 
+    # MET-593 resume: subscribe FIRST (so nothing new is missed), then replay
+    # the buffered gap; the live loop skips anything the replay already sent.
+    replayed_to = last_event_id if last_event_id is not None else -1
     try:
+        if last_event_id is not None:
+            for buffered in mgr.replay_since(thread_id, last_event_id):
+                if buffered.event_id is not None and buffered.event_id > replayed_to:
+                    replayed_to = buffered.event_id
+                yield buffered.to_sse()
         while True:
             event = await queue.get()
             if event is None:
                 # Sentinel — server closed the stream
                 break
+            if event.event_id is not None and event.event_id <= replayed_to:
+                continue  # already delivered via replay
             yield event.to_sse()
     except asyncio.CancelledError:
         logger.info("stream_cancelled", thread_id=thread_id)

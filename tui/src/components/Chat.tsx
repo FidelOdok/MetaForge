@@ -4,6 +4,10 @@ import TextInput from "ink-text-input";
 import type { GatewayClient } from "../api/client.js";
 import type { ChatMessage, UseChat } from "../hooks/useChat.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import type { ThreadSummary } from "../api/client.js";
+import { describeThread, pickerCandidates } from "../lib/resume.js";
+import { stepRows, tailLines } from "../lib/live-tail.js";
+import { pendingHeight, transcriptHeight } from "../lib/transcript-height.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
@@ -11,6 +15,15 @@ import { Welcome, welcomeHeight } from "./Welcome.js";
 
 /** A completed conversation turn, rendered once into <Static> and never again. */
 function Turn({ m }: { m: ChatMessage }) {
+  // A local notice (project switch, degraded scope) — not part of the
+  // conversation the agent sees, so it renders dim and unattributed.
+  if (m.role === "system") {
+    return (
+      <Box paddingX={1} marginTop={1}>
+        <Text dimColor>{m.text}</Text>
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column" paddingX={1} marginTop={1}>
       {m.role === "user" ? (
@@ -52,6 +65,7 @@ export function Chat({
   provider,
   onModelChange,
   onProviderChange,
+  onProjectChange,
   chat,
 }: {
   client: GatewayClient;
@@ -59,6 +73,8 @@ export function Chat({
   provider?: string;
   onModelChange?: (model: string) => void;
   onProviderChange?: (provider: string) => void;
+  /** `/project [id|name|none]` — resolves in App; resolves to the notice to show. */
+  onProjectChange?: (arg: string) => Promise<string>;
   /** Chat thread state, owned by App so it survives view switches and so App's
    *  height policy and this component's layout branch flip in the SAME render
    *  (a callback would lag one render behind and strand transition frames). */
@@ -67,6 +83,9 @@ export function Chat({
   const { status, error, messages, pending, send } = chat;
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  // MET-595: /resume thread picker — when non-null it replaces the input box.
+  const [picker, setPicker] = useState<ThreadSummary[] | null>(null);
+  const [pickerIdx, setPickerIdx] = useState(0);
   const busy = status === "thinking";
   const reconnecting = status === "reconnecting";
   const { rows: termRows, cols } = useTerminalSize();
@@ -88,6 +107,23 @@ export function Chat({
   const draft = useRef("");
 
   useInput((_i, key) => {
+    // Picker mode captures navigation keys (MET-595).
+    if (picker !== null) {
+      if (key.upArrow) setPickerIdx((i) => Math.max(0, i - 1));
+      else if (key.downArrow) setPickerIdx((i) => Math.min(picker.length - 1, i + 1));
+      else if (key.return) {
+        const chosen = picker[pickerIdx];
+        setPicker(null);
+        if (chosen) {
+          chat.resume(chosen.id);
+          setNotice(`resuming "${chosen.title || chosen.id.slice(0, 8)}" …`);
+        }
+      } else if (key.escape) {
+        setPicker(null);
+        setNotice(null);
+      }
+      return;
+    }
     if (history.length === 0) return;
     if (key.upArrow) {
       if (histPos.current === null) {
@@ -136,8 +172,37 @@ export function Chat({
           setNotice(`provider: ${provider ?? "default"}`);
         }
         return true;
+      case "project":
+        if (!onProjectChange) {
+          setNotice("/project is unavailable here");
+          return true;
+        }
+        // Resolution needs the gateway (name → id), so the notice lands async.
+        if (arg) setNotice(`resolving project "${arg}"…`);
+        void onProjectChange(arg).then(setNotice, (e: Error) =>
+          setNotice(`/project failed: ${e.message}`),
+        );
+        return true;
+      case "resume":
+        setNotice("loading sessions…");
+        void client
+          .listThreads(50)
+          .then((threads) => {
+            const items = pickerCandidates(threads, chat.threadId);
+            if (!items.length) {
+              setNotice("no resumable sessions found");
+              return;
+            }
+            setPickerIdx(0);
+            setPicker(items);
+            setNotice(null);
+          })
+          .catch((e: Error) => setNotice(`/resume failed: ${e.message}`));
+        return true;
       case "help":
-        setNotice("/model <slug> · /provider <id> · /help · Esc quit");
+        setNotice(
+          "/resume · /project <id|name> · /model <slug> · /provider <id> · /help · Esc quit",
+        );
         return true;
       default:
         setNotice(`unknown command: /${cmd} (try /help)`);
@@ -196,27 +261,65 @@ export function Chat({
   // The live region — the only part that repaints during a turn: the streaming
   // in-flight answer, transient banners, and the input box. Shared by both the
   // launch layout and the Static transcript layout.
+  //
+  // INVARIANT: this region must always fit the viewport. Ink repaints the
+  // dynamic frame in place, which only works while the frame is shorter than
+  // the terminal — once it overflows, Ink cannot erase the previous paint and
+  // every repaint (spinner tick, stream flush) strands a duplicate copy into
+  // scrollback ("glitching while thinking"). A long agentic turn (20+ steps,
+  // multi-screen streamed answer) WILL outgrow any terminal, so we render only
+  // a viewport-sized TAIL of the in-flight turn here: the last few steps and
+  // the last rows of the streaming text. The full step trace and full answer
+  // land in <Static> when the turn finalizes, so nothing is lost.
+  //
+  // Budget: rows available to the pending block after the fixed chrome around
+  // it — input box (3), App footer (2), context meter + alert (2), pending
+  // headers/margins (~4) — plus slack for estimation drift in tailLines.
+  const LIVE_CHROME = 14;
+  const liveBudget = Math.max(5, termRows - LIVE_CHROME);
+  const perStep = stepRows(cols);
+  // Steps get up to a third of the budget; the streaming text gets the rest.
+  const maxSteps = Math.max(1, Math.floor(liveBudget / 3 / perStep));
+  const liveSteps = pending ? pending.steps.slice(-maxSteps) : [];
+  const hiddenSteps = pending ? pending.steps.length - liveSteps.length : 0;
+  const textBudget = Math.max(3, liveBudget - liveSteps.length * perStep - (hiddenSteps ? 1 : 0));
+  const liveText = pending ? tailLines(pending.text, Math.max(1, cols - 2), textBudget) : "";
   const liveRegion = (
     <>
-      {/* Live in-flight turn: streams here, then moves into <Static> on
-          completion. */}
+      {/* Live in-flight turn: a bounded tail streams here, and the full turn
+          moves into <Static> on completion. */}
       {pending ? (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
-          {pending.steps.length ? (
+          {pending.steps.length || pending.thinking || pending.startedAction ? (
             <Box flexDirection="column">
-              <Text dimColor>· thinking</Text>
-              <Box marginLeft={1}>
-                <StepTrace steps={pending.steps} />
+              <Text dimColor>
+                · thinking
+                {pending.thinking || pending.text
+                  ? ` · ~${Math.max(1, Math.round(((pending.thinking?.length ?? 0) + pending.text.length) / 4))} tok`
+                  : ""}
+                {hiddenSteps > 0 ? ` · ${pending.steps.length} steps` : ""}
+              </Text>
+              <Box marginLeft={1} flexDirection="column">
+                {hiddenSteps > 0 ? <Text dimColor>… {hiddenSteps} earlier steps</Text> : null}
+                {liveSteps.length ? <StepTrace steps={liveSteps} /> : null}
+                {pending.thinking ? (
+                  <Text dimColor wrap="truncate-end">
+                    {pending.thinking.slice(-600)}
+                  </Text>
+                ) : null}
+                {pending.startedAction ? (
+                  <Text color="yellow">→ calling {pending.startedAction} …</Text>
+                ) : null}
               </Box>
             </Box>
           ) : null}
           {pending.text ? (
             <>
               <Text color="magenta" bold>
-                ◆ assistant
+                ◆ assistant{liveText.startsWith("…") ? <Text dimColor> (streaming — full reply follows)</Text> : null}
               </Text>
               <Text>
-                {pending.text}
+                {liveText}
                 {busy ? <Text color="yellow">▌</Text> : null}
               </Text>
             </>
@@ -242,16 +345,35 @@ export function Chat({
         </Box>
       ) : null}
 
-      {/* Input pinned to the bottom of the live region. */}
-      <Box marginX={1} borderStyle="round" borderColor={busy || reconnecting ? "yellow" : "blue"} paddingX={1}>
-        <Text color={busy || reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
-        <TextInput
-          value={input}
-          onChange={onInputChange}
-          onSubmit={onSubmit}
-          placeholder={placeholder}
-        />
-      </Box>
+      {/* MET-595: /resume picker replaces the input box while open. */}
+      {picker !== null ? (
+        <Box marginX={1} borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
+          <Text color="cyan" bold>
+            resume a session  (↑/↓ · Enter · Esc)
+          </Text>
+          {picker.map((t, i) => (
+            <Text key={t.id} color={i === pickerIdx ? "cyan" : undefined} inverse={i === pickerIdx}>
+              {describeThread(t)}
+            </Text>
+          ))}
+        </Box>
+      ) : (
+        /* Input pinned to the bottom of the live region. */
+        <Box
+          marginX={1}
+          borderStyle="round"
+          borderColor={busy || reconnecting ? "yellow" : "blue"}
+          paddingX={1}
+        >
+          <Text color={busy || reconnecting ? "yellow" : "blue"}>{busy ? "… " : "› "}</Text>
+          <TextInput
+            value={input}
+            onChange={onInputChange}
+            onSubmit={onSubmit}
+            placeholder={placeholder}
+          />
+        </Box>
+      )}
     </>
   );
 
@@ -279,11 +401,42 @@ export function Chat({
   }
 
   // Transcript layout: finalized turns live in <Static> (native scrollback,
-  // never repainted), the live region follows the content below them.
+  // never repainted). MET-607: the live region is bottom-pinned via a
+  // min-height spacer sized from an ESTIMATE of the Static content's height
+  // (Ink can't measure scrollback). Clamped at 0, so drift is a slightly
+  // short gap at worst — and once the transcript exceeds one screen the
+  // spacer is 0 and this is exactly the old content-flow behavior.
+  //
+  // MET-641: the reservation also shrinks by the in-flight turn's own
+  // rendered height. Without that, `pinHeight` stays fixed at the size of
+  // the *finalized* transcript while the live region grows underneath it —
+  // it silently outgrows a stale minHeight, so the frame's total height
+  // jumps the moment a streaming turn's trace first exceeds the reservation.
+  // Shrinking the reservation in step with the live region's growth keeps the
+  // total frame height roughly constant instead. Uses the SAME clipped
+  // `liveSteps`/`liveText`/`hiddenSteps` MET-617 computed above (what's
+  // actually on screen, viewport-bounded), not the raw unbounded `pending` —
+  // otherwise this would overestimate a long turn's height and the
+  // reservation would collapse to 0 well before the (bounded) live region
+  // does.
+  const FOOTER_ROWS = 2;
+  const staticEstimate =
+    welcomeHeight(cols, client.baseUrl()) + transcriptHeight(messages, cols);
+  const liveEstimate = pending
+    ? pendingHeight(
+        { text: liveText, steps: liveSteps, thinking: pending.thinking, startedAction: pending.startedAction },
+        cols,
+        busy,
+        hiddenSteps > 0 ? 1 : 0,
+      )
+    : 0;
+  const pinHeight = Math.max(0, termRows - staticEstimate - FOOTER_ROWS - 1 - liveEstimate);
   return (
     <Box flexDirection="column" flexGrow={1}>
       {staticContent}
-      {liveRegion}
+      <Box flexDirection="column" minHeight={pinHeight} justifyContent="flex-end">
+        {liveRegion}
+      </Box>
     </Box>
   );
 }

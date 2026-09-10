@@ -34,11 +34,63 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYTHON = _REPO_ROOT / ".venv" / "bin" / "python"
 
 
+# MET-703 hardening. These are the variables `cli.forge_cli` reads; the
+# subprocess used to inherit os.environ wholesale, so an earlier test leaking
+# one of them could change this child's behaviour while the tests here assert
+# on exact exit codes and on stderr containing no traceback.
+#
+# Honest scope: this is defence in depth, NOT a proven fix for MET-703.
+#  * The reported failure does not reproduce on current main -- collection
+#    order is deterministic (no randomising plugin), the suite has grown from
+#    ~2.3k tests to ~5.8k since the report, and the full suite is green, so the
+#    ordering that produced it no longer exists.
+#  * Attempting to demonstrate the mechanism FAILED: with the strip removed,
+#    deliberately leaking each of these four variables (including a
+#    non-numeric METAFORGE_INGEST_TIMEOUT) does not break the CLI. So the
+#    polluter, if it returns, is something else.
+#
+# The strip is kept because a subprocess test inheriting caller config is a
+# real order-dependence hazard regardless of whether it caused this particular
+# report -- but the issue should stay open, not be closed as fixed.
+_CLI_ENV_PREFIXES = ("METAFORGE_", "FORGE_")
+
+
+#: A path that will not exist, so ``ForgeConfig.load()`` returns defaults.
+#: MET-729: stripping FORGE_CONFIG is not sufficient isolation -- with it
+#: absent the CLI falls back to ``~/.forge/config.json``, and a developer's
+#: saved ``gateway_url`` then decides where these subprocesses point. That is
+#: not hypothetical: it sent 11 ingests from pytest temp directories into the
+#: shared dev gateway over one week. Pinning the variable to a missing file is
+#: what actually guarantees no live gateway is reachable from this file.
+_NO_CONFIG = "/nonexistent/forge-config-for-tests.json"
+
+
+def _clean_env(**overrides: str) -> dict[str, str]:
+    """The environment with every CLI-read variable removed.
+
+    ``FORGE_CONFIG`` is then pinned at a missing file so no saved config is
+    consulted, and ``METAFORGE_GATEWAY_URL`` at a dead port so that even a
+    code path which ignored both would fail locally rather than reach a real
+    deployment. Callers can add or replace entries via ``overrides``.
+    """
+    env = {
+        k: v for k, v in os.environ.items() if not any(k.startswith(p) for p in _CLI_ENV_PREFIXES)
+    }
+    env["FORGE_CONFIG"] = _NO_CONFIG
+    env["METAFORGE_GATEWAY_URL"] = "http://127.0.0.1:1"
+    env.update(overrides)
+    return env
+
+
 def _run_ingest(*args: str) -> subprocess.CompletedProcess[str]:
     """Run ``python -m cli.forge_cli.main ingest <args> --dry-run``.
 
     --dry-run is added by default so we don't hit the gateway. Tests
     that need a non-dry-run path can build their own argv.
+
+    The child gets an explicitly cleaned environment (see ``_clean_env``) so
+    these assertions depend on the ingest logic alone, not on what earlier
+    tests left in ``os.environ``.
     """
     interpreter = str(_PYTHON) if _PYTHON.exists() else sys.executable
     cmd = [interpreter, "-m", "cli.forge_cli.main", "ingest", *args]
@@ -48,12 +100,92 @@ def _run_ingest(*args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         cwd=str(_REPO_ROOT),
         timeout=60,
+        env=_clean_env(),
     )
 
 
 # ---------------------------------------------------------------------------
 # Nonexistent path → exit code 2, actionable stderr
 # ---------------------------------------------------------------------------
+
+
+class TestEnvironmentIsolation:
+    """The subprocess must not inherit CLI-read variables (MET-703 hardening).
+
+    These pin the isolation contract: whatever a caller has in its own
+    environment, the child sees none of the CLI's configuration variables.
+
+    They do NOT prove the MET-703 failure is fixed. Verified explicitly:
+    with the strip removed, these same leaks still pass, so none of these four
+    variables is capable of producing the reported symptom. See the note above
+    ``_CLI_ENV_PREFIXES``.
+    """
+
+    @pytest.mark.parametrize(
+        "var,value",
+        [
+            ("METAFORGE_INGEST_TIMEOUT", "not-a-number"),
+            ("METAFORGE_GATEWAY_URL", "http://127.0.0.1:1"),
+            ("METAFORGE_HARNESS_ADMIN_TOKEN", "bogus"),
+            ("FORGE_CONFIG", "/does/not/exist/forge.json"),
+        ],
+    )
+    def test_a_leaked_variable_cannot_change_the_result(
+        self, var: str, value: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(var, value)
+        bogus = "/does/not/exist/at/all"
+
+        proc = _run_ingest(bogus, "--dry-run")
+
+        assert proc.returncode == 2, (
+            f"{var} leaked into the child and changed the exit code: "
+            f"{proc.returncode}\nstderr={proc.stderr!r}"
+        )
+        assert "Traceback (most recent call last):" not in proc.stderr
+
+    def test_clean_env_strips_inherited_cli_variables(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing the caller set survives -- including a saved config path."""
+        monkeypatch.setenv("METAFORGE_GATEWAY_URL", "http://fidel-dev:8000")
+        monkeypatch.setenv("FORGE_CONFIG", "/home/someone/.forge/config.json")
+        monkeypatch.setenv("METAFORGE_INGEST_TIMEOUT", "99")
+
+        env = _clean_env()
+
+        assert "METAFORGE_INGEST_TIMEOUT" not in env
+        assert env["METAFORGE_GATEWAY_URL"] != "http://fidel-dev:8000"
+        assert env["FORGE_CONFIG"] != "/home/someone/.forge/config.json"
+        # The interpreter still needs to be able to run.
+        for keep in ("PATH", "HOME"):
+            if keep in os.environ:
+                assert keep in env
+
+    def test_clean_env_pins_the_child_away_from_any_real_gateway(self) -> None:
+        """MET-729: this is the assertion that matters, and the previous
+        contract ("no CLI variables at all") was too weak to make it.
+
+        With the variables merely absent, the CLI falls back to
+        ``~/.forge/config.json``, whose ``gateway_url`` on a developer machine
+        points at a real deployment -- which is how this file spent a week
+        ingesting pytest temp files into the shared dev gateway. Both the
+        config path and the URL have to be pinned, not just cleared.
+        """
+        env = _clean_env()
+
+        assert env["FORGE_CONFIG"] == _NO_CONFIG
+        assert not Path(env["FORGE_CONFIG"]).exists(), (
+            "the pinned config path must not exist, or a real config is read"
+        )
+        assert env["METAFORGE_GATEWAY_URL"] == "http://127.0.0.1:1"
+
+    def test_clean_env_overrides_are_applied(self) -> None:
+        env = _clean_env(METAFORGE_INGEST_TIMEOUT="1")
+
+        assert env["METAFORGE_INGEST_TIMEOUT"] == "1"
+        # An override must not undo the isolation.
+        assert env["FORGE_CONFIG"] == _NO_CONFIG
 
 
 class TestNonexistentPath:
@@ -157,9 +289,13 @@ class TestBinaryFile:
         # gateway URL — the valid .md will fail HTTP but the binary
         # detection happens BEFORE the HTTP call, and is the assertion
         # we care about.
-        env = os.environ.copy()
-        env["METAFORGE_GATEWAY_URL"] = "http://127.0.0.1:1"
-        env["METAFORGE_INGEST_TIMEOUT"] = "1"
+        # MET-729: os.environ.copy() carried the caller's config through, and
+        # the saved ~/.forge/config.json gateway_url then outranked the
+        # METAFORGE_GATEWAY_URL set on the next line -- so this test spent a
+        # week POSTing valid.md into the live dev gateway instead of failing
+        # against a dead port. _clean_env pins both the config path and the
+        # URL.
+        env = _clean_env(METAFORGE_INGEST_TIMEOUT="1")
 
         interpreter = str(_PYTHON) if _PYTHON.exists() else sys.executable
         proc = subprocess.run(

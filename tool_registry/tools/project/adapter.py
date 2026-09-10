@@ -17,6 +17,7 @@ backend is ready.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
@@ -28,6 +29,31 @@ from tool_registry.mcp_server.server import McpToolServer
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.project")
+
+# MET-589: the chat harness truncates any tool observation past a char
+# budget, dropping trailing list items with no way for the caller to detect
+# it short of the length shrinking underneath a `limit` it already asked
+# for. There are TWO such budgets depending on which loop is driving the
+# model, and this tool has no way to know which one applies:
+#   - native tool-calling: _MAX_OBSERVATION_CHARS (native_tools.py)
+#   - legacy ReAct (e.g. openai-codex/gpt-5.5 today): _MAX_OBS_CHARS
+#     (policy.py), applied to a `str(dict)` render of the SAME observation
+# A page sized for one budget alone can still get re-shrunk by the other —
+# confirmed live when both were tiny (8000/2000): the model saw
+# `has_more`/`next_offset` from this tool's own pagination AND a second,
+# uncoordinated `projects_omitted_count` for items on the same page, and
+# (reasonably) stopped trusting either, re-querying overlapping ranges
+# instead of walking `next_offset` cleanly. MET-598 raised both harness
+# budgets to 75_000 (previously hardcoded far below what a modern large-
+# context model can actually spare — trace_token_budget() already scales the
+# *overall* trace to the model's real window). Target comfortably under the
+# smaller of the two so a page this tool considers complete survives either
+# loop: 100 realistic project records measured at ~40k-57k chars, so 60_000
+# leaves real margin (barring a single project with a description near its
+# 2000-char max, which alone can still exceed this — acceptable, since that
+# only affects rendering of the one already-known item, not
+# `has_more`/`next_offset`, which stay accurate regardless).
+_MAX_LIST_PAGE_CHARS = 60_000
 
 
 @runtime_checkable
@@ -157,20 +183,59 @@ class ProjectServer(McpToolServer):
                 adapter_id="project",
                 name="List Projects",
                 description=(
-                    "Return every project the caller can see. No filter "
-                    "args today; project-level scoping is handled by the "
-                    "backend (per-tenant deployments)."
+                    "Return a page of project summaries (no per-project "
+                    "work_products detail — call project.get for that), "
+                    "newest first. Paginated via `limit`/`offset`, but the "
+                    "actual page may hold FEWER than `limit` even when more "
+                    "remain: the response also self-caps to a safe payload "
+                    "size. Always check `has_more`/`next_offset` and keep "
+                    "re-calling with `next_offset` until `has_more` is "
+                    "false to see everything — never assume one call "
+                    "returned the full set. Project-level scoping is "
+                    "handled by the backend (per-tenant deployments)."
                 ),
                 capability="project_management",
-                input_schema={"type": "object", "properties": {}},
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100,
+                            "default": 20,
+                            "description": "Max projects to return in this page (capped at 100).",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 0,
+                            "description": "Number of projects to skip, for paging.",
+                        },
+                    },
+                },
                 output_schema={
                     "type": "object",
                     "properties": {
                         "projects": {
                             "type": "array",
-                            "items": _project_output_schema(),
+                            "items": _project_summary_schema(),
                         },
-                        "total": {"type": "integer"},
+                        "total": {
+                            "type": "integer",
+                            "description": "Total projects visible to the caller, across pages.",
+                        },
+                        "offset": {"type": "integer"},
+                        "limit": {"type": "integer"},
+                        "has_more": {
+                            "type": "boolean",
+                            "description": "True if projects remain beyond this page.",
+                        },
+                        "next_offset": {
+                            "type": ["integer", "null"],
+                            "description": (
+                                "Pass as `offset` for the next page; null when has_more is false."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -334,6 +399,27 @@ class ProjectServer(McpToolServer):
 
     async def handle_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.list") as span:
+            limit_raw = arguments.get("limit", 20)
+            offset_raw = arguments.get("offset", 0)
+            if isinstance(limit_raw, bool) or isinstance(offset_raw, bool):
+                raise ValueError(
+                    "project.list: 'limit' and 'offset' must be integers, not booleans"
+                )
+            try:
+                # Some MCP call paths deliver numeric args as strings (e.g.
+                # "20") rather than JSON numbers — coerce like every other
+                # numeric-arg adapter in this codebase (memory/knowledge/twin)
+                # instead of rejecting valid input on a strict isinstance check.
+                limit = int(limit_raw)
+                offset = int(offset_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("project.list: 'limit' and 'offset' must be integers") from exc
+            if limit < 1:
+                raise ValueError("project.list: 'limit' must be a positive integer")
+            if offset < 0:
+                raise ValueError("project.list: 'offset' must be a non-negative integer")
+            limit = min(limit, 100)
+
             ctx_project_id = current_context().project_id
             projects = await self.backend.list_projects()
 
@@ -346,15 +432,47 @@ class ProjectServer(McpToolServer):
                 span.set_attribute("mcp.project_id", ctx_id_str)
                 span.set_attribute("project.scoped", True)
 
-            span.set_attribute("project.result_count", len(projects))
+            total = len(projects)
+            candidates = projects[offset : offset + limit]
+
+            # MET-589: cap the page to a safe serialized size regardless of
+            # `limit` — a page that fits `limit` can still be big enough to
+            # trip the harness's own truncation, which would silently drop
+            # entries with no way for the caller to tell. Always keep at
+            # least one project so a single oversized record can't stall
+            # pagination entirely.
+            page: list[dict[str, Any]] = []
+            page_chars = 0
+            for p in candidates:
+                summary = _project_to_summary_dict(p)
+                rendered_len = len(json.dumps(summary))
+                if page and page_chars + rendered_len > _MAX_LIST_PAGE_CHARS:
+                    break
+                page.append(summary)
+                page_chars += rendered_len
+
+            returned = len(page)
+            has_more = offset + returned < total
+            next_offset = offset + returned if has_more else None
+
+            span.set_attribute("project.result_count", returned)
+            span.set_attribute("project.total", total)
             logger.info(
                 "project_mcp_list",
-                result_count=len(projects),
+                result_count=returned,
+                total=total,
+                offset=offset,
+                limit=limit,
+                page_chars=page_chars,
                 scoped_to=str(ctx_project_id) if ctx_project_id else None,
             )
             return {
-                "projects": [_project_to_dict(p) for p in projects],
-                "total": len(projects),
+                "projects": page,
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "has_more": has_more,
+                "next_offset": next_offset,
             }
 
     async def handle_get(self, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -488,6 +606,26 @@ def _project_to_dict(project: ProjectLike) -> dict[str, Any]:
     }
 
 
+def _project_to_summary_dict(project: ProjectLike) -> dict[str, Any]:
+    """Lighter per-project projection used by ``project.list`` (MET-589).
+
+    Drops the full ``work_products`` array (unbounded per project — the
+    thing that made list pages balloon past the harness's truncation cap)
+    in favor of just a count. Callers that need the detail call
+    ``project.get``.
+    """
+    return {
+        "id": project.id,
+        "name": project.name,
+        "description": project.description,
+        "status": project.status,
+        "agent_count": project.agent_count,
+        "created_at": project.created_at,
+        "last_updated": project.last_updated,
+        "work_product_count": len(project.work_products),
+    }
+
+
 def _project_output_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -512,5 +650,21 @@ def _project_output_schema() -> dict[str, Any]:
                     },
                 },
             },
+        },
+    }
+
+
+def _project_summary_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "status": {"type": "string"},
+            "agent_count": {"type": "integer"},
+            "created_at": {"type": "string"},
+            "last_updated": {"type": "string"},
+            "work_product_count": {"type": "integer"},
         },
     }

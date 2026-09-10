@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from api_gateway.runs.flow_brain import ReActPhaseBrain
@@ -57,3 +59,25 @@ async def test_backstop_never_raises_on_bridge_error() -> None:
     phase = next(p for p in get_flow("hardware_v1").phases if p.id == "firmware")
     ctx = FlowContext(goal="g", project_id=None, completed=[])
     await brain._backstop_decision(phase, ctx, "summary")  # must not raise
+
+
+@pytest.mark.asyncio
+@patch("api_gateway.runs.flow_brain.get_metrics")
+@patch("api_gateway.runs.flow_brain.run_chat_turn", new_callable=AsyncMock)
+async def test_run_phase_threads_the_configured_metrics_collector(
+    mock_run_chat_turn: AsyncMock, mock_get_metrics: MagicMock
+) -> None:
+    """MET-659 follow-up: run_phase is the design-flow-phase equivalent of
+    the interactive chat harness's run_chat_turn_streaming call, which had
+    the same gap (init_metrics() set a collector nothing ever read)."""
+    sentinel_collector = object()
+    mock_get_metrics.return_value = sentinel_collector
+    mock_run_chat_turn.return_value = "Designed the thing."
+
+    brain = ReActPhaseBrain(mcp_bridge=_Bridge())
+    phase = next(p for p in get_flow("mech_v1").phases if p.id == "design")
+    ctx = FlowContext(goal="a bracket", project_id="p1", completed=[])
+
+    await brain.run_phase(goal="a bracket", phase=phase, context=ctx)
+
+    assert mock_run_chat_turn.call_args.kwargs["metrics"] is sentinel_collector

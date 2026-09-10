@@ -17,8 +17,8 @@ CODEX_SPEC = ProviderSpec(name="openai-codex", model="gpt-5-codex")
 class _Stream:
     """Async-iterable of Responses stream events (codex is streaming-only)."""
 
-    def __init__(self, text: str) -> None:
-        self._events = [
+    def __init__(self, text: str, events: list[object] | None = None) -> None:
+        self._events = events or [
             SimpleNamespace(type="response.output_text.delta", delta=text),
             SimpleNamespace(type="response.completed"),
         ]
@@ -35,21 +35,32 @@ class _Stream:
 
 
 class _Responses:
-    def __init__(self, text: str | None = None, exc: Exception | None = None) -> None:
+    def __init__(
+        self,
+        text: str | None = None,
+        exc: Exception | None = None,
+        events: list[object] | None = None,
+    ) -> None:
         self._text = text
         self._exc = exc
+        self._events = events
         self.calls: list[dict] = []
 
     async def create(self, **kwargs: object) -> object:
         self.calls.append(kwargs)
         if self._exc is not None:
             raise self._exc
-        return _Stream(self._text or "")
+        return _Stream(self._text or "", self._events)
 
 
 class FakeCodexClient:
-    def __init__(self, text: str | None = None, exc: Exception | None = None) -> None:
-        self.responses = _Responses(text, exc)
+    def __init__(
+        self,
+        text: str | None = None,
+        exc: Exception | None = None,
+        events: list[object] | None = None,
+    ) -> None:
+        self.responses = _Responses(text, exc, events)
 
 
 def test_codex_registered_with_family() -> None:
@@ -88,6 +99,28 @@ async def test_codex_invoke_maps_errors() -> None:
         await codex_invoke(CODEX_SPEC, {"prompt": "hi"}, client=client)
     assert ei.value.status_code == 401
     assert not ei.value.retryable  # 401 is terminal
+
+
+@pytest.mark.asyncio
+async def test_codex_incomplete_response_raises_retryable() -> None:
+    """MET-614: a length-capped response must surface loudly, not return
+    silently truncated text that downstream parses as a malformed reply."""
+    client = FakeCodexClient(
+        events=[
+            SimpleNamespace(type="response.output_text.delta", delta='{"thought": "cut'),
+            SimpleNamespace(
+                type="response.incomplete",
+                response=SimpleNamespace(
+                    incomplete_details=SimpleNamespace(reason="max_output_tokens")
+                ),
+            ),
+        ]
+    )
+    with pytest.raises(ProviderError) as ei:
+        await codex_invoke(CODEX_SPEC, {"prompt": "hi"}, client=client)
+    assert ei.value.retryable
+    assert "incomplete" in str(ei.value)
+    assert "max_output_tokens" in str(ei.value)
 
 
 @pytest.mark.asyncio

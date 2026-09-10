@@ -1,0 +1,24 @@
+# Loki ruler alert rules (LogQL exprs, Prometheus-compatible rule format).
+# Version-controlled per the observability taxonomy — do not create ad-hoc
+# Grafana alerts. Loaded by the Loki ruler (or importable into Grafana
+# unified alerting with the Loki datasource).
+groups:
+  - name: metaforge_evals
+    rules:
+      # MET-574: evals/nightly.sh pushes one outcome line per run under
+      # service_name="metaforge-evals" when LOKI_PUSH_URL is set in the cron
+      # environment; level="error" means a suite failed or trend.py --strict
+      # found a regression against the previous nightly.
+      - alert: NightlyEvalRegression
+        expr: sum(count_over_time({service_name="metaforge-evals", level="error"} [25h])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nightly eval regression on {{ $labels.job }}"
+          description: >-
+            The nightly eval run reported a suite failure or a trend
+            regression in the last 25h. Inspect the pushed log line for the
+            reports directory, then diff with
+            `python3 evals/trend.py diff --before <prev> --after <new>`.
+          runbook_url: "https://github.com/FidelOdok/MetaForge/blob/main/evals/README.md"

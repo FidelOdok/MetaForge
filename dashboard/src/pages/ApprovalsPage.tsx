@@ -1,11 +1,8 @@
-import { useState } from 'react';
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
-import { ProjectScopePicker } from '../components/shared/ProjectScopePicker';
+import { useActiveProject } from '../hooks/use-active-project';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
-import { useScopedChat } from '../hooks/use-scoped-chat';
-import { ApprovalChatPanel } from '../components/chat/integrations/ApprovalChatPanel';
 import type { Proposal } from '../api/endpoints/assistant';
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
@@ -82,14 +79,7 @@ function DiffPanel({ diff }: { diff: Record<string, unknown> }) {
 // ─── ProposalCard ────────────────────────────────────────────────────────────
 function ProposalCard({ proposal }: { proposal: Proposal }) {
   const decide = useDecideProposal();
-  const [chatOpen, setChatOpen] = useState(false);
   const isPending = proposal.status === 'pending';
-
-  const chat = useScopedChat({
-    scopeKind: 'approval',
-    entityId: proposal.change_id,
-    defaultAgentCode: proposal.agent_code,
-  });
 
   function handleDecision(decision: 'approve' | 'reject') {
     decide.mutate({
@@ -219,21 +209,6 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
             <span className="material-symbols-outlined" style={{ fontSize: 14 }}>cancel</span>
             Reject
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setChatOpen(!chatOpen)}
-            className="gap-1.5 ml-auto"
-            style={{
-              color: KC.onSurfaceVariant,
-              border: `1px solid ${KC.border}`,
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
-              {chatOpen ? 'chat_bubble' : 'chat_bubble_outline'}
-            </span>
-            {chatOpen ? 'Hide' : 'Discuss'}
-          </Button>
         </div>
       )}
 
@@ -248,35 +223,14 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           {proposal.decision_reason && ` — ${proposal.decision_reason}`}
         </div>
       )}
-
-      {/* Inline chat */}
-      {chatOpen && (
-        <div
-          className="mt-1 rounded"
-          style={{
-            borderTop: `1px solid ${KC.border}`,
-            paddingTop: 12,
-          }}
-        >
-          <ApprovalChatPanel
-            approvalId={proposal.change_id}
-            agentCode={proposal.agent_code}
-            thread={chat.thread}
-            messages={chat.messages}
-            isTyping={chat.isTyping}
-            onSendMessage={chat.sendMessage}
-            onCreateThread={chat.createThread}
-          />
-        </div>
-      )}
     </div>
   );
 }
 
 // ─── ApprovalsPage ───────────────────────────────────────────────────────────
 export function ApprovalsPage() {
-  const [projectId, setProjectId] = useState('');
-  const { data, isLoading } = useProposals(projectId || undefined);
+  const { activeProjectId } = useActiveProject();
+  const { data, isLoading } = useProposals(activeProjectId ?? undefined);
 
   if (isLoading) {
     return (
@@ -331,20 +285,6 @@ export function ApprovalsPage() {
             Human-in-the-loop review · {total} proposal{total !== 1 ? 's' : ''}
           </span>
         </div>
-        <div className="flex items-center gap-2" style={{ marginTop: 3 }}>
-          <ProjectScopePicker value={projectId} onChange={setProjectId} />
-          <span
-            className="font-mono rounded px-2 py-0.5"
-            style={{
-              fontSize: 10,
-              backgroundColor: KC.surfaceContainer,
-              color: KC.onSurfaceVariant,
-              border: `1px solid ${KC.border}`,
-            }}
-          >
-            W3 Gate Check
-          </span>
-        </div>
       </div>
 
       {/* ── 3-column regime cards ────────────────────────────────────────── */}
@@ -364,22 +304,12 @@ export function ApprovalsPage() {
             borderLeft: '2px solid #f59e0b',
           }}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="mb-2">
             <span
               className="font-mono"
               style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               PENDING
-            </span>
-            <span
-              className="font-mono rounded px-1.5 py-0.5"
-              style={{
-                fontSize: 9,
-                backgroundColor: 'rgba(245,158,11,0.12)',
-                color: '#f59e0b',
-              }}
-            >
-              AT-RISK
             </span>
           </div>
           <div
@@ -428,22 +358,12 @@ export function ApprovalsPage() {
             borderLeft: `2px solid ${KC.success}`,
           }}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="mb-2">
             <span
               className="font-mono"
               style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               APPROVED
-            </span>
-            <span
-              className="font-mono rounded px-1.5 py-0.5"
-              style={{
-                fontSize: 9,
-                backgroundColor: 'rgba(61,214,140,0.12)',
-                color: KC.success,
-              }}
-            >
-              READY
             </span>
           </div>
           <div
@@ -492,22 +412,12 @@ export function ApprovalsPage() {
             borderLeft: `2px solid ${KC.error}`,
           }}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="mb-2">
             <span
               className="font-mono"
               style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               REJECTED
-            </span>
-            <span
-              className="font-mono rounded px-1.5 py-0.5"
-              style={{
-                fontSize: 9,
-                backgroundColor: 'rgba(255,180,171,0.12)',
-                color: KC.error,
-              }}
-            >
-              IN PROGRESS
             </span>
           </div>
           <div
@@ -549,16 +459,8 @@ export function ApprovalsPage() {
         </div>
       </div>
 
-      {/* ── Two-column grid: proposals + checklist ───────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 320px',
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
-        {/* Left — PROPOSALS panel */}
+      {/* ── PROPOSALS panel ──────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 16 }}>
         <div style={glassPanel}>
           <div
             style={{
@@ -596,102 +498,6 @@ export function ApprovalsPage() {
             )}
           </div>
         </div>
-
-        {/* Right — CHECKLIST panel */}
-        <div style={glassPanel}>
-          <div
-            style={{
-              padding: '10px 16px',
-              borderBottom: `1px solid ${KC.border}`,
-            }}
-          >
-            <span
-              className="font-mono"
-              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
-            >
-              CHECKLIST
-            </span>
-          </div>
-          <div>
-            {([
-              { symbol: '✓', symbolColor: KC.success,          symbolSize: 14, label: 'Design review sign-off',     meta: '2026-01-14' },
-              { symbol: '✓', symbolColor: KC.success,          symbolSize: 14, label: 'Constraint validation pass',  meta: '2026-02-03' },
-              { symbol: '⏳', symbolColor: '#f59e0b',           symbolSize: 12, label: 'Safety analysis review',     meta: 'pending'    },
-              { symbol: '✓', symbolColor: KC.success,          symbolSize: 14, label: 'BOM risk assessment',         meta: '2025-12-20' },
-              { symbol: '✗', symbolColor: KC.error,            symbolSize: 14, label: 'EMC pre-scan complete',       meta: 'overdue'    },
-              { symbol: '⏳', symbolColor: '#f59e0b',           symbolSize: 12, label: 'Final gate review',          meta: 'scheduled'  },
-            ] as Array<{ symbol: string; symbolColor: string; symbolSize: number; label: string; meta: string }>).map((row, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  height: 36,
-                  padding: '0 16px',
-                  borderBottom: i < 5 ? `1px solid ${KC.border}` : undefined,
-                  gap: 10,
-                }}
-              >
-                <span
-                  style={{
-                    width: 16,
-                    fontSize: row.symbolSize,
-                    color: row.symbolColor,
-                    flexShrink: 0,
-                    textAlign: 'center',
-                  }}
-                >
-                  {row.symbol}
-                </span>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: KC.onSurface,
-                    flex: 1,
-                    overflow: 'hidden',
-                    whiteSpace: 'nowrap',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {row.label}
-                </span>
-                <span
-                  className="font-mono"
-                  style={{
-                    fontSize: 10,
-                    color:
-                      row.meta === 'overdue'  ? KC.error :
-                      row.meta === 'pending'  ? '#f59e0b' :
-                      row.meta === 'scheduled' ? KC.onSurfaceVariant :
-                      KC.onSurfaceVariant,
-                    flexShrink: 0,
-                  }}
-                >
-                  {row.meta}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Flow tags row ────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 6 }}>
-        {['P9', 'P10', 'W3'].map((tag) => (
-          <span
-            key={tag}
-            className="font-mono rounded"
-            style={{
-              fontSize: 10,
-              color: KC.onSurfaceVariant,
-              backgroundColor: KC.surfaceContainer,
-              padding: '2px 8px',
-              border: `1px solid ${KC.border}`,
-            }}
-          >
-            {tag}
-          </span>
-        ))}
       </div>
     </div>
   );

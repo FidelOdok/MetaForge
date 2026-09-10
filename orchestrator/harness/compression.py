@@ -13,8 +13,10 @@ can plug in a real tokenizer without this module taking the dependency.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
 
@@ -67,12 +69,278 @@ def _summarize(older: Sequence[ReActStep]) -> str:
     return f"[{len(older)} earlier steps compressed — tools: {tool_desc}; errors: {errors}]"
 
 
+def summarize_trajectory(steps: Sequence[ReActStep]) -> str:
+    """A hand-off summary of what a loop attempted before stopping without a
+    real answer (step cap / wall-clock timeout) — production-harness audit
+    follow-up. Replaces a bare "I couldn't converge" string, which threw away
+    the full trajectory even though it was sitting right there in memory.
+    """
+    if not steps:
+        return "I ran out of turns before I could take any actions."
+    lines = ["I ran out of turns before finishing. Here's what I did:"]
+    for i, step in enumerate(steps, 1):
+        if step.tool_call is None:
+            continue
+        name = step.tool_call.name
+        if step.error is not None:
+            lines.append(f"{i}. {name} — failed: {step.error}")
+        else:
+            lines.append(f"{i}. {name} — succeeded")
+    lines.append("Ask me to continue and I'll pick up from here.")
+    return "\n".join(lines)
+
+
 def _render_all(goal: str, synopsis: str | None, steps: Sequence[ReActStep]) -> str:
     lines = [f"goal: {goal}"]
     if synopsis is not None:
         lines.append(synopsis)
     lines.extend(_render_step(s) for s in steps)
     return "\n".join(lines)
+
+
+def truncate_observation(text: str, max_chars: int = 2000) -> str:
+    """Cap an observation with an EXPLICIT marker (MET-568).
+
+    The old behavior was a silent slice — the model (and anyone reading the
+    trace) had no way to know content was missing, which turns a truncated
+    tool result into a source of confident wrong answers. The marker states
+    exactly how much was dropped.
+    """
+    if len(text) <= max_chars:
+        return text
+    dropped = len(text) - max_chars
+    return f"{text[:max_chars]}…[truncated {dropped} chars]"
+
+
+def _shrink_structurally(
+    value: dict[str, Any] | list[Any],
+    max_chars: int,
+    *,
+    render: Callable[[Any], str],
+) -> str | None:
+    """Drop trailing items from the largest list until ``render`` fits.
+
+    ``value`` itself if it IS a list, else its largest list-valued field (the
+    common ``{"items": [...], "total": N}`` tool-envelope shape). Every other
+    key is preserved, and the number of omitted items is recorded — so a
+    truncated collection still reports an accurate count instead of a blind
+    character slice landing mid-item with the summary field (e.g. ``total``)
+    chopped off and no way to tell what's missing. Binary-searches the widest
+    prefix that fits (so this costs O(log n) re-renders, not O(n)). Returns
+    ``None`` when there's no list to shrink — the caller falls back to a
+    blind slice.
+    """
+    key: str | None
+    if isinstance(value, list):
+        items, key = value, None
+    else:
+        list_keys = [k for k, v in value.items() if isinstance(v, list) and v]
+        if not list_keys:
+            return _omit_largest_string_field(value, max_chars, render=render)
+        key = max(list_keys, key=lambda k: len(value[k]))
+        items = value[key]
+
+    def candidate(n: int) -> Any:
+        omitted = len(items) - n
+        if key is None:
+            kept: list[Any] = list(items[:n])
+            if omitted:
+                kept.append(f"…[{omitted} more items omitted]")
+            return kept
+        out = dict(value)
+        out[key] = items[:n]
+        if omitted:
+            out[f"{key}_omitted_count"] = omitted
+        return out
+
+    lo, hi = 0, len(items)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(render(candidate(mid))) <= max_chars:
+            lo = mid
+        else:
+            hi = mid - 1
+    return render(candidate(lo))
+
+
+def _omit_largest_string_field(
+    value: dict[str, Any], max_chars: int, *, render: Callable[[Any], str]
+) -> str | None:
+    """Replace an oversized plain-string field with an explicit marker.
+
+    A dict whose oversized field is a plain string (e.g. a base64-encoded
+    file blob, not a list) has nothing for ``_shrink_structurally`` to trim
+    -- the previous behavior fell through to a blind character slice on the
+    whole rendered dict, which can (and, live-caught, did) land MID-STRING.
+    A truncated base64 blob isn't "partially usable" the way a truncated
+    list is -- it decodes to garbage or fails outright -- so a model that
+    reuses a mid-string-truncated value verbatim in a later tool call (e.g.
+    handing a cut ``step_base64`` to ``twin.commit_geometry``) gets a
+    confusing "not valid base64" error instead of an honest "this was too
+    large" signal. Dropping the whole field with an explicit marker is
+    strictly safer than any partial prefix. Returns ``None`` (falls back to
+    the pre-existing blind slice) only when even the marker itself doesn't
+    fit the budget.
+    """
+    str_keys = [k for k, v in value.items() if isinstance(v, str) and v]
+    if not str_keys:
+        return None
+    key = max(str_keys, key=lambda k: len(value[k]))
+    out = dict(value)
+    out[key] = (
+        f"<omitted: {len(value[key])} chars, too large to include in the trace -- "
+        "do not reuse a partial value; reference the result by its session_id/obj_id "
+        "(or re-run the export) instead>"
+    )
+    rendered = render(out)
+    return rendered if len(rendered) <= max_chars else None
+
+
+def truncate_observation_value(
+    value: Any,
+    max_chars: int = 2000,
+    *,
+    render: Callable[[Any], str] = str,
+) -> str:
+    """Render + cap an observation with an EXPLICIT marker (MET-568, MET-58X).
+
+    ``render`` is the caller's normal stringifier (``str`` for the ReAct
+    trace, JSON for the native tool-calling loop) — used unchanged whenever
+    the rendered text already fits. Only when it doesn't, and ``value`` is a
+    dict or list, does this reach past a blind character slice: see
+    ``_shrink_structurally``. A blind slice on a large list-shaped tool
+    result (e.g. ``project.list``'s ``{"projects": [...], "total": N}``) can
+    land mid-array and cut off the trailing ``total`` field entirely — the
+    exact metadata a model needs to self-report "N of M" rather than
+    discovering an arbitrary cut with no idea how much is missing.
+    """
+    text = render(value)
+    if len(text) <= max_chars or not isinstance(value, dict | list):
+        return truncate_observation(text, max_chars)
+    shrunk = _shrink_structurally(value, max_chars, render=render)
+    return truncate_observation(shrunk if shrunk is not None else text, max_chars)
+
+
+def budget_history(
+    history: Sequence[dict[str, Any]],
+    *,
+    max_tokens: int,
+    count_tokens: TokenCounter = default_token_count,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split ``history`` into (kept, dropped) under a token budget (MET-568).
+
+    Keeps the NEWEST turns whole, accumulating backwards until the budget is
+    spent; everything older is returned as ``dropped`` (oldest first) for the
+    caller to summarize. Replaces the old fixed 20-turn slice, which threw
+    away short early turns that would have fit and kept huge recent ones that
+    blew the window.
+    """
+    kept_rev: list[dict[str, Any]] = []
+    spent = 0
+    cut = len(history)
+    for i in range(len(history) - 1, -1, -1):
+        turn = history[i]
+        cost = count_tokens(str(turn.get("content", "")))
+        if spent + cost > max_tokens and kept_rev:
+            break
+        spent += cost
+        kept_rev.append(turn)
+        cut = i
+    return list(reversed(kept_rev)), list(history[:cut])
+
+
+def summarize_turns(
+    turns: Sequence[dict[str, Any]],
+    *,
+    max_chars_per_turn: int = 200,
+    max_total_chars: int = 6000,
+) -> str:
+    """Deterministic content-preserving summary of dropped chat turns (MET-568).
+
+    One line per dropped turn, content head-truncated — facts stated early in
+    a conversation (serials, specs, names) survive into the summary so the
+    model can still recall them after the verbatim turns no longer fit the
+    budget. Deterministic (no model call) so it is free, instant, and
+    reproducible; an LLM-written rolling summary can replace this later
+    without changing the call sites.
+    """
+    lines = [f"[Summary of {len(turns)} earlier conversation turns:]"]
+    total = len(lines[0])
+    for turn in turns:
+        content = " ".join(str(turn.get("content", "")).split())
+        if len(content) > max_chars_per_turn:
+            content = content[:max_chars_per_turn] + "…"
+        line = f"- {turn.get('role', '?')}: {content}"
+        if total + len(line) > max_total_chars:
+            lines.append(f"- …and {len(turns) - (len(lines) - 1)} more turns omitted")
+            break
+        lines.append(line)
+        total += len(line)
+    return "\n".join(lines)
+
+
+def _is_tool_exchange_start(msg: dict[str, Any]) -> bool:
+    return msg.get("role") == "assistant" and bool(msg.get("tool_calls"))
+
+
+def compact_native_messages(
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int,
+    keep_recent_exchanges: int = 3,
+    count_tokens: TokenCounter = default_token_count,
+) -> list[dict[str, Any]]:
+    """Fold older tool exchanges in a native-loop message list (MET-568).
+
+    A native tool-calling turn grows without bound: each iteration appends an
+    assistant tool_calls message plus one ``tool`` result message per call
+    (historically 24 steps × 8KB). When the estimated total exceeds
+    ``max_tokens``, the exchanges older than ``keep_recent_exchanges`` are
+    replaced by ONE synthetic user message carrying a ``compress_trace``-style
+    synopsis (which tools ran, how often, how many errored). The leading
+    segment (conversation history + the goal) and the most recent exchanges
+    stay verbatim.
+    """
+    est = sum(count_tokens(json.dumps(m, default=str)) for m in messages)
+    if est <= max_tokens:
+        return messages
+
+    # Locate exchange boundaries: each starts at an assistant tool_calls
+    # message and runs through its tool results.
+    starts = [i for i, m in enumerate(messages) if _is_tool_exchange_start(m)]
+    if len(starts) <= keep_recent_exchanges:
+        return messages
+    lead_end = starts[0]
+    fold_end = starts[len(starts) - keep_recent_exchanges]
+    folded = messages[lead_end:fold_end]
+
+    tools: dict[str, int] = {}
+    errors = 0
+    for m in folded:
+        if _is_tool_exchange_start(m):
+            for call in m.get("tool_calls") or []:
+                name = str((call.get("function") or {}).get("name", "?"))
+                tools[name] = tools.get(name, 0) + 1
+        elif m.get("role") == "tool" and str(m.get("content", "")).startswith("ERROR"):
+            errors += 1
+    tool_desc = ", ".join(f"{name}×{n}" for name, n in sorted(tools.items())) or "none"
+    synopsis = {
+        "role": "user",
+        "content": (
+            f"[{len(folded)} earlier tool-exchange messages compressed — "
+            f"tools: {tool_desc}; errors: {errors}. Results already reflected "
+            f"in the conversation; do not repeat these calls.]"
+        ),
+    }
+    compacted = [*messages[:lead_end], synopsis, *messages[fold_end:]]
+    logger.info(
+        "native_messages_compacted",
+        before_msgs=len(messages),
+        after_msgs=len(compacted),
+        before_tokens=est,
+        folded=len(folded),
+    )
+    return compacted
 
 
 def compress_trace(

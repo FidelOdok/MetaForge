@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import time
 from typing import Any
 
 import structlog
 
+from domain_agents.shared.cad_backend import resolve_cad_backend
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -16,12 +18,6 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("skill.generate_cad")
 
 SUPPORTED_SHAPES = {"bracket", "plate", "enclosure", "cylinder"}
-
-# Tool IDs per backend
-_TOOL_IDS = {
-    "cadquery": "cadquery.create_parametric",
-    "freecad": "freecad.create_parametric",
-}
 
 
 class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
@@ -36,31 +32,50 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
     input_type = GenerateCadInput
     output_type = GenerateCadOutput
 
-    async def _resolve_backend(self, preferred: str) -> tuple[str, str]:
-        """Resolve which backend tool to use, with fallback.
+    async def _commit_geometry(
+        self, *, cad_file: str, shape_type: str, material: str, project_id: str | None
+    ) -> tuple[bool, str | None, str | None, str | None]:
+        """Best-effort persist the exported STEP file via twin.commit_geometry.
+
+        Reading *cad_file* directly only works when the CAD backend runs
+        in-process with this skill (true for cadquery today); a containerized
+        backend whose filesystem isn't shared with this process reports a
+        commit_error instead of raising, so a caller that asked to persist
+        can see why it didn't happen without the whole skill failing.
 
         Returns:
-            Tuple of (backend_name, tool_id).
-
-        Raises:
-            RuntimeError: If no CAD backend is available.
+            (committed, twin_node_id, model_url, commit_error).
         """
-        preferred_tool = _TOOL_IDS[preferred]
-        if await self.context.mcp.is_available(preferred_tool):
-            return preferred, preferred_tool
+        if not await self.context.mcp.is_available("twin.commit_geometry"):
+            return False, None, None, "twin.commit_geometry tool is not available"
 
-        # Try fallback
-        fallback = "freecad" if preferred == "cadquery" else "cadquery"
-        fallback_tool = _TOOL_IDS[fallback]
-        if await self.context.mcp.is_available(fallback_tool):
+        try:
+            with open(cad_file, "rb") as fh:
+                step_base64 = base64.b64encode(fh.read()).decode("ascii")
+        except OSError as exc:
             self.logger.warning(
-                "Preferred CAD backend unavailable, falling back",
-                preferred=preferred,
-                fallback=fallback,
+                "Could not read generated CAD file to commit it",
+                cad_file=cad_file,
+                error=str(exc),
             )
-            return fallback, fallback_tool
+            return False, None, None, f"could not read {cad_file}: {exc}"
 
-        raise RuntimeError(f"No CAD backend available. Tried {preferred_tool} and {fallback_tool}.")
+        arguments: dict[str, Any] = {
+            "name": f"{shape_type} ({material})",
+            "step_base64": step_base64,
+            "domain": "mechanical",
+            "format": "step",
+        }
+        if project_id:
+            arguments["project_id"] = project_id
+
+        try:
+            result = await self.context.mcp.invoke("twin.commit_geometry", arguments, timeout=60)
+        except Exception as exc:
+            self.logger.warning("twin.commit_geometry failed", error=str(exc))
+            return False, None, None, str(exc)
+
+        return True, result.get("node_id"), result.get("model_url"), None
 
     async def validate_preconditions(self, input_data: GenerateCadInput) -> list[str]:
         """Check that the work_product exists and at least one CAD tool is available."""
@@ -74,9 +89,8 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                 errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         # Check that at least one backend is available
-        cadquery_ok = await self.context.mcp.is_available("cadquery.create_parametric")
-        freecad_ok = await self.context.mcp.is_available("freecad.create_parametric")
-        if not cadquery_ok and not freecad_ok:
+        candidates = await self.context.mcp.list_tools(capability="cad_generation")
+        if not candidates:
             errors.append("No CAD backend available (neither cadquery nor freecad)")
 
         return errors
@@ -107,7 +121,9 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                 )
 
             # 2. Resolve backend (with fallback)
-            backend, tool_id = await self._resolve_backend(input_data.backend)
+            backend, tool_id = await resolve_cad_backend(
+                self.context.mcp, "cad_generation", input_data.backend
+            )
             span.set_attribute("backend.resolved", backend)
 
             # 3. Build output path if not provided
@@ -160,6 +176,21 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             span.set_attribute("volume_mm3", volume_mm3)
             span.set_attribute("elapsed_s", elapsed)
 
+            # 6. Persist into the Twin so this skill always leaves a reviewable
+            # work product behind (MET-615) rather than an ephemeral adapter file.
+            committed = False
+            twin_node_id: str | None = None
+            model_url: str | None = None
+            commit_error: str | None = None
+            if input_data.commit:
+                committed, twin_node_id, model_url, commit_error = await self._commit_geometry(
+                    cad_file=cad_file,
+                    shape_type=input_data.shape_type,
+                    material=input_data.material,
+                    project_id=input_data.project_id,
+                )
+                span.set_attribute("committed", committed)
+
             return GenerateCadOutput(
                 work_product_id=input_data.work_product_id,
                 cad_file=cad_file,
@@ -169,6 +200,10 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                 bounding_box=bounding_box,
                 parameters_used=parameters_used,
                 material=input_data.material,
+                committed=committed,
+                twin_node_id=twin_node_id,
+                model_url=model_url,
+                commit_error=commit_error,
             )
 
     async def validate_output(self, output: GenerateCadOutput) -> list[str]:

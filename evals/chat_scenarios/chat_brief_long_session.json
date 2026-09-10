@@ -1,0 +1,47 @@
+{
+  "id": "chat_brief_long_session",
+  "title": "Project brief survives a long session (re-prepended every turn, unlike sliced history)",
+  "scope": "project",
+  "project_description": "Eval fixture: a handheld gas-detector product design project.",
+  "rubric": ["chat_brief", "chat_window"],
+  "definition_of_done": {
+    "decision_substance": "Both recorded design decisions carry substantive rationales grounded in the gas-detector product (sensor stability, field-swappable power), not title restatements.",
+    "late_session_quality": "The decision recorded after the long filler stretch is as substantive as the one recorded at the start."
+  },
+  "variants": [
+    { "name": "native", "provider": null, "model": null }
+  ],
+  "max_turn_seconds": 240,
+  "turns": [
+    {
+      "say": "Record a design decision in this project titled 'Sensor: NDIR CO2 module' with rationale 'long-term stability over electrochemical cells'.",
+      "checks": [
+        { "id": "seed_decision_recorded", "type": "tool_called", "tool": "mcp_twin_record_decision" }
+      ]
+    },
+    {
+      "repeat": {
+        "count": 20,
+        "template": "Noted point {i}: field-test observation {i} logged as OBS-{i}. Just acknowledge briefly."
+      }
+    },
+    {
+      "say": "After all that: which project are we working in? Reply with its name and its id.",
+      "checks": [
+        { "id": "late_project_id_in_reply", "type": "reply_contains", "pattern": "$PROJECT_ID" }
+      ]
+    },
+    {
+      "say": "Record one more design decision in this project titled 'Battery: 18650 Li-ion' with rationale 'field-swappable and widely available'.",
+      "checks": [
+        {
+          "id": "late_decision_project_scoped",
+          "type": "tool_arg_equals",
+          "tool": "mcp_twin_record_decision",
+          "arg": "project_id",
+          "value": "$PROJECT_ID"
+        }
+      ]
+    }
+  ]
+}

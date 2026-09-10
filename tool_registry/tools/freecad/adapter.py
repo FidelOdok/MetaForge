@@ -61,7 +61,10 @@ class FreecadServer(McpToolServer):
         self._ops = FreecadOperations(
             work_dir=self.config.work_dir, timeout=float(self.config.max_operation_time)
         )
-        self._sessions = FreecadSessionStore()
+        self._sessions = FreecadSessionStore(
+            ttl_seconds=self.config.session_ttl_seconds,
+            max_sessions=self.config.max_sessions,
+        )
         self._register_tools()
         self._register_authoring_tools()
 
@@ -72,7 +75,14 @@ class FreecadServer(McpToolServer):
                 tool_id="freecad.export_geometry",
                 adapter_id="freecad",
                 name="Export Geometry",
-                description="Export CAD model to STEP/STL/OBJ/BREP format",
+                description=(
+                    "Export CAD model to STEP/STL/OBJ/BREP format (STEP only today; "
+                    "other formats raise). Output is written to the adapter's local "
+                    "filesystem only — it is NOT persisted or visible in the "
+                    "project/Twin until twin.commit_geometry is called. The response "
+                    "includes step_base64 — pass that directly as "
+                    "twin.commit_geometry's step_base64 argument to persist it."
+                ),
                 capability="cad_export",
                 input_schema={
                     "type": "object",
@@ -99,6 +109,12 @@ class FreecadServer(McpToolServer):
                         "output_file": {"type": "string"},
                         "file_size_bytes": {"type": "integer"},
                         "format": {"type": "string"},
+                        "step_base64": {
+                            "type": "string",
+                            "description": (
+                                "Base64 STEP bytes -- pass to twin.commit_geometry's step_base64."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -248,6 +264,49 @@ class FreecadServer(McpToolServer):
                 ),
             ),
             handler=self.get_properties,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="freecad.describe_step_file",
+                adapter_id="freecad",
+                name="Describe STEP File",
+                description=(
+                    "Per-component breakdown of a CAD assembly file, by name: each "
+                    "top-level shape's Label, solid_count, volume, area, and bounding "
+                    "box. Use this instead of freecad.get_properties whenever you need "
+                    "the individual PARTS of a multipart assembly (names, per-part "
+                    "volumes) rather than one flattened aggregate. Note: a multipart "
+                    "STEP export typically returns both each named leaf part AND a "
+                    "top-level assembly/product compound whose volume equals the sum "
+                    "of the parts — compare volumes/solid_count to tell them apart."
+                ),
+                capability="cad_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "input_file": {
+                            "type": "string",
+                            "description": (
+                                "Path to CAD file (e.g. from twin.stage_work_product_file)"
+                            ),
+                        },
+                    },
+                    "required": ["input_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string"},
+                        "components": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=300, max_disk_mb=512
+                ),
+            ),
+            handler=self.describe_step_file,
         )
 
         self.register_tool(
@@ -433,6 +492,15 @@ class FreecadServer(McpToolServer):
         result = await self._execute_analysis(input_file, properties)
         return result
 
+    async def describe_step_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Per-component breakdown of a multipart CAD assembly file."""
+        input_file = arguments.get("input_file", "")
+        if not input_file:
+            raise ValueError("input_file is required")
+
+        logger.info("Describing STEP file", input_file=input_file)
+        return await self._execute_describe_step_file(input_file)
+
     async def _execute_export(
         self, input_file: str, output_format: str, output_path: str
     ) -> dict[str, Any]:
@@ -464,6 +532,10 @@ class FreecadServer(McpToolServer):
     async def _execute_analysis(self, input_file: str, properties: list[str]) -> dict[str, Any]:
         """Extract geometric properties via FreeCAD (headless)."""
         return self._ops.get_properties(input_file, properties)
+
+    async def _execute_describe_step_file(self, input_file: str) -> dict[str, Any]:
+        """Per-component breakdown via FreeCAD (headless)."""
+        return self._ops.describe_step_file(input_file)
 
     async def _execute_parametric(
         self,
@@ -895,7 +967,17 @@ class FreecadServer(McpToolServer):
             (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
-                "(escape hatch; assign `result` to surface an object)",
+                "(escape hatch; assign `result` to surface an object). Namespace "
+                "provides: FreeCAD (alias App), Part, math, doc, and the bare "
+                "geometry types Vector/Rotation/Placement/Matrix (no import needed, "
+                "no FreeCAD. prefix required). Blocked anywhere in the script: "
+                "open, __import__, os, sys, subprocess, eval, exec, compile. "
+                "IMPORTANT: never assign the same Shape object to more than one "
+                "document object's .Shape (e.g. once into an assembly compound "
+                "AND again onto its own per-part object) -- this has caused the "
+                "adapter process to crash outright (MET-643). Call shape.copy() "
+                "before each additional assignment if you need both an "
+                "assembly-level compound and per-part representations.",
                 "cad_scripting",
                 obj_schema(
                     {"session_id": sid, "code": {"type": "string"}},
@@ -905,7 +987,10 @@ class FreecadServer(McpToolServer):
             ),
             (
                 "export_model",
-                "Export a session object to STEP and return the bytes (base64)",
+                "Export a session object to STEP and return the bytes (base64). "
+                "Returned bytes are NOT persisted anywhere — call "
+                "twin.commit_geometry (session_id + obj_id) afterward to add it "
+                "to the project/Twin as a cad_model work product.",
                 "cad_export",
                 obj_schema(
                     {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
@@ -1475,6 +1560,10 @@ class FreecadServer(McpToolServer):
         obj = self._sessions.get_object(session_id, obj_id)
         step_bytes = self._ops.export_object_step_bytes(obj)
         return {
+            # MET-650: echoed back so a later twin.commit_geometry call (by
+            # reference) can be built directly from this result even if the
+            # arguments that produced it are no longer in view.
+            "session_id": session_id,
             "obj_id": obj_id,
             "format": "step",
             "size_bytes": len(step_bytes),

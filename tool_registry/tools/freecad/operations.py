@@ -7,6 +7,7 @@ can be imported and tested without a real FreeCAD installation.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from pathlib import Path
@@ -22,11 +23,13 @@ tracer = get_tracer("tool_registry.tools.freecad.operations")
 # Conditional FreeCAD import -- allows testing without FreeCAD installed
 try:
     import FreeCAD  # type: ignore[import-untyped]
+    import Import  # type: ignore[import-untyped]
     import Part  # type: ignore[import-untyped]
 
     HAS_FREECAD = True
 except ImportError:
     FreeCAD = None  # type: ignore[assignment]
+    Import = None  # type: ignore[assignment]
     Part = None  # type: ignore[assignment]
     HAS_FREECAD = False
 
@@ -105,18 +108,75 @@ _SAFE_BUILTINS = {
     "tuple",
     "type",
     "zip",
+    # Exception types: pure classes, no capability to catch/raise them --
+    # unlike open/eval/exec/__import__ these were never a security boundary,
+    # just an oversight. A script wrapping its own logic in try/except (a
+    # completely normal Python pattern) crashed with "name 'Exception' is
+    # not defined" without these (found live during the MET-642 S3 eval).
+    "Exception",
+    "BaseException",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "IndexError",
+    "AttributeError",
+    "RuntimeError",
+    "StopIteration",
+    "ZeroDivisionError",
+    "ArithmeticError",
+    "NotImplementedError",
 }
 _BLOCKED_NAMES = {"__import__", "eval", "exec", "compile", "open", "os", "sys", "subprocess"}
-_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "math"}  # injected into the namespace
+# MET-688: `Import` (FreeCAD's own STEP/IGES import-export module -- the tool
+# that preserves multi-part Labels, per MET-616's "raw Shape.exportStep()
+# collapses everything into one anonymous PRODUCT" finding) grants no
+# capability `Part` doesn't already have -- both do file I/O through FreeCAD's
+# native layer regardless of the sandbox's blocked Python builtins (`open`
+# etc.), which is exactly why the module docstring already says the real
+# isolation boundary is the container, not this allowlist. Confirmed live: a
+# script correctly reached for `import Import` to re-load a STEP file
+# label-preserving, got rejected, and fell back to `Part.Shape().read()`
+# (which flattens to one anonymous shape, losing per-part structure).
+_SANDBOX_MODULES = {"FreeCAD", "App", "Part", "Import", "math"}  # injected into the namespace
+# MET-645: FreeCAD scripts overwhelmingly reach for these bare (not
+# FreeCAD.Vector-qualified) -- binding them directly avoids a
+# NameError-then-fallback-to-raw-primitives round trip on the model's very
+# first attempt. All three are plain geometry value types, not a sandbox
+# relaxation.
+_SANDBOX_CONVENIENCE_NAMES = {"Vector", "Rotation", "Placement", "Matrix"}
+# MET-649: `_strip_sandbox_imports` drops `from math import sin, cos, ...`
+# entirely (math is a sandbox module, so the whole line matches and is
+# removed) but nothing rebinds `sin`/`cos` as bare names afterward, so a
+# script that wrote the from-import form got a NameError on first use. Same
+# convenience-binding pattern as MET-645's Vector/Rotation/Placement/Matrix.
+_MATH_CONVENIENCE_NAMES = ("sin", "cos", "tan", "atan2", "sqrt", "pi", "radians", "degrees")
+import ast as _ast  # noqa: E402
 import re as _re  # noqa: E402
 
 _IMPORT_RE = _re.compile(
     r"^(?:import\s+(?P<mod>\w+)(?:\s+as\s+\w+)?|from\s+(?P<from_mod>\w+)\s+import\s+.+)$"
 )
 
+# MET-652: any STEP with real solid geometry has at least one of these AP214
+# entities. A file with only placement/context boilerplate (no solids) is
+# exactly the "successful export, empty file" failure this guards against.
+_STEP_SOLID_MARKER_RE = _re.compile(
+    rb"MANIFOLD_SOLID_BREP|BREP_WITH_VOIDS|SHELL_BASED_SURFACE_MODEL"
+)
+
 
 def _strip_sandbox_imports(script: str) -> str:
-    """Drop top-level import lines for modules already injected (FreeCAD/App/Part)."""
+    """Drop top-level import lines for modules already injected (FreeCAD/App/Part).
+
+    Best-effort only -- ``_IMPORT_RE`` requires a bare module name, so a dotted
+    submodule import (``import FreeCAD.Base``) or any other syntax variant it
+    doesn't recognize passes through untouched. ``_sandboxed_import`` below is
+    the actual enforcement point: any import line this misses still resolves
+    safely (or fails safely) at exec time rather than crashing with a bare
+    ``__import__ not found`` NameError (MET-645 follow-up, found live during
+    the MET-642 re-eval: a model-written ``import`` statement bypassed this
+    regex and the restricted namespace had no ``__import__` at all).
+    """
     out = []
     for line in script.splitlines():
         m = _IMPORT_RE.match(line.strip())
@@ -124,6 +184,104 @@ def _strip_sandbox_imports(script: str) -> str:
             continue
         out.append(line)
     return "\n".join(out)
+
+
+def _find_shared_compound_shape_reuse(code: str) -> str | None:
+    """Detect the exact pattern proven to crash the FreeCAD/OCCT process
+    outright (MET-643, confirmed by direct live repro): a shape passed into
+    ``Part.makeCompound([...])`` is later assigned, unmodified, as a SECOND
+    document object's ``.Shape`` -- e.g.::
+
+        compound = Part.makeCompound([tube, plate, boss])
+        ...
+        arm_obj.Shape = tube  # `tube` already lives inside `compound`
+
+    This is a native crash, not a catchable Python exception, so it cannot be
+    guarded from inside the script itself -- it has to be rejected before
+    ``exec()`` ever runs. Returns the offending variable name if found, else
+    ``None``. Best-effort/heuristic (a static AST pass, not a data-flow
+    analysis): it only recognizes the direct-name-reuse shape reproduced
+    live, and un-flags a name once it sees a ``.copy()`` call bind a new
+    value to it. It cannot see through aliasing, so this is a safety net for
+    the known-dangerous pattern, not a guarantee against every possible
+    variant.
+    """
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        return None  # exec() will raise its own clear error
+
+    compounded: set[str] = set()
+
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Assign):
+            value = node.value
+            if (
+                isinstance(value, _ast.Call)
+                and isinstance(value.func, _ast.Attribute)
+                and value.func.attr == "makeCompound"
+                and value.args
+                and isinstance(value.args[0], (_ast.List, _ast.Tuple))
+            ):
+                for elt in value.args[0].elts:
+                    if isinstance(elt, _ast.Name):
+                        compounded.add(elt.id)
+            # A `.copy()` call reassigned to the same name makes it safe again.
+            if (
+                isinstance(value, _ast.Call)
+                and isinstance(value.func, _ast.Attribute)
+                and value.func.attr == "copy"
+            ):
+                for target in node.targets:
+                    if isinstance(target, _ast.Name):
+                        compounded.discard(target.id)
+            # `obj.Shape = <name>` where <name> was already compounded.
+            for target in node.targets:
+                if (
+                    isinstance(target, _ast.Attribute)
+                    and target.attr == "Shape"
+                    and isinstance(value, _ast.Name)
+                    and value.id in compounded
+                ):
+                    return value.id
+    return None
+
+
+def _sandboxed_import(
+    name: str,
+    globals: dict[str, Any] | None = None,  # noqa: A002
+    locals: dict[str, Any] | None = None,  # noqa: A002
+    fromlist: tuple[str, ...] = (),
+    level: int = 0,
+) -> Any:
+    """Restricted ``__import__`` for execute_code's namespace (MET-645 follow-up).
+
+    Only the already-injected sandbox modules (FreeCAD/App/Part/math) may be
+    imported -- via any syntax (``import X``, ``import X.Y``, ``from X import
+    Y``, aliasing) -- since ``_strip_sandbox_imports`` only catches the plain
+    ``import X`` / ``from X import Y`` forms textually. This resolves to the
+    SAME objects already bound in the namespace rather than performing a real
+    import, so it grants no capability beyond what's already pre-bound.
+    Anything else raises ImportError, same as a genuinely missing module.
+    """
+    import math as _math_module
+
+    top_level = name.split(".", 1)[0]
+    if top_level not in _SANDBOX_MODULES:
+        raise ImportError(f"import of {name!r} is not permitted in this sandbox")
+    resolved = {
+        "FreeCAD": FreeCAD,
+        "App": FreeCAD,
+        "Part": Part,
+        "Import": Import,
+        "math": _math_module,
+    }[top_level]
+    # Bare `import FreeCAD.Base` (no fromlist) and `from FreeCAD import Base`
+    # (fromlist=("Base",)) both resolve to the same already-injected object --
+    # this sandbox doesn't model real submodule attribute access, it just
+    # hands back what's already bound, matching the pre-MET-645 behavior for
+    # the plain `import X` case that `_strip_sandbox_imports` already covers.
+    return resolved
 
 
 class FreecadNotAvailableError(RuntimeError):
@@ -402,10 +560,18 @@ class FreecadOperations:
                 duration_s=round(elapsed, 3),
             )
 
+            with open(output_path, "rb") as f:  # noqa: PTH123
+                step_base64 = base64.b64encode(f.read()).decode("ascii")
+
             return {
                 "output_file": output_path,
                 "file_size_bytes": file_size,
                 "format": "step",
+                # MET-489: without this, freecad.export_geometry output had no
+                # path into twin.commit_geometry (unlike freecad.export_model,
+                # which already returns step_base64) and was lost when the
+                # adapter container recreated.
+                "step_base64": step_base64,
             }
 
     def generate_mesh(
@@ -550,11 +716,54 @@ class FreecadOperations:
             if "area" in wanted:
                 props["area"] = round(shape.Area, 2)
             if "center_of_mass" in wanted:
-                com = shape.CenterOfMass
-                props["center_of_mass"] = [round(com.x, 3), round(com.y, 3), round(com.z, 3)]
+                # ``Part.Shape`` has no ``CenterOfMass`` (only ``Part.Solid``
+                # does — it AttributeErrors on a shape/compound, which the
+                # MCP layer surfaced as an opaque "Tool execution failed"
+                # with no way to tell what broke). ``CenterOfGravity`` is the
+                # shape-level equivalent: FreeCAD computes it as the
+                # volume-weighted centroid across every solid, matching a
+                # manual per-solid CenterOfMass weighted average.
+                cog = shape.CenterOfGravity
+                props["center_of_mass"] = [round(cog.x, 3), round(cog.y, 3), round(cog.z, 3)]
             if "bounding_box" in wanted:
                 props["bounding_box"] = self._bbox_dict(shape.BoundBox)
             return {"file": input_file, "properties": props}
+
+    def describe_step_file(self, input_file: str) -> dict[str, Any]:
+        """Per-component breakdown of a (possibly multipart) CAD assembly file.
+
+        ``get_properties`` reads the file as one flattened ``Part.Shape`` --
+        it can report "3 solids, 6,080,000 mm3 total" but not "Tabletop (1
+        solid, 4.8M mm3), LegA, LegB." This loads the file into a document via
+        ``Import`` (preserves STEP PRODUCT names as object Labels -- see
+        MET-534/MET-535) so each named component's own geometry is visible.
+        For a multipart STEP export the result typically includes both each
+        named leaf part AND a top-level assembly/product compound whose
+        volume equals the sum of the parts -- compare volumes/solid_count to
+        tell them apart (the tool doesn't guess which is which).
+        """
+        self._require_freecad()
+        with tracer.start_as_current_span("freecad.describe_step_file"):
+            doc = FreeCAD.newDocument()
+            try:
+                Import.insert(input_file, doc.Name)
+                components = []
+                for obj in doc.Objects:
+                    shape = getattr(obj, "Shape", None)
+                    if shape is None or not shape.Solids:
+                        continue
+                    components.append(
+                        {
+                            "label": obj.Label,
+                            "solid_count": len(shape.Solids),
+                            "volume": round(shape.Volume, 2),
+                            "area": round(shape.Area, 2),
+                            "bounding_box": self._bbox_dict(shape.BoundBox),
+                        }
+                    )
+                return {"file": input_file, "components": components}
+            finally:
+                FreeCAD.closeDocument(doc.Name)
 
     # ------------------------------------------------------------------
     # Stateful authoring ops (MET-528) — operate on a live session document.
@@ -885,6 +1094,33 @@ class FreecadOperations:
         document.recompute()
         return mir
 
+    @staticmethod
+    def _resolve_execute_code_result(document: Any, raw_result: Any) -> Any:
+        """Recover a usable FreeCAD object from ``execute_code``'s ``result``
+        variable when the script assigned a *description* of the object
+        (a dict with an id/name field) instead of the object itself.
+
+        Confirmed live (MET-687): scripts repeatedly write
+        ``result = {'obj_id': model.Name, ...}`` -- a plain dict has no
+        ``.Shape``, so the caller's ``hasattr(result, "Shape")`` registration
+        check silently drops it, leaving the script's own claimed ``obj_id``
+        unusable for a later commit-by-reference. If ``raw_result`` already
+        has a ``.Shape`` (the documented, correct contract), it's returned
+        unchanged -- this only kicks in for the dict-shaped mistake.
+        """
+        if raw_result is None or hasattr(raw_result, "Shape"):
+            return raw_result
+        if not isinstance(raw_result, dict):
+            return raw_result
+        for key in ("obj_id", "obj_name", "name", "model_name", "Name"):
+            candidate = raw_result.get(key)
+            if not isinstance(candidate, str):
+                continue
+            for obj in document.Objects:
+                if getattr(obj, "Name", None) == candidate and hasattr(obj, "Shape"):
+                    return obj
+        return raw_result
+
     def execute_code(
         self,
         document: Any,
@@ -895,10 +1131,22 @@ class FreecadOperations:
     ) -> Any:
         """Run a sandboxed FreeCAD Python script against the session ``doc``.
 
-        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``math`` and
-        the active ``doc``. Assign the object to surface to a variable named
-        ``result`` (it gets registered + returned). Source-level guarding mirrors
-        cadquery.execute_script; the real isolation boundary is the container.
+        The namespace provides ``FreeCAD`` (alias ``App``), ``Part``, ``Import``
+        (MET-688 -- use ``Import.insert(path, doc.Name)``/``Import.export(objs,
+        path)`` over ``Part.Shape().read(...)`` when Labels/multi-part
+        structure matter), ``math``, the active ``doc``, and the geometry
+        value types ``Vector``,
+        ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
+        ``FreeCAD.Vector``, though that also works). Assign the object to
+        surface to a variable named ``result`` (it gets registered + returned).
+        A script that instead assigns a dict describing the object (e.g.
+        ``{'obj_id': model.Name}``) is tolerated -- ``document.Objects`` is
+        searched by that name and the real object substituted (MET-687).
+        Blocked names (cannot appear anywhere in the script, including in
+        strings/comments): ``open``, ``__import__``, ``os``, ``sys``,
+        ``subprocess``, ``eval``, ``exec``, ``compile``. Source-level guarding
+        mirrors cadquery.execute_script; the real isolation boundary is the
+        container.
         """
         # Sandbox policy is validated first (no FreeCAD needed) so it's unit-testable.
         lines = code.strip().splitlines()
@@ -907,6 +1155,15 @@ class FreecadOperations:
         for blocked in _BLOCKED_NAMES:
             if _re.search(r"\b" + _re.escape(blocked) + r"\b", code):
                 raise ScriptSandboxError(f"Script contains blocked name: {blocked!r}")
+        reused = _find_shared_compound_shape_reuse(code)
+        if reused is not None:
+            raise ScriptSandboxError(
+                f"Script reassigns {reused!r} (already used inside Part.makeCompound(...)) "
+                "to another object's .Shape -- this crashes the FreeCAD process outright "
+                f"(MET-643, confirmed by live repro). Call {reused}.copy() before the second "
+                "assignment if you need both an assembly-level compound and a per-part "
+                "representation."
+            )
         code = _strip_sandbox_imports(code)
 
         self._require_freecad()
@@ -918,13 +1175,33 @@ class FreecadOperations:
         safe_builtins = {
             k: getattr(_builtins_module, k) for k in _SAFE_BUILTINS if hasattr(_builtins_module, k)
         }
+        # MET-645 follow-up: a restricted __import__ so any `import`/`from...
+        # import` syntax the line-based _strip_sandbox_imports doesn't catch
+        # (dotted submodules, unusual formatting) still resolves safely
+        # instead of crashing with "__import__ not found".
+        safe_builtins["__import__"] = _sandboxed_import
         namespace: dict[str, Any] = {
             "__builtins__": safe_builtins,
             "FreeCAD": FreeCAD,
             "App": FreeCAD,
             "Part": Part,
+            "Import": Import,
             "math": math,
             "doc": document,
+            # MET-649: a no-op stub for the common CQ-editor/CQGI
+            # `show_object(shape)` convention -- not part of this headless
+            # execution context, but common enough in model-generated
+            # scripts (hallucinated from generic CAD-scripting knowledge)
+            # that silently accepting it beats a NameError over dropping it.
+            "show_object": lambda *_a, **_k: None,
+            **{
+                name: getattr(FreeCAD, name)
+                for name in _SANDBOX_CONVENIENCE_NAMES
+                if hasattr(FreeCAD, name)
+            },
+            **{
+                name: getattr(math, name) for name in _MATH_CONVENIENCE_NAMES if hasattr(math, name)
+            },
         }
 
         is_main = threading.current_thread() is threading.main_thread()
@@ -932,6 +1209,13 @@ class FreecadOperations:
 
         def _timeout(_signum: int, _frame: Any) -> None:
             raise ScriptTimeoutError(f"Script exceeded {timeout}s")
+
+        # MET-643: a native crash inside exec() below kills the process with
+        # no Python traceback ever logged, leaving no way to tell what script
+        # provoked it. Logging BEFORE exec (not after, which a crash would
+        # never reach) means the script survives in the container's stdout
+        # even when the process dies mid-call.
+        logger.info("freecad_execute_code_running", code=code[:8000], code_length=len(code))
 
         with tracer.start_as_current_span("freecad.execute_code"):
             try:
@@ -950,7 +1234,7 @@ class FreecadOperations:
                         signal.signal(signal.SIGALRM, old_handler)
 
         document.recompute()
-        return namespace.get("result")
+        return self._resolve_execute_code_result(document, namespace.get("result"))
 
     def shell_solid(
         self, document: Any, body: Any, thickness: float, faces: list[str] | None = None
@@ -1405,18 +1689,26 @@ class FreecadOperations:
         return leaves
 
     def _resolve_shape(self, obj: Any) -> Any:
-        """The shape to export/measure for ``obj`` — its own, or a compound of an
+        """The shape to measure for ``obj`` — its own, or a compound of an
         assembly's children (MET-10: ``export_model`` on an ``App::Part`` used to
-        crash with ``'App.Part' object has no attribute 'Shape'``)."""
+        crash with ``'App.Part' object has no attribute 'Shape'``).
+
+        For read-only inspection (measure/describe_model/shape_props) only —
+        the compound this builds has no Label/PRODUCT identity, so it must
+        NOT be used for STEP export (see ``export_object_step_bytes``)."""
         self._require_freecad()
         leaves = self._shape_leaves(obj)
         if not leaves:
-            label = getattr(obj, "Label", getattr(obj, "Name", obj))
-            raise ValueError(
-                f"nothing to export: {label!r} has no exportable geometry "
-                "(an empty assembly, or a body with no features yet)"
-            )
+            self._raise_empty_geometry(obj)
         return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
+
+    @staticmethod
+    def _raise_empty_geometry(obj: Any) -> None:
+        label = getattr(obj, "Label", getattr(obj, "Name", obj))
+        raise ValueError(
+            f"nothing to export: {label!r} has no exportable geometry "
+            "(an empty assembly, or a body with no features yet)"
+        )
 
     def shape_props(self, obj: Any) -> dict[str, Any]:
         """Volume / surface area / bounding box for a live object's shape."""
@@ -1477,25 +1769,90 @@ class FreecadOperations:
         }
 
     def export_object_step_bytes(self, obj: Any) -> bytes:
-        """Export a live object's shape to STEP and return the bytes.
+        """Export a live object to STEP and return the bytes.
 
         Bytes (not a container-local path) so the gateway/twin layer can persist
         them to MinIO regardless of where the adapter runs (MET-529).
+
+        Uses the document-aware ``Import`` module (MET-616), not a raw
+        ``Shape.exportStep()`` on a flattened compound: the raw shape STEP
+        writer has no concept of FreeCAD Labels, so an assembly's children
+        all landed in one anonymous PRODUCT named after the OCCT translator
+        header, and the multi-part structure was lost. ``Import.export``
+        walks the live object (following into an ``App::Part``'s children
+        itself) and writes one PRODUCT per object, preserving Labels and
+        the assembly hierarchy — verified empirically against FreeCAD 7.8.
         """
         self._require_freecad()
         import tempfile
 
-        shape = self._resolve_shape(obj)
+        if not self._shape_leaves(obj):
+            self._raise_empty_geometry(obj)
         with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
             tmp_path = tmp.name
         try:
-            shape.exportStep(tmp_path)
-            return Path(tmp_path).read_bytes()
+            Import.export([obj], tmp_path)
+            step_bytes = Path(tmp_path).read_bytes()
+            # MET-652: the pre-export _shape_leaves check above validates the
+            # SOURCE object's .Shape, not what Import.export actually wrote --
+            # live-caught a case where the source check passed but the written
+            # STEP had no solid entities at all (a dangling SHAPE_REPRESENTATION
+            # referencing geometry that was never defined), so a "successful"
+            # commit silently stored an unusable file. The regex is a cheap
+            # fast-reject; it cannot be the whole check.
+            if not _STEP_SOLID_MARKER_RE.search(step_bytes):
+                self._log_export_geometry_gap(obj, step_bytes, reason="no_solid_marker")
+                self._raise_empty_geometry(obj)
+            # MET-652 (reopened): the regex alone is not sufficient -- a
+            # MANIFOLD_SOLID_BREP entity can appear in the DATA section
+            # syntactically (satisfying the regex) while the geometry it
+            # references is itself dangling/undefined, so the file still has
+            # zero real solids to any actual reader. Live-caught a 23,361-byte
+            # STEP that matched the marker regex yet opened with no solids.
+            # Reading the file back through the same kernel a downstream
+            # consumer (viewer, converter) will use is the only authoritative
+            # check.
+            solid_count = self._read_back_solid_count(tmp_path)
+            if solid_count == 0:
+                self._log_export_geometry_gap(obj, step_bytes, reason="roundtrip_zero_solids")
+                self._raise_empty_geometry(obj)
         finally:
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
+        return step_bytes
+
+    @staticmethod
+    def _read_back_solid_count(step_path: str) -> int:
+        """Read a just-written STEP file back through the geometry kernel and
+        count real solids -- the authoritative check. A ``MANIFOLD_SOLID_BREP``
+        entity can be present in the file syntactically while the geometry it
+        references is dangling (MET-652), so scanning the raw bytes for entity
+        names is not sufficient on its own."""
+        try:
+            shape = Part.Shape()
+            shape.read(step_path)
+            return len(shape.Solids)
+        except Exception:  # noqa: BLE001 -- any read failure means no usable solids
+            logger.warning("freecad_export_roundtrip_read_failed", step_path=step_path)
+            return 0
+
+    def _log_export_geometry_gap(self, obj: Any, step_bytes: bytes, *, reason: str) -> None:
+        """MET-652: forensic context for whoever hits the next occurrence of
+        an export that looked successful but carried no real geometry --
+        capture the source object's structure so it's diagnosable without
+        needing to reproduce it live."""
+        leaves = self._shape_leaves(obj)
+        logger.warning(
+            "freecad_export_empty_geometry_detected",
+            reason=reason,
+            object_type_id=getattr(obj, "TypeId", type(obj).__name__),
+            object_label=getattr(obj, "Label", getattr(obj, "Name", None)),
+            leaf_count=len(leaves),
+            leaf_shapes_null=[s.isNull() for s in leaves],
+            step_byte_length=len(step_bytes),
+        )
 
     @staticmethod
     def _bbox_dict(bb: Any) -> dict[str, float]:

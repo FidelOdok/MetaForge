@@ -348,13 +348,23 @@ def _review_new_proposals(
         _prompt_decision(p, client, color=color)
 
 
-def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None:
-    """Reuse ``--thread`` if given, else create a fresh thread.
+def _thread_scope(args: argparse.Namespace, *, session: str | None) -> tuple[str, str]:
+    """(scope_kind, scope_entity_id) for a new thread.
 
-    ``--project <id>`` creates a *project-scoped* thread so the agent sees the
+    ``--project <id>`` scopes the thread to that project so the agent sees the
     project's work products and saves new CAD/decisions into it; otherwise the
-    thread is assistant-scoped.
+    thread is assistant-scoped. Shared by initial thread creation and
+    ``/clear`` so a fresh thread never silently drops the project scope
+    (MET-565).
     """
+    project = getattr(args, "project", None)
+    if project:
+        return "project", str(project)
+    return _SCOPE_KIND, (session or f"cli-{uuid.uuid4().hex[:8]}")
+
+
+def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None:
+    """Reuse ``--thread`` if given, else create a fresh thread."""
     if args.thread:
         try:
             client.get_thread(args.thread)
@@ -366,11 +376,7 @@ def _resolve_thread(args: argparse.Namespace, client: ForgeClient) -> str | None
             return None
         return args.thread
 
-    project = getattr(args, "project", None)
-    if project:
-        scope_kind, entity = "project", project
-    else:
-        scope_kind, entity = _SCOPE_KIND, (args.session or f"cli-{uuid.uuid4().hex[:8]}")
+    scope_kind, entity = _thread_scope(args, session=args.session)
     try:
         thread = client.create_thread(scope_kind, entity, title=args.title or "CLI session")
     except ForgeClientError as exc:
@@ -469,10 +475,11 @@ def _dispatch_slash(
         return "handled"
 
     if cmd == "/clear":
+        # A fresh thread must keep the session's --project scope — clearing
+        # context is not the same as leaving the project (MET-565).
+        scope_kind, entity = _thread_scope(args, session=None)
         try:
-            thread = client.create_thread(
-                _SCOPE_KIND, f"cli-{uuid.uuid4().hex[:8]}", title="CLI session"
-            )
+            thread = client.create_thread(scope_kind, entity, title="CLI session")
         except ForgeClientError as exc:
             print(f"  Error: could not start a new thread: {exc}", file=sys.stderr)
             return "handled"

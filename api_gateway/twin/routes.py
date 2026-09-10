@@ -6,7 +6,7 @@ Endpoints live under ``/v1/twin``.
 
 from __future__ import annotations
 
-import os
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -14,7 +14,14 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
-from api_gateway.convert.service import ConversionService
+from api_gateway.convert.service import ConversionError, ConversionService
+from api_gateway.twin.boolean_ops import (
+    BooleanOpError,
+    InvalidFormatError,
+    NodeNotFoundError,
+    NoOverlapError,
+    perform_boolean_op,
+)
 from api_gateway.twin.file_link import (
     FileLink,
     FileLinkCreateRequest,
@@ -34,8 +41,11 @@ from api_gateway.twin.import_service import (
     infer_wp_type,
 )
 from api_gateway.twin.schemas import (
+    BooleanCutRequest,
+    BooleanCutResponse,
     TwinNodeListResponse,
     TwinNodeResponse,
+    TwinNodeScriptResponse,
     TwinRelationshipListResponse,
     TwinRelationshipResponse,
 )
@@ -103,6 +113,11 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         status="valid",
         properties=properties,
         updatedAt=wp.updated_at.isoformat(),
+        # MET-630: surface the structured (non-scalar) geometry_features
+        # metadata that the loop above silently drops, and whether a
+        # git-versioned script backs this node.
+        geometryParameters=wp.metadata.get("geometry_features"),
+        hasScript=bool(wp.metadata.get("script_node_id")),
     )
 
 
@@ -140,10 +155,24 @@ async def list_twin_nodes(
 
 
 @router.get("/relationships", response_model=TwinRelationshipListResponse)
-async def list_twin_relationships() -> TwinRelationshipListResponse:
-    """List all edges in the Digital Twin graph."""
+async def list_twin_relationships(
+    project_id: str | None = None,
+) -> TwinRelationshipListResponse:
+    """List edges in the Digital Twin graph.
+
+    ``project_id`` scopes the view to a single project (MET-491), matching
+    ``list_twin_nodes``. Omitted or empty returns every edge (including
+    unscoped legacy nodes) — preserving the prior global behaviour.
+    """
     with tracer.start_as_current_span("twin.list_relationships") as span:
-        work_products = await _twin.list_work_products()
+        scoped_project: UUID | None = None
+        if project_id:
+            try:
+                scoped_project = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("twin.filter.project_id", project_id)
+        work_products = await _twin.list_work_products(project_id=scoped_project)
         edges = []
         seen: set[str] = set()
         for wp in work_products:
@@ -167,7 +196,7 @@ async def list_twin_relationships() -> TwinRelationshipListResponse:
                     )
                 )
         span.set_attribute("twin.relationships_count", len(edges))
-        logger.info("twin_relationships_listed", count=len(edges))
+        logger.info("twin_relationships_listed", count=len(edges), project_id=project_id)
         return TwinRelationshipListResponse(relationships=edges, total=len(edges))
 
 
@@ -187,7 +216,78 @@ async def get_twin_node(node_id: str) -> TwinNodeResponse:
         return _wp_to_response(wp)
 
 
-_WORKSPACE_DIR = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+@router.post("/nodes/boolean-cut", response_model=BooleanCutResponse, status_code=201)
+async def boolean_cut_nodes(body: BooleanCutRequest) -> BooleanCutResponse:
+    """Real CSG boolean-cut between two committed STEP work products (MET-612).
+
+    A direct-commit endpoint, not the ``twin.propose_change``/apply HITL
+    pipeline — a human cutting their own open model is not meaningfully
+    different from clicking Save (same rationale as ``twin.record_document``,
+    whose apply executor doesn't fit this action either). Drives the
+    containerized CadQuery adapter via the shared MCP bridge, then commits the
+    result through the geometry recorder with provenance edges to both inputs.
+    """
+    from api_gateway.chat.routes import get_mcp_bridge
+    from api_gateway.projects.routes import get_project_backend
+    from api_gateway.twin.geometry_recorder import make_geometry_recorder
+
+    with tracer.start_as_current_span("twin.boolean_cut_route") as span:
+        span.set_attribute("boolean_cut.operation", body.operation)
+        recorder = make_geometry_recorder(_twin, get_project_backend())
+        try:
+            rec = await perform_boolean_op(
+                twin=_twin,
+                bridge=get_mcp_bridge(),
+                recorder=recorder,
+                target_node_id=body.target_node_id,
+                cutter_node_id=body.cutter_node_id,
+                operation=body.operation,
+                result_name=body.result_name,
+            )
+        except NodeNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidFormatError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except NoOverlapError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except BooleanOpError as exc:
+            span.record_exception(exc)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": -32001,
+                    "message": "CAD adapter unavailable — boolean operation could not run",
+                    "detail": str(exc),
+                },
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — adapter/network failure -> 503
+            span.record_exception(exc)
+            logger.warning("boolean_cut_adapter_error", error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": -32001,
+                    "message": "CAD adapter unavailable — boolean operation could not run",
+                    "detail": str(exc),
+                },
+            ) from exc
+
+        node_id = rec.get("node_id")
+        if not node_id:
+            raise HTTPException(
+                status_code=500, detail="boolean-cut committed but no node id returned"
+            )
+        wp = await _twin.get_work_product(UUID(str(node_id)))
+        if wp is None:
+            raise HTTPException(
+                status_code=500, detail="boolean-cut committed node could not be re-read"
+            )
+        return BooleanCutResponse(
+            node=_wp_to_response(wp),
+            operation=body.operation,
+            result_volume_mm3=float(rec.get("result_volume_mm3") or 0.0),
+            result_area_mm2=float(rec.get("result_area_mm2") or 0.0),
+        )
 
 
 @router.get("/nodes/{node_id}/model")
@@ -220,7 +320,31 @@ async def get_node_model(
         content, filename = _resolve_blob(wp)
         span.set_attribute("model.filename", filename)
 
-        result = ConversionService().convert(content, filename, quality)
+        try:
+            # MET-725: ConversionService.convert is synchronous and does a
+            # blocking httpx.post with a 120s timeout. Called directly from
+            # this async route it held the event loop for the whole
+            # conversion, so ONE slow CAD conversion served nothing else at
+            # all -- no /health (hence "unhealthy" containers), no chat, no
+            # SSE, and no shutdown progress. to_thread copies the context, so
+            # the OTel span above stays the parent.
+            result = await asyncio.to_thread(
+                ConversionService().convert, content, filename, quality
+            )
+        except ConversionError as exc:
+            # MET-652: this is a client-facing "this content can't be
+            # converted" case (e.g. a STEP with no exportable solids), not a
+            # server fault — previously an unhandled 500 with a full stack
+            # trace on every request for this node.
+            span.record_exception(exc)
+            logger.warning(
+                "node_model_conversion_rejected",
+                node_id=node_id,
+                filename=filename,
+                occt_status=exc.status_code,
+                occt_body=exc.body,
+            )
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.info(
             "node_model_converted",
             node_id=node_id,
@@ -276,50 +400,22 @@ def _content_type_for(fmt: str, filename: str) -> str:
 def _resolve_blob(wp: WorkProduct) -> tuple[bytes, str]:
     """Return ``(content, filename)`` for a work product's stored blob.
 
-    Resolution order matches the storage layering:
-
-    1. **MinIO object key** — if the WP records one in metadata
-       (``minio_object_key``), fetch the blob from object storage. This
-       is the architecture's source of truth for work-product blobs
-       (Planner data-modalities.md).
-    2. **Local file path** — the import path stores blobs on disk via
-       ``shared.storage`` and records the absolute path in ``file_path``;
-       workspace-relative paths resolve against the adapter workspace
-       (mirrors ``get_node_model``).
-
-    Raises ``HTTPException(404)`` when no retrievable blob exists — which
-    is exactly the "work product has no file behind it" case.
+    Thin wrapper over the promoted ``blob_store.resolve_work_product_blob``
+    (MET-612) so non-route callers (e.g. the boolean-cut endpoint) share the
+    exact same MinIO-first-then-local resolution without importing the router.
     """
-    filename = str(wp.metadata.get("original_filename") or "") or (
-        f"{wp.name}.{wp.format}" if wp.format else wp.name
-    )
+    from api_gateway.twin.blob_store import resolve_work_product_blob
 
-    object_key = wp.metadata.get("minio_object_key")
-    if isinstance(object_key, str) and object_key:
-        try:
-            from api_gateway.twin.blob_store import fetch_work_product_blob
-
-            return fetch_work_product_blob(object_key), filename
-        except HTTPException:
-            raise
-        except Exception as exc:  # storage misconfigured / object gone
-            logger.warning("wp_blob_minio_fetch_failed", key=object_key, error=str(exc))
-            raise HTTPException(
-                status_code=502, detail="Work product blob could not be read from storage"
-            ) from exc
-
-    file_path = wp.file_path
-    if not file_path:
-        raise HTTPException(
-            status_code=404,
-            detail="Work product has no stored file (empty file_path and no object key)",
-        )
-    path = Path(file_path)
-    if not path.is_absolute():
-        path = _WORKSPACE_DIR / path
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Stored file not found: {path.name}")
-    return path.read_bytes(), (filename or path.name)
+    try:
+        return resolve_work_product_blob(wp)
+    except HTTPException as exc:
+        if exc.status_code == 502:
+            logger.warning(
+                "wp_blob_minio_fetch_failed",
+                key=wp.metadata.get("minio_object_key"),
+                error=exc.detail,
+            )
+        raise
 
 
 @router.get("/nodes/{node_id}/file")
@@ -603,6 +699,48 @@ async def get_version_history(node_id: UUID) -> WorkProductVersionHistory:
     if wp is None:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
     return VersionService.get_history(wp)
+
+
+@router.get("/nodes/{node_id}/script", response_model=TwinNodeScriptResponse)
+async def get_node_script(node_id: UUID) -> TwinNodeScriptResponse:
+    """The current git-versioned generation script for a CAD_MODEL node (MET-630).
+
+    Lets a dashboard parameter panel seed a regeneration proposal with the
+    script as it stands today, rather than the user retyping it from scratch.
+    404 when the node has no linked script (imported geometry, or the git
+    backend isn't configured).
+    """
+    from api_gateway.twin.git_repo_registry import get_git_registry
+
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+
+    script_node_id = wp.metadata.get("script_node_id")
+    git_commit_sha = wp.metadata.get("git_commit_sha")
+    git_path = wp.metadata.get("git_path")
+    if not (script_node_id and git_commit_sha and git_path):
+        raise HTTPException(status_code=404, detail=f"Node {node_id} has no versioned script")
+
+    registry = get_git_registry()
+    if registry is None:
+        raise HTTPException(status_code=503, detail="Git versioning backend is not configured")
+
+    project_id = str(wp.project_id) if wp.project_id else None
+    engine = registry.for_project(project_id)
+    script_source = await engine.read_file(git_commit_sha, git_path)
+    if script_source is None:
+        raise HTTPException(
+            status_code=404, detail=f"Script content not found at {git_path}@{git_commit_sha}"
+        )
+
+    return TwinNodeScriptResponse(
+        node_id=str(node_id),
+        script_node_id=str(script_node_id),
+        script_source=script_source,
+        git_commit_sha=str(git_commit_sha),
+        git_path=str(git_path),
+    )
 
 
 @router.post("/nodes/{node_id}/iterate", response_model=WorkProductRevision, status_code=201)

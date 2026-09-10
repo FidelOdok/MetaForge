@@ -7,6 +7,7 @@ import pytest
 from orchestrator.harness import HarnessRuntime
 from orchestrator.harness.react import (
     ReActAction,
+    ReActParseError,
     ReActStep,
     ToolCall,
     run_react,
@@ -15,15 +16,22 @@ from orchestrator.harness.tools import ToolRegistry
 
 
 class ScriptedPolicy:
-    """Returns a fixed sequence of actions, ignoring the trace."""
+    """Returns a fixed sequence of actions, ignoring the trace.
 
-    def __init__(self, actions: list[ReActAction]) -> None:
+    An entry that's an ``Exception`` instance is raised instead of returned —
+    lets a test script a policy that fails the ReAct protocol on some steps
+    (see ``ReActParseError``).
+    """
+
+    def __init__(self, actions: list[ReActAction | Exception]) -> None:
         self._actions = actions
         self._i = 0
 
     async def next_action(self, goal: str, steps: list[ReActStep]) -> ReActAction:
         action = self._actions[min(self._i, len(self._actions) - 1)]
         self._i += 1
+        if isinstance(action, Exception):
+            raise action
         return action
 
 
@@ -79,6 +87,36 @@ async def test_tool_error_is_fed_back_not_fatal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parse_error_is_fed_back_not_fatal() -> None:
+    """A policy reply that fails the ReAct protocol (ReActParseError) must be
+    recorded as an errored step and the loop must continue — not crash the
+    turn, and not silently treat the malformed reply as a final answer."""
+    rt = _runtime_with_tool()
+    policy = ScriptedPolicy(
+        [
+            ReActParseError("no JSON object found"),
+            ReActAction(thought="recovered", final_output="ok"),
+        ]
+    )
+    result = await run_react(rt, policy, "goal")
+    assert result.status == "completed"
+    assert result.output == "ok"
+    assert result.steps[0].tool_call.name == "(invalid_reply)"
+    assert result.steps[0].error == "no JSON object found"
+
+
+@pytest.mark.asyncio
+async def test_repeated_parse_errors_exhaust_not_hang() -> None:
+    rt = _runtime_with_tool()
+    policy = ScriptedPolicy([ReActParseError("never valid")])
+    result = await run_react(rt, policy, "goal", max_steps=3)
+    assert result.status == "exhausted"
+    assert result.output is None
+    assert len(result.steps) == 3
+    assert all(s.tool_call.name == "(invalid_reply)" for s in result.steps)
+
+
+@pytest.mark.asyncio
 async def test_gate_blocked_tool_surfaces_as_error() -> None:
     tools = ToolRegistry()
     tools.register_native(
@@ -109,3 +147,26 @@ async def test_exhausts_at_max_steps() -> None:
     assert result.status == "exhausted"
     assert result.output is None
     assert len(result.steps) == 3
+    # Production-harness audit follow-up: an honest, unambiguous stop signal
+    # alongside the pre-existing `status`.
+    assert result.stop_reason == "max_steps"
+
+
+@pytest.mark.asyncio
+async def test_final_sets_stop_reason_done() -> None:
+    rt = HarnessRuntime.build()
+    policy = ScriptedPolicy([ReActAction(thought="done", final_output="answer")])
+    result = await run_react(rt, policy, "goal")
+    assert result.stop_reason == "done"
+
+
+@pytest.mark.asyncio
+async def test_deadline_stops_before_max_steps() -> None:
+    """A deadline already in the past ends the loop before the policy is ever
+    consulted, so a step budget never actually matters if time already ran out."""
+    rt = _runtime_with_tool()
+    policy = ScriptedPolicy([ReActAction(thought="loop", tool_call=ToolCall("double", {"x": 1}))])
+    result = await run_react(rt, policy, "goal", max_steps=10, deadline=0.0)
+    assert result.stop_reason == "timeout"
+    assert result.status == "exhausted"
+    assert result.steps == []

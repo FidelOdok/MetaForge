@@ -277,6 +277,15 @@ def _chunk_by_heading(content: str, max_chars: int) -> list[_Chunk]:
     ]
 
 
+# MET-577: a single row whose ``file_path`` is not JSON (e.g. written by
+# lightrag-hku 1.5.x, which basenames file_path on write) makes every
+# ``file_path::jsonb`` cast in the workspace raise ``invalid input syntax
+# for type json`` — one bad row takes down all search. Every query that
+# casts prefilters to JSON-shaped rows so garbage rows are invisible
+# instead of fatal. (Such rows are undecodable to us anyway.)
+_JSON_FILE_PATH_GUARD = "c.file_path ~ '^\\s*[\\[{\"]'"
+
+
 def _stable_chunk_id(source_path: str, index: int, text: str) -> str:
     """Deterministic chunk id so re-ingesting the same source dedupes.
 
@@ -744,6 +753,47 @@ class LightRAGKnowledgeService:
 
             await self._rag.ainsert(input=texts, ids=ids, file_paths=file_paths)
 
+            # Persistence read-back. LightRAG's ``ainsert`` can fail to
+            # store the chunk vectors *without raising* — an embedding or
+            # KG-extraction error inside its pipeline is swallowed, yet the
+            # call returns normally. Previously we reported
+            # ``chunks_indexed=len(chunks)`` on faith, so a silent write
+            # failure was indistinguishable from success: the tool answered
+            # "9 chunks indexed" while the store held nothing and every
+            # later search came back empty. Read the store back and confirm
+            # the chunks actually landed before claiming success. ``None``
+            # means the check could not run (no store handle / query error)
+            # — we fall back to the optimistic count rather than fail a
+            # possibly-good ingest.
+            persisted = await self._count_persisted_chunks(ids, source_path, project_id)
+            if persisted is not None:
+                span.set_attribute("knowledge.persist_confirmed", persisted)
+                if persisted <= 0:
+                    logger.error(
+                        "lightrag_ingest_not_persisted",
+                        source_path=source_path,
+                        expected_chunks=len(chunks),
+                        persisted_chunks=persisted,
+                        project_id=scope_project_id,
+                        actor_id=actor_id,
+                    )
+                    raise RuntimeError(
+                        f"ingest produced {len(chunks)} chunk(s) for {source_path!r} "
+                        f"but the knowledge store confirms 0 persisted — the write did "
+                        f"not land (embedding / pipeline failure). Refusing to report "
+                        f"success so the caller can retry instead of trusting a "
+                        f"phantom ingest."
+                    )
+                if persisted < len(chunks):
+                    logger.warning(
+                        "lightrag_ingest_partial_persist",
+                        source_path=source_path,
+                        expected_chunks=len(chunks),
+                        persisted_chunks=persisted,
+                        project_id=scope_project_id,
+                        actor_id=actor_id,
+                    )
+
             # MET-401: index by (project_scope, source_path) so a
             # subsequent delete_by_source under one project cannot evict
             # chunks ingested under another project at the same path.
@@ -1010,6 +1060,7 @@ class LightRAGKnowledgeService:
             f"       1 - (c.content_vector <=> $2::vector) AS similarity "
             f"FROM {table} c "
             f"WHERE c.workspace = $1 "
+            f"  AND {_JSON_FILE_PATH_GUARD} "
             f"  AND c.content_vector <=> $2::vector < $3 "
             f"{project_clause}"
             f"{''.join(extra_clauses)}"
@@ -1210,6 +1261,7 @@ class LightRAGKnowledgeService:
             f"       (array_agg(c.file_path::jsonb->'x'))[1] AS metadata "
             f"FROM {table} c "
             f"WHERE c.workspace = $1 "
+            f"  AND {_JSON_FILE_PATH_GUARD} "
             f"  AND COALESCE((c.file_path::jsonb->'x'->>'project_id'), 'default') = $2 "
             f"{kt_clause}"
             f"  AND c.file_path::jsonb->>'src' IS NOT NULL "
@@ -1409,6 +1461,7 @@ class LightRAGKnowledgeService:
             f"SELECT c.file_path::jsonb->'x'->>'content_sha256' AS sha "
             f"FROM {table} c "
             f"WHERE c.workspace = $1 "
+            f"  AND {_JSON_FILE_PATH_GUARD} "
             f"  AND c.file_path::jsonb->>'src' = $2 "
             f"  AND COALESCE(c.file_path::jsonb->'x'->>'project_id', 'default') = $3 "
             f"LIMIT 1;"
@@ -1439,6 +1492,114 @@ class LightRAGKnowledgeService:
             self._content_sha_index[(scope_project_id, source_path)] = sha
             return sha
         return None
+
+    async def _count_persisted_chunks(
+        self,
+        ids: list[str],
+        source_path: str,
+        project_id: UUID | None = None,
+    ) -> int | None:
+        """Count the chunks that actually landed for this ingest.
+
+        Post-``ainsert`` read-back used to confirm the write really landed.
+        LightRAG can swallow an embedding / KG-extraction failure inside
+        its pipeline and return normally, so the submitted chunk count is
+        not proof of persistence. This reads the store back so ``ingest``
+        can turn a silent write failure into an explicit error instead of
+        a false success (ingest says "9", search finds nothing).
+
+        MET-577, two-step hybrid — LightRAG builds disagree about what
+        happens to the ids we pass to ``ainsert``:
+
+        1. **Id match first.** Some builds store our ``_stable_chunk_id``
+           values verbatim as the chunk ``id`` — then the match is exact
+           (stale rows at the same source can't mask a failed write) and
+           entirely cast-free.
+        2. **Guarded source-count fallback.** Current 1.4.16 derives its
+           own ``chunk-<hash>`` ids (ours become document ids), so the id
+           match legitimately finds nothing for a perfectly good write —
+           live-caught as a false ``lightrag_ingest_not_persisted`` on
+           both the gateway and sidecar after the MET-577 image rebuild.
+           Fall back to counting rows at ``(workspace, src, project)``,
+           prefiltered by ``_JSON_FILE_PATH_GUARD`` so rows mangled by
+           1.5.x basenaming can't error the check into fail-open.
+
+        Returns the confirmed chunk count, or ``None`` when the check
+        cannot run (no ``chunks_vdb`` handle, non-dict in-memory storage,
+        or the PG query itself errored) — the caller treats ``None`` as
+        "unverifiable" and keeps the optimistic count rather than failing
+        a possibly-good ingest.
+        """
+        if not ids:
+            return 0
+        chunks_vdb = getattr(self._rag, "chunks_vdb", None)
+        if chunks_vdb is None:
+            return None
+        scope_project_id = str(project_id) if project_id is not None else "default"
+
+        # In-memory / NanoVectorDB fallback: inspect ``client_storage``
+        # rows (NanoVectorDB keys ids ``__id__``; our unit-test stubs use
+        # ``id``). Used when no Postgres DSN is configured and in tests.
+        if not self._cfg.postgres_dsn:
+            client_storage = getattr(chunks_vdb, "client_storage", None)
+            if not isinstance(client_storage, dict):
+                return None
+            data = client_storage.get("data")
+            if not isinstance(data, list):
+                return None
+            rows = [chunk for chunk in data if isinstance(chunk, dict)]
+            wanted = set(ids)
+            by_id = sum(1 for chunk in rows if (chunk.get("id") or chunk.get("__id__")) in wanted)
+            if by_id:
+                return by_id
+            count = 0
+            for chunk in rows:
+                file_path_field = chunk.get("file_path") or chunk.get("file_paths") or ""
+                if isinstance(file_path_field, list):
+                    file_path_field = file_path_field[0] if file_path_field else ""
+                meta = _decode_meta(file_path_field)
+                if not meta or meta.get("src") != source_path:
+                    continue
+                if str((meta.get("x") or {}).get("project_id", "default")) == scope_project_id:
+                    count += 1
+            return count
+
+        table = getattr(chunks_vdb, "table_name", "lightrag_vdb_chunks")
+        workspace = getattr(chunks_vdb, "workspace", self._cfg.namespace_prefix)
+        id_sql = (
+            f"SELECT count(*) AS n FROM {table} c "
+            f"WHERE c.workspace = $1 AND c.id = ANY($2::text[]);"
+        )
+        src_sql = (
+            f"SELECT count(*) AS n "
+            f"FROM {table} c "
+            f"WHERE c.workspace = $1 "
+            f"  AND {_JSON_FILE_PATH_GUARD} "
+            f"  AND c.file_path::jsonb->>'src' = $2 "
+            f"  AND COALESCE(c.file_path::jsonb->'x'->>'project_id', 'default') = $3;"
+        )
+        try:
+            import asyncpg  # type: ignore[import-untyped]
+
+            assert self._cfg.postgres_dsn is not None
+            conn = await asyncpg.connect(self._cfg.postgres_dsn)
+            try:
+                row = await conn.fetchrow(id_sql, workspace, list(ids))
+                n = int(row["n"]) if row and row["n"] is not None else 0
+                if n == 0:
+                    row = await conn.fetchrow(src_sql, workspace, source_path, scope_project_id)
+                    n = int(row["n"]) if row and row["n"] is not None else 0
+            finally:
+                await conn.close()
+        except Exception as exc:  # pragma: no cover — best effort
+            logger.warning(
+                "lightrag_persist_check_failed",
+                source_path=source_path,
+                project_id=scope_project_id,
+                error=str(exc),
+            )
+            return None
+        return n
 
     async def extract_properties(
         self,

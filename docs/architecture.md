@@ -35,9 +35,9 @@ These five rules are non-negotiable across all phases:
 | Agent Framework | PydanticAI + Temporal | ADR-001: structured agent outputs + durable workflows |
 | LLM Providers | `openai` + `anthropic` SDKs | Unified abstraction layer |
 | Validation | Pydantic v2 | All schemas, configs, messages |
-| Workflow Engine | Temporal (Python SDK) | Durable execution, retries, sagas |
+| Workflow Engine | Temporal (Python SDK) | Durable execution, retries, sagas — see [wired vs in-process](#durable-tiers-wired-vs-in-process) |
 | Graph Database | Neo4j | Digital Twin work_product graph |
-| Event Bus | Apache Kafka | Design change events, audit log |
+| Event Bus | Apache Kafka | Design change events, audit log — in-process bus when unconfigured, see [wired vs in-process](#durable-tiers-wired-vs-in-process) |
 | Observability | OpenTelemetry + structlog | Traces, metrics, structured logs |
 | Monitoring | Prometheus + Grafana | Dashboards, alerts |
 | Containerization | Docker | Tool adapter isolation |
@@ -48,6 +48,50 @@ The agent framework decision (ADR-001) selects **PydanticAI** for structured LLM
 
 - **PydanticAI** handles: agent definition, tool registration, structured output parsing, LLM provider abstraction.
 - **Temporal** handles: workflow DAGs, agent coordination, timeout/retry policies, long-running design loops, state persistence.
+
+### Durable tiers: wired vs in-process
+
+The table above states the *chosen* technologies. This section states which of
+them a running deployment actually uses, because the two diverged for six
+months and the docs did not say so.
+
+Both Temporal and Kafka were built in March 2026 (MET-186, MET-197) and were
+**dead in every deployment** until they were wired (MET-197/MET-186 wiring):
+the image installed only the `[gateway]` extra, so `aiokafka` and `temporalio`
+were absent, and both modules were written to degrade gracefully without their
+SDK. Measured on the live stack before the fix: the Kafka broker had **zero
+topics ever created**, and the Temporal server had **zero workflow executions
+ever**, while `KAFKA_BOOTSTRAP_SERVERS` and `TEMPORAL_HOST` were passed to the
+gateway and read by no Python code.
+
+| Tier | Status | What runs |
+| --- | --- | --- |
+| **Event bus** | ✅ wired | `create_kafka_bus()` when `KAFKA_BOOTSTRAP_SERVERS` is set — dispatches in-process to every subscriber **and** persists to the topic. Falls back to the in-process bus if the broker is unreachable. |
+| **Consolidation cadence** | ✅ two drivers, pick one | the gateway's asyncio `ConsolidationScheduler` (default), or `ConsolidationWorkflow` on the Temporal worker with `METAFORGE_CONSOLIDATION_INTERVAL_SECONDS=0` |
+| **Design-flow runs** (`/v1/runs`) | ⚠️ **still in-process** | `InMemoryWorkflowEngine` — `SingleAgentWorkflow` / `HardwareDesignWorkflow` are registered on the worker but nothing starts them, so runs still do not survive a gateway restart |
+
+So Temporal is **runnable and registered**, and owns the consolidation pass
+when you hand it over; it is not yet the execution path for design-flow runs.
+Moving those over is a separate change — the gateway would start a Temporal
+workflow instead of calling the in-house engine.
+
+Both cadence drivers build the tier through one factory,
+`digital_twin.memory.consolidation.bootstrap.build_consolidation_stack()`
+(MET-723). Before that existed the wiring lived inside the gateway's lifespan,
+so a worker would accept `ConsolidationWorkflow` and then fail its activity with
+*"orchestrator was not bound before activity ran"* — the workflow was
+registered but could not run. A worker-driven pass is now measured end to end:
+eight experiences fetched from pgvector, grouped, synthesized, and the
+execution `COMPLETED`.
+
+Because the worker synthesizes in its own process, it needs the same
+`OPEN_ROUTER_API_KEY` the gateway has (MET-724). Without it the tier degrades to
+`StubLLMClient`, which answers confidence `0.0`; the validator then rejects
+every insight, so a pass fetches and synthesizes and still accepts nothing.
+
+The event bus is additive by design: adopting Kafka does not change dispatch
+semantics, it adds a durable log, which is what makes the MET-567 deposit
+paths replayable rather than best-effort.
 
 ---
 
@@ -485,6 +529,8 @@ MetaForge/
 │       ├── freecad/            # CAD operations
 │       ├── kicad/              # PCB/schematic validation
 │       ├── spice/              # Circuit simulation
+│       ├── gazebo/             # ROS-native physics/dynamics simulation
+│       ├── omniverse_usd/      # GLB -> OpenUSD conversion
 │       └── isaac_sim/          # PhysX physics + RTX rendering (ephemeral GPU)
 │
 ├── ide_assistants/             # Layer 7: IDE integrations

@@ -1,4 +1,9 @@
-"""Project-scoped chat: the agent gets a project brief as leading history (MET-10)."""
+"""Project-scoped chat: the agent gets a project brief (MET-10 / MET-566).
+
+Since MET-566 the brief is TEXT (placement — layered system prompt on the
+native path, legacy history pair on ReAct — is decided in
+``harness_backend._apply_turn_context``, tested separately).
+"""
 
 from __future__ import annotations
 
@@ -50,23 +55,57 @@ def _wp(name: str, wp_type: str) -> ProjectWorkProductResponse:
     )
 
 
-async def _brief(monkeypatch: pytest.MonkeyPatch, thread: ChatThreadRecord, project: Any) -> list:
+async def _brief(
+    monkeypatch: pytest.MonkeyPatch, thread: ChatThreadRecord, project: Any
+) -> str | None:
+    # MET-575: chat resolves the projects backend through the accessor at
+    # call time (the import-time alias silently pinned the empty in-memory
+    # store after startup swapped in Postgres) — so tests patch the projects
+    # module's backend, exactly like ``init_project_backend`` does.
     import api_gateway.chat.routes as routes
+    import api_gateway.projects.routes as projects_routes
 
-    monkeypatch.setattr(routes, "_project_backend", _FakeProjectBackend(project))
+    monkeypatch.setattr(projects_routes, "_backend", _FakeProjectBackend(project))
     return await routes._project_brief(thread)
+
+
+@pytest.mark.asyncio
+async def test_brief_sees_backend_swapped_after_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MET-575 regression: the brief must consult the CURRENT projects
+    backend, not whichever instance existed when chat.routes was imported.
+    The old ``from ... import _backend as _project_backend`` alias made every
+    project-scoped chat lose its brief on any deployment that swaps the
+    backend at startup."""
+    from api_gateway.projects.routes import init_project_backend
+
+    project = _project([_wp("Bracket", "cad_model")])
+    swapped = _FakeProjectBackend(project)
+    import api_gateway.projects.routes as projects_routes
+
+    original = projects_routes._backend
+    try:
+        init_project_backend(swapped)  # the real startup swap, after import
+        import api_gateway.chat.routes as routes
+
+        out = await routes._project_brief(_thread("project", "p-123"))
+        assert out, "brief must be built from the swapped-in backend"
+        assert "p-123" in out
+    finally:
+        init_project_backend(original)
 
 
 @pytest.mark.asyncio
 async def test_non_project_scope_gets_no_brief(monkeypatch: pytest.MonkeyPatch) -> None:
     out = await _brief(monkeypatch, _thread("session", "s1"), _project([]))
-    assert out == []
+    assert out is None
 
 
 @pytest.mark.asyncio
 async def test_missing_project_gets_no_brief(monkeypatch: pytest.MonkeyPatch) -> None:
     out = await _brief(monkeypatch, _thread("project", "nope"), _project([]))
-    assert out == []
+    assert out is None
 
 
 @pytest.mark.asyncio
@@ -74,11 +113,9 @@ async def test_project_brief_lists_work_products_and_commit_instruction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _project([_wp("Gimbal Base", "cad_model"), _wp("Yaw Housing", "cad_model")])
-    out = await _brief(monkeypatch, _thread("project", "p-123"), project)
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
 
-    assert len(out) == 2
-    assert out[0]["role"] == "user" and out[1]["role"] == "assistant"
-    brief = out[0]["content"]
+    assert brief is not None
     # Names the project + both work products so the agent can reason over them.
     assert "Pan-Tilt Gimbal" in brief
     assert "Gimbal Base" in brief and "Yaw Housing" in brief
@@ -92,6 +129,41 @@ async def test_project_brief_caps_work_product_list(monkeypatch: pytest.MonkeyPa
     import api_gateway.chat.routes as routes
 
     many = [_wp(f"Part {i}", "cad_model") for i in range(routes._PROJECT_WP_LIMIT + 5)]
-    out = await _brief(monkeypatch, _thread("project", "p-123"), _project(many))
-    brief = out[0]["content"]
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project(many))
+    assert brief is not None
     assert "and 5 more" in brief
+
+
+# --------------------------------------------------------------------------
+# Requirements-discovery directive (MET-584)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bare_project_brief_carries_requirements_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No prd/constraint_set in the project -> the brief must tell the agent
+    to elicit and record requirements before substantive design work."""
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([]))
+    assert brief is not None
+    assert "NO recorded requirements" in brief
+    assert "twin.record_constraint_set" in brief
+    assert "Ask before you assume" in brief
+
+
+@pytest.mark.asyncio
+async def test_constrained_project_brief_has_no_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project([_wp("Bracket requirements", "constraint_set")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+    assert brief is not None
+    assert "NO recorded requirements" not in brief
+
+
+@pytest.mark.asyncio
+async def test_prd_alone_also_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([_wp("PRD", "prd")]))
+    assert brief is not None
+    assert "NO recorded requirements" not in brief

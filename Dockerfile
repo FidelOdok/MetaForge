@@ -13,14 +13,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-# Install runtime + gateway database dependencies
-RUN pip install --no-cache-dir ".[gateway]" \
+# Install runtime + gateway database dependencies.
+#
+# ``kafka`` and ``temporal`` are included deliberately: both tiers were built
+# in March 2026 (MET-197, MET-186) and both were dead in every deployment
+# because this line installed only ``[gateway]`` -- so ``aiokafka`` and
+# ``temporalio`` were absent from the image and the code fell through its
+# graceful-degradation path forever (zero Kafka topics, zero Temporal workflow
+# executions). Installing the extras is what makes the wiring reachable.
+RUN pip install --no-cache-dir ".[gateway,kafka,temporal]" \
     && pip install --no-cache-dir uvicorn[standard]
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 
 WORKDIR /app
+
+# git CLI — required by twin_core.versioning.GitVersionEngine
+# (METAFORGE_VERSION_BACKEND=git) to shell out to real git commands.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from deps stage
 COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages

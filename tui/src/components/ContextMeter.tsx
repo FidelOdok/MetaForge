@@ -35,10 +35,17 @@ export function ContextMeter({ stats }: { stats: ContextStats }) {
       return `${label} ${fmt(c.tokens)}${counts}`;
     })
     .join(" · ");
+  // MET-596: real provider-reported turn usage lands on the final stats emit;
+  // estimates keep the meter alive before/without it.
+  const usage = stats.usage
+    ? ` · in ${fmt(stats.usage.input_tokens)} / out ${fmt(stats.usage.output_tokens)} tok`
+    : "";
   return (
     <Box paddingX={1}>
       <Text dimColor wrap="truncate">
-        <Text color={color}>{bar}</Text> ctx {fmt(stats.used)}/{fmt(stats.window)} · {pct}% · {parts}
+        <Text color={color}>{bar}</Text> ctx {fmt(stats.used)}/{fmt(stats.window)} · {pct}% ·{" "}
+        {parts}
+        {usage}
       </Text>
     </Box>
   );

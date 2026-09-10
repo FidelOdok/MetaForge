@@ -162,14 +162,20 @@ async def refresh_credentials(
 
 
 def save_credentials(path: Path, creds: CodexCredentials) -> bool:
-    """Write refreshed tokens back into auth.json, preserving its shape.
+    """Write tokens to auth.json, preserving its shape, creating the parent
+    directory if needed (a fresh host with no prior ``codex login`` has no
+    ``~/.codex/`` yet — this is also the FIRST write for a `forge auth login`
+    OAuth credential, not just a refresh).
 
     Codex refresh tokens rotate (single-use), so a long-lived service MUST
     persist the new tokens or the next process reads a stale (invalidated)
     refresh token. Best-effort: returns False (and logs) if the file can't be
     written — e.g. a read-only mount — so a call still succeeds in-memory.
+    Callers that need the credential to survive a process restart (like a
+    fresh OAuth login) MUST check this return value.
     """
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         data: dict[str, Any] = {}
         if path.is_file():
             data = json.loads(path.read_text(encoding="utf-8"))

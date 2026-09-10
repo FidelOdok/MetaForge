@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { listSources } from '../api/endpoints/knowledge';
-import { useProjects } from '../hooks/use-projects';
+import { listSources, searchKnowledge } from '../api/endpoints/knowledge';
+import { useActiveProject } from '../hooks/use-active-project';
 import { formatRelativeTime } from '../utils/format-time';
-import type { KnowledgeType, SourceSummary } from '../types/knowledge';
+import type { KnowledgeSearchResult, KnowledgeType, SourceSummary } from '../types/knowledge';
 
 // ---------------------------------------------------------------------------
 // Knowledge-type chip styling — pulled from the Kinetic Console palette so
@@ -145,71 +145,50 @@ function metadataField(metadata: Record<string, unknown>, key: string): string {
 export function KnowledgePage() {
   const navigate = useNavigate();
   const [filterType, setFilterType] = useState<KnowledgeType | 'all'>('all');
-  // MET-452: project dropdown replaced the UUID-paste input. ``''`` is
-  // the sentinel for "All projects (default tenant)" — anything else
-  // is a real project UUID picked from useProjects().
-  const [projectId, setProjectId] = useState<string>('');
-  const { data: projects } = useProjects();
+  // Context UI: project scope now comes from the single global active
+  // project every page shares (Topbar switcher), rather than this page's
+  // own auto-select-newest + empty-fallback logic.
+  const { activeProjectId } = useActiveProject();
   const [sortKey, setSortKey] = useState<SortKey>('indexed_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
-  // Project options, sorted newest-first so the most-recently-updated
-  // project sits at the top of the dropdown and gets auto-selected
-  // (matches what users typically want — fresh ingest goes into the
-  // newest project, default tenant is the legacy fallback).
-  const projectOptions = useMemo(() => {
-    if (!projects) return [];
-    return [...projects].sort((a, b) => {
-      const ta = new Date(a.lastUpdated).getTime() || 0;
-      const tb = new Date(b.lastUpdated).getTime() || 0;
-      return tb - ta;
-    });
-  }, [projects]);
-
-  // Auto-select the most-recently-updated project on first load *only*
-  // if the user hasn't already picked one. We use a guard ref-pattern
-  // via the state initialiser so flipping back to "All projects" after
-  // load stays sticky for the rest of the session.
-  const [autoSelected, setAutoSelected] = useState(false);
-  // Track which project was auto-selected + whether the user has chosen,
-  // so the empty-fallback below only fires for the auto-selection (never
-  // overrides a deliberate pick). MET-486.
-  const [autoSelectedId, setAutoSelectedId] = useState<string | null>(null);
-  const [userPicked, setUserPicked] = useState(false);
-  const [autoFellBack, setAutoFellBack] = useState(false);
+  // Semantic search (GET /v1/knowledge/search) — a real, previously-unused
+  // backend capability. Debounced so we don't fire a request per keystroke;
+  // a non-empty debounced query replaces the source-listing table below
+  // with matched entries instead of filtering it client-side.
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
-    if (autoSelected) return;
-    const newest = projectOptions[0];
-    if (!newest) return;
-    setProjectId(newest.id);
-    setAutoSelectedId(newest.id);
-    setAutoSelected(true);
-  }, [autoSelected, projectOptions]);
+    const handle = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+  const isSearching = debouncedSearch.length > 0;
+
+  const { data: searchResults, isLoading: isSearchLoading } = useQuery({
+    queryKey: ['knowledge', 'search', debouncedSearch, filterType, activeProjectId ?? ''],
+    queryFn: () =>
+      searchKnowledge({
+        query: debouncedSearch,
+        knowledge_type: filterType === 'all' ? undefined : filterType,
+        project_id: activeProjectId ?? undefined,
+        limit: 20,
+      }),
+    enabled: isSearching,
+    staleTime: 30_000,
+  });
 
   // The filter chip pushes ``knowledge_type`` to the server so we don't
   // pull rows we'll just discard; the project_id filter does the same.
   const { data: sources, isLoading } = useQuery({
-    queryKey: ['knowledge', 'sources', filterType, projectId.trim()],
+    queryKey: ['knowledge', 'sources', filterType, activeProjectId ?? ''],
     queryFn: () =>
       listSources({
         knowledge_type: filterType === 'all' ? undefined : filterType,
-        project_id: projectId.trim() ? projectId.trim() : undefined,
+        project_id: activeProjectId ?? undefined,
       }),
     staleTime: 30_000,
+    enabled: !isSearching,
   });
-
-  // MET-486: if the auto-selected project has no scoped knowledge, fall
-  // back to "All projects (default tenant)" so the page never looks
-  // empty-by-surprise. Fires once, only for the auto-selection, and never
-  // after the user has picked (so a deliberate empty project stays put).
-  useEffect(() => {
-    if (userPicked || autoFellBack) return;
-    if (isLoading || sources === undefined) return;
-    if (projectId && projectId === autoSelectedId && sources.length === 0) {
-      setProjectId('');
-      setAutoFellBack(true);
-    }
-  }, [userPicked, autoFellBack, isLoading, sources, projectId, autoSelectedId]);
 
   const sortedSources = useMemo(() => {
     if (!sources) return [];
@@ -245,8 +224,36 @@ export function KnowledgePage() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span style={{ fontSize: 18, fontWeight: 500, color: '#e8e8ed' }}>Knowledge</span>
           <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>
-            {total} {total === 1 ? 'source' : 'sources'} · L1 corpus
+            {isSearching
+              ? `${searchResults?.length ?? 0} match${(searchResults?.length ?? 0) === 1 ? '' : 'es'}`
+              : `${total} ${total === 1 ? 'source' : 'sources'} · L1 corpus`}
           </span>
+        </div>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <span
+            className="material-symbols-outlined"
+            style={{ position: 'absolute', left: 8, fontSize: 14, color: '#9a9aaa', pointerEvents: 'none' }}
+          >
+            search
+          </span>
+          <input
+            type="text"
+            aria-label="Search knowledge"
+            placeholder="Search knowledge…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            style={{
+              width: 260,
+              padding: '6px 10px 6px 28px',
+              background: 'rgba(30,31,38,0.85)',
+              border: '1px solid rgba(65,72,90,0.3)',
+              borderRadius: 4,
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: '#e2e2eb',
+              outline: 'none',
+            }}
+          />
         </div>
       </div>
 
@@ -300,57 +307,46 @@ export function KnowledgePage() {
             );
           })}
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <label
-            htmlFor="knowledge-project-filter"
-            style={{
-              fontFamily: 'monospace',
-              fontSize: 10,
-              color: '#9a9aaa',
-              textTransform: 'uppercase',
-              letterSpacing: '0.07em',
-            }}
-          >
-            project
-          </label>
-          <select
-            id="knowledge-project-filter"
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value);
-              // Lock auto-select once the user has picked anything —
-              // including switching back to "All projects" — so a later
-              // ``useProjects`` refetch doesn't yank them back, and the
-              // empty-fallback (MET-486) never overrides a deliberate pick.
-              setAutoSelected(true);
-              setUserPicked(true);
-            }}
-            style={{
-              flex: 1,
-              maxWidth: 360,
-              background: 'rgba(30,31,38,0.85)',
-              border: '1px solid rgba(65,72,90,0.3)',
-              borderRadius: 4,
-              padding: '6px 10px',
-              fontFamily: 'monospace',
-              fontSize: 11,
-              color: '#e2e2eb',
-              outline: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="">All projects (default tenant)</option>
-            {projectOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
-      {/* ── Sources table ───────────────────────────────────────────────── */}
+      {isSearching ? (
+        /* ── Search results ────────────────────────────────────────────── */
+        <div style={GLASS} role="region" aria-label="Search results">
+          {isSearchLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 8 }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#9a9aaa' }}>
+                progress_activity
+              </span>
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>Searching…</span>
+            </div>
+          ) : !searchResults || searchResults.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '48px 24px',
+                minHeight: 160,
+                textAlign: 'center',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#9a9aaa', opacity: 0.4 }}>
+                search_off
+              </span>
+              <span style={{ fontSize: 13, color: '#e2e2eb' }}>No matches for &ldquo;{debouncedSearch}&rdquo;</span>
+            </div>
+          ) : (
+            <div role="rowgroup">
+              {searchResults.map((result) => (
+                <SearchResultRow key={result.id} result={result} onOpenSource={navigate} />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      /* ── Sources table ───────────────────────────────────────────────── */
       <div style={GLASS} role="region" aria-label="Knowledge sources">
         {/* Header */}
         <div
@@ -419,6 +415,7 @@ export function KnowledgePage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -463,6 +460,71 @@ function EmptySourcesState() {
       >
         forge ingest &lt;path&gt;
       </code>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search result row
+// ---------------------------------------------------------------------------
+
+function SearchResultRow({
+  result,
+  onOpenSource,
+}: {
+  result: KnowledgeSearchResult;
+  onOpenSource: (path: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const clickable = !!result.source_path;
+
+  return (
+    <div
+      role="row"
+      tabIndex={clickable ? 0 : undefined}
+      onClick={() => {
+        if (result.source_path) onOpenSource(`/knowledge/sources/${encodeURIComponent(result.source_path)}`);
+      }}
+      onKeyDown={(e) => {
+        if (clickable && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onOpenSource(`/knowledge/sources/${encodeURIComponent(result.source_path!)}`);
+        }
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        padding: '10px 16px',
+        borderBottom: '1px solid rgba(65,72,90,0.08)',
+        cursor: clickable ? 'pointer' : 'default',
+        background: hovered ? '#282a30' : 'transparent',
+        transition: 'background 0.15s',
+        outline: 'none',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <TypeChip type={result.knowledge_type} />
+        {result.source_path && (
+          <span
+            style={{
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: '#9a9aaa',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {result.source_path}
+          </span>
+        )}
+      </div>
+      <span style={{ fontSize: 12, color: '#d4d4d8', lineHeight: 1.5 }}>
+        {result.content.length > 240 ? `${result.content.slice(0, 240)}…` : result.content}
+      </span>
     </div>
   );
 }

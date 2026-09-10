@@ -23,6 +23,7 @@ from api_gateway.assistant.schemas import (
     AssistantRequest,
     AssistantResponse,
     ChangeStatus,
+    CreateProposalRequest,
     DesignChangeProposal,
     ProposalListResponse,
     RunStatusResponse,
@@ -180,6 +181,25 @@ async def list_proposals(
     """List pending design-change proposals, optionally filtered by session/project."""
     proposals = workflow.get_pending_proposals(session_id=session_id, project_id=project_id)
     return ProposalListResponse(proposals=proposals, total=len(proposals))
+
+
+@router.post("/proposals", response_model=DesignChangeProposal, status_code=201)
+async def create_proposal(body: CreateProposalRequest) -> DesignChangeProposal:
+    """Create a design-change proposal directly from a human (MET-630).
+
+    Same underlying ``ApprovalWorkflow.propose_change`` an agent's
+    ``twin.propose_change`` MCP call uses — a human (e.g. via a dashboard
+    parameter panel) can submit one just as well, and it goes through the
+    identical review/apply pipeline (``decide`` → apply executor).
+    """
+    return await workflow.propose_change(
+        agent_code=body.agent_code,
+        description=body.description,
+        diff=body.diff,
+        work_products=body.work_products_affected,
+        session_id=body.session_id,
+        project_id=body.project_id,
+    )
 
 
 @router.get("/proposals/{change_id}", response_model=DesignChangeProposal)

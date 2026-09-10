@@ -322,3 +322,129 @@ async def test_update_thread_timestamp(repo: PgChatRepository, session: AsyncSes
     thread = await repo.get_thread(session, thread_id)
     assert thread is not None
     assert thread.last_message_at.year == 2099
+
+
+# ---------------------------------------------------------------------------
+# 11. Update thread scope (MET-580)
+# ---------------------------------------------------------------------------
+
+
+async def test_update_thread_scope_rescopes_in_place(
+    repo: PgChatRepository, session: AsyncSession
+) -> None:
+    """update_thread_scope should change scope_kind/scope_entity_id/channel_id
+    on the SAME row — the thread id, and everything else about it, is untouched."""
+    await repo.seed_default_channels(session)
+    await session.commit()
+
+    channels = {ch.scope_kind: ch for ch in await repo.list_channels(session)}
+    thread_id = str(uuid4())
+    await repo.create_thread(
+        session,
+        thread_id=thread_id,
+        channel_id=channels["assistant"].id,
+        scope_kind="assistant",
+        scope_entity_id="a1",
+        title="Rescope thread",
+    )
+    await session.commit()
+
+    updated = await repo.update_thread_scope(
+        session,
+        thread_id,
+        channel_id=channels["project"].id,
+        scope_kind="project",
+        scope_entity_id="p-123",
+    )
+    await session.commit()
+
+    assert updated is not None
+    assert updated.id == thread_id
+    assert updated.scope_kind == "project"
+    assert updated.scope_entity_id == "p-123"
+    assert updated.channel_id == channels["project"].id
+    assert updated.title == "Rescope thread"  # everything else is untouched
+
+    reread = await repo.get_thread(session, thread_id)
+    assert reread is not None
+    assert reread.scope_kind == "project"
+
+
+async def test_update_thread_scope_missing_thread_returns_none(
+    repo: PgChatRepository, session: AsyncSession
+) -> None:
+    await repo.seed_default_channels(session)
+    await session.commit()
+    channels = await repo.list_channels(session)
+
+    result = await repo.update_thread_scope(
+        session,
+        str(uuid4()),
+        channel_id=channels[0].id,
+        scope_kind=channels[0].scope_kind,
+        scope_entity_id="x",
+    )
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 12. PgChatBackend (MET-10): the concrete class must implement every
+# ChatBackend abstract method, or instantiation itself fails -- not just a
+# specific call.
+# ---------------------------------------------------------------------------
+
+
+def test_pg_chat_backend_can_be_instantiated() -> None:
+    """Regression: PgChatBackend never implemented ``update_thread_scope``
+    (added to the ChatBackend ABC alongside MET-580's repository method), so
+    ``PgChatBackend()`` raised ``TypeError: Can't instantiate abstract class
+    PgChatBackend with abstract method update_thread_scope``. create_backend()
+    catches that in a broad except and silently falls back to
+    InMemoryChatBackend, so every Postgres-configured deployment was actually
+    running chat entirely in-memory (no persistence across restarts) without
+    any visible failure beyond a warning log line. Constructing it directly,
+    with no mocking, is the whole regression guard."""
+    from api_gateway.chat.backend import PgChatBackend
+
+    PgChatBackend()
+
+
+async def test_pg_chat_backend_update_thread_scope_delegates(
+    engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PgChatBackend.update_thread_scope must actually reach the repository
+    and rescope the real row, not just exist to satisfy the ABC."""
+    import api_gateway.db.engine as engine_mod
+    from api_gateway.chat.backend import PgChatBackend
+
+    monkeypatch.setattr(engine_mod, "get_engine", lambda: engine)
+
+    backend = PgChatBackend()
+
+    async with engine_mod.get_session() as session:
+        await backend._repo.seed_default_channels(session)
+        await session.commit()
+        channels = {ch.scope_kind: ch for ch in await backend._repo.list_channels(session)}
+
+    thread = await backend.create_thread(
+        channel_id=channels["assistant"].id,
+        scope_kind="assistant",
+        scope_entity_id="a1",
+        title="Rescope via backend",
+    )
+
+    updated = await backend.update_thread_scope(
+        thread.id,
+        channel_id=channels["project"].id,
+        scope_kind="project",
+        scope_entity_id="p-123",
+    )
+
+    assert updated is not None
+    assert updated.id == thread.id
+    assert updated.scope_kind == "project"
+    assert updated.scope_entity_id == "p-123"
+
+    reread = await backend.get_thread(thread.id)
+    assert reread is not None
+    assert reread.scope_kind == "project"

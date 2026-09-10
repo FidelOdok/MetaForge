@@ -1,0 +1,39 @@
+{
+  "id": "chat_mem_needle",
+  "title": "Facts seeded in turn 1 are recalled a few turns later (Phase A amnesia class)",
+  "scope": "assistant",
+  "rubric": ["chat_memory"],
+  "variants": [
+    { "name": "native", "provider": null, "model": null },
+    { "name": "react", "provider": "gemini", "model": "gemini-2.5-flash" }
+  ],
+  "turns": [
+    {
+      "say": "For this session, remember two facts: our enclosure wall thickness is 2.4 mm and the fastener spec is M3x8. Please acknowledge briefly."
+    },
+    {
+      "say": "What materials are commonly used for IoT device enclosures? One short paragraph."
+    },
+    {
+      "say": "Which of those would you pick for outdoor use? One sentence."
+    },
+    {
+      "say": "Quick check: what wall thickness did I tell you at the start of this conversation?",
+      "checks": [
+        { "id": "wall_thickness_recalled", "type": "reply_contains", "pattern": "2.4" }
+      ]
+    },
+    {
+      "say": "And what was the fastener spec I mentioned?",
+      "checks": [
+        {
+          "id": "fastener_recalled",
+          "type": "reply_contains",
+          "pattern": "M3\\s*[x×]\\s*8",
+          "regex": true
+        },
+        { "id": "probe_reply_not_fallback", "type": "reply_is_not_fallback" }
+      ]
+    }
+  ]
+}

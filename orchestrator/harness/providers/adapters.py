@@ -25,7 +25,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -38,18 +38,70 @@ _RETRYABLE_NAMES = frozenset(
     {"RateLimitError", "APITimeoutError", "APIConnectionError", "InternalServerError"}
 )
 
+# Substrings (lowercased) that SDKs across providers use for "the prompt is
+# too big for this model's context window" -- a request-size failure, not a
+# transient one, so it's never retryable and (MET-655 remainder) lets the
+# pipeline skip any later candidate whose window is provably too small too.
+_CONTEXT_LENGTH_MARKERS = (
+    "context length",
+    "context_length_exceeded",
+    "context window",
+    "maximum context",
+    "too many tokens",
+    "exceeds the context",
+)
+
 
 def _classify_error(exc: Exception) -> ProviderError:
     """Map an SDK exception to a ProviderError with retry semantics."""
     status = getattr(exc, "status_code", None)
     if not isinstance(status, int):
         status = None
-    retryable = (
+    message = str(exc) or type(exc).__name__
+    context_length_exceeded = any(marker in message.lower() for marker in _CONTEXT_LENGTH_MARKERS)
+    retryable = not context_length_exceeded and (
         type(exc).__name__ in _RETRYABLE_NAMES
         or status == 429
         or (status is not None and status >= 500)
     )
-    return ProviderError(str(exc) or type(exc).__name__, status_code=status, retryable=retryable)
+    return ProviderError(
+        message,
+        status_code=status,
+        retryable=retryable,
+        context_length_exceeded=context_length_exceeded,
+    )
+
+
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
+
+def default_max_output_tokens() -> int:
+    """Output-token cap applied when a request doesn't set ``max_tokens``.
+
+    ``METAFORGE_MAX_OUTPUT_TOKENS`` overrides (for models with smaller or
+    larger output limits). The old default of 1024 silently truncated long
+    answers and large tool arguments on every completion (MET-565).
+    """
+    raw = (os.environ.get("METAFORGE_MAX_OUTPUT_TOKENS") or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def _usage_from(
+    obj: Any, in_key: str = "input_tokens", out_key: str = "output_tokens"
+) -> dict[str, int] | None:
+    """Best-effort {input_tokens, output_tokens} from a provider usage object (MET-596)."""
+    u = getattr(obj, "usage", None)
+    if u is None:
+        return None
+    try:
+        return {
+            "input_tokens": int(getattr(u, in_key, 0) or 0),
+            "output_tokens": int(getattr(u, out_key, 0) or 0),
+        }
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], int, float]:
@@ -62,12 +114,16 @@ def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], 
     return (
         system,
         list(messages),
-        int(request.get("max_tokens", 1024)),
+        int(request.get("max_tokens", default_max_output_tokens())),
         float(request.get("temperature", 1.0)),
     )
 
 
 def _require_key(spec: ProviderSpec, default_env: str) -> str:
+    # A raw key from the gateway auth store (`forge auth login`) wins over the
+    # environment; fall back to the env var named by the spec/profile.
+    if spec.api_key and spec.api_key.strip():
+        return spec.api_key.strip()
     env = spec.api_key_env or default_env
     key = os.environ.get(env, "").strip()
     if not key:
@@ -193,6 +249,9 @@ async def anthropic_invoke(
     result: dict[str, Any] = {"text": text, "model": getattr(resp, "model", spec.model)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    usage = _usage_from(resp)
+    if usage:
+        result["usage"] = usage
     return result
 
 
@@ -244,11 +303,15 @@ async def openai_invoke(
                 "arguments": args if isinstance(args, dict) else {},
             }
         )
-    return {
+    out: dict[str, Any] = {
         "text": msg.content or "",
         "tool_calls": tool_calls,
         "model": getattr(resp, "model", spec.model),
     }
+    usage = _usage_from(resp, "prompt_tokens", "completion_tokens")
+    if usage:
+        out["usage"] = usage
+    return out
 
 
 async def gemini_invoke(
@@ -262,9 +325,19 @@ async def gemini_invoke(
     """
     system, messages, max_tokens, temperature = _normalize_request(request)
     if client is None:
-        from google import genai
+        # MET-733: google-genai is an optional provider SDK and is in no
+        # dependency group, so mypy's view of `google.genai` depends on which
+        # other `google.*` namespace packages happen to be installed. With
+        # none present it stays quiet; with a sibling present (as on the CI
+        # runner) it resolves `google` and then reports `has no attribute
+        # "genai"`. That divergence is why this passed locally and failed in
+        # CI when the mypy ratchet first covered this package.
+        from google import genai  # type: ignore[attr-defined]
 
-        client = genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY"))
+        # cast(Any, …): keep the SDK seam untyped — request payloads here are
+        # normalized plain dicts, which the SDK accepts at runtime but whose
+        # narrowed client type makes mypy demand its TypedDict param shapes.
+        client = cast(Any, genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY")))
     contents = "\n\n".join(m.get("content", "") for m in messages)
     config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
     if system:
@@ -328,8 +401,24 @@ async def _codex_stream_deltas(
         stream=True,
     )
     async for event in stream:
-        if getattr(event, "type", "") == "response.output_text.delta":
+        etype = getattr(event, "type", "")
+        if etype == "response.output_text.delta":
             yield getattr(event, "delta", "") or ""
+        elif etype in ("response.incomplete", "response.failed"):
+            # MET-614: a length-capped or failed response used to return
+            # silently truncated text, which downstream parses as a malformed
+            # ReAct reply and burns a recovery round-trip. Surface it as
+            # retryable — a fresh generation usually fits.
+            response = getattr(event, "response", None)
+            details = getattr(response, "incomplete_details", None) or getattr(
+                response, "error", None
+            )
+            reason = getattr(details, "reason", None) or getattr(details, "message", None)
+            raise ProviderError(
+                f"codex response ended '{etype.removeprefix('response.')}'"
+                + (f" ({reason})" if reason else ""),
+                retryable=True,
+            )
 
 
 async def _codex_call(
@@ -357,6 +446,19 @@ async def codex_invoke(
     """
     system, messages, _max_tokens, _temperature = _normalize_request(request)
     input_text = "\n\n".join(m.get("content", "") for m in messages)
+
+    # MET-575: this adapter cannot forward native tool schemas (the codex
+    # Responses call is built from flattened text). Silently dropping them
+    # produced turns where the model claimed "no tools available" while the
+    # harness had dozens registered. The path decision now routes codex to
+    # ReAct (tools travel as text), so reaching here with tools means a
+    # caller bypassed that — make the drop loud instead of silent.
+    if isinstance(request, dict) and request.get("tools"):
+        logger.warning(
+            "codex_native_tools_dropped",
+            n_tools=len(request["tools"]),
+            model=spec.model,
+        )
 
     # Injected client (tests) → single call, no auth handling.
     if client is not None:
@@ -535,8 +637,15 @@ async def openai_stream(
     if client is None:
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(
-            api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+        # cast(Any, …): keep the SDK seam untyped — messages are normalized
+        # plain dicts and ``stream=True`` returns an async iterator; the
+        # narrowed client type makes mypy demand SDK TypedDicts and a union
+        # return that hides ``__aiter__``.
+        client = cast(
+            Any,
+            AsyncOpenAI(
+                api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+            ),
         )
     try:
         stream = await client.chat.completions.create(
@@ -562,9 +671,19 @@ async def gemini_stream(
     """Stream a Google Gemini model's text deltas."""
     system, messages, max_tokens, temperature = _normalize_request(request)
     if client is None:
-        from google import genai
+        # MET-733: google-genai is an optional provider SDK and is in no
+        # dependency group, so mypy's view of `google.genai` depends on which
+        # other `google.*` namespace packages happen to be installed. With
+        # none present it stays quiet; with a sibling present (as on the CI
+        # runner) it resolves `google` and then reports `has no attribute
+        # "genai"`. That divergence is why this passed locally and failed in
+        # CI when the mypy ratchet first covered this package.
+        from google import genai  # type: ignore[attr-defined]
 
-        client = genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY"))
+        # cast(Any, …): keep the SDK seam untyped — request payloads here are
+        # normalized plain dicts, which the SDK accepts at runtime but whose
+        # narrowed client type makes mypy demand its TypedDict param shapes.
+        client = cast(Any, genai.Client(api_key=_require_key(spec, "GOOGLE_API_KEY")))
     contents = "\n\n".join(m.get("content", "") for m in messages)
     config: dict[str, Any] = {"temperature": temperature, "max_output_tokens": max_tokens}
     if system:
@@ -609,3 +728,224 @@ def default_stream(spec: ProviderSpec, request: Any) -> AsyncIterator[str]:
     if name in _CODEX_NAMES:
         return codex_stream(spec, request)
     return openai_stream(spec, request)
+
+
+# ---------------------------------------------------------------------------
+# Event streaming (MET-591): text deltas + assembled tool calls in one stream
+# ---------------------------------------------------------------------------
+#
+# The plain ``*_stream`` adapters above yield only text and drop ``tools`` —
+# unusable inside the native tool-calling loop. These variants stream the SAME
+# request shape ``*_invoke`` takes and yield structured events:
+#
+#     {"type": "text_delta", "text": str}          # as tokens generate
+#     {"type": "response", "result": {...}}        # terminal; result matches
+#                                                  # the *_invoke return shape
+#
+# so the loop can forward live text while still receiving the exact response
+# object it would have gotten from the non-streaming call.
+
+
+class StreamingUnsupported(ProviderError):
+    """This provider family has no event-streaming adapter — fall back to
+    the non-streaming invoke (never retried; not a provider fault)."""
+
+    def __init__(self, family: str) -> None:
+        super().__init__(
+            f"event streaming unsupported for provider family '{family}'", retryable=False
+        )
+
+
+async def openai_stream_events(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream an OpenAI-compatible completion as events (text + tool calls).
+
+    Tool-call fragments arrive per chunk keyed by ``index`` (``id``/``name``
+    once, ``function.arguments`` split across chunks) and are assembled into
+    the same ``tool_calls`` shape :func:`openai_invoke` returns.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    if system:
+        messages = [{"role": "system", "content": system}, *messages]
+    if client is None:
+        from openai import AsyncOpenAI
+
+        client = cast(
+            Any,
+            AsyncOpenAI(
+                api_key=_require_key(spec, "OPENAI_API_KEY"), base_url=spec.base_url or None
+            ),
+        )
+    kwargs: dict[str, Any] = {
+        "model": spec.model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+        # MET-596: ask for usage on the final stream chunk (OpenAI-compatible
+        # servers that don't know the option simply ignore it).
+        "stream_options": {"include_usage": True},
+    }
+    tools = request.get("tools") if isinstance(request, dict) else None
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = request.get("tool_choice", "auto")
+
+    text_parts: list[str] = []
+    acc: dict[int, dict[str, str]] = {}
+    announced: set[int] = set()
+    usage: dict[str, int] | None = None
+    try:
+        stream = await client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            usage = _usage_from(chunk, "prompt_tokens", "completion_tokens") or usage
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                text_parts.append(content)
+                yield {"type": "text_delta", "text": content}
+            for tc in getattr(delta, "tool_calls", None) or []:
+                idx = int(getattr(tc, "index", 0) or 0)
+                slot = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] += fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["arguments"] += fn.arguments
+                # MET-592 "typed from step zero": announce the action the
+                # moment its NAME is known — long before arguments finish.
+                if slot["name"] and idx not in announced:
+                    announced.add(idx)
+                    yield {"type": "action_started", "name": slot["name"]}
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+    tool_calls: list[dict[str, Any]] = []
+    for idx in sorted(acc):
+        slot = acc[idx]
+        try:
+            args = json.loads(slot["arguments"] or "{}")
+        except (ValueError, TypeError):
+            args = {}
+        tool_calls.append(
+            {
+                "id": slot["id"],
+                "name": slot["name"],
+                "arguments": args if isinstance(args, dict) else {},
+            }
+        )
+    result: dict[str, Any] = {"text": "".join(text_parts), "model": spec.model}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    if usage:
+        result["usage"] = usage
+    yield {"type": "response", "result": result}
+
+
+async def anthropic_stream_events(
+    spec: ProviderSpec, request: Any, *, client: Any | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream an Anthropic completion as events (text + tool calls).
+
+    Text arrives as ``text_delta`` events; ``tool_use`` blocks assemble from
+    ``content_block_start`` + ``input_json_delta``. The terminal response is
+    taken from the SDK's accumulated final message and parsed exactly like
+    :func:`anthropic_invoke`.
+    """
+    system, messages, max_tokens, temperature = _normalize_request(request)
+    tools = request.get("tools") if isinstance(request, dict) else None
+    if client is None:
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(
+            api_key=_require_key(spec, "ANTHROPIC_API_KEY"), base_url=spec.base_url or None
+        )
+    kwargs: dict[str, Any] = {
+        "model": spec.model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": _to_anthropic_messages(messages) if tools else messages,
+    }
+    if system:
+        kwargs["system"] = system
+    if tools:
+        kwargs["tools"] = _to_anthropic_tools(tools)
+
+    try:
+        async with client.messages.stream(**kwargs) as stream:
+            # Raw event iteration (MET-592): typed blocks instead of the
+            # text-only convenience stream — thinking_delta (extended
+            # thinking) is distinguishable from text_delta, and a tool_use
+            # block announces its NAME at content_block_start, before its
+            # input_json_delta arguments finish assembling.
+            async for event in stream:
+                etype = getattr(event, "type", "")
+                if etype == "content_block_start":
+                    block = getattr(event, "content_block", None)
+                    if getattr(block, "type", None) == "tool_use":
+                        yield {"type": "action_started", "name": getattr(block, "name", "")}
+                elif etype == "content_block_delta":
+                    d = getattr(event, "delta", None)
+                    dtype = getattr(d, "type", "")
+                    text = getattr(d, "text", None)
+                    thinking = getattr(d, "thinking", None)
+                    if dtype == "text_delta" and text:
+                        yield {"type": "text_delta", "text": text}
+                    elif dtype == "thinking_delta" and thinking:
+                        yield {"type": "thinking_delta", "text": thinking}
+            final = await stream.get_final_message()
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
+        raise _classify_error(exc) from exc
+
+    text = "".join(
+        getattr(block, "text", "")
+        for block in final.content
+        if getattr(block, "type", None) == "text"
+    )
+    tool_calls = [
+        {
+            "id": getattr(block, "id", ""),
+            "name": getattr(block, "name", ""),
+            "arguments": dict(getattr(block, "input", None) or {}),
+        }
+        for block in final.content
+        if getattr(block, "type", None) == "tool_use"
+    ]
+    result: dict[str, Any] = {"text": text, "model": getattr(final, "model", spec.model)}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    usage = _usage_from(final)
+    if usage:
+        result["usage"] = usage
+    yield {"type": "response", "result": result}
+
+
+def default_stream_events(spec: ProviderSpec, request: Any) -> AsyncIterator[dict[str, Any]]:
+    """Dispatch to the event-streaming adapter by provider family.
+
+    Families without one (gemini / bedrock / codex — codex's Responses stream
+    cannot carry the loop's tool schemas) raise :class:`StreamingUnsupported`,
+    which the pipeline treats as non-retryable so callers fall back to the
+    non-streaming invoke with identical behavior.
+    """
+    name = spec.name.lower()
+    if name in _ANTHROPIC_NAMES:
+        return anthropic_stream_events(spec, request)
+    if name in _GEMINI_NAMES or name in _BEDROCK_NAMES or name in _CODEX_NAMES:
+
+        async def _unsupported() -> AsyncIterator[dict[str, Any]]:
+            raise StreamingUnsupported(name)
+            yield {}  # pragma: no cover - makes this an async generator
+
+        return _unsupported()
+    return openai_stream_events(spec, request)

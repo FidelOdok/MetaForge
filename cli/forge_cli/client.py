@@ -444,6 +444,85 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def _admin_headers(self) -> dict[str, str]:
+        """The credential-write admin token, if the deployment requires one."""
+        tok = os.environ.get("METAFORGE_HARNESS_ADMIN_TOKEN", "").strip()
+        return {"X-MetaForge-Admin": tok} if tok else {}
+
+    @staticmethod
+    def _raise_for_write(resp: httpx.Response) -> None:
+        """Like ``raise_for_status`` but surfaces FastAPI's ``detail`` message —
+        a write that fails (e.g. couldn't persist a credential) must say why,
+        not just report a bare status code."""
+        if resp.is_success:
+            return
+        detail = None
+        try:
+            detail = resp.json().get("detail")
+        except (ValueError, AttributeError):
+            pass
+        message = str(detail) if detail else f"HTTP {resp.status_code}"
+        raise ForgeClientError(message, resp.status_code)
+
+    def set_credential(
+        self,
+        provider: str,
+        *,
+        method: str = "api_key",
+        api_key: str | None = None,
+        base_url: str | None = None,
+        tokens: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Store a provider credential on the gateway (``POST /v1/harness/credentials``).
+
+        ``method='api_key'`` sends ``api_key`` (+ optional ``base_url``);
+        ``method='oauth'`` sends a ``tokens`` blob (auth.json shape).
+        """
+        payload: dict[str, Any] = {"provider": provider, "method": method}
+        if api_key is not None:
+            payload["api_key"] = api_key
+        if base_url:
+            payload["base_url"] = base_url
+        if tokens is not None:
+            payload["tokens"] = tokens
+        with self._client() as client:
+            resp = client.post(
+                "/v1/harness/credentials", json=payload, headers=self._admin_headers()
+            )
+            if resp.status_code == 401:
+                raise ForgeClientError(
+                    "credential write unauthorized — set METAFORGE_HARNESS_ADMIN_TOKEN", 401
+                )
+            self._raise_for_write(resp)
+            return resp.json()
+
+    def set_selection(self, provider: str, model: str | None = None) -> dict[str, Any]:
+        """Set the gateway's durable active provider/model (``PUT /v1/harness/selection``)."""
+        payload: dict[str, Any] = {"provider": provider}
+        if model:
+            payload["model"] = model
+        with self._client() as client:
+            resp = client.put("/v1/harness/selection", json=payload, headers=self._admin_headers())
+            if resp.status_code == 401:
+                raise ForgeClientError(
+                    "selection write unauthorized — set METAFORGE_HARNESS_ADMIN_TOKEN", 401
+                )
+            self._raise_for_write(resp)
+            return resp.json()
+
+    def delete_credential(self, provider: str) -> dict[str, Any]:
+        """Forget a provider's stored credential (``DELETE /v1/harness/credentials/{provider}``)."""
+        with self._client() as client:
+            resp = client.delete(
+                f"/v1/harness/credentials/{provider}", headers=self._admin_headers()
+            )
+            if resp.status_code == 401:
+                raise ForgeClientError(
+                    "credential delete unauthorized — set METAFORGE_HARNESS_ADMIN_TOKEN", 401
+                )
+            self._raise_for_write(resp)
+            return resp.json()
+
     def create_thread(
         self,
         scope_kind: str,

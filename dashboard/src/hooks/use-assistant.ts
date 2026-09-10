@@ -1,17 +1,10 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import {
-  submitRequest,
-  getRunStatus,
-  getProposals,
-  decideProposal,
-  type SubmitRequestPayload,
-} from '../api/endpoints/assistant';
+import { getProposals, decideProposal } from '../api/endpoints/assistant';
 
 export const assistantKeys = {
   all: ['assistant'] as const,
   proposals: (projectId?: string) =>
     [...assistantKeys.all, 'proposals', projectId ?? 'all'] as const,
-  runStatus: (runId: string) => [...assistantKeys.all, 'run', runId] as const,
 };
 
 export function useProposals(projectId?: string) {
@@ -19,25 +12,6 @@ export function useProposals(projectId?: string) {
     queryKey: assistantKeys.proposals(projectId),
     queryFn: () => getProposals(projectId),
     staleTime: 10_000,
-  });
-}
-
-export function useRunStatus(runId: string | undefined) {
-  return useQuery({
-    queryKey: assistantKeys.runStatus(runId ?? ''),
-    queryFn: () => getRunStatus(runId!),
-    enabled: !!runId,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (status === 'completed' || status === 'failed') return false;
-      return 2_000;
-    },
-  });
-}
-
-export function useSubmitRequest() {
-  return useMutation({
-    mutationFn: (payload: SubmitRequestPayload) => submitRequest(payload),
   });
 }
 

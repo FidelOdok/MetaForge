@@ -6,19 +6,6 @@ vi.mock('../../hooks/use-assistant', () => ({
   useDecideProposal: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-vi.mock('../../hooks/use-scoped-chat', () => ({
-  useScopedChat: () => ({
-    thread: null,
-    messages: [],
-    isTyping: false,
-    sendMessage: vi.fn(),
-    createThread: vi.fn(),
-    isLoading: false,
-    isCreating: false,
-    isSending: false,
-  }),
-}));
-
 import { ApprovalsPage } from '../ApprovalsPage';
 import { useProposals } from '../../hooks/use-assistant';
 
@@ -36,6 +23,19 @@ describe('ApprovalsPage', () => {
     mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
     expect(screen.getByText('No pending proposals')).toBeInTheDocument();
+  });
+
+  it('does not render static/fabricated gate content unrelated to real proposal data', () => {
+    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
+    render(<ApprovalsPage />);
+    // These used to be hardcoded regardless of the real (zero) counts above them.
+    expect(screen.queryByText('AT-RISK')).not.toBeInTheDocument();
+    expect(screen.queryByText('READY')).not.toBeInTheDocument();
+    expect(screen.queryByText('IN PROGRESS')).not.toBeInTheDocument();
+    expect(screen.queryByText('W3 Gate Check')).not.toBeInTheDocument();
+    expect(screen.queryByText('CHECKLIST')).not.toBeInTheDocument();
+    expect(screen.queryByText('Design review sign-off')).not.toBeInTheDocument();
+    expect(screen.queryByText('P9')).not.toBeInTheDocument();
   });
 
   it('renders proposals', () => {

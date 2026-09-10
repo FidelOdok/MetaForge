@@ -30,8 +30,19 @@ describe('SessionsPage', () => {
   it('shows empty state', () => {
     mockUseSessions.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    // New orchestrator layout shows static DAG + log when no sessions
     expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+  });
+
+  it('shows honest empty states instead of fake demo content when there are no sessions', () => {
+    mockUseSessions.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useSessions>);
+    render(<SessionsPage />);
+    // The DAG and execution log panels used to fall back to a fabricated
+    // "schematic RUNNING" workflow and fixed timestamps that contradicted
+    // the real "0 workflows running" state — they must not appear.
+    expect(screen.queryByText('schematic')).not.toBeInTheDocument();
+    expect(screen.queryByText(/12:04/)).not.toBeInTheDocument();
+    expect(screen.getByText('No workflow runs yet')).toBeInTheDocument();
+    expect(screen.getByText('No execution log yet')).toBeInTheDocument();
   });
 
   it('renders session list', () => {
@@ -69,5 +80,33 @@ describe('SessionsPage', () => {
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
     expect(screen.getByText('running')).toBeInTheDocument();
+  });
+
+  it('does not warn about duplicate React keys when multiple sessions share a taskType', () => {
+    // Regression: the DAG panel keyed each node by its (non-unique) task
+    // label ("chat"), so any two queued sessions of the same type -- the
+    // common case, e.g. several queued "chat" tasks -- triggered React's
+    // "Encountered two children with the same key" warning live on
+    // /sessions. Key by the session's actual unique id instead.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sameTypeSessions = Array.from({ length: 5 }, (_, i) => ({
+      ...COMPLETED_SESSION,
+      id: `session-${i}`,
+      taskType: 'chat',
+      status: 'pending' as const,
+      completedAt: undefined,
+    }));
+    mockUseSessions.mockReturnValue({
+      data: sameTypeSessions,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useSessions>);
+
+    render(<SessionsPage />);
+
+    const duplicateKeyWarning = consoleError.mock.calls.some((args) =>
+      String(args[0]).includes('Encountered two children with the same key')
+    );
+    expect(duplicateKeyWarning).toBe(false);
+    consoleError.mockRestore();
   });
 });

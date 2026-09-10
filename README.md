@@ -11,6 +11,16 @@ keeps every step versioned and auditable.
 > **Prime rule:** if it can't be versioned, reviewed, and built —
 > MetaForge doesn't output it.
 
+### See it in action
+
+A real turn in the interactive `forge` TUI — the assistant calls a
+tool, then answers from what it returned:
+
+![Animated capture of a forge TUI chat turn: typing a question, a tool call streaming in with a spinner, then the final formatted answer](docs/assets/tui/chat-demo.gif)
+
+More screenshots (welcome screen, the Runs pane) in the
+[CLI reference](docs/cli-reference.md#what-it-looks-like).
+
 ```mermaid
 flowchart LR
     intent["Human intent<br/>PRD · Constraints"]
@@ -50,6 +60,39 @@ flowchart LR
 Full inventory: **[`docs/capability-matrix.md`](docs/capability-matrix.md)**.
 
 ## Quickstart
+
+The fastest path — one script handles Docker, secrets, the `forge`
+CLI, and your first project:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/onboarding.sh | bash
+```
+
+### High-level flow
+
+```mermaid
+flowchart TD
+    mode{Usage or<br/>Develop mode?} --> adapters[Pick tool adapters<br/>KiCad · CalculiX · CadQuery · FreeCAD<br/>— skip any you don't need]
+    adapters --> llm{LLM provider?}
+    llm -->|API key| key[Anthropic · OpenAI · OpenRouter]
+    llm -->|Subscription| oauth[ChatGPT / Codex — OAuth,<br/>no key to paste]
+    llm -->|Skip| later[Configure later]
+    key --> stack[Pull the gateway image from GHCR<br/>build the rest, start the stack]
+    oauth --> stack
+    later --> stack
+    stack --> health[Wait for Postgres/Neo4j/Kafka/<br/>Temporal/OCCT/gateway healthy]
+    health --> cli[Install the forge CLI]
+    cli --> codexlogin[Finish Codex OAuth login,<br/>if chosen]
+    codexlogin --> project[Create your first project<br/>+ a demo chat turn]
+```
+
+Non-interactive / scripted installs, adapter and provider flags, and
+`--develop` mode (editable source, hot-reload) are documented in
+`onboarding.sh --help`.
+
+### Manual install
+
+Prefer to do it by hand, or already have a checkout:
 
 ```bash
 git clone https://github.com/FidelOdok/MetaForge.git

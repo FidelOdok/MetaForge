@@ -72,6 +72,41 @@ def server_with_mocks() -> FreecadServer:
             },
         }
     )
+    s._execute_describe_step_file = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "file": "/models/bracket.step",
+            "components": [
+                {
+                    "label": "Tabletop",
+                    "solid_count": 1,
+                    "volume": 4_800_000.0,
+                    "area": 480_000.0,
+                    "bounding_box": {
+                        "min_x": 0.0,
+                        "min_y": 0.0,
+                        "min_z": 400.0,
+                        "max_x": 600.0,
+                        "max_y": 400.0,
+                        "max_z": 420.0,
+                    },
+                },
+                {
+                    "label": "LegA",
+                    "solid_count": 1,
+                    "volume": 640_000.0,
+                    "area": 87_200.0,
+                    "bounding_box": {
+                        "min_x": 0.0,
+                        "min_y": 0.0,
+                        "min_z": 0.0,
+                        "max_x": 40.0,
+                        "max_y": 40.0,
+                        "max_z": 400.0,
+                    },
+                },
+            ],
+        }
+    )
     return s
 
 
@@ -90,6 +125,14 @@ class TestFreecadConfig:
         assert cfg.supported_import_formats == ["step", "stp", "stl", "iges", "igs", "brep"]
         assert cfg.supported_export_formats == ["step", "stp", "stl", "obj", "brep"]
         assert cfg.default_mesh_algorithm == "netgen"
+        # MET-644: session lifecycle knobs, operator-tunable without a code change.
+        assert cfg.session_ttl_seconds == 1800.0
+        assert cfg.max_sessions == 32
+
+    def test_custom_session_lifecycle_config(self) -> None:
+        cfg = FreecadConfig(session_ttl_seconds=600.0, max_sessions=8)
+        assert cfg.session_ttl_seconds == 600.0
+        assert cfg.max_sessions == 8
 
     def test_custom_config(self) -> None:
         cfg = FreecadConfig(
@@ -132,12 +175,22 @@ class TestFreecadServer:
     def test_server_adapter_id(self, server: FreecadServer) -> None:
         assert server.adapter_id == "freecad"
 
+    def test_session_store_uses_configured_lifecycle_values(self) -> None:
+        """MET-644: config values must actually reach the session store, not
+        just exist on the dataclass -- the previous default was hardcoded."""
+        server = FreecadServer(config=FreecadConfig(session_ttl_seconds=42.0, max_sessions=3))
+        # _ttl/_max are the SessionStore's private fields (session.py); reaching
+        # into them here is the only way to prove the constructor arg landed.
+        assert server._sessions._ttl == 42.0  # noqa: SLF001
+        assert server._sessions._max == 3  # noqa: SLF001
+
     def test_server_version(self, server: FreecadServer) -> None:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 5 stateless + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param + script + 7 skills = 40.
-        assert len(server.tool_ids) == 43
+        # 6 stateless (incl. describe_step_file, MET-629) + 8 auth + 8 feature
+        # + 4 asm + 2 inspect + 2 param + script + 7 skills = 44.
+        assert len(server.tool_ids) == 44
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -146,6 +199,7 @@ class TestFreecadServer:
             "freecad.generate_mesh",
             "freecad.boolean_operation",
             "freecad.get_properties",
+            "freecad.describe_step_file",
             "freecad.create_parametric",
             # stateful authoring (MET-528)
             "freecad.open_session",
@@ -372,6 +426,27 @@ class TestGetProperties:
 
 
 # ---------------------------------------------------------------------------
+# TestDescribeStepFile
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeStepFile:
+    async def test_describe_step_file_success(self, server_with_mocks: FreecadServer) -> None:
+        result = await server_with_mocks.describe_step_file({"input_file": "/models/bracket.step"})
+        assert result["file"] == "/models/bracket.step"
+        labels = [c["label"] for c in result["components"]]
+        assert labels == ["Tabletop", "LegA"]
+        assert result["components"][0]["solid_count"] == 1
+        assert result["components"][0]["volume"] == 4_800_000.0
+
+    async def test_describe_step_file_missing_file_raises(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        with pytest.raises(ValueError, match="input_file is required"):
+            await server_with_mocks.describe_step_file({"input_file": ""})
+
+
+# ---------------------------------------------------------------------------
 # TestUnmockedMethodsRaise
 # ---------------------------------------------------------------------------
 
@@ -411,6 +486,12 @@ class TestUnmockedMethodsDegrade:
 
         with pytest.raises(FreecadNotAvailableError):
             await server._execute_analysis("/models/test.step", ["volume"])
+
+    async def test_describe_step_file_degrades(self, server: FreecadServer) -> None:
+        from tool_registry.tools.freecad.operations import FreecadNotAvailableError
+
+        with pytest.raises(FreecadNotAvailableError):
+            await server._execute_describe_step_file("/models/test.step")
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +602,10 @@ class TestStatefulAuthoring:
         assert result["size_bytes"] == len(b"ISO-10303-21;\nfake-step\n")
         assert base64.b64decode(result["step_base64"]) == b"ISO-10303-21;\nfake-step\n"
         assert result["volume_mm3"] == 1000.0
+        # MET-650: echoed back so a later commit-by-reference call can be
+        # built from this result alone, without needing to recall the
+        # arguments this call was originally made with.
+        assert result["session_id"] == sid
 
     async def test_create_primitive_passes_document_and_kind(
         self, authoring_server: FreecadServer
@@ -1028,7 +1113,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 43
+        assert len(response["result"]["tools"]) == 44
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1075,7 +1160,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 43
+        assert response["result"]["tools_available"] == 44
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

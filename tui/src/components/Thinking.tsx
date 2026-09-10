@@ -9,18 +9,25 @@ const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "
  * the elapsed clock is simply time-since-mount. ``label`` lets the caller show
  * "thinking" vs "reconnecting".
  */
+// MET-641: one shared tick drives both the spinner frame and the elapsed
+// clock, instead of two independent `setInterval`s at different phases —
+// each was an unsynchronized trigger for a full Ink live-region repaint, so
+// during a long tool-heavy turn (already repainting on every buffered
+// delta/step flush) they doubled the effective repaint rate for no visible
+// benefit. 150ms keeps the spin looking smooth while halving that overhead.
+const TICK_MS = 150;
+
 export function Thinking({ label = "thinking" }: { label?: string }) {
   const [frame, setFrame] = useState(0);
   const [secs, setSecs] = useState(0);
 
   useEffect(() => {
-    const spin = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), 90);
     const start = Date.now();
-    const clock = setInterval(() => setSecs(Math.round((Date.now() - start) / 1000)), 500);
-    return () => {
-      clearInterval(spin);
-      clearInterval(clock);
-    };
+    const tick = setInterval(() => {
+      setFrame((f) => (f + 1) % FRAMES.length);
+      setSecs(Math.round((Date.now() - start) / 1000));
+    }, TICK_MS);
+    return () => clearInterval(tick);
   }, []);
 
   return (

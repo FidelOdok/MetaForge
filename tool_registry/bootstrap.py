@@ -56,17 +56,45 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
     # tests/integration/test_mcp_e2e/test_vertical_electronics.py
     # was forced to skip steps 3-6 (run_erc / run_drc / export_bom /
     # export_gerber). Wiring KiCad here surfaces all 6 kicad.* tools
-    # in the unified server. Production deploys still need the kicad
-    # CLI binary in PATH for the tools to execute; without it the
-    # adapter registers (tools/list contains them) but each handler
-    # raises KicadCliNotFoundError, which the dispatcher surfaces as
-    # -32001 TOOL_EXECUTION_ERROR — the EE vertical's _attempt() helper
-    # already treats that as an acceptable outcome.
+    # in the unified server as an in-process fallback for local/dev use
+    # (no kicad-cli needed there).
+    #
+    # MET-478 follow-up: this in-process path has no kicad-cli binary in
+    # PATH, so every real deployment that relied on it alone had kicad.*
+    # register successfully (tools/list looked healthy) but fail every
+    # actual call with -32001. Production/dev-compose deployments should
+    # set METAFORGE_ADAPTER_KICAD_URL to the kicad-adapter container
+    # (which bundles kicad-cli and serves HTTP like cadquery/freecad,
+    # MET-532) so _create_remote_adapter is used instead of this
+    # in-process entry; the in-process path remains the fallback when
+    # that URL is unset or unreachable (see
+    # test_remote_url_unreachable_falls_back_to_in_process).
     "kicad": {
         "module": "tool_registry.tools.kicad.adapter",
         "class": "KicadServer",
         "config_module": "tool_registry.tools.kicad.config",
         "config_class": "KicadConfig",
+    },
+    # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
+    # (Gazebo Sim) in the container/host PATH to execute; the adapter
+    # registers regardless so tools/list is stable, but handlers raise
+    # SolverError if `gz` isn't found. Not in the documented default
+    # METAFORGE_ADAPTERS list.
+    "gazebo": {
+        "module": "tool_registry.tools.gazebo.adapter",
+        "class": "GazeboServer",
+        "config_module": "tool_registry.tools.gazebo.config",
+        "config_class": "GazeboConfig",
+    },
+    # MET-634: opt-in like freecad/kicad above -- needs the 'omniverse-usd'
+    # extra (usd-core, trimesh, scipy; plain PyPI wheels, no GPU/conda).
+    # Adapter registers regardless so tools/list is stable; handlers raise
+    # UsdConversionError with a clear install hint if the extra is missing.
+    "omniverse_usd": {
+        "module": "tool_registry.tools.omniverse_usd.adapter",
+        "class": "OmniverseUsdServer",
+        "config_module": "tool_registry.tools.omniverse_usd.config",
+        "config_class": "OmniverseUsdConfig",
     },
     # MET-635/636: opt-in like freecad/kicad above -- this adapter is a
     # thin coordinator (no GPU needed itself); it dispatches to a separate
@@ -81,6 +109,23 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_class": "IsaacSimConfig",
     },
 }
+
+# Adapters with no static factory above -- each is registered by its own
+# dedicated, self-contained block further down in bootstrap_tool_registry()
+# (depends on a runtime-injected object like a KnowledgeService, or on
+# distributor API credentials read from the environment). Every one of
+# these blocks already appends to exactly one of registered/skipped/failed
+# on its own. When one of these ids is *also* explicitly passed in
+# ``adapter_ids`` (the common case -- e.g. ``--adapters knowledge,twin,...``),
+# the generic loop below must not treat it as unknown: doing so logged a
+# false "Unknown adapter ID" warning and appended it to ``failed``, so the
+# final summary showed the adapter in both ``failed`` and ``registered``/
+# ``skipped`` simultaneously, even though it registered successfully.
+_RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
+    {"knowledge", "constraint", "twin", "project", "run", "session", "memory"}
+    | {"digikey", "mouser", "nexar"}
+    | {"component", "offer_resolver"}
+)
 
 
 def _is_adapter_enabled(adapter_id: str) -> bool:
@@ -202,6 +247,12 @@ async def bootstrap_tool_registry(
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
     proposal_recorder: Any = None,
+    constraint_recorder: Any = None,
+    run_launcher: Any = None,
+    document_recorder: Any = None,
+    blob_stager: Any = None,
+    component_catalog_store: Any = None,
+    component_intent_llm: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -224,6 +275,21 @@ async def bootstrap_tool_registry(
         twin_allow_mutations: When True, ``twin.query_cypher`` accepts
             mutating Cypher (CREATE / DELETE / SET / MERGE / ...). Off
             by default; every call is audit-logged regardless.
+        blob_stager: Optional async ``stage(node_id) -> dict`` (MET-618).
+            When supplied, registers ``twin.stage_work_product_file``,
+            which resolves a committed work product's blob onto the
+            shared adapter workspace so any CAD/FEA tool can load it by
+            path even after its authoring session is gone. ``None``
+            skips registration (same pattern as ``document_recorder``).
+        component_catalog_store: Optional ``ComponentCatalogStore`` instance
+            (MET-436). When supplied together with ``knowledge_service``
+            and ``component_intent_llm``, the ``component`` MCP adapter
+            (component.search_parametric + component.search_intent) is
+            registered. When any of the three is ``None``, skipped — same
+            runtime-injected pattern as ``knowledge``/``constraint``.
+        component_intent_llm: Optional ``IntentLLM`` instance (MET-436),
+            used only by ``component.search_intent`` to translate a
+            free-text goal into structured category/spec candidates.
 
     Returns:
         The populated ToolRegistry.
@@ -240,6 +306,10 @@ async def bootstrap_tool_registry(
         for adapter_id in ids_to_register:
             spec = _ADAPTER_REGISTRY.get(adapter_id)
             if spec is None:
+                if adapter_id in _RUNTIME_INJECTED_ADAPTER_IDS:
+                    # Handled by its own dedicated block below, which owns
+                    # this id's registered/skipped/failed outcome.
+                    continue
                 logger.warning("Unknown adapter ID", adapter_id=adapter_id)
                 failed.append(adapter_id)
                 continue
@@ -375,6 +445,9 @@ async def bootstrap_tool_registry(
                     decision_recorder=decision_recorder,
                     geometry_recorder=geometry_recorder,
                     proposal_recorder=proposal_recorder,
+                    constraint_recorder=constraint_recorder,
+                    document_recorder=document_recorder,
+                    blob_stager=blob_stager,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
@@ -421,6 +494,29 @@ async def bootstrap_tool_registry(
                     if project_backend is None
                     else "disabled via config"
                 ),
+            )
+
+        # ----- Runs MCP adapter (MET-587) -----
+        # Runtime-injected launcher (built in api_gateway over the run store +
+        # flow executor) so the chat agent can start gated design flows. The
+        # flow's own phase gates are the HITL approval mechanism.
+        if run_launcher is not None and _is_adapter_enabled("run"):
+            try:
+                from tool_registry.tools.runs.adapter import RunsServer
+
+                server = RunsServer(launcher=run_launcher)
+                await registry.register_adapter(server)
+                registered.append("run")
+                logger.info("runs_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("runs_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("run")
+        else:
+            skipped.append("run")
+            logger.info(
+                "runs_mcp_adapter_skipped",
+                reason=("no run_launcher supplied" if run_launcher is None else "disabled"),
             )
 
         # ----- Session MCP adapter (MET-494) -----
@@ -496,6 +592,56 @@ async def bootstrap_tool_registry(
                 ),
             )
 
+        # ----- Component MCP adapter (MET-436) -----
+        # Runtime-injected, same pattern as knowledge/constraint/memory:
+        # depends on three collaborators (the Postgres-backed parametric
+        # catalog store, the existing KnowledgeService for mode-2 fallback,
+        # and an intent-translation LLM client) rather than a static
+        # factory. All three must be present — a partially-wired component
+        # search (e.g. no fallback LLM) would silently degrade in ways
+        # that are worse than just not registering the tool.
+        if (
+            component_catalog_store is not None
+            and knowledge_service is not None
+            and component_intent_llm is not None
+            and _is_adapter_enabled("component")
+            and (not adapter_ids or "component" in adapter_ids)
+        ):
+            try:
+                from tool_registry.tools.components.adapter import ComponentServer
+
+                server = ComponentServer(
+                    search_store=component_catalog_store,
+                    knowledge_service=knowledge_service,
+                    llm=component_intent_llm,
+                )
+                await registry.register_adapter(server)
+                registered.append("component")
+                logger.info(
+                    "component_mcp_adapter_registered",
+                    store=type(component_catalog_store).__name__,
+                )
+            except Exception as exc:
+                logger.error("component_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("component")
+        else:
+            skipped.append("component")
+            logger.info(
+                "component_mcp_adapter_skipped",
+                reason=(
+                    "no component_catalog_store supplied"
+                    if component_catalog_store is None
+                    else "no knowledge_service supplied"
+                    if knowledge_service is None
+                    else "no component_intent_llm supplied"
+                    if component_intent_llm is None
+                    else "not in adapter_ids"
+                    if adapter_ids and "component" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
         # ----- Distributor MCP adapters (MET-434) -----
         # Self-constructing clients keyed on env vars. The HTTP code
         # lives in tool_registry/tools/{digikey,mouser,nexar}/adapter.py;
@@ -534,6 +680,12 @@ async def bootstrap_tool_registry(
             ("nexar", _make_nexar, "NEXAR_CLIENT_ID + NEXAR_CLIENT_SECRET"),
         )
 
+        # Populated as each distributor adapter constructs successfully,
+        # so the offer-resolver block below can fan out across whichever
+        # 0-3 distributors ended up available — it borrows these instances
+        # (does not own their HTTP/token lifecycle; see OfferResolverServer).
+        _available_distributor_adapters: list[DistributorAdapter] = []
+
         for distributor_id, factory, creds_hint in _DISTRIBUTOR_FACTORIES:
             if not _is_adapter_enabled(distributor_id):
                 skipped.append(distributor_id)
@@ -560,6 +712,7 @@ async def bootstrap_tool_registry(
                 server = DistributorMcpServer(adapter=adapter)
                 await registry.register_adapter(server)
                 registered.append(distributor_id)
+                _available_distributor_adapters.append(adapter)
                 logger.info(
                     f"{distributor_id}_mcp_adapter_registered",
                     distributor=adapter.name,
@@ -568,6 +721,45 @@ async def bootstrap_tool_registry(
                 logger.error(f"{distributor_id}_mcp_adapter_failed", error=str(exc))
                 span.record_exception(exc)
                 failed.append(distributor_id)
+
+        # ----- Offer Resolver MCP adapter (MET-436) -----
+        # Registered whenever selected (even with zero available distributor
+        # adapters) — "no offers found" is this tool's normal degraded
+        # response, not a missing-tool situation, so it shouldn't disappear
+        # just because no distributor credentials are configured. It has no
+        # required collaborator object (unlike knowledge/component/etc), so
+        # unlike those it's explicitly re-checked against ``adapter_ids``
+        # here — otherwise an explicit narrow ``adapter_ids=[...]`` request
+        # would always pull it in regardless of what was asked for.
+        if _is_adapter_enabled("offer_resolver") and (
+            not adapter_ids or "offer_resolver" in adapter_ids
+        ):
+            try:
+                from tool_registry.tools.distributors.offer_resolver import (
+                    OfferResolverServer,
+                )
+
+                server = OfferResolverServer(adapters=_available_distributor_adapters)
+                await registry.register_adapter(server)
+                registered.append("offer_resolver")
+                logger.info(
+                    "offer_resolver_mcp_adapter_registered",
+                    available_distributors=len(_available_distributor_adapters),
+                )
+            except Exception as exc:
+                logger.error("offer_resolver_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("offer_resolver")
+        else:
+            skipped.append("offer_resolver")
+            logger.info(
+                "offer_resolver_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "offer_resolver" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))

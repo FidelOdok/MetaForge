@@ -1,36 +1,5 @@
 import apiClient from '../client';
 
-export interface SubmitRequestPayload {
-  action: string;
-  target_id?: string;
-  project_id: string;
-  prompt?: string;
-  parameters?: Record<string, unknown>;
-  session_id?: string;
-}
-
-export interface AssistantResponse {
-  request_id: string;
-  status: string;
-  result: Record<string, unknown>;
-  errors: string[];
-}
-
-export interface RunStatusResponse {
-  run_id: string;
-  status: string;
-  steps: Record<string, {
-    status: string;
-    agent_code: string;
-    task_type: string;
-    result: Record<string, unknown>;
-    error: string | null;
-    started_at: string | null;
-    completed_at: string | null;
-  }>;
-  completed_at: string | null;
-}
-
 export interface Proposal {
   change_id: string;
   agent_code: string;
@@ -51,19 +20,30 @@ export interface ProposalListResponse {
   total: number;
 }
 
-export async function submitRequest(payload: SubmitRequestPayload): Promise<AssistantResponse> {
-  const { data } = await apiClient.post<AssistantResponse>('/assistant/request', payload);
-  return data;
-}
-
-export async function getRunStatus(runId: string): Promise<RunStatusResponse> {
-  const { data } = await apiClient.get<RunStatusResponse>(`/assistant/request/${runId}`);
-  return data;
-}
-
 export async function getProposals(projectId?: string): Promise<ProposalListResponse> {
   const params = projectId ? { project_id: projectId } : {};
   const { data } = await apiClient.get<ProposalListResponse>('/assistant/proposals', { params });
+  return data;
+}
+
+export interface CreateProposalRequest {
+  description: string;
+  diff: Record<string, unknown>;
+  projectId?: string;
+  workProductsAffected?: string[];
+}
+
+// MET-630: a human (e.g. a parameter-panel "Regenerate" button) proposing
+// a change directly, without going through an agent's twin.propose_change
+// MCP call. Goes through the identical review/apply pipeline as any other
+// proposal — see decideProposal below.
+export async function createProposal(body: CreateProposalRequest): Promise<Proposal> {
+  const { data } = await apiClient.post<Proposal>('/assistant/proposals', {
+    description: body.description,
+    diff: body.diff,
+    project_id: body.projectId ?? null,
+    work_products_affected: body.workProductsAffected ?? [],
+  });
   return data;
 }
 

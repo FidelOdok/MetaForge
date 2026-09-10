@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Eye, EyeOff, Search, ChevronsUpDown, ChevronUp } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import type { PartTreeNode } from '../../types/viewer';
@@ -7,10 +7,21 @@ interface TreeNodeProps {
   node: PartTreeNode;
   depth: number;
   searchTerm: string;
+  /**
+   * Set by the "Collapse all / Expand all" header button; each flip snaps
+   * every node (recursively) to that value, then the user can freely
+   * re-toggle individual nodes until the button is pressed again.
+   */
+  forceExpand?: boolean;
 }
 
-function TreeNodeItem({ node, depth, searchTerm }: TreeNodeProps) {
+function TreeNodeItem({ node, depth, searchTerm, forceExpand }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    if (forceExpand !== undefined) setExpanded(forceExpand);
+  }, [forceExpand]);
+
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
   const selectPart = useViewerStore((s) => s.selectPart);
@@ -89,6 +100,7 @@ function TreeNodeItem({ node, depth, searchTerm }: TreeNodeProps) {
             node={child}
             depth={depth + 1}
             searchTerm={searchTerm}
+            forceExpand={forceExpand}
           />
         ))}
     </div>
@@ -190,6 +202,7 @@ export function ComponentTree({ collapsed = false, onToggleCollapse }: Component
                 node={part}
                 depth={0}
                 searchTerm={searchTerm}
+                forceExpand={allExpanded}
               />
             ))}
             {searchTerm && (

@@ -40,6 +40,10 @@ class WorkProductType(StrEnum):
     # MET-495: a recorded design decision (ADR-style), rendered to markdown
     # and persisted as a first-class work product via twin.record_decision.
     DESIGN_DECISION = "design_decision"
+    # MET-630: the CadQuery/FreeCAD parametric generation script that
+    # authored a CAD_MODEL — the real source of truth, git-versioned for
+    # diffing. Linked to the CAD_MODEL it produced via a PARENT_OF edge.
+    CAD_SOURCE_SCRIPT = "cad_source_script"
 
 
 class ConstraintSeverity(StrEnum):

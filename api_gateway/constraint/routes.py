@@ -36,12 +36,30 @@ _FEASIBLE_LIMIT_MM = 500.0
 _freecad_client: FreecadMcpClient = default_freecad_client
 
 
+class RotationDelta(BaseModel):
+    """Single-axis rotation delta of a dragged group (MET-611)."""
+
+    axis: Literal["x", "y", "z"]
+    angle_deg: float
+
+
+class ScaleDelta(BaseModel):
+    """Single-axis scale delta of a dragged group (MET-611)."""
+
+    axis: Literal["x", "y", "z"]
+    factor: float
+
+
 class DeltaTransform(BaseModel):
-    """Translation delta of a dragged group, in world units (mm)."""
+    """Delta of a dragged group: translation (mm), or — additively, MET-611 —
+    a single-axis rotation or scale. Exactly one kind is populated per request,
+    matching whichever gizmo mode produced it on the client."""
 
     dx: float = 0.0
     dy: float = 0.0
     dz: float = 0.0
+    rotation: RotationDelta | None = None
+    scale: ScaleDelta | None = None
 
 
 class SynthesizeRequest(BaseModel):
@@ -114,6 +132,56 @@ def _suggest(group_name: str, dx: float, dy: float, dz: float) -> SynthesizeResp
     )
 
 
+def _suggest_rotation(group_name: str, rotation: RotationDelta) -> SynthesizeResponse:
+    """Rotation counterpart to `_suggest` (MET-611) — the gizmo already isolates a
+    single axis+angle per Apply, so there's no dominant-axis selection to do."""
+    if abs(rotation.angle_deg) < 1e-6:
+        return SynthesizeResponse(status="noop", suggestion="No change to apply.")
+
+    value = round(rotation.angle_deg, 2)
+    sign = "+" if value >= 0 else ""
+    parameter = f"{group_name}_rotation_{rotation.axis}"
+    suggestion = (
+        f"{group_name} rotated {sign}{value}deg about {rotation.axis.upper()} "
+        f"→ suggest {parameter} = {value}deg"
+    )
+    return SynthesizeResponse(
+        status="ok",
+        suggestion=suggestion,
+        constraint=ConstraintSuggestion(parameter=parameter, value=value, unit="deg"),
+    )
+
+
+def _suggest_scale(group_name: str, scale: ScaleDelta) -> SynthesizeResponse:
+    """Scale counterpart to `_suggest` (MET-611)."""
+    if abs(scale.factor - 1.0) < 1e-6:
+        return SynthesizeResponse(status="noop", suggestion="No change to apply.")
+
+    # Same infeasibility spirit as translate's distance guard — a wildly
+    # over/undersized group is as likely to be a mis-drag as a real intent.
+    if scale.factor <= 0 or scale.factor > 10:
+        reason = (
+            "Scale factor outside the feasible envelope (0, 10]; the re-solve "
+            "would likely produce degenerate geometry."
+        )
+        return SynthesizeResponse(
+            status="conflict",
+            suggestion="Scale rejected — constraint conflict.",
+            conflict_reason=reason,
+        )
+
+    value = round(scale.factor, 3)
+    parameter = f"{group_name}_scale_{scale.axis}"
+    suggestion = (
+        f"{group_name} scaled {value}x along {scale.axis.upper()} → suggest {parameter} = {value}"
+    )
+    return SynthesizeResponse(
+        status="ok",
+        suggestion=suggestion,
+        constraint=ConstraintSuggestion(parameter=parameter, value=value, unit="x"),
+    )
+
+
 def _axis_of(parameter: str) -> str:
     """Recover the dominant axis (``x``/``y``/``z``) from a ``*_position_<axis>`` name."""
     return parameter.rsplit("_", 1)[-1]
@@ -131,14 +199,29 @@ async def synthesize_constraint(body: SynthesizeRequest) -> SynthesizeResponse:
     """
     with tracer.start_as_current_span("constraint.synthesize") as span:
         span.set_attribute("constraint.group", body.group_name)
-        resp = _suggest(body.group_name, body.delta.dx, body.delta.dy, body.delta.dz)
+
+        # Exactly one of rotation/scale/translate is populated per request —
+        # the client only ever sends the gizmo mode that was actually dragged.
+        default_property_path: str | None
+        if body.delta.rotation is not None:
+            resp = _suggest_rotation(body.group_name, body.delta.rotation)
+            default_property_path = "Placement.Rotation.Angle"
+        elif body.delta.scale is not None:
+            resp = _suggest_scale(body.group_name, body.delta.scale)
+            default_property_path = "Scale"
+        else:
+            resp = _suggest(body.group_name, body.delta.dx, body.delta.dy, body.delta.dz)
+            default_property_path = None  # translate derives its path from the axis below
         span.set_attribute("constraint.status", resp.status)
 
         # Parametric Apply: only when we have something to bind to and the
         # suggestion is actionable.
         if resp.status == "ok" and resp.constraint and body.session_id and body.obj_id:
-            axis = _axis_of(resp.constraint.parameter)
-            property_path = body.property_path or f"Placement.Base.{axis}"
+            if default_property_path is not None:
+                property_path = body.property_path or default_property_path
+            else:
+                axis = _axis_of(resp.constraint.parameter)
+                property_path = body.property_path or f"Placement.Base.{axis}"
             try:
                 binding = await _freecad_client.apply_parametric_binding(
                     session_id=body.session_id,

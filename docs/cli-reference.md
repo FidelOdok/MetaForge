@@ -78,11 +78,100 @@ subcommand name:
 | Flag | Default | Purpose |
 |---|---|---|
 | `--format {table,json,compact}` | `table` | Output rendering |
-| `--gateway-url <url>` | `$METAFORGE_GATEWAY_URL` or `http://localhost:8000` | Override gateway base URL |
+| `--gateway-url <url>` | `$METAFORGE_GATEWAY_URL`, then the saved config, then `http://localhost:8000` | Override gateway base URL |
 
 ```bash
 python -m cli.forge_cli --format json --gateway-url http://gateway.local:8000 proposals
 ```
+
+## Interactive workspace (bare `forge`)
+
+Running the [standalone binary](#standalone-binary-no-python-required) with no
+subcommand in a terminal opens the **interactive workspace**: streaming chat plus
+panes for runs, the twin, and a new run. It talks to the same gateway as the
+Python CLI, but it is a separate front-end — the slash commands below are *its*
+commands, not [`chat`](#chat-interactive-assistant-repl)'s.
+
+```bash
+forge                                   # open the workspace
+forge --project "Monitor Build Demo"    # …already scoped to a project
+forge ui --debug                        # verbose logging (see below)
+```
+
+| Flag | Purpose |
+|---|---|
+| `--project <id\|name>` | Start the chat scoped to a project. Takes an id, an exact name, or a unique substring (`--project gimbal`). An ambiguous or unknown name is reported on screen and the session starts unscoped |
+| `--debug` | Verbose logging, including raw SSE frames (see [Logs & debugging](#logs-debugging-the-interactive-tui)) |
+
+Any other flag (`--help`, `--version`, `--gateway <url>`) runs the scriptable
+command layer instead of opening the UI. `--project` works there too, on the
+one-shot turn:
+
+```bash
+forge chat -m "what's in this project?" --project "Monitor Build Demo"
+```
+
+| Key / command | Effect |
+|---|---|
+| `^T` `^R` `^B` `^N` | chat · runs · twin · new run |
+| `PageUp` / `PageDn` | Scroll the transcript |
+| `/resume` | Pick a previous session (title · scope · activity) and continue it — the transcript backfills and the server rebuilds the conversation's context per turn (MET-595). `forge --continue` / `-c` resumes the most recent session directly at launch |
+| `/project [id\|name]` | Show the current project, or switch to one. Switching starts a **new thread** — see below. `/project none` leaves the project |
+| `/model <slug>` | Change the model for this session (persisted to `~/.forge/config.json`) |
+| `/provider <id>` | Change the provider for this session |
+| `/help` | List the slash commands |
+| `Esc` | Quit |
+
+### What it looks like
+
+Real captures from the compiled binary (`tmux` driving `forge` against a live
+gateway) — not mockups.
+
+**Launch** — the welcome screen, a message composed and ready to send:
+
+![The forge TUI welcome screen, showing the banner, keybinding hints, and a message typed into the input box](assets/tui/welcome.png)
+
+**A turn in progress** — the model calls a tool, then answers. This is the
+literal answer to "Tell me about the Quadruped Robot project": one
+`project.get`-style call, then a formatted response using what it returned.
+
+![Animated capture of a forge TUI chat turn: typing a question, a tool call streaming in with a spinner, then the final formatted answer](assets/tui/chat-demo.gif)
+
+The same turn once it settles, so the tool-call trace and the full answer are
+both visible at once:
+
+![A completed forge TUI chat turn, showing the tool call line and the full formatted answer below it](assets/tui/chat-answer.png)
+
+**The Runs pane** (`^R`) — same footer, different content pane:
+
+![The forge TUI Runs pane, empty, with a hint to press ^N or run `forge runs create`](assets/tui/runs-pane.png)
+
+### What "project" in the status line means
+
+The project segment of the status footer is the **scope of the live chat thread**
+(`no project` when there isn't one) — not a UI preference. Scope is fixed when
+the gateway creates the thread (`scope_kind` / `scope_entity_id`), and a
+project-scoped thread is the one that gets the
+[project brief](#project-scoped-chat) prepended to every turn: the project's
+intent, its work products, and the instruction to pass `project_id` when
+committing CAD or recording a decision. So scope decides whether new deliverables
+land in the project — an unscoped chat can still discuss it, but nothing it
+produces is filed there.
+
+Two consequences worth knowing:
+
+- **`/project` starts a new thread.** Typed by you, it switches by creating a
+  **new** thread in the new scope, so the conversation restarts; the workspace
+  says so in the transcript rather than letting you discover it when the agent
+  has forgotten what you were discussing.
+- **Asking the agent in prose does rescope — in place.** "Switch to project X"
+  is answered by the agent calling `chat.set_project_scope`, which rescopes the
+  **current** thread rather than starting a new one — the conversation is kept,
+  and the very next turn gets the new project's brief. An ambiguous or unknown
+  name is refused (the agent won't guess), and it must say so explicitly rather
+  than continuing to talk about the project as if the switch happened silently.
+  Watch the footer either way: it always reflects the thread's real scope,
+  whoever changed it.
 
 ## Commands
 
@@ -107,14 +196,63 @@ forge config set model claude-sonnet-5       # or set values directly
 forge config show
 ```
 
-Precedence: an explicit CLI flag wins over the config file, which wins over the
-`METAFORGE_GATEWAY_URL` env var, which wins over the built-in default.
+Precedence, highest first: an explicit CLI flag, then the
+`METAFORGE_GATEWAY_URL` env var, then the config file, then the built-in
+default.
+
+!!! warning "This changed in MET-729"
+    The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
+    usual convention — an environment variable exists to override persisted
+    config for a single invocation — and it had a real cost: a unit test that
+    set `METAFORGE_GATEWAY_URL` to a dead port to keep itself local was
+    silently ignored, and instead ingested documents into a shared dev
+    gateway on every run (11 such writes in one week, found in that
+    deployment's own logs).
+
+    If you relied on the old order, note that `forge config set gateway_url`
+    still works exactly as before whenever the env var is unset — which is the
+    normal case. Only a shell that exports `METAFORGE_GATEWAY_URL` now behaves
+    differently, and in that case the export is the more specific instruction.
 
 !!! note "What this does and doesn't configure"
-    This stores *your client's* choice of gateway and the per-turn
-    provider/model it sends (which the gateway honors via its selector). It does
-    **not** set the gateway's own API keys or the `METAFORGE_CHAT_HARNESS` flag —
-    those are server-side settings on the gateway host, not the CLI.
+    `config` stores *your client's* choice of gateway and the per-turn
+    provider/model it sends. To give the gateway a **credential** (API key or a
+    ChatGPT subscription), use [`auth`](#auth-provider-login-selection) — it does
+    not set the `METAFORGE_CHAT_HARNESS` flag, which is a server-side setting.
+
+### `auth` — provider login & selection
+
+```
+auth list                          # providers with configured/active state
+auth login [--provider P] [--method {api-key,oauth}] [--model M] [--no-activate]
+           [--mode {auto,loopback,device,manual}] [--port N] [--no-browser]
+auth use <provider> [-m MODEL]     # set the durable active provider/model
+auth logout <provider>             # forget a stored credential
+```
+
+Log in to an LLM provider **from the CLI** — like `opencode`/OpenClaw — and the
+credential is **pushed once to the gateway** (the shared runtime for CLI, TUI,
+and dashboard) and stored `0600`, so every client uses it with no restart.
+
+- **API key** (any provider): `forge auth login` → pick a provider → enter the
+  key at a hidden prompt. Stored in the gateway's auth store and injected into
+  the model call (preferred over env).
+- **ChatGPT/Codex OAuth** (subscription, no API key): pick `openai-codex` → a
+  browser OAuth loopback runs **on your machine** (localhost:1455); only the
+  resulting token is sent to the gateway (written where the Codex adapter reads
+  it). On a headless client use `--mode device` or `--mode manual`.
+
+```bash
+forge auth login --provider openai            # API key for OpenAI
+forge auth login --provider openai-codex      # ChatGPT subscription (browser)
+forge auth use openai gpt-4o                   # make it the active model
+forge auth list
+```
+
+Active-selection precedence: an explicit `chat --provider/--model` flag → the
+`auth use` selection stored on the gateway → the gateway's `METAFORGE_LLM_*`
+env. If the gateway sets `METAFORGE_HARNESS_ADMIN_TOKEN`, the CLI sends it
+automatically (from the same env var) so writes are authorized.
 
 ### `chat` — interactive assistant REPL
 
@@ -186,6 +324,13 @@ Once scoped, ask the agent about the project ("what's in this project?", "what
 did we decide about the base plate?") and it answers from the work products; ask
 it to build geometry and the result is saved back into the project.
 
+Mid-conversation you can also just ask the agent to switch: "switch to the Foo
+project" (or "leave the project") makes it call `chat.set_project_scope`, which
+rescopes the **same** thread in place — the conversation is kept, and the next
+turn's brief reflects the new project. This works whether the thread started
+scoped or unscoped. An ambiguous or unknown name is refused rather than guessed,
+and the agent must tell you explicitly that it switched.
+
 #### From prompt to CAD
 
 There are three paths from a typed intent to a committed `cad_model` work product
@@ -237,7 +382,7 @@ python -m cli.forge_cli cad build bracket.json --project-id <id>
 | `/mode [ask\|auto\|plan]` | Show or set the permission mode |
 | `/plan` | Shortcut for `/mode plan` |
 | `/thread` | Show the current thread id |
-| `/clear` | Start a fresh thread (clears context) |
+| `/clear` | Start a fresh thread (clears context; keeps the `--project` scope) |
 | `/exit`, `/quit` | Leave the chat |
 
 #### Hooks
@@ -576,7 +721,9 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 | Var | Used by | Purpose |
 |---|---|---|
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
+| `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | If set on the gateway, credential writes require it; the CLI sends the matching value from this env var |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
+| `METAFORGE_MAX_OUTPUT_TOKENS` | chat (gateway-side) | Output-token cap per model completion (default 8192) |
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
 | `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |
 

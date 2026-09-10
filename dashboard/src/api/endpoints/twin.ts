@@ -16,6 +16,24 @@ interface TwinNodeApiResponse {
   status: string;
   properties: Record<string, string | number | boolean>;
   updatedAt: string;
+  geometryParameters?: { parameters: Record<string, unknown>; properties: Record<string, unknown> } | null;
+  hasScript?: boolean;
+}
+
+export interface TwinNodeScript {
+  nodeId: string;
+  scriptNodeId: string;
+  scriptSource: string;
+  gitCommitSha: string | null;
+  gitPath: string | null;
+}
+
+interface TwinNodeScriptApiResponse {
+  node_id: string;
+  script_node_id: string;
+  script_source: string;
+  git_commit_sha: string | null;
+  git_path: string | null;
 }
 
 interface TwinNodeListApiResponse {
@@ -35,6 +53,8 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     status: node.status,
     properties: node.properties,
     updatedAt: node.updatedAt,
+    geometryParameters: node.geometryParameters ?? undefined,
+    hasScript: node.hasScript,
   }));
 }
 
@@ -50,18 +70,44 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       status: node.status,
       properties: node.properties,
       updatedAt: node.updatedAt,
+      geometryParameters: node.geometryParameters ?? undefined,
+      hasScript: node.hasScript,
     };
   } catch {
     return undefined;
   }
 }
 
-export async function getTwinRelationships(): Promise<TwinRelationship[]> {
+// MET-630: the current git-versioned generation script for a CAD_MODEL
+// node, used to seed a regeneration proposal's textarea. Undefined when
+// the node has no linked script (imported geometry, or the git backend
+// isn't configured) — callers should treat that as "not available", not
+// an error.
+export async function getNodeScript(id: string): Promise<TwinNodeScript | undefined> {
+  try {
+    const response = await apiClient.get<TwinNodeScriptApiResponse>(`/twin/nodes/${id}/script`);
+    const s = response.data;
+    return {
+      nodeId: s.node_id,
+      scriptNodeId: s.script_node_id,
+      scriptSource: s.script_source,
+      gitCommitSha: s.git_commit_sha,
+      gitPath: s.git_path,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getTwinRelationships(projectId?: string): Promise<TwinRelationship[]> {
   // Live edges from the twin graph (backend already returns camelCase fields
   // matching TwinRelationship). Falls back to mocks if the endpoint is absent.
+  // MET-491: scope to a project when one is selected; omit for all projects.
   try {
+    const params = projectId ? { project_id: projectId } : undefined;
     const response = await apiClient.get<{ relationships: TwinRelationship[] }>(
       '/twin/relationships',
+      { params },
     );
     return response.data.relationships ?? [];
   } catch {
@@ -141,9 +187,31 @@ export async function syncNode(nodeId: string): Promise<SyncResult> {
   return data;
 }
 
-export async function getNodeVersionHistory(nodeId: string): Promise<Record<string, unknown>[]> {
-  const { data } = await apiClient.get<Record<string, unknown>[]>(`/twin/nodes/${nodeId}/versions`);
-  return data;
+/** One snapshot in a work product's revision history (``WorkProductRevision``). */
+export interface WorkProductRevision {
+  revision: number;
+  created_at: string;
+  content_hash: string;
+  change_description: string;
+  metadata_snapshot: Record<string, unknown>;
+}
+
+interface WorkProductVersionHistoryRaw {
+  work_product_id: string;
+  revisions: WorkProductRevision[];
+  total: number;
+}
+
+/**
+ * Full revision history for a work product.
+ *
+ * Backed by ``GET /v1/twin/nodes/{node_id}/versions``, which returns a
+ * ``WorkProductVersionHistory`` object (``{work_product_id, revisions,
+ * total}``) — this unwraps `.revisions` so callers get a plain list.
+ */
+export async function getNodeVersionHistory(nodeId: string): Promise<WorkProductRevision[]> {
+  const { data } = await apiClient.get<WorkProductVersionHistoryRaw>(`/twin/nodes/${nodeId}/versions`);
+  return data.revisions ?? [];
 }
 
 // ── Work-product file download / open / preview (MET-483) ───────────────────
@@ -161,4 +229,52 @@ export function nodeFileUrl(nodeId: string, download = false): string {
 export async function fetchNodeFileText(nodeId: string): Promise<string> {
   const { data } = await apiClient.get(`/twin/nodes/${nodeId}/file`, { responseType: 'text' });
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+// ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────
+
+export type BooleanCutOperation = 'subtract' | 'union' | 'intersect';
+
+export interface BooleanCutResult {
+  node: TwinNode;
+  operation: BooleanCutOperation;
+  resultVolumeMm3: number;
+  resultAreaMm2: number;
+}
+
+interface BooleanCutApiResponse {
+  node: TwinNodeApiResponse;
+  operation: string;
+  result_volume_mm3: number;
+  result_area_mm2: number;
+}
+
+/** POST /v1/twin/nodes/boolean-cut — subtract/union/intersect two STEP nodes,
+ * committing a real new geometry node (not a client-side visual trick). */
+export async function booleanCutNodes(
+  targetNodeId: string,
+  cutterNodeId: string,
+  operation: BooleanCutOperation,
+  resultName?: string,
+): Promise<BooleanCutResult> {
+  const { data } = await apiClient.post<BooleanCutApiResponse>('/twin/nodes/boolean-cut', {
+    target_node_id: targetNodeId,
+    cutter_node_id: cutterNodeId,
+    operation,
+    result_name: resultName,
+  });
+  return {
+    node: {
+      id: data.node.id,
+      name: data.node.name,
+      type: data.node.type as TwinNode['type'],
+      domain: data.node.domain,
+      status: data.node.status,
+      properties: data.node.properties,
+      updatedAt: data.node.updatedAt,
+    },
+    operation: data.operation as BooleanCutOperation,
+    resultVolumeMm3: data.result_volume_mm3,
+    resultAreaMm2: data.result_area_mm2,
+  };
 }

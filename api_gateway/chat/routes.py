@@ -13,17 +13,27 @@ Endpoints live under ``/v1/chat``.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TypeVar
 from uuid import uuid4
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api_gateway.chat.agent_router import default_router
 from api_gateway.chat.backend import ChatBackend, InMemoryChatBackend
+from api_gateway.chat.context_adapter import (
+    assemble_chat_context,
+    render_context_block,
+)
 from api_gateway.chat.harness_backend import (
     chat_harness_enabled,
+    context_window_for,
     run_chat_turn_streaming,
 )
 from api_gateway.chat.models import (
@@ -39,28 +49,80 @@ from api_gateway.chat.schemas import (
     ThreadListResponse,
     ThreadResponse,
     ThreadSummaryResponse,
+    UpdateThreadScopeRequest,
 )
+from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope
 from api_gateway.chat.streaming import (
+    notify_agent_action_started,
     notify_agent_done,
     notify_agent_step,
+    notify_agent_thinking,
     notify_agent_typing,
     notify_context_stats,
     notify_message_delta,
+    notify_tool_approval_requested,
     stream_manager,
     stream_thread,
 )
-from api_gateway.projects.routes import _backend as _project_backend
+from api_gateway.chat.turn_capture import capture_step, capture_turn_done
+
+# MET-575: import the ACCESSOR, never the module attribute. A
+# ``from ... import _backend as _project_backend`` binds the in-memory
+# instance that exists at import time; when server startup swaps the real
+# (Postgres) backend in via ``init_project_backend``, the alias silently
+# keeps pointing at the empty in-memory store — so every project-scoped
+# chat lost its brief (get_project always missed) on any real deployment.
+from api_gateway.projects.routes import get_project_backend
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
     run_agent,
 )
+from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
+from orchestrator.harness.compression import budget_history, summarize_turns
 from skill_registry.mcp_bridge import InMemoryMcpBridge, McpBridge
 from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.chat.routes")
+
+_T = TypeVar("_T")
+
+
+async def _run_cancellable_on_disconnect(
+    is_disconnected: Callable[[], Awaitable[bool]],
+    coro: Awaitable[_T],
+    *,
+    poll_interval: float = 1.0,
+) -> _T:
+    """Run *coro*, cancelling it the first time *is_disconnected* reports true.
+
+    A chat turn runs synchronously inside this POST and can take minutes (the
+    harness may make many tool calls) -- without this, a client that
+    disconnects early (TUI abort, closed browser tab, dropped network) left
+    the turn running server-side to completion with nothing left to consume
+    the result: wasted compute, and for design turns, wasted tool/LLM spend.
+    Raises ``asyncio.CancelledError`` when cancelled, same as the underlying
+    task -- callers decide how to respond to that.
+    """
+    task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+
+    async def _watch() -> None:
+        while not task.done():
+            if await is_disconnected():
+                task.cancel()
+                return
+            await asyncio.sleep(poll_interval)
+
+    watcher = asyncio.ensure_future(_watch())
+    try:
+        return await task
+    finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+
 
 # ---------------------------------------------------------------------------
 # Module-level backend & router
@@ -81,6 +143,13 @@ def init_chat_backend(backend: ChatBackend) -> None:
     logger.info("chat_backend_initialized", backend_type=type(backend).__name__)
 
 
+def get_chat_backend() -> ChatBackend:
+    """Accessor for the live chat backend — always call this, never bind
+    ``_backend`` at import time (MET-575: an early alias keeps pointing at the
+    empty in-memory store after ``init_chat_backend`` swaps in the real one)."""
+    return _backend
+
+
 # Legacy alias — kept for backward compatibility with tests that import `store`
 store = _backend
 
@@ -90,6 +159,28 @@ store = _backend
 
 _twin = InMemoryTwinAPI.create()
 _mcp_bridge: McpBridge = InMemoryMcpBridge()
+_metrics: MetricsCollector | None = None
+
+
+def init_metrics(collector: MetricsCollector | None) -> None:
+    """Wire the gateway's real MetricsCollector into the harness path
+    (production-harness audit follow-up — the harness loop had zero metrics
+    of its own). Called by the API Gateway lifespan; None (the default,
+    matching every existing test) keeps this a no-op.
+    """
+    global _metrics  # noqa: PLW0603
+    _metrics = collector
+    logger.info("chat_metrics_initialized", enabled=collector is not None)
+
+
+def get_metrics() -> MetricsCollector | None:
+    """The gateway's configured MetricsCollector, if any (MET-659 follow-up).
+
+    Lets other call sites of ``run_chat_turn`` (e.g. the design-flow-phase
+    handlers under ``api_gateway/runs/``) thread the same collector this
+    module uses, instead of each needing its own wiring.
+    """
+    return _metrics
 
 
 def init_mcp_bridge(bridge: McpBridge) -> None:
@@ -137,27 +228,39 @@ def _make_message_response(msg: ChatMessageRecord) -> MessageResponse:
 # actor_kind (as stored) -> LLM chat role. Only these two carry into context;
 # system/error messages are left out.
 _HISTORY_ROLE = {"user": "user", "agent": "assistant"}
-_HISTORY_LIMIT = 20  # most-recent turns fed back as context
+# MET-568: history is token-budgeted, not turn-sliced. The old hard 20-turn
+# slice dropped short early turns that would have fit (losing facts the user
+# stated at the start) while happily keeping huge recent turns. _HISTORY_LIMIT
+# survives only as a generous safety ceiling on turn count.
+_HISTORY_LIMIT = 100
+
+
+def _history_token_budget() -> int:
+    """Token budget for prior-conversation context (``METAFORGE_HISTORY_TOKENS``)."""
+    raw = (os.environ.get("METAFORGE_HISTORY_TOKENS") or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return 12_000
 
 
 _PROJECT_WP_LIMIT = 30  # most work products listed in the project brief
 
 
-async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
-    """A leading context turn describing the thread's project (empty if none).
+async def _project_brief(thread: ChatThreadRecord) -> str | None:
+    """The thread's project brief as text (``None`` when not project-scoped).
 
     When a thread is scoped to a project (``scope_kind == "project"``), the agent
     should reason over the project's digital thread — its existing work products —
-    and persist new CAD/decisions back into it. The agent loop can't be handed the
-    project object, so we frame it as the earliest ``history`` exchange: a synthetic
-    user turn stating the project context, plus an assistant acknowledgement. This
-    reaches both the native-tool and ReAct loops without touching harness core.
+    and persist new CAD/decisions back into it. Placement is path-dependent
+    (MET-566, decided in ``harness_backend._apply_turn_context``): the native
+    path folds this into the layered system prompt; the ReAct path keeps the
+    legacy synthetic ``[project context]`` history pair.
     """
     if thread.scope_kind != "project" or not thread.scope_entity_id:
-        return []
-    project = await _project_backend.get_project(thread.scope_entity_id)
+        return None
+    project = await get_project_backend().get_project(thread.scope_entity_id)
     if project is None:
-        return []
+        return None
 
     lines = [
         f"You are working inside the MetaForge project **{project.name}** "
@@ -176,22 +279,29 @@ async def _project_brief(thread: ChatThreadRecord) -> list[dict[str, str]]:
     else:
         lines.append("\nThis project has no work products yet.")
 
+    # MET-584: requirements-discovery directive. Chat has no gates, so the
+    # elicitation nudge lives in the brief — the enforcement twin of this is
+    # the design-flow Requirements gate (MET-582/583).
+    types = {str(getattr(wp.type, "value", wp.type)) for wp in project.work_products}
+    if not types & {"prd", "constraint_set"}:
+        lines.append(
+            "\nThis project has NO recorded requirements or constraints (no prd "
+            "or constraint_set work product). Before substantive design work — "
+            "authoring or committing geometry, selecting components — elicit the "
+            "key quantified requirements from the user (loads, mass/envelope "
+            "budgets, power, cost, safety factors) and record them with "
+            "`twin.record_constraint_set` (and the rationale with "
+            "`twin.record_decision`). Ask before you assume."
+        )
+
     lines.append(
-        f"\nTo save any CAD model or design decision into this project, pass "
-        f'`project_id="{project.id}"` when you call `twin.commit_geometry` or '
-        f"`twin.record_decision`. Ground your answers in the work products above."
+        f"\nAny CAD model you generate in this project is NOT saved until you call "
+        f'`twin.commit_geometry` with `project_id="{project.id}"` — do this before your '
+        f"final answer whenever you generated or modified geometry this turn. Record "
+        f'design decisions the same way with `twin.record_decision` (`project_id="{project.id}"`). '
+        f"Ground your answers in the work products above."
     )
-    brief = "\n".join(lines)
-    return [
-        {"role": "user", "content": f"[project context]\n{brief}"},
-        {
-            "role": "assistant",
-            "content": (
-                f"Understood — I'm working within project {project.name} "
-                f"({project.id}) and will scope new work products to it."
-            ),
-        },
-    ]
+    return "\n".join(lines)
 
 
 async def _context_availability(thread: ChatThreadRecord) -> dict[str, int]:
@@ -203,7 +313,7 @@ async def _context_availability(thread: ChatThreadRecord) -> dict[str, int]:
     """
     avail: dict[str, int] = {}
     if thread.scope_kind == "project" and thread.scope_entity_id:
-        project = await _project_backend.get_project(thread.scope_entity_id)
+        project = await get_project_backend().get_project(thread.scope_entity_id)
         if project is not None:
             total = len(project.work_products)
             avail["work_products_total"] = total
@@ -218,7 +328,14 @@ async def _thread_history(thread_id: str) -> list[dict[str, str]]:
 
     The current user turn has already been persisted by the caller, so the last
     stored message is dropped — it is passed to the harness separately as the
-    goal. Capped to the most recent ``_HISTORY_LIMIT`` turns.
+    goal.
+
+    MET-568: turns are TOKEN-budgeted (newest kept whole, oldest dropped), and
+    dropped turns are folded into a deterministic content-preserving summary
+    prepended as a leading context exchange — facts stated early in a long
+    conversation survive as summary lines instead of vanishing. The full
+    history stays in the chat store, so the summary is recomputed per turn
+    rather than persisted (nothing to migrate, nothing to drift).
     """
     msgs = await _backend.get_messages(thread_id)
     prior = msgs[:-1] if msgs else []
@@ -227,7 +344,20 @@ async def _thread_history(thread_id: str) -> list[dict[str, str]]:
         role = _HISTORY_ROLE.get(m.actor_kind)
         if role and m.content and (m.status or "ok") != "error":
             out.append({"role": role, "content": m.content})
-    return out[-_HISTORY_LIMIT:]
+    out = out[-_HISTORY_LIMIT:]
+
+    kept, dropped = budget_history(out, max_tokens=_history_token_budget())
+    if not dropped:
+        return kept
+    summary = summarize_turns(dropped)
+    return [
+        {"role": "user", "content": f"[conversation summary]\n{summary}"},
+        {
+            "role": "assistant",
+            "content": "Understood — I'll treat that summary as our earlier conversation.",
+        },
+        *kept,
+    ]
 
 
 async def _invoke_agent(
@@ -260,22 +390,59 @@ async def _invoke_agent(
                 async def _on_delta(delta: str) -> None:
                     await notify_message_delta(thread.id, delta)
 
+                capture_project = thread.scope_entity_id if thread.scope_kind == "project" else None
+                step_count = {"n": 0}
+
                 async def _on_step(step: dict[str, object]) -> None:
+                    step_count["n"] += 1
                     await notify_agent_step(thread.id, step, "harness-agent")
+                    # MET-594: tee the live step into the durable
+                    # Action-Observation log (best-effort by contract).
+                    await capture_step(thread.id, capture_project, step)
+
+                async def _on_thinking(delta: str, kind: str = "draft") -> None:
+                    await notify_agent_thinking(thread.id, delta, kind)
+
+                async def _on_action_started(tool: str) -> None:
+                    await notify_agent_action_started(thread.id, tool)
 
                 async def _on_context(stats: dict[str, object]) -> None:
                     await notify_context_stats(thread.id, stats)
 
+                async def _on_approval_request(
+                    run_id: str, tool: str, arguments: dict[str, object]
+                ) -> None:
+                    # Production-harness audit follow-up: best-effort — a
+                    # broadcast failure must never block the paused tool call.
+                    await notify_tool_approval_requested(thread.id, run_id, tool, arguments)
+
                 await notify_agent_typing(thread.id, "harness-agent")
-                # Project-scoped threads lead with a project brief so the agent
-                # reasons over the digital thread and scopes new work to it.
-                history = await _project_brief(thread) + await _thread_history(thread.id)
+                # Project-scoped threads carry a project brief so the agent
+                # reasons over the digital thread and scopes new work to it;
+                # placement (system prompt vs. history pair) is path-dependent
+                # and decided in harness_backend (MET-566).
+                brief = await _project_brief(thread)
+                history = await _thread_history(thread.id)
                 availability = await _context_availability(thread)
+                # MET-566: assemble retrieved knowledge for this message via
+                # the ContextAssembler (role scoping, staleness, conflicts,
+                # budget + truncation metric). Best-effort — None when the
+                # knowledge service isn't wired or assembly fails.
+                ctx_response = await assemble_chat_context(
+                    user_content,
+                    window=context_window_for(provider, model),
+                )
+                context_block = (
+                    render_context_block(ctx_response) if ctx_response is not None else None
+                )
                 text = await run_chat_turn_streaming(
                     user_content,
                     on_delta=_on_delta,
                     on_step=_on_step,
+                    on_thinking=_on_thinking,
+                    on_action_started=_on_action_started,
                     on_context=_on_context,
+                    on_approval_request=_on_approval_request,
                     session_id=thread.id,
                     mcp_bridge=_mcp_bridge,
                     provider=provider,
@@ -283,8 +450,19 @@ async def _invoke_agent(
                     enabled_tools=tools,
                     history=history,
                     availability=availability,
+                    project_brief=brief,
+                    context_block=context_block,
+                    chat_backend=_backend,
+                    twin=_twin,
+                    metrics=_metrics,
+                    # MET-567: scope this turn's experience deposit to the
+                    # thread's project (None on an unscoped assistant thread).
+                    project_id=capture_project,
                 )
                 await notify_agent_done(thread.id, "harness-agent")
+                await capture_turn_done(
+                    thread.id, capture_project, status="completed", steps=step_count["n"]
+                )
                 return ChatMessageRecord(
                     id=str(uuid4()),
                     thread_id=thread.id,
@@ -297,6 +475,14 @@ async def _invoke_agent(
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error("harness_chat_failed", error=str(exc))
+                # MET-591 (live-caught): the turn is over — say so on the
+                # stream. Without this, SSE clients whose turn errored got
+                # typing + context.stats and then silence forever (no
+                # agent.done), which read as a hung turn instead of a failure.
+                try:
+                    await notify_agent_done(thread.id, "harness-agent")
+                except Exception:  # noqa: BLE001 — notification is best-effort
+                    logger.warning("agent_done_notify_failed", thread_id=thread.id)
                 return ChatMessageRecord(
                     id=str(uuid4()),
                     thread_id=thread.id,
@@ -335,7 +521,7 @@ async def _invoke_agent(
             project_id = ""
             work_product_id = ""
             if thread.scope_kind == "project" and thread.scope_entity_id:
-                project = await _project_backend.get_project(thread.scope_entity_id)
+                project = await get_project_backend().get_project(thread.scope_entity_id)
                 if project and project.work_products:
                     project_id = thread.scope_entity_id
                     work_product_id = project.work_products[0].id
@@ -544,6 +730,50 @@ async def create_thread(body: CreateThreadRequest) -> ThreadResponse:
     )
 
 
+@router.patch("/threads/{thread_id}/scope", response_model=ThreadResponse)
+async def update_thread_scope(thread_id: str, body: UpdateThreadScopeRequest) -> ThreadResponse:
+    """Rescope an EXISTING thread in place (MET-580).
+
+    Unlike ``POST /threads``, this preserves the conversation — the same
+    thread continues, and its next turn's project brief (if scoped to a
+    project) reflects the new scope. The agent-callable ``chat.set_project_scope``
+    native tool goes through the same ``apply_thread_scope`` helper, so a human
+    hitting this endpoint and the agent switching scope mid-turn behave
+    identically and both broadcast the same ``scope.changed`` SSE event.
+    """
+    thread = await _backend.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail=f"Thread {thread_id!r} not found")
+
+    project_name = None
+    if body.scope_kind == "project":
+        project = await get_project_backend().get_project(body.scope_entity_id)
+        project_name = project.name if project is not None else None
+
+    try:
+        updated = await apply_thread_scope(
+            _backend,
+            thread_id,
+            scope_kind=body.scope_kind,
+            scope_entity_id=body.scope_entity_id,
+            project_name=project_name,
+        )
+    except ScopeResolutionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ThreadResponse(
+        id=updated.id,
+        channel_id=updated.channel_id,
+        scope_kind=updated.scope_kind,
+        scope_entity_id=updated.scope_entity_id,
+        title=updated.title,
+        archived=updated.archived,
+        created_at=updated.created_at,
+        last_message_at=updated.last_message_at,
+        messages=[],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Message endpoints
 # ---------------------------------------------------------------------------
@@ -554,7 +784,9 @@ async def create_thread(body: CreateThreadRequest) -> ThreadResponse:
     response_model=MessageResponse,
     status_code=201,
 )
-async def send_message(thread_id: str, body: SendMessageRequest) -> MessageResponse:
+async def send_message(
+    thread_id: str, body: SendMessageRequest, request: Request
+) -> MessageResponse:
     """Append a message to an existing thread.
 
     After persisting the user message, the handler routes it to the
@@ -577,9 +809,18 @@ async def send_message(thread_id: str, body: SendMessageRequest) -> MessageRespo
 
     # --- Agent invocation (async) ----------------------------------------
     if body.actor_kind == "user":
-        agent_msg = await _invoke_agent(
-            thread, body.content, provider=body.provider, model=body.model, tools=body.tools
-        )
+        try:
+            agent_msg = await _run_cancellable_on_disconnect(
+                request.is_disconnected,
+                _invoke_agent(
+                    thread, body.content, provider=body.provider, model=body.model, tools=body.tools
+                ),
+            )
+        except asyncio.CancelledError:
+            # The client is gone -- no response will ever be read, so there's
+            # nothing left to do but stop the turn and record why.
+            logger.warning("chat_turn_cancelled_client_disconnected", thread_id=thread_id)
+            return _make_message_response(msg)
         if agent_msg is not None:
             await _backend.add_message(
                 thread_id=thread_id,
@@ -598,7 +839,7 @@ async def send_message(thread_id: str, body: SendMessageRequest) -> MessageRespo
 
 
 @router.get("/threads/{thread_id}/stream")
-async def stream_thread_events(thread_id: str) -> StreamingResponse:
+async def stream_thread_events(thread_id: str, request: Request) -> StreamingResponse:
     """Stream real-time events for a chat thread via Server-Sent Events.
 
     The client receives events as they occur:
@@ -620,10 +861,17 @@ async def stream_thread_events(thread_id: str) -> StreamingResponse:
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    logger.info("sse_stream_requested", thread_id=thread_id)
+    # MET-593: standard SSE resume — replay the gap since the client's last
+    # received event id (Last-Event-ID header, query param as fallback).
+    raw_last = request.headers.get("last-event-id") or request.query_params.get("last_event_id")
+    last_event_id: int | None = None
+    if raw_last and str(raw_last).lstrip("-").isdigit():
+        last_event_id = int(raw_last)
+
+    logger.info("sse_stream_requested", thread_id=thread_id, resume_from=last_event_id)
 
     return StreamingResponse(
-        stream_thread(thread_id, manager=stream_manager),
+        stream_thread(thread_id, manager=stream_manager, last_event_id=last_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

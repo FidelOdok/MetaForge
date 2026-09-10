@@ -25,13 +25,21 @@ class Gate:
 
     ``name`` is the human-facing gate label (e.g. "Requirements sign-off").
     ``auto_approve`` skips the human pause (useful for tests / unattended
-    runs). ``criteria`` are advisory readiness checks surfaced to the reviewer;
-    the weighted evaluation lands with the gate_engine wiring in a later slice.
+    runs). ``criteria`` are advisory readiness checks surfaced to the reviewer.
+
+    ``enforce_constraints`` (MET-583, constraint-as-gate-criteria): when set,
+    the gate also evaluates the project's recorded constraints through the
+    constraint engine, and any ERROR-severity violation makes the gate
+    not-ready (fail-fast, same as a missing required deliverable). Gates
+    without the flag still *surface* the constraint state in the gate reason
+    so the human reviewer sees real data, not just prose. This keeps the gate
+    skeleton hardcoded while the criteria come from the project itself.
     """
 
     name: str
     auto_approve: bool = False
     criteria: tuple[str, ...] = ()
+    enforce_constraints: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +149,7 @@ DESIGN_V1 = FlowDefinition(
             disciplines=("simulation",),
             gate=Gate(
                 name="V&V sign-off",
+                enforce_constraints=True,
                 criteria=(
                     "Analysis executed on the critical subsystem",
                     "Key result extracted",
@@ -188,7 +197,11 @@ HARDWARE_V1 = FlowDefinition(
                 "(record-decision tool), scoped to the project."
             ),
             expected_artifacts=("prd", "constraint_set", "design_decision"),
-            required_deliverables=("design_decision",),
+            # MET-582: the requirements handler records an evaluable
+            # constraint_set (twin.record_constraint_set), so the gate can
+            # REQUIRE it — quantified limits become machine-checked criteria
+            # at every later gate instead of prose in a decision blob.
+            required_deliverables=("design_decision", "constraint_set"),
             gate=Gate(
                 name="Requirements sign-off",
                 criteria=(
@@ -335,6 +348,7 @@ HARDWARE_V1 = FlowDefinition(
             disciplines=("supply_chain", "compliance"),
             gate=Gate(
                 name="Manufacturing readiness",
+                enforce_constraints=True,
                 criteria=(
                     "BOM complete and costed",
                     "Fabrication outputs identified",
@@ -417,6 +431,7 @@ MECH_V1 = FlowDefinition(
             disciplines=("simulation",),
             gate=Gate(
                 name="V&V sign-off",
+                enforce_constraints=True,
                 criteria=(
                     "FEA executed on the committed geometry",
                     "Max stress / safety factor extracted",

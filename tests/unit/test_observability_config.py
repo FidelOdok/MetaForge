@@ -243,6 +243,19 @@ class TestInitObservabilityNoOtel:
 class TestInitObservabilityMocked:
     """init_observability with OTel mocked as available."""
 
+    @pytest.fixture(autouse=True)
+    def _export_enabled(self, monkeypatch):
+        """These tests assert providers ARE built, so they must say so.
+
+        MET-701: the root conftest sets ``METAFORGE_OTEL_EXPORT=off`` for the
+        whole suite (no OTLP exporters, no 33s shutdown flush). This class
+        exercises the opposite path, so it clears the switch rather than
+        inheriting an ambient value -- which is what it should have done from
+        the start: it previously passed only because nothing set the variable.
+        """
+        monkeypatch.delenv("METAFORGE_OTEL_EXPORT", raising=False)
+        monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
     def _mock_otel_init(self, config: ObservabilityConfig) -> ObservabilityState:
         """Run init_observability with all OTel symbols mocked."""
         mock_resource = MagicMock()

@@ -28,6 +28,17 @@ class CreateThreadRequest(BaseModel):
     )
 
 
+class UpdateThreadScopeRequest(BaseModel):
+    """Body for ``PATCH /api/v1/chat/threads/{id}/scope`` (MET-580).
+
+    Rescopes an EXISTING thread in place, preserving its conversation — unlike
+    ``CreateThreadRequest``, which always starts a fresh thread.
+    """
+
+    scope_kind: str = Field(description="Scope type (session, approval, project, ...)")
+    scope_entity_id: str = Field(description="ID of the scoped entity")
+
+
 class SendMessageRequest(BaseModel):
     """Body for ``POST /api/v1/chat/threads/{thread_id}/messages``."""
 

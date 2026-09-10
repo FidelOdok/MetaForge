@@ -148,6 +148,14 @@ class InMemoryRunStore:
         self._notify(run)
         return run
 
+    def restore(self, run: Run) -> None:
+        """Reinsert a ``Run`` recovered from durable storage, bypassing
+        transition validation (production-harness audit follow-up — used
+        only at startup to rehydrate in-flight runs after a process restart,
+        see ``orchestrator.harness.ledger.SqliteRunLedger``)."""
+        self._runs[run.id] = run
+        logger.info("run_restored", run_id=run.id, status=run.status.value)
+
     def get(self, run_id: str) -> Run:
         try:
             return self._runs[run_id]

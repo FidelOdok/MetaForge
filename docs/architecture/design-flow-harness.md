@@ -96,6 +96,24 @@ every phase, and do the artifacts agree?) run over three reference products:
 genuine Phase-2 boundary (real ERC needs an authored schematic, a KiCad-write
 capability), not a defect — with the digital thread intact end to end.
 
+A second suite, `evals/run_chat_scenarios.py` (MET-570), applies the same
+flywheel to the harness-backed **chat** surface: scripted multi-turn
+conversations over `/v1/chat` scored for needle recall across turns,
+project-brief adherence, context-window telemetry honesty, and tool-call
+trajectory quality (duplicate/retry discipline, error rates, big-observation
+survival). Scenarios declare `expected_today` for behavior known broken on the
+current harness (e.g. facts beyond the 20-turn history slice, until MET-568
+lands compaction), which reports as `xfail` and flips to `xpass` when the fix
+ships — so re-running the identical baseline command measures each
+context-engineering phase as it lands. See `evals/README.md` for the scenario
+schema and rubric catalog.
+
+Work-product **quality** (substance, not structure) is scored by an optional
+LLM-as-judge pass, `evals/judge.py` (MET-571): it grades each run's twin work
+products against the scenario's `definition_of_done` and attaches advisory
+`judge` blocks to the report. Deterministic rubric checks remain authoritative
+for pass/fail.
+
 ## How a run flows
 
 ```
@@ -145,6 +163,23 @@ python -m cli.forge_cli runs reject <run_id>
 A run is treated as a design flow only when it opts in with a `flow` id (or
 `kind: "design_flow"`); a bare `{goal}` keeps the plain run semantics.
 
+## Driving it from chat (MET-587)
+
+The chat agent can start a flow itself via the `runs` MCP adapter:
+
+- **`run.start_design_flow`** — goal + flow id (validated against the
+  registry, default `hardware_v1`) + `project_id`; drives the same
+  in-process path as `POST /v1/runs` and returns the run id + phase list.
+- **`run.get_status`** — run id → lifecycle state, the gate reason it is
+  paused on, error/result — so the agent can report progress in
+  conversation.
+
+Launching is deliberately **not** pre-gated: the flow pauses at every phase
+boundary for human approval, so the gates themselves are the HITL
+mechanism — the tool only queues work a human must repeatedly sign off.
+Approvals stay where they always were (`POST /v1/runs/{id}/approval`, the
+dashboard, or `forge runs approve`).
+
 ## Deliverable enforcement ("no work product silently missing")
 
 Each phase declares `required_deliverables` — the work-product *types* it must
@@ -160,6 +195,31 @@ checks which of those types the phase actually recorded during its window:
 This makes completeness machine-enforced and quality human-judged: the machine
 guarantees the deliverable exists in the twin; the human reviews whether it's
 right.
+
+## Constraint-as-gate-criteria (MET-583)
+
+Gate *criteria* were previously prose shown to the approver but never
+evaluated. Now every gate also evaluates the project's recorded constraints
+through the twin's constraint engine (`TwinConstraintChecker` in
+`api_gateway/runs/gate_eval.py`):
+
+- **Every gate** appends the real constraint state to its approval reason —
+  `Constraints: OK (N evaluated)` or the violation/warning list — so the
+  reviewer sees data, not just prose.
+- **Gates with `enforce_constraints`** (the final gate of each built-in flow:
+  V&V sign-off on `design_v1`/`mech_v1`, Manufacturing readiness on
+  `hardware_v1`) fail-fast when any ERROR-severity violation applies to the
+  run's project, with the same contract as a missing required deliverable.
+- **Best-effort**: a broken or absent constraint engine reads as "unchecked"
+  and never blocks or crashes a run.
+- **Scoping**: the engine evaluates the branch, not the project — violations
+  citing `work_product_ids` are filtered to the run's project; violations
+  citing none are treated as global and always count.
+
+The gate skeleton stays hardcoded (versioned code); the criteria come from
+the project's own constraint data. The structured constraint-creation tool
+(MET-582) is what fills that data from the Requirements phase; decision-derived
+phase applicability (MET-585) is the planned complement.
 
 ## What's built vs. planned
 
@@ -190,3 +250,4 @@ and a dedicated `forge design` CLI wrapper.
 | `api_gateway/runs/gate_eval.py` | `ProjectGateEvaluator` — deliverable enforcement (loadable `cad_model`) |
 | `api_gateway/runs/routes.py` | Per-flow handler routing; launches the executor on a design-flow `POST /v1/runs` |
 | `evals/run_scenarios.py`, `evals/*_rubric.py` | Eval flywheel: scenario runner + correctness rubrics |
+| `evals/run_chat_scenarios.py`, `evals/chat_*_rubric.py` | Chat context-engineering evals: multi-turn scenarios + trajectory rubrics (MET-570) |

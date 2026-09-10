@@ -209,15 +209,27 @@ async def search_knowledge(
     knowledge_type: KnowledgeType | None = Query(
         default=None, alias="knowledgeType", description="Filter by knowledge type"
     ),
+    project_id: UUID | None = Query(
+        default=None, alias="projectId", description="Scope search to a project UUID"
+    ),
     limit: int = Query(default=5, ge=1, le=50, description="Max results"),
 ) -> SearchResponse:
     """Semantic search over indexed knowledge.
 
     Routes through ``KnowledgeService`` when available so it shares
     the same backend as ``/ingest`` and ``/documents`` (MET-390).
+
+    ``project_id`` (MET-670) mirrors the ``projectId`` filter already
+    on ``/sources`` and ``/ingest``: without it, ``KnowledgeService.search``
+    falls back to the ``default`` tenant, so a project-scoped ingest was
+    never searchable from a project-scoped UI — the search box silently
+    returned whatever unrelated content happened to live under
+    ``default`` instead of the active project's own sources.
     """
     with tracer.start_as_current_span("knowledge_api.search") as span:
         span.set_attribute("knowledge.query_length", len(query))
+        if project_id is not None:
+            span.set_attribute("knowledge.project_id", str(project_id))
 
         service = _maybe_service(request)
         if service is not None:
@@ -225,6 +237,7 @@ async def search_knowledge(
                 query=query,
                 top_k=limit,
                 knowledge_type=knowledge_type,
+                project_id=project_id,
             )
             now = datetime.now(UTC)
             results = [
@@ -246,6 +259,7 @@ async def search_knowledge(
                 query=query[:80],
                 result_count=len(results),
                 backend="knowledge_service",
+                project_id=str(project_id) if project_id else None,
             )
             return SearchResponse(
                 results=results,

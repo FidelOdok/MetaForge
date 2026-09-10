@@ -391,6 +391,44 @@ class MetricsRegistry:
         labels=[],
     )
 
+    # ── Chat harness loop metrics (production-harness audit follow-up) ─
+    HARNESS_TURN_DURATION = MetricDefinition(
+        name="metaforge_harness_turn_duration_seconds",
+        type="histogram",
+        description="Full chat-harness tool-loop duration for one turn",
+        labels=["loop_kind", "stop_reason"],
+        unit="s",
+        buckets=[0.5, 1, 2.5, 5, 10, 30, 60, 120, 300],
+    )
+    HARNESS_TURN_TOTAL = MetricDefinition(
+        name="metaforge_harness_turn_total",
+        type="counter",
+        description="Total chat-harness turns by loop kind and how they stopped",
+        labels=["loop_kind", "stop_reason"],
+    )
+    HARNESS_TOOL_CALL_DURATION = MetricDefinition(
+        name="metaforge_harness_tool_call_duration_seconds",
+        type="histogram",
+        description="Duration of one harness tool call",
+        labels=["tool_name", "status"],
+        unit="s",
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    )
+    HARNESS_TOOL_CALL_TOTAL = MetricDefinition(
+        name="metaforge_harness_tool_call_total",
+        type="counter",
+        description="Total harness tool calls by tool and outcome",
+        labels=["tool_name", "status"],
+    )
+    HARNESS_PROVIDER_CALL_DURATION = MetricDefinition(
+        name="metaforge_harness_provider_call_duration_seconds",
+        type="histogram",
+        description="Duration of one harness model-provider call attempt",
+        labels=["provider", "model", "role"],
+        unit="s",
+        buckets=[0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -408,7 +446,19 @@ class MetricsRegistry:
             + cls.knowledge_metrics()
             + cls.twin_metrics()
             + cls.consolidation_metrics()
+            + cls.harness_metrics()
         )
+
+    @classmethod
+    def harness_metrics(cls) -> list[MetricDefinition]:
+        """Chat harness tool-loop metrics (production-harness audit follow-up)."""
+        return [
+            cls.HARNESS_TURN_DURATION,
+            cls.HARNESS_TURN_TOTAL,
+            cls.HARNESS_TOOL_CALL_DURATION,
+            cls.HARNESS_TOOL_CALL_TOTAL,
+            cls.HARNESS_PROVIDER_CALL_DURATION,
+        ]
 
     @classmethod
     def consolidation_metrics(cls) -> list[MetricDefinition]:
@@ -907,3 +957,40 @@ class MetricsCollector:
         stale_c = self._instruments.get(MetricsRegistry.CONSOLIDATION_STALE_MARKED_TOTAL.name)
         if stale_c is not None and stale_marked:
             stale_c.add(stale_marked, attributes={})
+
+    # ── Chat harness loop (production-harness audit follow-up) ─────────
+
+    def record_harness_turn(self, loop_kind: str, stop_reason: str, duration: float) -> None:
+        """Record one full chat-harness tool-loop turn (counter + histogram).
+
+        ``loop_kind`` is ``"native"`` or ``"react"``; ``stop_reason`` is
+        ``ReActResult.stop_reason`` (``done``/``max_steps``/``timeout``/``error``).
+        """
+        attrs = {"loop_kind": loop_kind, "stop_reason": stop_reason}
+        counter = self._instruments.get(MetricsRegistry.HARNESS_TURN_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes=attrs)
+        hist = self._instruments.get(MetricsRegistry.HARNESS_TURN_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes=attrs)
+
+    def record_harness_tool_call(self, tool_name: str, status: str, duration: float) -> None:
+        """Record one harness tool call (counter + histogram).
+
+        ``status`` is ``"ok"`` or ``"error"``.
+        """
+        attrs = {"tool_name": tool_name, "status": status}
+        counter = self._instruments.get(MetricsRegistry.HARNESS_TOOL_CALL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes=attrs)
+        hist = self._instruments.get(MetricsRegistry.HARNESS_TOOL_CALL_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes=attrs)
+
+    def record_harness_provider_call(
+        self, provider: str, model: str, role: str, duration: float
+    ) -> None:
+        """Record one harness model-provider call attempt's duration."""
+        hist = self._instruments.get(MetricsRegistry.HARNESS_PROVIDER_CALL_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes={"provider": provider, "model": model, "role": role})

@@ -1,5 +1,11 @@
 import apiClient from '../client';
-import type { KnowledgeType, SourceSummary, SourcesQuery } from '../../types/knowledge';
+import type {
+  KnowledgeType,
+  SourceSummary,
+  SourcesQuery,
+  KnowledgeSearchResult,
+  KnowledgeSearchQuery,
+} from '../../types/knowledge';
 
 /**
  * Wire-level response shape from ``GET /api/v1/knowledge/sources``.
@@ -70,4 +76,50 @@ export async function listSources(query: SourcesQuery = {}): Promise<SourceSumma
     params,
   });
   return (data.sources ?? []).map(mapSource);
+}
+
+/** Wire-level entry shape from ``GET /api/v1/knowledge/search`` — camelCase per ``KnowledgeEntryResponse``. */
+interface KnowledgeSearchEntryRaw {
+  id: string;
+  content: string;
+  knowledgeType?: string | null;
+  metadata?: Record<string, unknown>;
+  sourcePath?: string | null;
+  createdAt: string;
+}
+
+interface SearchResponseRaw {
+  query: string;
+  results: KnowledgeSearchEntryRaw[];
+  totalFound: number;
+}
+
+function mapSearchResult(raw: KnowledgeSearchEntryRaw): KnowledgeSearchResult {
+  return {
+    id: raw.id,
+    content: raw.content,
+    knowledge_type: normaliseKnowledgeType(raw.knowledgeType ?? null),
+    metadata: raw.metadata ?? {},
+    source_path: raw.sourcePath ?? null,
+    created_at: raw.createdAt,
+  };
+}
+
+/**
+ * Semantic search over the ingested knowledge corpus.
+ *
+ * Backed by ``GET /api/v1/knowledge/search`` (MET-390, project scoping
+ * MET-670). Without `project_id`, the server falls back to the
+ * `default` tenant rather than searching everything — so this must be
+ * passed the same way `listSources` passes it, or a project-scoped
+ * ingest is silently unsearchable from that project's own UI.
+ */
+export async function searchKnowledge(query: KnowledgeSearchQuery): Promise<KnowledgeSearchResult[]> {
+  const params: Record<string, string | number> = { query: query.query };
+  if (query.knowledge_type) params.knowledgeType = query.knowledge_type;
+  if (query.project_id) params.projectId = query.project_id;
+  if (query.limit !== undefined) params.limit = query.limit;
+
+  const { data } = await apiClient.get<SearchResponseRaw>('/knowledge/search', { params });
+  return (data.results ?? []).map(mapSearchResult);
 }

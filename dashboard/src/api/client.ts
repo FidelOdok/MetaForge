@@ -1,3 +1,4 @@
+import { context as otelContext, propagation } from '@opentelemetry/api';
 import axios from 'axios';
 import { logger } from '../lib/logger';
 
@@ -23,17 +24,21 @@ apiClient.interceptors.request.use((config) => {
   });
 
   // Inject W3C trace-context headers if OTel propagation is available
-  try {
-    const { propagation, context: otelContext } = require('@opentelemetry/api');
-    const carrier: Record<string, string> = {};
-    propagation.inject(otelContext.active(), carrier);
-    for (const [key, value] of Object.entries(carrier)) {
-      if (config.headers) {
-        config.headers[key] = value;
-      }
+  // MET-736: this was a `require('@opentelemetry/api')` inside a try/catch.
+  // `require` does not exist in a browser ESM module and Vite does not shim
+  // it for app code -- it survived verbatim into the bundle, threw
+  // ReferenceError on this line, and the catch swallowed it. So no
+  // `traceparent` header was ever sent and browser spans never linked to
+  // gateway traces, silently, since this was written.
+  //
+  // The guard was never needed either: @opentelemetry/api is a hard
+  // dependency of this package, not an optional one.
+  const carrier: Record<string, string> = {};
+  propagation.inject(otelContext.active(), carrier);
+  for (const [key, value] of Object.entries(carrier)) {
+    if (config.headers) {
+      config.headers[key] = value;
     }
-  } catch {
-    // OTel not available — skip
   }
 
   return config;

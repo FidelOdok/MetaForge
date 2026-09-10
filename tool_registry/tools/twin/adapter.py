@@ -43,6 +43,9 @@ class TwinServer(McpToolServer):
         decision_recorder: Any = None,
         geometry_recorder: Any = None,
         proposal_recorder: Any = None,
+        constraint_recorder: Any = None,
+        document_recorder: Any = None,
+        blob_stager: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -65,6 +68,30 @@ class TwinServer(McpToolServer):
         # Built in api_gateway over the ApprovalWorkflow; None keeps
         # tool_registry free of api_gateway imports.
         self._proposal_recorder = proposal_recorder
+        # MET-582: an injected async ``record(...)`` that persists a batch of
+        # structured, evaluable constraints + a constraint_set work product.
+        # Same injection seam as decision_recorder; None keeps tool_registry
+        # free of api_gateway imports.
+        self._constraint_recorder = constraint_recorder
+        # MET-588: an injected async ``record(...)`` (make_document_recorder)
+        # that persists an arbitrary text/markdown artifact as a PRD/
+        # DOCUMENTATION work product — MinIO blob + twin node + project link.
+        # Fixes the gap where the chat agent had no direct way to save a
+        # requirements/notes document and fell back to twin.propose_change,
+        # whose apply-on-approve executor only implements a `record_decision`
+        # action — every other diff shape (including one the model invents,
+        # e.g. `create_work_product`) silently no-ops even after approval.
+        # Same injection seam as decision_recorder; None keeps tool_registry
+        # free of api_gateway imports.
+        self._document_recorder = document_recorder
+        # MET-618: an injected async ``stage(node_id) -> dict`` that resolves a
+        # committed work product's blob and writes it into the shared adapter
+        # workspace, returning a local file_path. Without it, an agent has no
+        # way back to a work product's actual content once its authoring
+        # session is gone — every CAD/FEA tool needs a file_path, not a node
+        # id. Same injection seam as decision_recorder; None keeps
+        # tool_registry free of api_gateway imports.
+        self._blob_stager = blob_stager
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -72,6 +99,12 @@ class TwinServer(McpToolServer):
             self._register_commit_geometry()
         if proposal_recorder is not None:
             self._register_propose_change()
+        if constraint_recorder is not None:
+            self._register_record_constraint_set()
+        if document_recorder is not None:
+            self._register_record_document()
+        if blob_stager is not None:
+            self._register_stage_work_product_file()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -557,6 +590,204 @@ class TwinServer(McpToolServer):
         )
 
     # ------------------------------------------------------------------
+    # twin.record_constraint_set (MET-582)
+    # ------------------------------------------------------------------
+
+    def _register_record_constraint_set(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_constraint_set",
+                adapter_id="twin",
+                name="Record Constraint Set",
+                description=(
+                    "Persist a project's structured requirements as EVALUABLE "
+                    "constraints: each entry becomes a Constraint node the "
+                    "constraint engine checks at design-flow gates, plus one "
+                    "constraint_set work product summarising the set. Use "
+                    "during requirements capture so quantified limits (mass, "
+                    "power, cost, safety factor, ...) become machine-checked "
+                    "gate criteria instead of prose."
+                ),
+                capability="twin_constraint_set",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Constraint-set title (e.g. 'Gimbal v1 requirements').",
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "minItems": 1,
+                            "description": "Structured constraints to record.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Short unique name (e.g. mass_budget).",
+                                    },
+                                    "expression": {
+                                        "type": "string",
+                                        "description": (
+                                            "Python expression over `ctx` the engine "
+                                            'evaluates (e.g. "all(float(wp.metadata.get('
+                                            "'mass_g', 0)) <= 60 for wp in "
+                                            "ctx.work_products(type='cad_model'))\"). "
+                                            "Must compile; validated at record time."
+                                        ),
+                                    },
+                                    "severity": {
+                                        "type": "string",
+                                        "enum": ["error", "warning", "info"],
+                                        "description": "error violations fail enforcing gates.",
+                                    },
+                                    "message": {
+                                        "type": "string",
+                                        "description": "Human explanation of the limit.",
+                                    },
+                                    "domain": {
+                                        "type": "string",
+                                        "description": "Discipline (default: systems).",
+                                    },
+                                },
+                                "required": ["name", "expression"],
+                            },
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["title", "constraints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "constraint_ids": {"type": "array", "items": {"type": "string"}},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_constraint_set,
+        )
+
+    async def record_constraint_set(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        title = arguments.get("title")
+        constraints = arguments.get("constraints")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.record_constraint_set: 'title' is required (non-empty string)")
+        if not isinstance(constraints, list) or not constraints:
+            raise ValueError(
+                "twin.record_constraint_set: 'constraints' is required (non-empty array)"
+            )
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._constraint_recorder(
+            title=title,
+            constraints=constraints,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_document (MET-588)
+    # ------------------------------------------------------------------
+
+    _DOCUMENT_TYPES = ("prd", "documentation")
+
+    def _register_record_document(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_document",
+                adapter_id="twin",
+                name="Record Document",
+                description=(
+                    "Persist a text/markdown artifact (requirements, notes, a "
+                    "spec) as a first-class PRD or DOCUMENTATION work product: "
+                    "stores it in MinIO and links it to a project so it shows on "
+                    "the project's work-product list. Writes immediately — no "
+                    "approval gate, same as twin.record_decision. Use this "
+                    "instead of twin.propose_change for saving a document; "
+                    "propose_change's apply-on-approve step only implements a "
+                    "'record_decision' action, so any other diff (including a "
+                    "document) silently does nothing even after a human approves it."
+                ),
+                capability="twin_decision",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Document title / work-product name.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The document body, as markdown.",
+                        },
+                        "document_type": {
+                            "type": "string",
+                            "enum": list(self._DOCUMENT_TYPES),
+                            "description": (
+                                "'prd' for a requirements/product doc, "
+                                "'documentation' for general notes/specs. "
+                                "Defaults to 'documentation'."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["name", "content"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_document,
+        )
+
+    async def record_document(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        content = arguments.get("content")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.record_document: 'name' is required (non-empty string)")
+        if not content or not isinstance(content, str):
+            raise ValueError("twin.record_document: 'content' is required (non-empty string)")
+        document_type = arguments.get("document_type") or "documentation"
+        if document_type not in self._DOCUMENT_TYPES:
+            raise ValueError(
+                f"twin.record_document: 'document_type' must be one of {self._DOCUMENT_TYPES}"
+            )
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._document_recorder(
+            content=content,
+            name=name,
+            wp_type=document_type,
+            domain="requirements" if document_type == "prd" else "documentation",
+            fmt="md",
+            link_type=document_type,
+            source_tool="twin.record_document",
+            session_id=session_id if isinstance(session_id, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
     # twin.propose_change (MET-548) — gated HITL modification
     # ------------------------------------------------------------------
 
@@ -587,7 +818,13 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Structured change. Include an 'action' "
                                 "(e.g. 'record_decision' | 'regenerate_geometry' | "
-                                "'update_properties') plus its parameters."
+                                "'update_properties') plus its parameters. For "
+                                "'regenerate_geometry': 'script_source' (required — the "
+                                "full edited script text), 'name', 'parameters' (optional "
+                                "structured values, purely informational), and 'cad_tool' "
+                                "('cadquery', the default, or 'freecad' — state which "
+                                "dialect script_source is written in; they are not "
+                                "interchangeable and this is never auto-detected)."
                             ),
                         },
                         "work_products_affected": {
@@ -650,9 +887,17 @@ class TwinServer(McpToolServer):
                     "product: stores the STEP blob in MinIO, creates a twin node, "
                     "and links it to a project so it renders in the 3D viewer. "
                     "PREFER commit-by-reference: after freecad.export_model, call "
-                    "this with the SAME session_id and obj_id (plus name) and the "
+                    "this with the SAME session_id AND obj_id (plus name) and the "
                     "server fills the STEP itself — you do NOT need to copy the "
-                    "large base64 string. (Passing step_base64 directly also works.)"
+                    "large base64 string. BOTH session_id and obj_id are required "
+                    "together on every call, including retries — obj_id alone is "
+                    "NOT unique (it's a per-session counter, not a global id), so "
+                    "omitting session_id will not match your prior export even "
+                    "though obj_id is correct. (Passing step_base64 directly also "
+                    "works and needs neither id — but when it names an export "
+                    "the server already holds, the server's copy is used, "
+                    "because a copied 30,000-character blob can only be equal "
+                    "or damaged.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -674,10 +919,50 @@ class TwinServer(McpToolServer):
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "step_base64": {
                             "type": "string",
-                            "description": "Base64 STEP (optional if session_id + obj_id given).",
+                            "description": (
+                                "Base64 STEP. Omit when passing session_id + obj_id: "
+                                "the server substitutes its own copy of that export "
+                                "anyway (MET-684)."
+                            ),
                         },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
+                        "script_source": {
+                            "type": "string",
+                            "description": (
+                                "The CadQuery/FreeCAD generation script text that authored "
+                                "this geometry, if any. When given, it is committed to the "
+                                "project's real git repo as the source of truth (real "
+                                "diffs/merges), linked as provenance to this STEP node."
+                            ),
+                        },
+                        "parameters": {
+                            "type": "object",
+                            "description": (
+                                "Structured values that drove generation (e.g. pad_length, "
+                                "hole_diameter) — stored on the node as queryable metadata."
+                            ),
+                        },
+                        "properties": {
+                            "type": "object",
+                            "description": (
+                                "Derived geometric measurements (volume_mm3, bounding_box, "
+                                "mass properties, etc.) — stored on the node as queryable "
+                                "metadata alongside 'parameters'."
+                            ),
+                        },
+                        "source_tool": {
+                            "type": "string",
+                            "description": (
+                                "Which authoring tool produced this geometry, e.g. "
+                                "'cadquery.execute_script' or 'freecad.export_model'. "
+                                "Recorded as the work product's provenance "
+                                "(authored_by/created_by). Defaults to "
+                                "'freecad.export_model', so pass it explicitly when the "
+                                "geometry came from CadQuery — otherwise the node claims "
+                                "a tool that never touched it (MET-693)."
+                            ),
+                        },
                     },
                     "required": ["name"],
                 },
@@ -701,6 +986,31 @@ class TwinServer(McpToolServer):
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
         if not step_base64 or not isinstance(step_base64, str):
+            # MET-642 S4 finding: reproduced live TWICE with the identical
+            # mechanism -- the model retried commit_geometry with obj_id but
+            # WITHOUT session_id (confirmed via the new geometry_stash logging
+            # below: "session_id": null). The stash keys on (session_id,
+            # obj_id) together -- not obj_id alone -- because obj_id is a
+            # per-session sequential counter (f"{kind}_{n}", see
+            # FreecadSessionStore.register_object), not a globally-unique id;
+            # dropping session_id from the lookup would risk a cross-session
+            # collision, so the fix is a sharper error, not a looser stash.
+            given_obj_id = arguments.get("obj_id")
+            given_session_id = arguments.get("session_id")
+            logger.warning(
+                "commit_geometry_missing_step_base64",
+                session_id=given_session_id,
+                obj_id=given_obj_id,
+                name=name,
+            )
+            if given_obj_id and not given_session_id:
+                raise ValueError(
+                    "twin.commit_geometry: you passed obj_id but no session_id -- "
+                    "commit-by-reference requires BOTH, exactly as given to the "
+                    "freecad.export_model call that produced this obj_id (obj_id "
+                    "alone is not unique across sessions). Re-call with the same "
+                    "session_id you used for export_model, or pass step_base64 directly."
+                )
             raise ValueError(
                 "twin.commit_geometry: no geometry to commit — call freecad.export_model "
                 "first, then commit with the same session_id + obj_id (or pass step_base64)."
@@ -711,6 +1021,19 @@ class TwinServer(McpToolServer):
         session_id = arguments.get("session_id")
         domain = arguments.get("domain")
         fmt = arguments.get("format")
+        script_source = arguments.get("script_source")
+        parameters = arguments.get("parameters")
+        properties = arguments.get("properties")
+        script_source = script_source if isinstance(script_source, str) and script_source else None
+        # MET-693: the recorder's `source_tool` defaults to
+        # "freecad.export_model", and this handler never passed one -- so every
+        # commit was stamped as FreeCAD-authored, including CadQuery geometry.
+        # The provenance of a work product has to be accurate: it is what a
+        # reviewer reads to know how the artifact was produced, and script-as-
+        # SSOT diffing (MET-630) depends on knowing which authoring tool the
+        # stored script belongs to.
+        source_tool = arguments.get("source_tool")
+        source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -718,4 +1041,61 @@ class TwinServer(McpToolServer):
             session_id=session_id if isinstance(session_id, str) else None,
             domain=domain if isinstance(domain, str) and domain else "mechanical",
             fmt=fmt if isinstance(fmt, str) and fmt else "step",
+            script_source=script_source,
+            parameters=parameters if isinstance(parameters, dict) else None,
+            properties=properties if isinstance(properties, dict) else None,
+            **({"source_tool": source_tool} if source_tool else {}),
         )
+
+    def _register_stage_work_product_file(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.stage_work_product_file",
+                adapter_id="twin",
+                name="Stage Work Product File",
+                description=(
+                    "Materialize a committed work product's stored file onto disk and "
+                    "return a local file_path that freecad.*/cadquery.*/calculix.* tools "
+                    "can load directly (e.g. freecad.get_properties, freecad.open_session "
+                    "then import it). Call this whenever you need to inspect a work "
+                    "product's actual content — geometry, mesh, whatever — and its "
+                    "original authoring session_id is stale, unknown, or was never yours: "
+                    "do NOT give up after freecad.describe_session fails or after seeing "
+                    "an empty file_path on the twin node. This tool works for ANY "
+                    "committed work product, independent of any live session."
+                ),
+                capability="twin_read",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "Work product node UUID (from twin.get_node etc.).",
+                        },
+                    },
+                    "required": ["node_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "file_path": {"type": "string"},
+                        "filename": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "content_hash": {"type": "string"},
+                        "format": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=30),
+            ),
+            handler=self.stage_work_product_file,
+        )
+
+    async def stage_work_product_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        node_id = arguments.get("node_id")
+        if not node_id or not isinstance(node_id, str):
+            raise ValueError(
+                "twin.stage_work_product_file: 'node_id' is required (non-empty string)"
+            )
+        return await self._blob_stager(node_id)

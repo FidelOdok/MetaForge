@@ -5,12 +5,14 @@
  * with a TTY launches the Ink TUI (see cli.tsx). Both share the same typed
  * gateway client, so there's one implementation, two modes.
  */
-import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline";
 import { GatewayClient, GatewayError } from "./api/client.js";
 import { isTerminal, streamRunStatus } from "./api/runs.js";
+import { loginChatGPT } from "./auth/oauth.js";
 import { CLI_QUICKSTART, MISSION, plainBanner } from "./banner.js";
 import { BUILD } from "./build-info.js";
 import { configPath, loadConfig, setConfigValue } from "./config.js";
+import { assistantScope, resolveProject, type ChatScope } from "./lib/project.js";
 
 interface Parsed {
   _: string[];
@@ -25,6 +27,13 @@ export function parseArgs(argv: string[]): Parsed {
     let key: string | null = null;
     if (a.startsWith("--")) key = a.slice(2);
     else if (a.startsWith("-") && a.length > 1) key = a.slice(1);
+    // `--flag=value` — the separate-word form below can't express a value that
+    // starts with `-`, and it's the form people reach for with quoted names.
+    if (key !== null && key.includes("=")) {
+      const eq = key.indexOf("=");
+      flags[key.slice(0, eq)] = key.slice(eq + 1);
+      continue;
+    }
     if (key !== null) {
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith("-")) {
@@ -68,21 +77,24 @@ function printHelp(): void {
       ...quickstart,
       "",
       "Interactive workspace (bare `forge` in a terminal)",
-      "  type to chat · ^R runs · ^B twin · ^N new run · ^T chat · Esc quit",
-      "  /model <slug>  switch model",
+      "  type to chat · Ctrl+R runs · Ctrl+B twin · Ctrl+N new run · Ctrl+T chat · Esc quit",
+      "  forge --project <id|name>     start scoped to a project",
+      "  /project <id|name>            switch project (new thread) · /project none to leave",
+      "  /model <slug>                 switch model",
       "",
       "All commands (scriptable; add --json for machine output)",
       "  forge runs list|get <id>|create|approve <id>|reject <id>|watch <id>",
-      '  forge chat -m "message"        one-shot assistant turn',
+      '  forge chat -m "message" [--project <id|name>]   one-shot assistant turn',
       "  forge projects                list projects",
       "  forge twin list               list twin nodes",
       "  forge sources                 list ingested knowledge sources",
       '  forge memory retrieve "goal"  find similar past experiences',
       "  forge proposals list|approve <id>|reject <id>",
+      "  forge auth list|login|use <provider>|logout <provider>",
       "  forge config show|path|set <key> <value>",
       "  forge --version | --help",
       "",
-      "Flags: --json  --gateway <url>  --debug  (chat: --model --provider)",
+      "Flags: --json  --gateway <url>  --debug  (chat: --model --provider --project)",
       "Config: ~/.forge/config.json (gateway_url, provider, model, mode)",
       "Logs:   ~/.forge/logs/session.log  (--debug or FORGE_LOG=1 adds raw SSE)",
     ].join("\n"),
@@ -166,7 +178,17 @@ async function chatCmd(
   const model = typeof flags.model === "string" ? flags.model : cfg.model;
   const provider = typeof flags.provider === "string" ? flags.provider : cfg.provider;
 
-  const thread = await client.createThread(`cli-${randomUUID().slice(0, 8)}`);
+  // `--project <id|name>` scopes the one-shot the same way it scopes the
+  // workspace: the gateway leads the turn with the project brief, so the answer
+  // is grounded in that project's work products.
+  let scope: ChatScope = assistantScope("cli");
+  if (typeof flags.project === "string") {
+    const r = resolveProject(await client.listProjects(), flags.project);
+    if (!r.ok) return usage(`--project ${flags.project}: ${r.error}`);
+    scope = r.scope;
+  }
+
+  const thread = await client.createThread(scope);
   await client.sendMessage(thread.id, message, { model, provider });
   const t = await client.getThread(thread.id);
   const msgs = t.messages ?? [];
@@ -262,6 +284,152 @@ function configCmd(sub: string | undefined, rest: string[], json: boolean): numb
   }
 }
 
+/**
+ * Which `forge auth login` method to use for a provider: an explicit
+ * `--method` flag always wins; otherwise codex-family providers (checked by
+ * BOTH `family` and `providerId`, since the registry's CODEX constant is
+ * literally the string "openai-codex", not "codex") default to OAuth, and
+ * everything else defaults to an API key.
+ */
+export function resolveLoginMethod(
+  explicit: string | undefined,
+  family: string | undefined,
+  providerId: string,
+): "oauth" | "api-key" {
+  if (explicit === "oauth" || explicit === "api-key") return explicit;
+  const isCodex = family === "openai-codex" || providerId === "openai-codex";
+  return isCodex ? "oauth" : "api-key";
+}
+
+function ask(q: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => rl.question(q, (a) => (rl.close(), resolve(a.trim()))));
+}
+
+/** Prompt without echoing (for API keys). Falls back to a visible prompt if the
+ * runtime doesn't support muting the readline output. */
+function askHidden(q: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  process.stdout.write(q);
+  (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = () => {};
+  return new Promise((resolve) =>
+    rl.question("", (a) => (rl.close(), process.stdout.write("\n"), resolve(a.trim()))),
+  );
+}
+
+async function authCmd(
+  client: GatewayClient,
+  sub: string | undefined,
+  rest: string[],
+  flags: Record<string, string | boolean>,
+  json: boolean,
+): Promise<number> {
+  switch (sub) {
+    case undefined:
+    case "list": {
+      const p = await client.listHarnessProviders();
+      const active = (p.active_provider ?? "").toLowerCase();
+      const rows = p.providers.map((pr) => ({
+        provider: pr.id,
+        family: pr.family,
+        configured: pr.configured,
+        active: pr.id.toLowerCase() === active,
+      }));
+      if (json) {
+        out({ active_provider: p.active_provider, active_model: p.active_model, providers: rows });
+      } else {
+        line(`active: ${p.active_provider ?? "(none)"}${p.active_model ? ` · ${p.active_model}` : ""}`);
+        for (const r of rows) {
+          line(`  [${r.configured ? "✓" : " "}] ${r.provider.padEnd(20)} ${r.family}${r.active ? "   (active)" : ""}`);
+        }
+      }
+      return 0;
+    }
+    case "use": {
+      const provider = rest[0]?.toLowerCase();
+      if (!provider) return usage("forge auth use <provider> [--model M]");
+      const model = typeof flags.model === "string" ? flags.model : undefined;
+      await client.setSelection(provider, model);
+      setConfigValue("provider", provider);
+      if (model) setConfigValue("model", model);
+      line(`✓ active provider → ${provider}${model ? ` · ${model}` : ""}`);
+      return 0;
+    }
+    case "logout": {
+      const provider = rest[0]?.toLowerCase();
+      if (!provider) return usage("forge auth logout <provider>");
+      await client.deleteCredential(provider);
+      line(`✓ forgot the stored credential for ${provider}`);
+      return 0;
+    }
+    case "login": {
+      const resp = await client.listHarnessProviders();
+      let provider = typeof flags.provider === "string" ? flags.provider.toLowerCase() : undefined;
+      if (!provider) {
+        line("Providers (✓ = configured on the gateway):");
+        resp.providers.forEach((pr, i) =>
+          line(`  ${String(i + 1).padStart(2)}. [${pr.configured ? "✓" : " "}] ${pr.id} (${pr.family})`),
+        );
+        const pick = await ask("Choose a provider (number or id): ");
+        const n = Number(pick);
+        provider =
+          Number.isInteger(n) && n >= 1 && n <= resp.providers.length
+            ? resp.providers[n - 1]!.id
+            : pick.toLowerCase();
+      }
+      const family = resp.providers.find((p) => p.id.toLowerCase() === provider)?.family;
+      const method = resolveLoginMethod(
+        typeof flags.method === "string" ? flags.method : undefined,
+        family,
+        provider!,
+      );
+
+      if (method === "oauth") {
+        line(`Starting OAuth login for ${provider} — a browser will open (localhost:1455)…`);
+        const tokens = await loginChatGPT({
+          open: flags["no-browser"] !== true,
+          onUrl: (u) => line(`If your browser didn't open, visit:\n  ${u}`),
+        });
+        await client.setCredential({
+          provider: provider!,
+          method: "oauth",
+          tokens: {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            id_token: tokens.id_token,
+          },
+        });
+        line(`✓ logged in to ${provider} (OAuth) — credential stored on the gateway.`);
+      } else {
+        const key =
+          typeof flags["api-key"] === "string"
+            ? flags["api-key"]
+            : await askHidden(`API key for ${provider}: `);
+        if (!key) return usage("no API key provided");
+        const baseUrl = typeof flags["base-url"] === "string" ? flags["base-url"] : undefined;
+        await client.setCredential({
+          provider: provider!,
+          method: "api_key",
+          api_key: key,
+          base_url: baseUrl,
+        });
+        line(`✓ stored an API key for ${provider} on the gateway.`);
+      }
+
+      if (flags["no-activate"] !== true) {
+        const model = typeof flags.model === "string" ? flags.model : undefined;
+        await client.setSelection(provider!, model);
+        setConfigValue("provider", provider!);
+        if (model) setConfigValue("model", model);
+        line(`✓ active provider → ${provider}${model ? ` · ${model}` : ""}`);
+      }
+      return 0;
+    }
+    default:
+      return usage(`unknown: forge auth ${sub}`);
+  }
+}
+
 /** Dispatch a non-interactive command. Returns a process exit code. */
 export async function runCommand(argv: string[]): Promise<number> {
   const { _, flags } = parseArgs(argv);
@@ -308,6 +476,8 @@ export async function runCommand(argv: string[]): Promise<number> {
         return await proposalsCmd(client, sub, rest, flags, json);
       case "config":
         return configCmd(sub, rest, json);
+      case "auth":
+        return await authCmd(client, sub, rest, flags, json);
       default:
         process.stderr.write(`unknown command: ${cmd ?? "(none)"}\n\n`);
         printHelp();

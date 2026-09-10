@@ -7,7 +7,8 @@ from twin_core.models.enums import WorkProductType
 
 VALID_TYPES = {t.value for t in WorkProductType}
 # Producible today (have a creation tool), so they may be *required* at a gate.
-PRODUCIBLE = {"design_decision", "cad_model"}
+# constraint_set: twin.record_constraint_set (MET-582).
+PRODUCIBLE = {"design_decision", "cad_model", "constraint_set"}
 
 
 def test_hardware_flow_registered_and_ordered() -> None:
