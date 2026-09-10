@@ -7,6 +7,7 @@ can be imported and tested without a real FreeCAD installation.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from pathlib import Path
@@ -559,10 +560,18 @@ class FreecadOperations:
                 duration_s=round(elapsed, 3),
             )
 
+            with open(output_path, "rb") as f:  # noqa: PTH123
+                step_base64 = base64.b64encode(f.read()).decode("ascii")
+
             return {
                 "output_file": output_path,
                 "file_size_bytes": file_size,
                 "format": "step",
+                # MET-489: without this, freecad.export_geometry output had no
+                # path into twin.commit_geometry (unlike freecad.export_model,
+                # which already returns step_base64) and was lost when the
+                # adapter container recreated.
+                "step_base64": step_base64,
             }
 
     def generate_mesh(

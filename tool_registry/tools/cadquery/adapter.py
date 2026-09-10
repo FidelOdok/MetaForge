@@ -194,7 +194,9 @@ class CadqueryServer(McpToolServer):
                     "Export CAD model to STEP/STL/OBJ/BREP/AMF/SVG format. Output is "
                     "written to the adapter's local filesystem only — it is NOT "
                     "persisted or visible in the project/Twin until "
-                    "twin.commit_geometry is called."
+                    "twin.commit_geometry is called. The response includes "
+                    "step_base64 (when output_format is STEP) — pass that directly "
+                    "as twin.commit_geometry's step_base64 argument to persist it."
                 ),
                 capability="cad_export",
                 input_schema={
@@ -222,6 +224,13 @@ class CadqueryServer(McpToolServer):
                         "output_file": {"type": "string"},
                         "file_size_bytes": {"type": "integer"},
                         "format": {"type": "string"},
+                        "step_base64": {
+                            "type": "string",
+                            "description": (
+                                "Base64 STEP bytes, present when output_format is "
+                                "STEP -- pass to twin.commit_geometry's step_base64."
+                            ),
+                        },
                     },
                 },
                 phase=1,

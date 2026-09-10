@@ -5,6 +5,7 @@ All tests mock FreeCAD internals since FreeCAD is not available in CI.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -749,3 +750,63 @@ class TestExecuteCodeExceptionTypes:
                 "IndexError, AttributeError, RuntimeError)\nresult = 'ok'",
             )
         assert result == "ok"
+
+
+# ---------------------------------------------------------------------------
+# 11. export_step includes step_base64 (MET-489)
+# ---------------------------------------------------------------------------
+
+
+class _FakeExportShape:
+    """Fakes the .exportStep() entry point export_step needs."""
+
+    def exportStep(self, output_path: str) -> None:  # noqa: N802
+        with open(output_path, "wb") as f:  # noqa: PTH123
+            f.write(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+
+class _FakeExportObject:
+    def __init__(self) -> None:
+        self.Shape = _FakeExportShape()
+
+
+class _FakeExportDoc:
+    def __init__(self) -> None:
+        self.Name = "doc1"
+        self.Objects = [_FakeExportObject()]
+
+
+class _FakeFreeCADForExport:
+    def __init__(self) -> None:
+        self.closed: list[str] = []
+
+    def openDocument(self, _path: str) -> _FakeExportDoc:  # noqa: N802
+        return _FakeExportDoc()
+
+    def closeDocument(self, name: str) -> None:  # noqa: N802
+        self.closed.append(name)
+
+
+class TestExportStepStepBase64:
+    """MET-489: freecad.export_geometry (-> export_step) had no path into
+    twin.commit_geometry -- unlike freecad.export_model, which already
+    returns step_base64 -- so its output was lost when the adapter
+    container recreated."""
+
+    def test_export_step_includes_step_base64(self, tmp_path) -> None:
+        import base64
+
+        ops = FreecadOperations()
+        output_path = str(tmp_path / "out.step")
+        freecad = _FakeFreeCADForExport()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", freecad),
+        ):
+            result = ops.export_step("/workspace/part.fcstd", output_path)
+
+        assert result["format"] == "step"
+        assert "step_base64" in result
+        decoded = base64.b64decode(result["step_base64"])
+        assert decoded == Path(output_path).read_bytes()
+        assert freecad.closed == ["doc1"]
