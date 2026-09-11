@@ -1013,6 +1013,71 @@ class CadqueryServer(McpToolServer):
             handler=self.generate_enclosure,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="cadquery.validate_physics_stability",
+                adapter_id="cadquery",
+                name="Validate Physics Stability",
+                description=(
+                    "Headless physics sanity check for an exported URDF robot "
+                    "description: load it into PyBullet, drop it on a ground plane "
+                    "under gravity alone (no control input), and check nothing "
+                    "diverges (NaN/exploding velocity). The cheapest, first-pass "
+                    "tier of 'ready for simulation' validation -- catches "
+                    "degenerate/zero inertia, disconnected link trees, and broken "
+                    "collision meshes without needing a GPU or the full target "
+                    "simulator (Gazebo/Isaac Sim) installed."
+                ),
+                capability="cad_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "urdf_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the exported .urdf file (its mesh files "
+                                "must be in the same directory, as every "
+                                "cadquery.export_urdf* tool already writes them)."
+                            ),
+                        },
+                        "steps": {
+                            "type": "integer",
+                            "default": 300,
+                            "description": "Physics steps to run (default 300, ~1.25s sim time).",
+                        },
+                        "ground_plane": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Load a flat ground plane so the robot settles under "
+                                "real contact resolution instead of free-falling."
+                            ),
+                        },
+                    },
+                    "required": ["urdf_path"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "stable": {"type": "boolean"},
+                        "diverged_at_step": {"type": ["integer", "null"]},
+                        "steps_run": {"type": "integer"},
+                        "link_count": {"type": "integer"},
+                        "joint_count": {"type": "integer"},
+                        "link_names": {"type": "array", "items": {"type": "string"}},
+                        "max_linear_velocity_mps": {"type": "number"},
+                        "max_angular_velocity_radps": {"type": "number"},
+                        "final_base_position_m": {"type": "array", "items": {"type": "number"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=1024, max_cpu_seconds=60, max_disk_mb=64
+                ),
+            ),
+            handler=self.validate_physics_stability,
+        )
+
     async def create_parametric(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Generate parametric CAD geometry from shape type and dimensions."""
         shape_type = arguments.get("shape_type", "")
@@ -1096,6 +1161,25 @@ class CadqueryServer(McpToolServer):
             timeout=self.config.max_operation_time,
         )
         return ops.get_properties(input_file, properties)
+
+    async def validate_physics_stability(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Headless PyBullet drop-test sanity check for an exported URDF."""
+        urdf_path = arguments.get("urdf_path", "")
+        if not urdf_path:
+            raise ValueError("urdf_path is required")
+        steps = arguments.get("steps", 300)
+        ground_plane = arguments.get("ground_plane", True)
+
+        logger.info(
+            "Validating physics stability",
+            urdf_path=urdf_path,
+            steps=steps,
+            ground_plane=ground_plane,
+        )
+
+        from tool_registry.tools.cadquery.physics_check import validate_physics_stability
+
+        return validate_physics_stability(urdf_path, steps=steps, ground_plane=ground_plane)
 
     async def export_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Export CAD model to the requested format."""

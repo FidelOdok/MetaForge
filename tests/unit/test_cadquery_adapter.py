@@ -42,9 +42,9 @@ class TestCadqueryConfig:
 class TestCadqueryServer:
     """Tests for CadqueryServer tool registration."""
 
-    def test_registers_fourteen_tools(self):
+    def test_registers_fifteen_tools(self):
         server = CadqueryServer()
-        assert len(server.tool_ids) == 14
+        assert len(server.tool_ids) == 15
 
     def test_tool_ids_correct(self):
         server = CadqueryServer()
@@ -63,6 +63,7 @@ class TestCadqueryServer:
             "cadquery.execute_script",
             "cadquery.create_assembly",
             "cadquery.generate_enclosure",
+            "cadquery.validate_physics_stability",
         }
         assert set(server.tool_ids) == expected
 
@@ -154,6 +155,35 @@ class TestGetProperties:
         server = CadqueryServer()
         with pytest.raises(ValueError, match="input_file is required"):
             await server.get_properties({})
+
+
+class TestValidatePhysicsStability:
+    """Tests for cadquery.validate_physics_stability handler validation."""
+
+    def test_registered(self):
+        server = CadqueryServer()
+        assert "cadquery.validate_physics_stability" in server.tool_ids
+
+    async def test_missing_urdf_path(self):
+        server = CadqueryServer()
+        with pytest.raises(ValueError, match="urdf_path is required"):
+            await server.validate_physics_stability({})
+
+    async def test_real_pybullet_end_to_end(self, tmp_path):
+        pytest.importorskip("pybullet")
+        urdf_path = tmp_path / "model.urdf"
+        urdf_path.write_text(
+            '<?xml version="1.0"?><robot name="r">'
+            '<link name="base"><visual><geometry><box size="0.1 0.1 0.1"/></geometry>'
+            '</visual><collision><geometry><box size="0.1 0.1 0.1"/></geometry>'
+            '</collision><inertial><mass value="1.0"/>'
+            '<inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>'
+            "</inertial></link></robot>"
+        )
+        server = CadqueryServer()
+        result = await server.validate_physics_stability({"urdf_path": str(urdf_path), "steps": 30})
+        assert result["stable"] is True
+        assert result["joint_count"] == 0
 
 
 class TestExportGeometry:
@@ -310,7 +340,7 @@ class TestJsonRpcIntegration:
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "1"
         tools = response["result"]["tools"]
-        assert len(tools) == 14
+        assert len(tools) == 15
 
     async def test_tool_list_filter_by_capability(self):
         server = CadqueryServer()
@@ -345,7 +375,7 @@ class TestJsonRpcIntegration:
         result = response["result"]
         assert result["adapter_id"] == "cadquery"
         assert result["status"] == "healthy"
-        assert result["tools_available"] == 14
+        assert result["tools_available"] == 15
 
     async def test_unknown_method(self):
         server = CadqueryServer()
