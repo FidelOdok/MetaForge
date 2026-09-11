@@ -8,12 +8,17 @@ the export panels (MET-720/721) — it is deliberately NOT a generic "call any
 MCP tool" runner (that's a separate, unscoped v2 idea per
 ``docs/dashboard-tour.md``).
 
-Output files are throwaway derived artifacts written under a per-export
-directory in the shared adapter workspace (same volume every adapter
-container mounts — see ``api_gateway/twin/blob_stager.py`` for the sibling
-pattern) and served back via a plain download route, mirroring how
-``/v1/convert`` serves its GLB. They are NOT committed to the Twin as work
-products for V1 (see MET-719's open design question).
+Output files are written under a per-export directory in the shared adapter
+workspace (same volume every adapter container mounts — see
+``api_gateway/twin/blob_stager.py`` for the sibling pattern) and served back
+via a plain download route, mirroring how ``/v1/convert`` serves its GLB.
+
+MET-740: the three assembly-export routes (urdf/sdf/usd) ALSO commit their
+output as a real, versioned ``robot_description`` Twin work product by
+default (``persist=true``) — resolving MET-719's original "open design
+question" in favor of persisting. The single-part export routes and
+``generate_ros2_launch`` remain throwaway-only; a robot description is
+specifically the multi-part case this was built to stop losing.
 """
 
 from __future__ import annotations
@@ -58,6 +63,21 @@ tracer = get_tracer("api_gateway.cad_export")
 router = APIRouter(prefix="/v1/cad-export", tags=["cad-export"])
 
 _EXPORTS_SUBDIR = "_cad_exports"
+
+# MET-740: injected async commit(...)/update(...) callables (built in
+# server.py over the same TwinAPI + project backend geometry_recorder uses).
+# None until init_robot_description_recorder() runs at startup — every
+# assembly-export route treats that as "persistence unavailable", degrading
+# to the pre-MET-740 throwaway-only behavior rather than failing the export.
+_robot_description_commit: Any = None
+_robot_description_update: Any = None
+
+
+def init_robot_description_recorder(commit_fn: Any, update_fn: Any) -> None:
+    """Wire the robot-description persistence callables (called from server.py)."""
+    global _robot_description_commit, _robot_description_update  # noqa: PLW0603
+    _robot_description_commit = commit_fn
+    _robot_description_update = update_fn
 
 
 def _workspace_root() -> Path:
@@ -191,6 +211,68 @@ async def _export_assembly(
     return export_id, data
 
 
+async def _persist_robot_description(
+    *,
+    ext: str,
+    default_name: str,
+    robot_name: str,
+    parts: list[PartRef],
+    joints: list[JointSpec],
+    output_path: str,
+    mesh_paths: list[str],
+    persist: bool,
+    persist_name: str | None,
+    update_node_id: str | None,
+    project_id: str | None,
+    source_tool: str,
+) -> str | None:
+    """Commit (or update) a just-exported assembly as a robot_description
+    Twin work product (MET-740). Best-effort: a persistence failure logs a
+    warning and returns None — it must never fail the export itself, since
+    the caller already has real, useful files on disk regardless.
+    """
+    if not persist or _robot_description_commit is None:
+        return None
+    try:
+        description_text = Path(output_path).read_text(encoding="utf-8")
+        mesh_files = {Path(p).name: Path(p).read_bytes() for p in mesh_paths}
+        parts_meta = [{"node_id": p.node_id, "link_name": p.link_name} for p in parts]
+        joints_meta = _joint_dicts(joints)
+        name = persist_name or f"{robot_name} robot description"
+        if update_node_id:
+            result = await _robot_description_update(
+                update_node_id,
+                description_text=description_text,
+                fmt=ext,
+                robot_name=robot_name,
+                parts=parts_meta,
+                joints=joints_meta,
+                mesh_files=mesh_files,
+            )
+        else:
+            result = await _robot_description_commit(
+                name=name,
+                description_text=description_text,
+                fmt=ext,
+                robot_name=robot_name,
+                parts=parts_meta,
+                joints=joints_meta,
+                mesh_files=mesh_files,
+                source_part_node_ids=[p.node_id for p in parts],
+                project_id=project_id,
+                source_tool=source_tool,
+            )
+        return str(result["node_id"])
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+        logger.warning(
+            "robot_description_persist_failed",
+            default_name=default_name,
+            update_node_id=update_node_id,
+            error=str(exc),
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Single-part export
 # ---------------------------------------------------------------------------
@@ -303,12 +385,27 @@ async def export_urdf_assembly(body: UrdfAssemblyExportRequest) -> UrdfAssemblyE
         mesh_uri_prefix=body.mesh_uri_prefix,
         xacro=body.xacro,
     )
+    node_id = await _persist_robot_description(
+        ext=ext,
+        default_name=body.robot_name,
+        robot_name=data["robot_name"],
+        parts=body.parts,
+        joints=body.joints,
+        output_path=data["output_file"],
+        mesh_paths=data["mesh_files"],
+        persist=body.persist,
+        persist_name=body.persist_name,
+        update_node_id=body.update_node_id,
+        project_id=body.project_id,
+        source_tool="cadquery.export_urdf_assembly",
+    )
     return UrdfAssemblyExportResponse(
         output_file=_export_file(export_id, data["output_file"]),
         mesh_files=[_export_file(export_id, p) for p in data["mesh_files"]],
         robot_name=data["robot_name"],
         link_names=data["link_names"],
         joint_names=data["joint_names"],
+        robot_description_node_id=node_id,
     )
 
 
@@ -317,16 +414,31 @@ async def export_sdf_assembly(body: SdfAssemblyExportRequest) -> SdfAssemblyExpo
     from api_gateway.chat.routes import get_mcp_bridge
 
     bridge = get_mcp_bridge()
+    ext = "sdf" if not body.world_name else "world"
     export_id, data = await _export_assembly(
         bridge,
         "cadquery.export_sdf_assembly",
         body.parts,
         body.joints,
-        "sdf" if not body.world_name else "world",
+        ext,
         model_name=body.model_name,
         mesh_format=body.mesh_format,
         static=body.static,
         world_name=body.world_name or "",
+    )
+    node_id = await _persist_robot_description(
+        ext="sdf",
+        default_name=body.model_name,
+        robot_name=data["model_name"],
+        parts=body.parts,
+        joints=body.joints,
+        output_path=data["output_file"],
+        mesh_paths=data["mesh_files"],
+        persist=body.persist,
+        persist_name=body.persist_name,
+        update_node_id=body.update_node_id,
+        project_id=body.project_id,
+        source_tool="cadquery.export_sdf_assembly",
     )
     return SdfAssemblyExportResponse(
         output_file=_export_file(export_id, data["output_file"]),
@@ -334,6 +446,7 @@ async def export_sdf_assembly(body: SdfAssemblyExportRequest) -> SdfAssemblyExpo
         model_name=data["model_name"],
         link_names=data["link_names"],
         joint_names=data["joint_names"],
+        robot_description_node_id=node_id,
     )
 
 
@@ -350,12 +463,27 @@ async def export_usd_assembly(body: UsdAssemblyExportRequest) -> UsdAssemblyExpo
         "usda",
         robot_name=body.robot_name,
     )
+    node_id = await _persist_robot_description(
+        ext="usda",
+        default_name=body.robot_name,
+        robot_name=data["robot_name"],
+        parts=body.parts,
+        joints=body.joints,
+        output_path=data["output_file"],
+        mesh_paths=data["mesh_files"],
+        persist=body.persist,
+        persist_name=body.persist_name,
+        update_node_id=body.update_node_id,
+        project_id=body.project_id,
+        source_tool="cadquery.export_usd_assembly",
+    )
     return UsdAssemblyExportResponse(
         output_file=_export_file(export_id, data["output_file"]),
         mesh_files=[_export_file(export_id, p) for p in data["mesh_files"]],
         robot_name=data["robot_name"],
         link_names=data["link_names"],
         joint_names=data["joint_names"],
+        robot_description_node_id=node_id,
     )
 
 

@@ -118,6 +118,9 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         # git-versioned script backs this node.
         geometryParameters=wp.metadata.get("geometry_features"),
         hasScript=bool(wp.metadata.get("script_node_id")),
+        # MET-740: {parts, joints} for a robot_description node — None for
+        # every other node type (metadata simply has no "assembly" key).
+        assembly=wp.metadata.get("assembly"),
     )
 
 
@@ -378,6 +381,12 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "gltf": "model/gltf+json",
     "step": "application/step",
     "stp": "application/step",
+    # MET-740: robot-description formats (text-based) + their mesh files.
+    "urdf": "application/xml",
+    "xacro": "application/xml",
+    "sdf": "application/xml",
+    "usda": "text/plain; charset=utf-8",
+    "stl": "model/stl",
     # Tool-native text formats preview fine as plain text.
     "kicad_sch": "text/plain; charset=utf-8",
     "kicad_pcb": "text/plain; charset=utf-8",
@@ -492,6 +501,26 @@ async def delete_node(
                 delete_work_product_blob(object_key)
             except Exception as exc:  # noqa: BLE001 — best-effort cleanup
                 logger.warning("wp_blob_delete_failed", key=object_key, error=str(exc))
+
+        # MET-740: a robot_description node stores one extra MinIO object
+        # per link's mesh file (metadata["mesh_files"], link_name -> key) —
+        # clean those up too, same best-effort discipline as the primary blob.
+        mesh_files = wp.metadata.get("mesh_files")
+        if isinstance(mesh_files, dict):
+            from api_gateway.twin.blob_store import delete_work_product_blob
+
+            for link_name, mesh_key in mesh_files.items():
+                if not isinstance(mesh_key, str) or not mesh_key:
+                    continue
+                try:
+                    delete_work_product_blob(mesh_key)
+                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                    logger.warning(
+                        "wp_mesh_blob_delete_failed",
+                        key=mesh_key,
+                        link_name=link_name,
+                        error=str(exc),
+                    )
 
         try:
             await _twin.delete_work_product(uid, cascade=cascade)

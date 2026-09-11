@@ -654,11 +654,26 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
+    from api_gateway.twin.robot_description_recorder import (
+        make_robot_description_recorder,
+        make_robot_description_updater,
+    )
 
     decision_recorder = make_decision_recorder(twin, project_backend)
     git_registry = GitRepoRegistry.from_env(twin.graph)
     init_git_registry(git_registry)
     geometry_recorder_fn = make_geometry_recorder(twin, project_backend, git_registry)
+
+    # MET-740: robot-description (URDF/SDF/USD) persistence for the
+    # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
+    # triggered like geometry_recorder above, so it's wired directly into
+    # that module rather than through bootstrap_tool_registry.
+    from api_gateway.cad_export.routes import init_robot_description_recorder
+
+    init_robot_description_recorder(
+        make_robot_description_recorder(twin, project_backend),
+        make_robot_description_updater(twin),
+    )
     tool_registry = await bootstrap_tool_registry(
         knowledge_service=getattr(app.state, "knowledge_service", None),
         twin=twin,

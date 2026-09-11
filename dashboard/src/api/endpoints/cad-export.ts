@@ -103,7 +103,18 @@ export interface PartRef {
   density_kg_m3?: number;
 }
 
-export interface UrdfAssemblyExportRequest {
+// MET-740: shared by every assembly-export request — commits the export as
+// a real, versioned `robot_description` Twin work product (default on)
+// instead of a throwaway file, and optionally updates an existing one
+// in place rather than creating a new node.
+interface RobotDescriptionPersistFields {
+  project_id?: string;
+  persist?: boolean;
+  persist_name?: string;
+  update_node_id?: string;
+}
+
+export interface UrdfAssemblyExportRequest extends RobotDescriptionPersistFields {
   parts: PartRef[];
   joints: JointSpec[];
   robot_name?: string;
@@ -112,7 +123,7 @@ export interface UrdfAssemblyExportRequest {
   xacro?: boolean;
 }
 
-export interface SdfAssemblyExportRequest {
+export interface SdfAssemblyExportRequest extends RobotDescriptionPersistFields {
   parts: PartRef[];
   joints: JointSpec[];
   model_name?: string;
@@ -121,7 +132,7 @@ export interface SdfAssemblyExportRequest {
   world_name?: string;
 }
 
-export interface UsdAssemblyExportRequest {
+export interface UsdAssemblyExportRequest extends RobotDescriptionPersistFields {
   parts: PartRef[];
   joints: JointSpec[];
   robot_name?: string;
@@ -139,6 +150,10 @@ interface AssemblyExportFields {
   mesh_files: ExportFile[];
   link_names: string[];
   joint_names: string[];
+  // MET-740: set when persist succeeded — the Twin node this export was
+  // committed (or updated) to. null when persist=false or persistence
+  // failed (the export itself still succeeds either way).
+  robot_description_node_id: string | null;
 }
 
 export interface UrdfAssemblyExportResponse extends AssemblyExportFields {

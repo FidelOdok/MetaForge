@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   exportUrdf,
   exportSdf,
@@ -17,8 +17,9 @@ import {
   type UsdAssemblyExportRequest,
   type Ros2LaunchRequest,
 } from '../api/endpoints/cad-export';
+import { twinKeys } from './use-twin';
 
-/** MET-720/721: robotics-sim export. Doesn't touch the Twin graph (output is
+/** MET-720/721: single-part export. Doesn't touch the Twin graph (output is
  * a throwaway derived artifact per MET-719), so unlike useBooleanCut there's
  * no query invalidation to do on success. */
 
@@ -40,21 +41,40 @@ export function useExportUsd() {
   });
 }
 
+/** MET-740: assembly exports DO touch the Twin graph by default
+ * (persist=true commits/updates a robot_description work product) —
+ * invalidate the node list on a persisted success so it shows up (or its
+ * new version reflects) immediately rather than waiting for the next poll. */
+function useInvalidateOnPersist() {
+  const queryClient = useQueryClient();
+  return (data: { robot_description_node_id: string | null }) => {
+    if (data.robot_description_node_id) {
+      queryClient.invalidateQueries({ queryKey: twinKeys.all });
+    }
+  };
+}
+
 export function useExportUrdfAssembly() {
+  const onSuccess = useInvalidateOnPersist();
   return useMutation({
     mutationFn: (req: UrdfAssemblyExportRequest) => exportUrdfAssembly(req),
+    onSuccess,
   });
 }
 
 export function useExportSdfAssembly() {
+  const onSuccess = useInvalidateOnPersist();
   return useMutation({
     mutationFn: (req: SdfAssemblyExportRequest) => exportSdfAssembly(req),
+    onSuccess,
   });
 }
 
 export function useExportUsdAssembly() {
+  const onSuccess = useInvalidateOnPersist();
   return useMutation({
     mutationFn: (req: UsdAssemblyExportRequest) => exportUsdAssembly(req),
+    onSuccess,
   });
 }
 
