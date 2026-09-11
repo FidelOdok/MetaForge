@@ -150,6 +150,7 @@ function ToolBtn({
 const _PREVIEW_IMG_FORMATS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg']);
 const _PREVIEW_TEXT_FORMATS = new Set([
   'txt', 'md', 'json', 'csv', 'log', 'kicad_sch', 'kicad_pcb', 'net', 'gbr', 'c', 'h',
+  'urdf', 'xacro', 'sdf', 'usda',
 ]);
 
 function FileActionBtn({
