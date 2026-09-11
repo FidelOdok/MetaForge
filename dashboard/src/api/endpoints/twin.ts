@@ -234,6 +234,16 @@ export async function fetchNodeFileText(nodeId: string): Promise<string> {
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 }
 
+/** MET-740 follow-up: base URL for a robot_description node's named mesh
+ * files (GET /nodes/{id}/files/{filename}) — same "{base}/{filename}"
+ * shape a fresh export's own _cad_exports/{export_id}/ directory has, so
+ * urdf-loader's workingPath can point straight at a saved node with no
+ * re-export. This route also serves the primary URDF itself, so it can
+ * stand in for the whole file set. */
+export function nodeMeshBaseUrl(nodeId: string): string {
+  return `${FILE_API_BASE}/twin/nodes/${nodeId}/files/`;
+}
+
 // ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────
 
 export type BooleanCutOperation = 'subtract' | 'union' | 'intersect';
