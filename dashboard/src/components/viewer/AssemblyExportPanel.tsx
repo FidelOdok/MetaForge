@@ -88,22 +88,28 @@ interface AssemblyExportPanelProps {
   /** All currently-loaded Twin nodes — filtered to CAD parts for the picker. */
   items: TwinNode[];
   onClose: () => void;
+  /** MET-740: links a persisted export to the active project. */
+  activeProjectId?: string | null;
 }
 
 /**
  * MET-721: export a multi-part assembly (with joints) to URDF/SDF/USD.
  *
- * Joints are never persisted anywhere durable — they only exist inside a
- * LIVE FreeCAD authoring session (default 30 min idle TTL). There is no way
- * to look one up by Twin/assembly node id, so this panel's "reuse joints
- * from chat" convenience requires the user to already have a session_id
- * (e.g. one echoed by a recent chat turn) — it is not auto-discovered.
- * Manually adding/editing parts and joints below always works regardless.
+ * Joints authored live in a FreeCAD session are NOT durable — that session
+ * expires after ~30 min idle, so "reuse joints from chat" below only works
+ * while it's still open (requires a session_id, e.g. one echoed by a recent
+ * chat turn — not auto-discovered). MET-740 adds a durable alternative:
+ * every export is committed as a real, versioned `robot_description` Twin
+ * work product by default, so "Load existing robot description" can
+ * reconstruct the full parts+joints form state from ANY past export,
+ * indefinitely — no live session required. Manually adding/editing parts
+ * and joints below always works regardless of either path.
  */
-export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps) {
+export function AssemblyExportPanel({ items, onClose, activeProjectId }: AssemblyExportPanelProps) {
   const toast = useToast();
   const nextKey = useRef(0);
   const cadNodes = items.filter((n) => n.properties.wp_type === 'cad_model');
+  const robotDescriptionNodes = items.filter((n) => n.properties.wp_type === 'robot_description');
 
   const [parts, setParts] = useState<PartRow[]>([]);
   const [joints, setJoints] = useState<JointRow[]>([]);
@@ -121,6 +127,10 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
   const [fetchedSessionId, setFetchedSessionId] = useState('');
   const sessionSummary = useSessionSummary(fetchedSessionId, fetchedSessionId.length > 0);
   const sessionJoints = useSessionJoints(fetchedSessionId, fetchedSessionId.length > 0);
+
+  // MET-740: when set, the next export replaces this node's content and
+  // records a new version instead of creating a new robot_description node.
+  const [updateNodeId, setUpdateNodeId] = useState<string | null>(null);
 
   const urdfAssembly = useExportUrdfAssembly();
   const sdfAssembly = useExportSdfAssembly();
@@ -184,6 +194,49 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
     toast.success(`Imported ${imported.length} joint(s) from session`);
   };
 
+  // MET-740: reconstruct the full form state from a persisted
+  // robot_description node's `assembly` metadata — unlike
+  // importPartsFromSession, this has real Twin node_ids already attached
+  // (a session's objects are FreeCAD-internal, with no node_id at all), so
+  // no manual re-picking is needed. Replaces the current form rather than
+  // appending, since this is "load this robot", not "add more parts".
+  const loadRobotDescription = (nodeId: string) => {
+    const node = robotDescriptionNodes.find((n) => n.id === nodeId);
+    if (!node?.assembly) {
+      toast.error('That robot description has no stored assembly data');
+      return;
+    }
+    const loadedParts: PartRow[] = node.assembly.parts.map((p) => ({
+      key: nextKey.current++,
+      nodeId: p.node_id,
+      linkName: p.link_name,
+      material: p.material ?? '',
+      density: p.density_kg_m3 !== undefined ? String(p.density_kg_m3) : '',
+    }));
+    const loadedJoints: JointRow[] = node.assembly.joints.map((j) => ({
+      key: nextKey.current++,
+      name: j.name,
+      type: j.type as JointType,
+      base: j.base,
+      follower: j.follower,
+      axis: [String(j.axis[0]), String(j.axis[1]), String(j.axis[2])],
+      anchor: [String(j.anchor[0]), String(j.anchor[1]), String(j.anchor[2])],
+      limitsLower: j.limits?.lower !== undefined ? String(j.limits.lower) : '',
+      limitsUpper: j.limits?.upper !== undefined ? String(j.limits.upper) : '',
+    }));
+    setParts(loadedParts);
+    setJoints(loadedJoints);
+    setUpdateNodeId(nodeId);
+    const robotName = node.properties.robot_name;
+    if (typeof robotName === 'string' && robotName) {
+      setRobotName(robotName);
+      setModelName(robotName);
+    }
+    toast.success(
+      `Loaded "${node.name}" (${loadedParts.length} parts, ${loadedJoints.length} joints) — exporting now will update it as a new version`,
+    );
+  };
+
   const validateParts = (): boolean => {
     if (parts.length === 0) {
       toast.error('Add at least one part');
@@ -225,10 +278,32 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
     setLaunchFile(null);
 
     const { apiParts, apiJoints } = buildPayload();
+    // MET-740: persist by default (backend default is also true — sent
+    // explicitly so this call site's intent reads clearly). Loaded-from-
+    // existing edits update that node in place (new version) rather than
+    // creating a duplicate.
+    const persistFields = {
+      project_id: activeProjectId ?? undefined,
+      persist: true,
+      update_node_id: updateNodeId ?? undefined,
+    };
 
-    const onSuccess = (data: { output_file: ExportFile; mesh_files: ExportFile[] }) => {
+    const onSuccess = (data: {
+      output_file: ExportFile;
+      mesh_files: ExportFile[];
+      robot_description_node_id: string | null;
+    }) => {
       setResult({ outputFile: data.output_file, meshFiles: data.mesh_files });
-      toast.success(`Exported ${data.output_file.filename}`);
+      if (data.robot_description_node_id) {
+        // Keep editing the same node on a subsequent export, whether this
+        // was a fresh create or an update to a loaded one.
+        setUpdateNodeId(data.robot_description_node_id);
+        toast.success(
+          `Exported ${data.output_file.filename} — saved as a Twin work product (${updateNodeId ? 'new version' : 'new node'})`,
+        );
+      } else {
+        toast.success(`Exported ${data.output_file.filename} (not saved to the Twin — see panel)`);
+      }
     };
     const onError = (err: unknown) => {
       toast.error(getErrorDetail(err, `${format.toUpperCase()} assembly export failed`));
@@ -236,7 +311,7 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
 
     if (format === 'urdf') {
       urdfAssembly.mutate(
-        { parts: apiParts, joints: apiJoints, robot_name: robotName || undefined, xacro },
+        { parts: apiParts, joints: apiJoints, robot_name: robotName || undefined, xacro, ...persistFields },
         { onSuccess, onError },
       );
     } else if (format === 'sdf') {
@@ -247,12 +322,13 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
           model_name: modelName || undefined,
           static: staticFlag,
           world_name: worldName || undefined,
+          ...persistFields,
         },
         { onSuccess, onError },
       );
     } else {
       usdAssembly.mutate(
-        { parts: apiParts, joints: apiJoints, robot_name: robotName || undefined },
+        { parts: apiParts, joints: apiJoints, robot_name: robotName || undefined, ...persistFields },
         { onSuccess, onError },
       );
     }
@@ -269,7 +345,16 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
     if (!validateParts()) return;
     const { apiParts, apiJoints } = buildPayload();
     urdfAssembly.mutate(
-      { parts: apiParts, joints: apiJoints, robot_name: robotName || undefined, mesh_format: 'stl', xacro: false },
+      {
+        parts: apiParts,
+        joints: apiJoints,
+        robot_name: robotName || undefined,
+        mesh_format: 'stl',
+        xacro: false,
+        // MET-740: previewing is read-only — it must never create/update a
+        // persisted robot_description as a side effect of just looking.
+        persist: false,
+      },
       {
         onSuccess: (data) => setPreviewUrdf(data.output_file),
         onError: (err) => toast.error(getErrorDetail(err, 'Preview export failed')),
@@ -368,6 +453,42 @@ export function AssemblyExportPanel({ items, onClose }: AssemblyExportPanelProps
             </div>
           )}
         </div>
+
+        {/* MET-740: load a previously-saved robot description — durable
+         * (survives session expiry), unlike the chat-session import above. */}
+        {robotDescriptionNodes.length > 0 && (
+          <div>
+            <div className="font-mono uppercase mb-1" style={{ fontSize: 10, letterSpacing: '0.08em', color: KC_ON_SURFACE_VARIANT }}>
+              Load existing robot description
+            </div>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) loadRobotDescription(e.target.value);
+              }}
+              className="w-full"
+              style={inputStyle}
+            >
+              <option value="">Select a saved robot description…</option>
+              {robotDescriptionNodes.map((n) => (
+                <option key={n.id} value={n.id}>{n.name}</option>
+              ))}
+            </select>
+            {updateNodeId && (
+              <div className="font-mono flex items-center justify-between mt-1" style={{ fontSize: 10, color: KC_ON_SURFACE_VARIANT }}>
+                <span>Editing "{robotDescriptionNodes.find((n) => n.id === updateNodeId)?.name ?? updateNodeId}" — export will save a new version</span>
+                <button
+                  type="button"
+                  onClick={() => setUpdateNodeId(null)}
+                  title="Export as a new robot description instead"
+                  style={{ background: 'transparent', border: 'none', color: KC_ON_SURFACE_VARIANT, cursor: 'pointer', textDecoration: 'underline', flexShrink: 0, marginLeft: 6 }}
+                >
+                  clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Parts */}
         <div>

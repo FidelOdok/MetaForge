@@ -26,6 +26,13 @@ class TwinNodeResponse(BaseModel):
     # retrievable via GET /nodes/{id}/script (a CAD_SOURCE_SCRIPT node
     # exists and is linked via metadata.script_node_id).
     hasScript: bool = False  # noqa: N815
+    # MET-740: a robot_description node's {parts, joints} — the exact shape
+    # cadquery.export_urdf_assembly accepts/returns. Kept separate from
+    # `properties` (scalar-only) so the dashboard can reconstruct the full
+    # Assembly export form from an already-fetched node list, with no extra
+    # round trip and no live FreeCAD session required. None for every other
+    # node type.
+    assembly: dict[str, Any] | None = None
 
 
 class TwinNodeScriptResponse(BaseModel):

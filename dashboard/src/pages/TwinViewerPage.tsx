@@ -1392,7 +1392,11 @@ export function TwinViewerPage() {
       ════════════════════════════════════════════ */}
       {assemblyExportOpen && (
         <div style={{ position: 'absolute', top: 52, right: 16, zIndex: 50 }}>
-          <AssemblyExportPanel items={items} onClose={() => setAssemblyExportOpen(false)} />
+          <AssemblyExportPanel
+            items={items}
+            onClose={() => setAssemblyExportOpen(false)}
+            activeProjectId={activeProjectId}
+          />
         </div>
       )}
 

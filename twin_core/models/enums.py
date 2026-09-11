@@ -44,6 +44,10 @@ class WorkProductType(StrEnum):
     # authored a CAD_MODEL — the real source of truth, git-versioned for
     # diffing. Linked to the CAD_MODEL it produced via a PARENT_OF edge.
     CAD_SOURCE_SCRIPT = "cad_source_script"
+    # MET-740: a URDF/SDF/USD robot description exported from one or more
+    # CAD_MODEL parts + a joint list. Linked to each source part via a
+    # PARENT_OF edge (mirrors CAD_SOURCE_SCRIPT's script->geometry edge).
+    ROBOT_DESCRIPTION = "robot_description"
 
 
 class ConstraintSeverity(StrEnum):

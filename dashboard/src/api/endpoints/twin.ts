@@ -1,4 +1,4 @@
-import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult } from '../../types/twin';
+import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription } from '../../types/twin';
 import apiClient from '../client';
 
 const MOCK_RELATIONSHIPS: TwinRelationship[] = [
@@ -18,6 +18,7 @@ interface TwinNodeApiResponse {
   updatedAt: string;
   geometryParameters?: { parameters: Record<string, unknown>; properties: Record<string, unknown> } | null;
   hasScript?: boolean;
+  assembly?: AssemblyDescription | null;
 }
 
 export interface TwinNodeScript {
@@ -55,6 +56,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     updatedAt: node.updatedAt,
     geometryParameters: node.geometryParameters ?? undefined,
     hasScript: node.hasScript,
+    assembly: node.assembly ?? undefined,
   }));
 }
 
@@ -72,6 +74,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       updatedAt: node.updatedAt,
       geometryParameters: node.geometryParameters ?? undefined,
       hasScript: node.hasScript,
+      assembly: node.assembly ?? undefined,
     };
   } catch {
     return undefined;

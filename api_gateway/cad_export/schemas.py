@@ -92,7 +92,42 @@ class UsdExportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class UrdfAssemblyExportRequest(BaseModel):
+class RobotDescriptionPersistFields(BaseModel):
+    """Shared MET-740 persistence fields for every assembly-export request.
+
+    Previously every export was a throwaway file under a scratch directory
+    that vanished once its ``export_id`` was forgotten — the only reusable
+    intermediate state was a live FreeCAD session (~30min idle TTL). These
+    fields let the export also be committed as a real, versioned Twin
+    ``robot_description`` work product.
+    """
+
+    project_id: str | None = Field(
+        default=None, description="Project to link the persisted work product to."
+    )
+    persist: bool = Field(
+        default=True,
+        description=(
+            "Commit this export as a robot_description Twin work product "
+            "(default on). Set false to keep the pre-MET-740 throwaway-only "
+            "behavior."
+        ),
+    )
+    persist_name: str | None = Field(
+        default=None,
+        description="Work-product display name (default: '<robot_name> robot description').",
+    )
+    update_node_id: str | None = Field(
+        default=None,
+        description=(
+            "An existing robot_description node's id — when given, this export "
+            "replaces that node's content and records a new version instead of "
+            "creating a new node."
+        ),
+    )
+
+
+class UrdfAssemblyExportRequest(RobotDescriptionPersistFields):
     parts: list[PartRef] = Field(..., min_length=1)
     joints: list[JointSpec] = Field(default_factory=list)
     robot_name: str = "robot"
@@ -101,7 +136,7 @@ class UrdfAssemblyExportRequest(BaseModel):
     xacro: bool = False
 
 
-class SdfAssemblyExportRequest(BaseModel):
+class SdfAssemblyExportRequest(RobotDescriptionPersistFields):
     parts: list[PartRef] = Field(..., min_length=1)
     joints: list[JointSpec] = Field(default_factory=list)
     model_name: str = "model"
@@ -110,7 +145,7 @@ class SdfAssemblyExportRequest(BaseModel):
     world_name: str | None = None
 
 
-class UsdAssemblyExportRequest(BaseModel):
+class UsdAssemblyExportRequest(RobotDescriptionPersistFields):
     parts: list[PartRef] = Field(..., min_length=1)
     joints: list[JointSpec] = Field(default_factory=list)
     robot_name: str = "robot"
@@ -172,6 +207,11 @@ class UrdfAssemblyExportResponse(BaseModel):
     robot_name: str
     link_names: list[str]
     joint_names: list[str]
+    # MET-740: set when persist=true succeeded — the Twin node this export
+    # was committed to (create) or updated (update_node_id given). None
+    # when persist=false, or when persistence failed (export still
+    # succeeds — see this module's docstring on best-effort persistence).
+    robot_description_node_id: str | None = None
 
 
 class SdfAssemblyExportResponse(BaseModel):
@@ -180,6 +220,7 @@ class SdfAssemblyExportResponse(BaseModel):
     model_name: str
     link_names: list[str]
     joint_names: list[str]
+    robot_description_node_id: str | None = None
 
 
 class UsdAssemblyExportResponse(BaseModel):
@@ -188,6 +229,7 @@ class UsdAssemblyExportResponse(BaseModel):
     robot_name: str
     link_names: list[str]
     joint_names: list[str]
+    robot_description_node_id: str | None = None
 
 
 class Ros2LaunchResponse(BaseModel):

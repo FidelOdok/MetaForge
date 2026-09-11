@@ -5,6 +5,24 @@ export interface GeometryFeatures {
   properties: Record<string, unknown>;
 }
 
+// MET-740: a robot_description node's {parts, joints} — the exact shape
+// the assembly-export request/response bodies use (see
+// api/endpoints/cad-export.ts's PartRef/JointSpec). Kept loose here (not
+// importing those types) to avoid a types/ -> api/ dependency; the shapes
+// are duck-typed identically.
+export interface AssemblyDescription {
+  parts: { node_id: string; link_name: string; material?: string; density_kg_m3?: number }[];
+  joints: {
+    name: string;
+    type: string;
+    base: string;
+    follower: string;
+    axis: [number, number, number];
+    anchor: [number, number, number];
+    limits?: Record<string, number>;
+  }[];
+}
+
 export interface TwinNode {
   id: string;
   name: string;
@@ -20,6 +38,11 @@ export interface TwinNode {
   // MET-630: whether a git-versioned generation script backs this node
   // (fetchable via GET /twin/nodes/{id}/script).
   hasScript?: boolean;
+  // MET-740: a robot_description node's {parts, joints} — undefined for
+  // every other node type. Lets the Assembly export form reconstruct its
+  // full state from an already-fetched node list, no extra round trip and
+  // no live FreeCAD session required.
+  assembly?: AssemblyDescription;
 }
 
 export interface TwinRelationship {

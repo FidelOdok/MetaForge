@@ -73,6 +73,12 @@ class _FakeBridge:
             out = params["output_path"]
             mesh_dir = Path(out).parent
             mesh_files = [str(mesh_dir / f"{p['link_name']}.stl") for p in params["parts"]]
+            # MET-740: real adapters actually write the output + mesh files
+            # to disk (the persistence path reads them back); mirror that
+            # here rather than only returning path strings.
+            Path(out).write_text(f'<robot name="{params.get("robot_name", "robot")}" />')
+            for mesh_path in mesh_files:
+                Path(mesh_path).write_bytes(b"solid mesh\nendsolid mesh\n")
             return {
                 "output_file": out,
                 "mesh_files": mesh_files,
@@ -334,6 +340,160 @@ def test_get_session_summary_502_when_session_missing(
 
     resp = client.get("/v1/cad-export/sessions/missing")
     assert resp.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# MET-740: robot-description persistence wiring
+# ---------------------------------------------------------------------------
+
+
+class _FakeCommit:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def __call__(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        return {"node_id": "wp-robot-description-1", "minio_object_key": "k", "mesh_files": {}}
+
+
+class _FakeUpdate:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def __call__(self, node_id: str, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append((node_id, kwargs))
+        return {"node_id": node_id, "minio_object_key": "k", "mesh_files": {}}
+
+
+def _patch_recorder(
+    monkeypatch: pytest.MonkeyPatch, commit: Any = None, update: Any = None
+) -> None:
+    import api_gateway.cad_export.routes as routes_module
+
+    monkeypatch.setattr(routes_module, "_robot_description_commit", commit)
+    monkeypatch.setattr(routes_module, "_robot_description_update", update)
+
+
+def _urdf_assembly_payload() -> dict[str, Any]:
+    return {
+        "parts": [
+            {"node_id": "wp-a", "link_name": "base"},
+            {"node_id": "wp-b", "link_name": "arm"},
+        ],
+        "joints": [
+            {
+                "name": "shoulder",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": [0, 0, 1],
+                "anchor": [0, 0, 10],
+            }
+        ],
+        "robot_name": "my_robot",
+    }
+
+
+def test_urdf_assembly_persists_by_default(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    _patch_bridge(monkeypatch, _FakeBridge())
+    commit = _FakeCommit()
+    _patch_recorder(monkeypatch, commit=commit)
+
+    resp = client.post("/v1/cad-export/urdf-assembly", json=_urdf_assembly_payload())
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["robot_description_node_id"] == "wp-robot-description-1"
+    assert len(commit.calls) == 1
+    call = commit.calls[0]
+    assert call["robot_name"] == "my_robot"
+    assert call["source_part_node_ids"] == ["wp-a", "wp-b"]
+    assert call["source_tool"] == "cadquery.export_urdf_assembly"
+    assert '<robot name="my_robot" />' == call["description_text"]
+    assert set(call["mesh_files"]) == {"base.stl", "arm.stl"}
+    assert call["joints"][0]["name"] == "shoulder"
+    assert call["parts"] == [
+        {"node_id": "wp-a", "link_name": "base"},
+        {"node_id": "wp-b", "link_name": "arm"},
+    ]
+
+
+def test_urdf_assembly_persist_false_skips_commit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    _patch_bridge(monkeypatch, _FakeBridge())
+    commit = _FakeCommit()
+    _patch_recorder(monkeypatch, commit=commit)
+
+    payload = _urdf_assembly_payload()
+    payload["persist"] = False
+    resp = client.post("/v1/cad-export/urdf-assembly", json=payload)
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["robot_description_node_id"] is None
+    assert commit.calls == []
+
+
+def test_urdf_assembly_update_node_id_calls_updater_not_commit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    _patch_bridge(monkeypatch, _FakeBridge())
+    commit = _FakeCommit()
+    update = _FakeUpdate()
+    _patch_recorder(monkeypatch, commit=commit, update=update)
+
+    payload = _urdf_assembly_payload()
+    payload["update_node_id"] = "wp-existing-robot"
+    resp = client.post("/v1/cad-export/urdf-assembly", json=payload)
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["robot_description_node_id"] == "wp-existing-robot"
+    assert commit.calls == []
+    assert len(update.calls) == 1
+    node_id, kwargs = update.calls[0]
+    assert node_id == "wp-existing-robot"
+    assert kwargs["robot_name"] == "my_robot"
+
+
+def test_export_still_succeeds_when_persistence_fails(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Persistence is best-effort — a recorder failure must never turn a
+    real, successful export into a 5xx; the files were still produced."""
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    _patch_bridge(monkeypatch, _FakeBridge())
+
+    async def _boom(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("twin unavailable")
+
+    _patch_recorder(monkeypatch, commit=_boom)
+
+    resp = client.post("/v1/cad-export/urdf-assembly", json=_urdf_assembly_payload())
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["robot_description_node_id"] is None
+    assert body["output_file"]["filename"] == "model.urdf"
+
+
+def test_urdf_assembly_no_recorder_wired_skips_persistence(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Before server.py's init_robot_description_recorder() ever runs (or
+    in any test not patching it), the module-level callables are None —
+    export must still work, just without persistence."""
+    monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+    _patch_bridge(monkeypatch, _FakeBridge())
+    _patch_recorder(monkeypatch, commit=None, update=None)
+
+    resp = client.post("/v1/cad-export/urdf-assembly", json=_urdf_assembly_payload())
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["robot_description_node_id"] is None
 
 
 def test_get_session_joints_returns_recorded_joints(

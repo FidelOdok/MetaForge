@@ -3413,10 +3413,52 @@
             "title": "Parts",
             "type": "array"
           },
+          "persist": {
+            "default": true,
+            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the pre-MET-740 throwaway-only behavior.",
+            "title": "Persist",
+            "type": "boolean"
+          },
+          "persist_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Work-product display name (default: '<robot_name> robot description').",
+            "title": "Persist Name"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to link the persisted work product to.",
+            "title": "Project Id"
+          },
           "static": {
             "default": false,
             "title": "Static",
             "type": "boolean"
+          },
+          "update_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An existing robot_description node's id \u2014 when given, this export replaces that node's content and records a new version instead of creating a new node.",
+            "title": "Update Node Id"
           },
           "world_name": {
             "anyOf": [
@@ -3465,6 +3507,17 @@
           },
           "output_file": {
             "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_description_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robot Description Node Id"
           }
         },
         "required": [
@@ -4664,6 +4717,18 @@
       "TwinNodeResponse": {
         "description": "Single node in the Digital Twin graph, shaped for the dashboard.",
         "properties": {
+          "assembly": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assembly"
+          },
           "domain": {
             "title": "Domain",
             "type": "string"
@@ -4935,10 +5000,52 @@
             "title": "Parts",
             "type": "array"
           },
+          "persist": {
+            "default": true,
+            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the pre-MET-740 throwaway-only behavior.",
+            "title": "Persist",
+            "type": "boolean"
+          },
+          "persist_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Work-product display name (default: '<robot_name> robot description').",
+            "title": "Persist Name"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to link the persisted work product to.",
+            "title": "Project Id"
+          },
           "robot_name": {
             "default": "robot",
             "title": "Robot Name",
             "type": "string"
+          },
+          "update_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An existing robot_description node's id \u2014 when given, this export replaces that node's content and records a new version instead of creating a new node.",
+            "title": "Update Node Id"
           },
           "xacro": {
             "default": false,
@@ -4977,6 +5084,17 @@
           },
           "output_file": {
             "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_description_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robot Description Node Id"
           },
           "robot_name": {
             "title": "Robot Name",
@@ -5118,10 +5236,52 @@
             "title": "Parts",
             "type": "array"
           },
+          "persist": {
+            "default": true,
+            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the pre-MET-740 throwaway-only behavior.",
+            "title": "Persist",
+            "type": "boolean"
+          },
+          "persist_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Work-product display name (default: '<robot_name> robot description').",
+            "title": "Persist Name"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Project to link the persisted work product to.",
+            "title": "Project Id"
+          },
           "robot_name": {
             "default": "robot",
             "title": "Robot Name",
             "type": "string"
+          },
+          "update_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An existing robot_description node's id \u2014 when given, this export replaces that node's content and records a new version instead of creating a new node.",
+            "title": "Update Node Id"
           }
         },
         "required": [
@@ -5155,6 +5315,17 @@
           },
           "output_file": {
             "$ref": "#/components/schemas/ExportFile"
+          },
+          "robot_description_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robot Description Node Id"
           },
           "robot_name": {
             "title": "Robot Name",
