@@ -4,26 +4,40 @@
 # Provides Gazebo Sim (gz-sim, "Harmonic") headless for ROS-native
 # dynamics/physics simulation, with a JSON-RPC MCP adapter.
 #
-# NOTE: unlike calculix's Dockerfile (verified against a real ``ccx``
-# install), this file has not been build-tested against a real ``gz``
-# binary in this environment -- no Docker daemon / package-index network
-# access was available while authoring it. Treat the OSRF repo setup and
-# package name below as a first cut to verify before relying on it, the
-# same way MET-380 caught a Debian packaging gotcha for CalculiX.
+# MET-740: build-verified against a real Docker daemon (previously untested,
+# per the note this replaced). Two real bugs found and fixed here:
+#
+# 1. The base image was Debian (python:3.12-slim-bookworm), but OSRF's
+#    "ubuntu-stable" apt repo has no Debian codenames at all -- `apt-get
+#    update` 404'd immediately.
+# 2. OSRF DOES also publish a "debian-stable" repo (right codename,
+#    "bookworm" resolves), but its package index is EMPTY for every Debian
+#    codename tried (bullseye/bookworm both 0-byte Packages files, confirmed
+#    via the raw InRelease MD5Sum listing) -- gz-harmonic (or anything else)
+#    is simply never published there. OSRF's only real, populated repo is
+#    Ubuntu ("ubuntu-stable"/jammy|noble, confirmed non-empty + gz-harmonic
+#    present in both). Base image switched to ubuntu:24.04 (noble) below --
+#    it also ships Python 3.12 directly via apt (3.12.3), matching the rest
+#    of this repo's Python version without needing a separate python:3.12
+#    base at all.
 
-FROM python:3.12-slim-bookworm AS deps
+FROM ubuntu:24.04 AS deps
 
 WORKDIR /build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
+        ca-certificates \
+        python3.12 \
+        python3.12-venv \
+        python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY tool_registry/tools/gazebo/requirements.txt /build/requirements.txt
-RUN pip install --no-cache-dir -r /build/requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r /build/requirements.txt
 
 # -- Stage 2: runtime --------------------------------------------------------
-FROM python:3.12-slim-bookworm AS runtime
+FROM ubuntu:24.04 AS runtime
 
 LABEL maintainer="MetaForge <team@metaforge.dev>"
 LABEL version="0.1.0"
@@ -32,10 +46,13 @@ LABEL org.opencontainers.image.source="https://github.com/FidelOdok/MetaForge"
 
 WORKDIR /app
 
-# Install Gazebo Sim (Harmonic) from the OSRF apt repo. Headless server-only
-# use (-s flag at runtime) still needs the simulation/physics packages, not
-# the GUI ones -- gz-sim is the meta-package that pulls those in.
+# Install Python 3.12 + Gazebo Sim (Harmonic) from the OSRF apt repo.
+# Headless server-only use (-s flag at runtime) still needs the
+# simulation/physics packages, not the GUI ones -- gz-sim is the
+# meta-package that pulls those in.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.12 \
+        ca-certificates \
         curl \
         gnupg \
         lsb-release \
@@ -48,7 +65,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && command -v gz
 
 # Copy Python packages from deps stage
-COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/lib/python3.12 /usr/lib/python3.12
+COPY --from=deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Copy adapter source code
@@ -76,6 +94,6 @@ WORKDIR /workspace
 EXPOSE 8201
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8201/health')" || exit 1
+    CMD python3.12 -c "import urllib.request; urllib.request.urlopen('http://localhost:8201/health')" || exit 1
 
-ENTRYPOINT ["python", "-m", "tool_registry.tools.gazebo.entrypoint"]
+ENTRYPOINT ["python3.12", "-m", "tool_registry.tools.gazebo.entrypoint"]
