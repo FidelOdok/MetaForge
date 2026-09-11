@@ -1,5 +1,4 @@
-import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -13,13 +12,6 @@ import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
-// MET-740 follow-up: same code-split rationale as AssemblyExportPanel's own
-// lazy import of this component -- urdf-loader + @dimforge/rapier3d-compat
-// (WASM) shouldn't load on every TwinViewerPage render, only once a robot
-// is actually being viewed.
-const UrdfPreviewPanel = lazy(() =>
-  import('../components/viewer/UrdfPreviewPanel').then((m) => ({ default: m.UrdfPreviewPanel })),
-);
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
@@ -626,48 +618,35 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
  * directly by GET /nodes/{id}/file + GET /nodes/{id}/files/{filename}
  * (the same persisted node data the Assembly panel's "Load existing
  * robot description" dropdown reads, just skipping the form entirely).
+ *
+ * MET-747: previously opened a second, independent floating Canvas
+ * (UrdfPreviewPanel, portal'd to escape MET-746's backdrop-filter clipping)
+ * instead of the main viewer already used for cad_model nodes -- two
+ * separate Three.js scenes/OrbitControls/render loops for what is, from
+ * the user's perspective, "view this thing in 3D". Now this button just
+ * loads the robot description into the SAME main viewer/Canvas (R3FViewer),
+ * the same way "View 3D Model" loads a GLB there -- one viewer, dispatched
+ * on the selected node's wp_type instead of a bespoke popup per node type.
  */
 function RobotDescriptionViewSection({ node }: { node: TwinNode }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const loadRobotDescription = useViewerStore((s) => s.loadRobotDescription);
+  const setViewMode = useViewerStore((s) => s.setViewMode);
   if (node.properties.wp_type !== 'robot_description') return null;
-
-  const urdfFile: ExportFile = {
-    filename: String(node.properties.original_filename ?? 'model.urdf'),
-    download_url: nodeFileUrl(node.id),
-  };
 
   return (
     <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
-      <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)} className="text-xs w-full">
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() => {
+          loadRobotDescription(node.id);
+          setViewMode('3d');
+        }}
+        className="text-xs w-full"
+      >
         <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>smart_toy</span>
         View Robot
       </Button>
-      {previewOpen &&
-        // MET-746: a plain position:fixed div here is NOT enough to escape
-        // this section's ancestor GlassPanel -- GlassPanel sets
-        // backdropFilter (blur), and per spec `filter`/`backdrop-filter`
-        // makes an element a containing block for its `position: fixed`
-        // descendants (same rule as `transform`). Without a portal, this
-        // overlay was getting trapped inside GlassPanel's 320px, overflow:
-        // hidden box -- clipped, and stacked below the react-flow canvas
-        // for click purposes (confirmed via document.elementFromPoint: a
-        // click on the visible checkbox resolved to the graph pane
-        // underneath). createPortal renders it as a real child of <body>,
-        // genuinely escaping every ancestor's stacking/clipping context.
-        createPortal(
-          <div style={{ position: 'fixed', top: 52, right: 400, zIndex: 60 }}>
-            <Suspense
-              fallback={
-                <div className="font-mono text-xs p-2" style={{ color: KC.onSurfaceVariant }}>
-                  Loading preview…
-                </div>
-              }
-            >
-              <UrdfPreviewPanel urdfFile={urdfFile} onClose={() => setPreviewOpen(false)} />
-            </Suspense>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }
@@ -863,6 +842,8 @@ export function TwinViewerPage() {
   }
   // Track which node's model is loaded so the auto-loader (MET-505) doesn't refetch.
   const [loadedModelNodeId, setLoadedModelNodeId] = useState<string | null>(null);
+  // Same tracking for the robot-description auto-loader (MET-747).
+  const [loadedRobotNodeId, setLoadedRobotNodeId] = useState<string | null>(null);
   // MET-683: distinguish "nothing loaded yet" from "we tried and the backend
   // rejected it" -- previously a failed conversion (e.g. an empty/invalid
   // STEP) silently fell back to the generic upload placeholder with no
@@ -892,6 +873,8 @@ export function TwinViewerPage() {
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const loadModel = useViewerStore((s) => s.loadModel);
   const clearModel = useViewerStore((s) => s.clearModel);
+  const loadRobotDescription = useViewerStore((s) => s.loadRobotDescription);
+  const robotDescription = useViewerStore((s) => s.robotDescription);
 
   const uploadMutation = useUploadAndConvert();
 
@@ -917,6 +900,7 @@ export function TwinViewerPage() {
     if (prevProjectIdRef.current !== null && prevProjectIdRef.current !== activeProjectId) {
       setSelectedId(null);
       setLoadedModelNodeId(null);
+      setLoadedRobotNodeId(null);
     }
     prevProjectIdRef.current = activeProjectId;
   }, [activeProjectId]);
@@ -935,7 +919,11 @@ export function TwinViewerPage() {
     if (viewMode !== '3d') return;
     const n = selectedNode;
     if (!n || n.properties.wp_type !== 'cad_model') return;
-    if (loadedModelNodeId === n.id) return;
+    // MET-747: also reload if a robot description's mutual-exclusion clear
+    // wiped glbUrl since this node was last loaded -- loadedModelNodeId
+    // alone can't tell "already showing" from "was showing, then cleared
+    // by switching to a robot and back to this same node".
+    if (loadedModelNodeId === n.id && glbUrl) return;
     // MET-683: clear any PREVIOUS node's geometry before attempting this
     // node's load -- otherwise a failed load left the prior node's model on
     // screen under the new node's breadcrumb, with no error overlay (it was
@@ -978,7 +966,24 @@ export function TwinViewerPage() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, selectedNode, loadedModelNodeId, loadModel, clearModel]);
+  }, [viewMode, selectedNode, loadedModelNodeId, glbUrl, loadModel, clearModel]);
+
+  // MET-747: same auto-load pattern as MET-505 above, for robot_description
+  // nodes -- selecting a different robot while already in 3D/MODEL mode
+  // swaps the main viewer's content instead of requiring a fresh click.
+  // loadRobotDescription itself clears any loaded GLB model (mutual
+  // exclusion lives in the store, not here). Guards on the store's own
+  // robotDescription, not just loadedRobotNodeId, for the same reason the
+  // CAD_MODEL effect above now checks glbUrl too -- switching to a CAD node
+  // and back to this same robot in between clears robotDescription.
+  useEffect(() => {
+    if (viewMode !== '3d') return;
+    const n = selectedNode;
+    if (!n || n.properties.wp_type !== 'robot_description') return;
+    if (loadedRobotNodeId === n.id && robotDescription) return;
+    loadRobotDescription(n.id);
+    setLoadedRobotNodeId(n.id);
+  }, [viewMode, selectedNode, loadedRobotNodeId, robotDescription, loadRobotDescription]);
 
   useEffect(() => {
     if (!uploadMutation.isPending) {
