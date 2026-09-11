@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -641,23 +642,32 @@ function RobotDescriptionViewSection({ node }: { node: TwinNode }) {
         <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>smart_toy</span>
         View Robot
       </Button>
-      {previewOpen && (
-        // position: fixed escapes this panel's own overflow-y-auto ancestor
-        // regardless of where in the DOM it's mounted -- same floating
-        // overlay UrdfPreviewPanel expects when opened from the Assembly
-        // export panel, without needing to lift state to the page level.
-        <div style={{ position: 'fixed', top: 52, right: 400, zIndex: 60 }}>
-          <Suspense
-            fallback={
-              <div className="font-mono text-xs p-2" style={{ color: KC.onSurfaceVariant }}>
-                Loading preview…
-              </div>
-            }
-          >
-            <UrdfPreviewPanel urdfFile={urdfFile} onClose={() => setPreviewOpen(false)} />
-          </Suspense>
-        </div>
-      )}
+      {previewOpen &&
+        // MET-746: a plain position:fixed div here is NOT enough to escape
+        // this section's ancestor GlassPanel -- GlassPanel sets
+        // backdropFilter (blur), and per spec `filter`/`backdrop-filter`
+        // makes an element a containing block for its `position: fixed`
+        // descendants (same rule as `transform`). Without a portal, this
+        // overlay was getting trapped inside GlassPanel's 320px, overflow:
+        // hidden box -- clipped, and stacked below the react-flow canvas
+        // for click purposes (confirmed via document.elementFromPoint: a
+        // click on the visible checkbox resolved to the graph pane
+        // underneath). createPortal renders it as a real child of <body>,
+        // genuinely escaping every ancestor's stacking/clipping context.
+        createPortal(
+          <div style={{ position: 'fixed', top: 52, right: 400, zIndex: 60 }}>
+            <Suspense
+              fallback={
+                <div className="font-mono text-xs p-2" style={{ color: KC.onSurfaceVariant }}>
+                  Loading preview…
+                </div>
+              }
+            >
+              <UrdfPreviewPanel urdfFile={urdfFile} onClose={() => setPreviewOpen(false)} />
+            </Suspense>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
