@@ -119,8 +119,15 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         geometryParameters=wp.metadata.get("geometry_features"),
         hasScript=bool(wp.metadata.get("script_node_id")),
         # MET-740: {parts, joints} for a robot_description node — None for
-        # every other node type (metadata simply has no "assembly" key).
-        assembly=wp.metadata.get("assembly"),
+        # every other node type. MET-745: api_gateway/cad/builder.py's
+        # build_assembly() independently writes metadata["assembly"] = True
+        # (a bare "was this CAD_MODEL built from multiple parts?" flag) on
+        # unrelated CAD_MODEL nodes, predating MET-740 — a real key-name
+        # collision, not a hypothetical one. Only surface it here when it's
+        # actually the robot_description {parts, joints} shape.
+        assembly=wp.metadata.get("assembly")
+        if isinstance(wp.metadata.get("assembly"), dict)
+        else None,
     )
 
 
