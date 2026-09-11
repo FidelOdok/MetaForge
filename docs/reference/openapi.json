@@ -9499,6 +9499,56 @@
         ]
       }
     },
+    "/v1/twin/nodes/{node_id}/files/{filename}": {
+      "get": {
+        "description": "Stream one of a work product's NAMED blobs (MET-740 follow-up).\n\n``GET /nodes/{id}/file`` only ever serves the primary blob. A\n``robot_description`` node stores N additional mesh blobs (one per\nURDF link) under ``metadata[\"mesh_files\"]`` (link filename -> MinIO\nobject key) \u2014 this resolves any of THOSE by filename, or falls back to\nthe primary blob if ``filename`` matches it, so the dashboard's\nexisting URDF preview (which expects every mesh reachable at\n``{some_base_url}/{filename}``, exactly like a fresh export's\n``_cad_exports/{export_id}/`` directory) can point straight at a\npersisted node with zero re-export round trip.",
+        "operationId": "download_node_named_file_v1_twin_nodes__node_id__files__filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Node Named File",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/nodes/{node_id}/iterate": {
       "post": {
         "description": "Record a new revision and apply metadata updates to a work product.",

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -12,6 +12,13 @@ import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
+// MET-740 follow-up: same code-split rationale as AssemblyExportPanel's own
+// lazy import of this component -- urdf-loader + @dimforge/rapier3d-compat
+// (WASM) shouldn't load on every TwinViewerPage render, only once a robot
+// is actually being viewed.
+const UrdfPreviewPanel = lazy(() =>
+  import('../components/viewer/UrdfPreviewPanel').then((m) => ({ default: m.UrdfPreviewPanel })),
+);
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
@@ -569,6 +576,10 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
           <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
         )}
 
+        {/* View a saved robot description directly -- no export form, no
+         * manual part/joint re-entry (MET-740 follow-up). */}
+        <RobotDescriptionViewSection node={node} />
+
         {/* File: worktype + path + download / open / preview (MET-483) */}
         <WorkProductFileSection node={node} />
 
@@ -599,6 +610,53 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
           <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── RobotDescriptionViewSection ─────────────────────────────────────────────────
+/**
+ * MET-740 follow-up: "just look at a robot I already built" was a real
+ * complaint -- the only path to a URDF preview went through the Assembly
+ * export panel's full form (pick every part from a dropdown, re-enter
+ * every joint), even for a robot that was already fully specified and
+ * saved. This is a pure READ action instead: one click, no form, backed
+ * directly by GET /nodes/{id}/file + GET /nodes/{id}/files/{filename}
+ * (the same persisted node data the Assembly panel's "Load existing
+ * robot description" dropdown reads, just skipping the form entirely).
+ */
+function RobotDescriptionViewSection({ node }: { node: TwinNode }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  if (node.properties.wp_type !== 'robot_description') return null;
+
+  const urdfFile: ExportFile = {
+    filename: String(node.properties.original_filename ?? 'model.urdf'),
+    download_url: nodeFileUrl(node.id),
+  };
+
+  return (
+    <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)} className="text-xs w-full">
+        <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>smart_toy</span>
+        View Robot
+      </Button>
+      {previewOpen && (
+        // position: fixed escapes this panel's own overflow-y-auto ancestor
+        // regardless of where in the DOM it's mounted -- same floating
+        // overlay UrdfPreviewPanel expects when opened from the Assembly
+        // export panel, without needing to lift state to the page level.
+        <div style={{ position: 'fixed', top: 52, right: 400, zIndex: 60 }}>
+          <Suspense
+            fallback={
+              <div className="font-mono text-xs p-2" style={{ color: KC.onSurfaceVariant }}>
+                Loading preview…
+              </div>
+            }
+          >
+            <UrdfPreviewPanel urdfFile={urdfFile} onClose={() => setPreviewOpen(false)} />
+          </Suspense>
+        </div>
+      )}
     </div>
   );
 }

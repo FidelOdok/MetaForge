@@ -58,13 +58,23 @@ export function useUrdfRobot(urdfText: string | null, meshBaseUrl: string) {
   return { robot, error };
 }
 
-/** Derive the shared per-export mesh directory URL from any one of that
- * export's `ExportFile.download_url`s (they all share the same
- * `/v1/cad-export/download/{export_id}/` prefix — see this module's
- * docstring). Returns '' if the URL doesn't match the expected shape
- * rather than guessing, so a resolver mismatch fails loudly (a broken
- * preview) instead of silently loading nothing. */
+/** Derive the shared mesh directory URL a URDF's own file URL lives
+ * alongside, for either of the two shapes this preview can be fed from:
+ *
+ * - A fresh export: `ExportFile.download_url`s all share a
+ *   `/v1/cad-export/download/{export_id}/` prefix.
+ * - A persisted `robot_description` Twin node (MET-740 follow-up): its
+ *   URDF is `/v1/twin/nodes/{id}/file`, and its mesh files live at the
+ *   sibling `/v1/twin/nodes/{id}/files/{filename}` route — letting the
+ *   preview point straight at a saved node with no re-export round trip.
+ *
+ * Returns '' if the URL matches neither shape rather than guessing, so a
+ * resolver mismatch fails loudly (a broken preview) instead of silently
+ * loading nothing. */
 export function meshBaseUrlFrom(downloadUrl: string): string {
-  const match = downloadUrl.match(/^(.*\/download\/[^/]+\/)[^/]+$/);
-  return match?.[1] ?? '';
+  const exportMatch = downloadUrl.match(/^(.*\/download\/[^/]+\/)[^/]+$/);
+  if (exportMatch?.[1]) return exportMatch[1];
+  const nodeMatch = downloadUrl.match(/^(.*\/nodes\/[^/]+)\/file$/);
+  if (nodeMatch?.[1]) return `${nodeMatch[1]}/files/`;
+  return '';
 }

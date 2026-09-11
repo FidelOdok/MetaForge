@@ -470,6 +470,67 @@ async def download_node_file(
         )
 
 
+@router.get("/nodes/{node_id}/files/{filename}")
+async def download_node_named_file(node_id: str, filename: str) -> Response:
+    """Stream one of a work product's NAMED blobs (MET-740 follow-up).
+
+    ``GET /nodes/{id}/file`` only ever serves the primary blob. A
+    ``robot_description`` node stores N additional mesh blobs (one per
+    URDF link) under ``metadata["mesh_files"]`` (link filename -> MinIO
+    object key) — this resolves any of THOSE by filename, or falls back to
+    the primary blob if ``filename`` matches it, so the dashboard's
+    existing URDF preview (which expects every mesh reachable at
+    ``{some_base_url}/{filename}``, exactly like a fresh export's
+    ``_cad_exports/{export_id}/`` directory) can point straight at a
+    persisted node with zero re-export round trip.
+    """
+    with tracer.start_as_current_span("twin.download_node_named_file") as span:
+        span.set_attribute("twin.node_id", node_id)
+        span.set_attribute("twin.filename", filename)
+        try:
+            uid = UUID(node_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid node ID format")
+
+        wp = await _twin.get_work_product(uid)
+        if wp is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+
+        mesh_files = wp.metadata.get("mesh_files")
+        mesh_key = mesh_files.get(filename) if isinstance(mesh_files, dict) else None
+
+        if mesh_key:
+            from api_gateway.twin.blob_store import fetch_work_product_blob
+
+            try:
+                content = fetch_work_product_blob(mesh_key)
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001 - storage misconfigured / object gone
+                raise HTTPException(
+                    status_code=502, detail="Mesh blob could not be read from storage"
+                ) from exc
+        else:
+            content, primary_filename = _resolve_blob(wp)
+            if filename != primary_filename:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"'{filename}' is not a stored file on this work product",
+                )
+
+        media_type = _content_type_for("", filename)
+        span.set_attribute("file.media_type", media_type)
+        span.set_attribute("file.size", len(content))
+        logger.info(
+            "node_named_file_served",
+            node_id=node_id,
+            filename=filename,
+            media_type=media_type,
+            size=len(content),
+        )
+        return Response(content=content, media_type=media_type)
+
+
 @router.delete("/nodes/{node_id}", status_code=204)
 async def delete_node(
     node_id: str,
