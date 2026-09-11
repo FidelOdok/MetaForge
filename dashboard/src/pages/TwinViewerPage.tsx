@@ -972,18 +972,25 @@ export function TwinViewerPage() {
   // nodes -- selecting a different robot while already in 3D/MODEL mode
   // swaps the main viewer's content instead of requiring a fresh click.
   // loadRobotDescription itself clears any loaded GLB model (mutual
-  // exclusion lives in the store, not here). Guards on the store's own
-  // robotDescription, not just loadedRobotNodeId, for the same reason the
-  // CAD_MODEL effect above now checks glbUrl too -- switching to a CAD node
-  // and back to this same robot in between clears robotDescription.
+  // exclusion lives in the store, not here).
+  //
+  // Guards on `hasRobotLoaded` (a primitive boolean), NOT the
+  // `robotDescription` object itself -- loadRobotDescription creates a
+  // brand-new {nodeId} object every call, so using that object as an effect
+  // dependency meant its reference "changed" on every run even when nodeId
+  // didn't, defeating the loadedRobotNodeId guard and causing an infinite
+  // render loop (confirmed live: React's "Maximum update depth exceeded").
+  // Boolean(robotDescription) is Object.is-stable across re-renders once
+  // true, which is all this guard actually needs.
+  const hasRobotLoaded = Boolean(robotDescription);
   useEffect(() => {
     if (viewMode !== '3d') return;
     const n = selectedNode;
     if (!n || n.properties.wp_type !== 'robot_description') return;
-    if (loadedRobotNodeId === n.id && robotDescription) return;
+    if (loadedRobotNodeId === n.id && hasRobotLoaded) return;
     loadRobotDescription(n.id);
     setLoadedRobotNodeId(n.id);
-  }, [viewMode, selectedNode, loadedRobotNodeId, robotDescription, loadRobotDescription]);
+  }, [viewMode, selectedNode, loadedRobotNodeId, hasRobotLoaded, loadRobotDescription]);
 
   useEffect(() => {
     if (!uploadMutation.isPending) {
