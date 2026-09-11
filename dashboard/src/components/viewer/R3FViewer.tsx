@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
@@ -14,6 +14,16 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { SceneContents } from './SceneContents';
 import { BooleanCutPanel } from './BooleanCutPanel';
 import type { PartInfo } from '../../types/viewer';
+
+// MET-747: lazy so an ordinary CAD_MODEL viewer never pulls in
+// urdf-loader/@dimforge/rapier3d-compat (same rationale AssemblyExportPanel's
+// lazy UrdfPreviewPanel import already established).
+const RobotSceneContents = lazy(() =>
+  import('./RobotSceneContents').then((m) => ({ default: m.RobotSceneContents })),
+);
+const RobotControlsOverlay = lazy(() =>
+  import('./RobotControlsOverlay').then((m) => ({ default: m.RobotControlsOverlay })),
+);
 
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -280,6 +290,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
+  const robotDescription = useViewerStore((s) => s.robotDescription);
   const themeMode = useThemeStore((s) => s.mode);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
 
@@ -291,7 +302,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
 
   const bgColor = isDark ? '#18181b' : '#f4f4f5';
 
-  if (!glbUrl || !manifest) {
+  if (!robotDescription && (!glbUrl || !manifest)) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-zinc-400">
         Upload a STEP file or load a model to view it in 3D
@@ -318,16 +329,26 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         }}
       >
         <Suspense fallback={<LoadingFallback />}>
-          <SceneContents
-            glbUrl={glbUrl}
-            manifest={manifest}
-            onPartClick={onPartClick}
-          />
+          {robotDescription ? (
+            <RobotSceneContents nodeId={robotDescription.nodeId} />
+          ) : (
+            glbUrl &&
+            manifest && (
+              <SceneContents
+                glbUrl={glbUrl}
+                manifest={manifest}
+                onPartClick={onPartClick}
+              />
+            )
+          )}
         </Suspense>
 
         {/* Boolean-cut cutter preview (MET-612) — translucent red, same Canvas,
             identity transform (v1 scope: both models authored already
-            positioned relative to the target's origin). */}
+            positioned relative to the target's origin). Robot descriptions
+            don't participate in boolean-cut, so no robotDescription guard
+            needed here — booleanCut state is only ever populated from the
+            CAD_MODEL "View 3D Model" flow. */}
         {booleanCut.cutterGlbUrl && booleanCut.cutterManifest && (
           <Suspense fallback={null}>
             <SceneContents
@@ -375,6 +396,15 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
 
       {/* Boolean-cut panel (MET-612) */}
       <BooleanCutPanel onCutComplete={onBooleanCutComplete} />
+
+      {/* Robot-description joint sliders + physics toggle (MET-747) — an
+          HTML sibling of the Canvas, since it needs <input type="range">
+          controls the Canvas itself can't render. */}
+      {robotDescription && (
+        <Suspense fallback={null}>
+          <RobotControlsOverlay />
+        </Suspense>
+      )}
 
       {/* Controls hint overlay — bottom-20 clears both the 32px twin status
           bar and the page's bottom-left Sessions button (bottom:40 + 32px

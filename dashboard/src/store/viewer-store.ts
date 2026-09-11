@@ -38,6 +38,16 @@ export interface ModelBounds {
   groundY: number;
 }
 
+/** A robot_description node's movable joints, serialized out of the parsed
+ * URDFRobot so the joint-slider overlay (an HTML sibling of the Canvas) can
+ * render controls without needing the live Three.js robot object itself. */
+export interface RobotJointInfo {
+  name: string;
+  lower: number;
+  upper: number;
+  initial: number;
+}
+
 interface ViewerState {
   glbUrl: string | null;
   manifest: ModelManifest | null;
@@ -52,6 +62,28 @@ interface ViewerState {
   /** Set by SceneContents once the primary model's GLB scene has loaded. */
   modelBounds: ModelBounds | null;
   setModelBounds: (bounds: ModelBounds | null) => void;
+
+  /** A robot_description node loaded into the SAME main viewer/Canvas as
+   * the GLB path (mutually exclusive with glbUrl/manifest) — the direct
+   * "View Robot" consolidation: one Canvas, one set of controls, dispatched
+   * on the selected node's wp_type instead of a second floating popup
+   * Canvas (MET-747). RobotSceneContents (a Canvas child) does the actual
+   * URDF fetch/parse; this slice only carries the node id plus the
+   * UI-facing state (joints, values, physics toggle) that the joint-slider
+   * overlay — a Canvas *sibling*, so it can't read Three.js objects
+   * directly — needs to render itself.
+   */
+  robotDescription: { nodeId: string } | null;
+  robotJoints: RobotJointInfo[] | null;
+  robotJointValues: Record<string, number>;
+  robotPhysicsEnabled: boolean;
+  robotError: string | null;
+  loadRobotDescription: (nodeId: string) => void;
+  clearRobotDescription: () => void;
+  setRobotJoints: (joints: RobotJointInfo[]) => void;
+  setRobotJointValue: (name: string, value: number) => void;
+  setRobotPhysicsEnabled: (enabled: boolean) => void;
+  setRobotError: (message: string | null) => void;
 
   loadModel: (glbUrl: string, manifest: ModelManifest) => void;
   /** MET-683: clear the loaded model WITHOUT leaving 3D view mode (unlike
@@ -103,6 +135,51 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   modelBounds: null,
   setModelBounds: (bounds) => set({ modelBounds: bounds }),
 
+  robotDescription: null,
+  robotJoints: null,
+  robotJointValues: {},
+  robotPhysicsEnabled: false,
+  robotError: null,
+
+  loadRobotDescription: (nodeId) =>
+    set({
+      robotDescription: { nodeId },
+      robotJoints: null,
+      robotJointValues: {},
+      robotPhysicsEnabled: false,
+      robotError: null,
+      viewMode: '3d',
+      // Mutually exclusive with the GLB path — same Canvas, one at a time.
+      glbUrl: null,
+      manifest: null,
+      selectedMeshName: null,
+      hiddenMeshes: new Set(),
+      explodeFactor: 0,
+      modelBounds: null,
+    }),
+
+  clearRobotDescription: () =>
+    set({
+      robotDescription: null,
+      robotJoints: null,
+      robotJointValues: {},
+      robotPhysicsEnabled: false,
+      robotError: null,
+    }),
+
+  setRobotJoints: (joints) =>
+    set({
+      robotJoints: joints,
+      robotJointValues: Object.fromEntries(joints.map((j) => [j.name, j.initial])),
+    }),
+
+  setRobotJointValue: (name, value) =>
+    set((state) => ({ robotJointValues: { ...state.robotJointValues, [name]: value } })),
+
+  setRobotPhysicsEnabled: (enabled) => set({ robotPhysicsEnabled: enabled }),
+
+  setRobotError: (message) => set({ robotError: message }),
+
   loadModel: (glbUrl, manifest) =>
     set({
       glbUrl,
@@ -112,6 +189,12 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       explodeFactor: 0,
       viewMode: '3d',
       modelBounds: null,
+      // Mutually exclusive with the robot-description path.
+      robotDescription: null,
+      robotJoints: null,
+      robotJointValues: {},
+      robotPhysicsEnabled: false,
+      robotError: null,
     }),
 
   clearModel: () =>
@@ -164,6 +247,11 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       explodeFactor: 0,
       viewMode: 'graph',
       modelBounds: null,
+      robotDescription: null,
+      robotJoints: null,
+      robotJointValues: {},
+      robotPhysicsEnabled: false,
+      robotError: null,
     }),
 
   registerCameraReset: (fn) => set({ _cameraResetFn: fn }),
