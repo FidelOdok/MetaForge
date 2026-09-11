@@ -42,14 +42,47 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
 import structlog
 
 from observability.tracing import get_tracer
 from tool_registry.container_runtime import ContainerConfig, ContainerRuntime, ExecutionResult
 
+# MET-740: conditional import, mirroring CadQuery's own pattern in
+# operations.py. `tool_registry/__init__.py` imports this module
+# unconditionally for EVERY adapter container (not just the ones that
+# actually dispatch to a remote compute provider), so a hard `import httpx`
+# here means every adapter's requirements.txt must carry httpx too, or the
+# adapter crash-loops on `import tool_registry` alone -- confirmed live:
+# the cadquery-adapter container (whose requirements.txt has never listed
+# httpx) crash-looped with `ModuleNotFoundError: No module named 'httpx'`
+# the first time it was rebuilt after this module was added, despite never
+# touching RunPod/Vast.ai. httpx is only ever actually used inside
+# RunPodRuntime/VastAIRuntime -- deferring the import there so the rest of
+# tool_registry (and every adapter that doesn't need remote dispatch) keeps
+# working without it.
+try:
+    import httpx
+
+    HAS_HTTPX = True
+except ImportError:  # pragma: no cover - exercised only when httpx is absent
+    httpx = None  # type: ignore[assignment]
+    HAS_HTTPX = False
+
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.compute_providers")
+
+
+class HttpxNotAvailableError(RuntimeError):
+    """Raised when a remote ContainerRuntime is used without httpx installed."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"{provider} needs httpx to make API requests, but it isn't installed "
+            "in this container (pip install httpx). Only adapters that actually "
+            "dispatch to a remote compute provider need it -- local Docker "
+            "execution (the default) never touches this code path."
+        )
+
 
 _POLL_INTERVAL_SECONDS = 2.0
 _REQUEST_TIMEOUT_SECONDS = 30.0
@@ -82,6 +115,8 @@ class RunPodRuntime(ContainerRuntime):
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        if client is None and not HAS_HTTPX:
+            raise HttpxNotAvailableError("RunPodRuntime")
         self._api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self._client = client or httpx.AsyncClient()
         self._owns_client = client is None
@@ -199,6 +234,8 @@ class VastAIRuntime(ContainerRuntime):
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        if client is None and not HAS_HTTPX:
+            raise HttpxNotAvailableError("VastAIRuntime")
         self._api_key = api_key or os.environ.get("VAST_API_KEY", "")
         self._client = client or httpx.AsyncClient()
         self._owns_client = client is None

@@ -242,3 +242,42 @@ class TestVastAIRuntime:
 
         runtime = VastAIRuntime(api_key="va_test", client=_vastai_client(handler))
         await runtime.cleanup("999")  # must not raise
+
+
+# ======================================================================
+# MET-740: httpx conditional import
+#
+# `tool_registry/__init__.py` imports this module unconditionally for
+# EVERY adapter container, not just the ones that dispatch to a remote
+# compute provider -- confirmed live that a hard top-level `import httpx`
+# here crash-loops any adapter whose requirements.txt doesn't list httpx
+# (e.g. cadquery-adapter, which has never needed it) the moment its image
+# is rebuilt, with no code path anywhere near RunPod/Vast.ai involved.
+# ======================================================================
+
+
+class TestHttpxConditionalImport:
+    def test_runpod_raises_clear_error_without_httpx(self, monkeypatch: pytest.MonkeyPatch):
+        import tool_registry.compute_providers as mod
+
+        monkeypatch.setattr(mod, "HAS_HTTPX", False)
+        with pytest.raises(mod.HttpxNotAvailableError, match="RunPodRuntime"):
+            RunPodRuntime(api_key="x")
+
+    def test_vastai_raises_clear_error_without_httpx(self, monkeypatch: pytest.MonkeyPatch):
+        import tool_registry.compute_providers as mod
+
+        monkeypatch.setattr(mod, "HAS_HTTPX", False)
+        with pytest.raises(mod.HttpxNotAvailableError, match="VastAIRuntime"):
+            VastAIRuntime(api_key="x")
+
+    def test_supplying_a_client_bypasses_the_httpx_check(self, monkeypatch: pytest.MonkeyPatch):
+        # An injected test client (as every other test in this file uses)
+        # must keep working even with HAS_HTTPX patched false -- the guard
+        # only fires when construction would fall back to a real
+        # httpx.AsyncClient().
+        import tool_registry.compute_providers as mod
+
+        monkeypatch.setattr(mod, "HAS_HTTPX", False)
+        client = _runpod_client(lambda r: httpx.Response(200, json={}))
+        RunPodRuntime(api_key="x", client=client)  # must not raise
