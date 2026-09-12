@@ -244,6 +244,30 @@ export function nodeMeshBaseUrl(nodeId: string): string {
   return `${FILE_API_BASE}/twin/nodes/${nodeId}/files/`;
 }
 
+// ── Design-sketch approval gate (follow-up to MET-740/747) ──────────────────
+
+export interface ApproveSketchResult {
+  nodeId: string;
+  approved: boolean;
+  approvedAt: string;
+}
+
+interface ApproveSketchApiResponse {
+  node_id: string;
+  approved: boolean;
+  approved_at: string;
+}
+
+/** POST /v1/twin/nodes/{id}/approve-sketch — human sign-off on a
+ * design_sketch work product, flipping its approval gate so the calling
+ * agent/skill is cleared to proceed to real CAD/build work. */
+export async function approveSketch(nodeId: string, approvedBy?: string): Promise<ApproveSketchResult> {
+  const { data } = await apiClient.post<ApproveSketchApiResponse>(`/twin/nodes/${nodeId}/approve-sketch`, {
+    approved_by: approvedBy,
+  });
+  return { nodeId: data.node_id, approved: data.approved, approvedAt: data.approved_at };
+}
+
 // ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────
 
 export type BooleanCutOperation = 'subtract' | 'union' | 'intersect';
