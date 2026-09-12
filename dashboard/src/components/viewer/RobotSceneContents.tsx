@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { Box3, Vector3 } from 'three';
 import type { Mesh } from 'three';
 import { useUrdfRobot } from '../../hooks/use-urdf-robot';
 import { useUrdfPhysics } from '../../hooks/use-urdf-physics';
@@ -50,6 +52,45 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
   useEffect(() => {
     if (parseError) setRobotError(`Failed to parse URDF: ${parseError.message}`);
   }, [parseError, setRobotError]);
+
+  // MET-747 fix: unlike SceneContents (the GLB path), this never published
+  // modelBounds -- CameraController fell back to DEFAULT_BOUNDS (radius
+  // 36mm, tuned for a small CAD part), leaving the camera framed far too
+  // tight for a ~200-300mm robot. Live-verified: without this, the camera
+  // sits inside/right next to one link, reading as "wrong geometry" when
+  // it was actually just the wrong shot.
+  //
+  // Recomputed for ~90 frames (not once on [robot]) because each link's
+  // <mesh> STL loads asynchronously inside urdf-loader (a background fetch
+  // per link) -- `robot` itself is available the instant URDFLoader.parse()
+  // returns, well before any of that geometry has actually attached, so a
+  // single [robot]-triggered measurement caught an almost-empty box and
+  // froze the camera at a near-zero-size framing (confirmed live: the whole
+  // robot rendered as a barely-visible speck). Recomputing every frame for
+  // ~1.5s lets the box grow to its real size as meshes finish loading, then
+  // stops -- cheap (a handful of frames, one small object graph) and
+  // self-correcting regardless of how long any individual STL fetch takes.
+  const setModelBounds = useViewerStore((s) => s.setModelBounds);
+  const boundsFrameCount = useRef(0);
+  useEffect(() => {
+    boundsFrameCount.current = 0;
+  }, [robot]);
+  useFrame(() => {
+    if (!robot || boundsFrameCount.current >= 90) return;
+    boundsFrameCount.current += 1;
+    robot.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(robot);
+    if (box.isEmpty()) return;
+    const center = new Vector3();
+    box.getCenter(center);
+    const size = new Vector3();
+    box.getSize(size);
+    setModelBounds({
+      center: [center.x, center.y, center.z],
+      radius: Math.max(size.length() / 2, 1),
+      groundY: box.min.y,
+    });
+  });
 
   // MET-747: same shadow flags SceneContents sets for GLB meshes -- without
   // this the viewer's shadow-casting light has nothing to shadow here either.
