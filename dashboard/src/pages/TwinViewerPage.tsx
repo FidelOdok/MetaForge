@@ -15,7 +15,8 @@ import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { useViewerStore } from '../store/viewer-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
-import { getNodeModel, nodeFileUrl, fetchNodeFileText } from '../api/endpoints/twin';
+import { getNodeModel, nodeFileUrl } from '../api/endpoints/twin';
+import { FullScreenPreviewModal } from '../components/viewer/FullScreenPreviewModal';
 import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
 import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
 import { useToast } from '../components/ui/Toast';
@@ -140,11 +141,8 @@ function ToolBtn({
 
 // ── NodeDetail (right floating panel) ────────────────────────────────────────
 // ── Work-product file: worktype + path + download / open / preview (MET-483) ──
-const _PREVIEW_IMG_FORMATS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg']);
-const _PREVIEW_TEXT_FORMATS = new Set([
-  'txt', 'md', 'json', 'csv', 'log', 'kicad_sch', 'kicad_pcb', 'net', 'gbr', 'c', 'h',
-  'urdf', 'xacro', 'sdf', 'usda',
-]);
+// MET-747 follow-up: format-kind detection now lives in FullScreenPreviewModal
+// (the "Preview" action opens that instead of a cramped 320px inline strip).
 
 function FileActionBtn({
   icon,
@@ -167,32 +165,12 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
   const wpType = node.properties.wp_type ? String(node.properties.wp_type) : undefined;
   const filePath = node.properties.file_path ? String(node.properties.file_path) : '';
   const fmt = (node.properties.format ? String(node.properties.format) : '').toLowerCase();
-  const [preview, setPreview] = useState(false);
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
 
-  const isImg = _PREVIEW_IMG_FORMATS.has(fmt);
-  const isPdf = fmt === 'pdf';
-  const isText = _PREVIEW_TEXT_FORMATS.has(fmt);
   const inlineUrl = nodeFileUrl(node.id, false);
   const downloadUrl = nodeFileUrl(node.id, true);
-
-  const togglePreview = useCallback(async () => {
-    if (preview) { setPreview(false); return; }
-    setPreview(true);
-    setError(null);
-    if (isText) {
-      setLoading(true);
-      try {
-        setText(await fetchNodeFileText(node.id));
-      } catch {
-        setError('No file stored for this work product yet.');
-      } finally {
-        setLoading(false);
-      }
-    }
-  }, [preview, isText, node.id]);
+  const isSketch = wpType === 'design_sketch';
+  const needsApproval = isSketch && node.properties.approved !== true;
 
   return (
     <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
@@ -207,6 +185,14 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
           {wpType ?? 'unknown'}
         </span>
         {fmt && <span className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>.{fmt}</span>}
+        {needsApproval && (
+          <span
+            className="font-mono uppercase"
+            style={{ fontSize: 9, color: '#f5b04d', background: 'rgba(245,176,77,0.14)', padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em' }}
+          >
+            Needs approval
+          </span>
+        )}
       </div>
       <div
         className="font-mono mb-2"
@@ -218,27 +204,9 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
       <div className="flex gap-1.5">
         <a href={downloadUrl} download style={{ textDecoration: 'none' }}><FileActionBtn icon="download" label="Download" /></a>
         <a href={inlineUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><FileActionBtn icon="open_in_new" label="Open" /></a>
-        <FileActionBtn icon="visibility" label={preview ? 'Hide' : 'Preview'} onClick={togglePreview} />
+        <FileActionBtn icon="fullscreen" label="Preview" onClick={() => setFullScreen(true)} />
       </div>
-      {preview && (
-        <div className="mt-2" style={{ border: `1px solid ${KC.border}`, borderRadius: 4, overflow: 'hidden', maxHeight: 320 }}>
-          {error ? (
-            <div className="font-mono px-2 py-3" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>{error}</div>
-          ) : isImg ? (
-            <img src={inlineUrl} alt={node.name} style={{ width: '100%', objectFit: 'contain', maxHeight: 320 }} />
-          ) : isPdf ? (
-            <iframe src={inlineUrl} title={node.name} style={{ width: '100%', height: 320, border: 'none', background: '#fff' }} />
-          ) : isText ? (
-            <pre style={{ margin: 0, padding: 8, fontSize: 10, color: KC.onSurface, maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {loading ? 'Loading…' : (text ?? '')}
-            </pre>
-          ) : (
-            <div className="font-mono px-2 py-3" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
-              Inline preview not available for .{fmt || 'this type'} — use Open or Download.
-            </div>
-          )}
-        </div>
-      )}
+      {fullScreen && <FullScreenPreviewModal node={node} onClose={() => setFullScreen(false)} />}
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory } from '../api/endpoints/twin';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory, approveSketch } from '../api/endpoints/twin';
 
 export const twinKeys = {
   all: ['twin'] as const,
@@ -54,5 +54,21 @@ export function useNodeVersionHistory(nodeId: string | undefined) {
     queryFn: () => getNodeVersionHistory(nodeId!),
     enabled: !!nodeId,
     staleTime: 15_000,
+  });
+}
+
+/** Follow-up to MET-740/747: human sign-off on a design_sketch node.
+ * Invalidates the node + its version history so the approval badge and the
+ * new revision it creates show up immediately rather than on the next poll. */
+export function useApproveSketch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeId, approvedBy }: { nodeId: string; approvedBy?: string }) =>
+      approveSketch(nodeId, approvedBy),
+    onSuccess: (_data, { nodeId }) => {
+      queryClient.invalidateQueries({ queryKey: twinKeys.node(nodeId) });
+      queryClient.invalidateQueries({ queryKey: [...twinKeys.all, nodeId, 'versions'] });
+      queryClient.invalidateQueries({ queryKey: twinKeys.all });
+    },
   });
 }
