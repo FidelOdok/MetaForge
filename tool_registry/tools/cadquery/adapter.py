@@ -310,6 +310,34 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": "Optional output .urdf/.xacro file path",
                         },
+                        "color_rgba": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "description": (
+                                "[r, g, b, a], each 0-1. Attaches a <material><color> "
+                                "to the link's visual geometry -- authored design "
+                                "color, not a renderer-invented palette. Omit for no "
+                                "<material> (unchanged default behavior)."
+                            ),
+                        },
+                        "mesh_tolerance": {
+                            "type": "number",
+                            "description": (
+                                "Max linear deviation (mm) between the tessellated "
+                                "mesh and the true CAD surface -- smaller means more "
+                                "triangles on curves/fillets and less visible faceting. "
+                                "Omit to keep OCCT's default."
+                            ),
+                        },
+                        "mesh_angular_tolerance": {
+                            "type": "number",
+                            "description": (
+                                "Max angle (radians) between adjacent facet normals. "
+                                "Omit to keep OCCT's default."
+                            ),
+                        },
                     },
                     "required": ["input_file"],
                 },
@@ -355,7 +383,7 @@ class CadqueryServer(McpToolServer):
                             "type": "array",
                             "description": (
                                 "One entry per link: {input_file, link_name, "
-                                "material?, density_kg_m3?}"
+                                "material?, density_kg_m3?, color_rgba?}"
                             ),
                             "items": {
                                 "type": "object",
@@ -364,6 +392,18 @@ class CadqueryServer(McpToolServer):
                                     "link_name": {"type": "string"},
                                     "material": {"type": "string"},
                                     "density_kg_m3": {"type": "number"},
+                                    "color_rgba": {
+                                        "type": "array",
+                                        "items": {"type": "number"},
+                                        "minItems": 4,
+                                        "maxItems": 4,
+                                        "description": (
+                                            "[r, g, b, a], each 0-1. Attaches a "
+                                            "<material><color> to this link's visual "
+                                            "geometry -- authored design color, not a "
+                                            "renderer-invented palette."
+                                        ),
+                                    },
                                 },
                                 "required": ["input_file", "link_name"],
                             },
@@ -410,6 +450,22 @@ class CadqueryServer(McpToolServer):
                         "output_path": {
                             "type": "string",
                             "description": "Optional output .urdf/.xacro file path",
+                        },
+                        "mesh_tolerance": {
+                            "type": "number",
+                            "description": (
+                                "Max linear deviation (mm) between the tessellated "
+                                "mesh and the true CAD surface, applied to every part "
+                                "-- smaller means more triangles on curves/fillets and "
+                                "less visible faceting. Omit to keep OCCT's default."
+                            ),
+                        },
+                        "mesh_angular_tolerance": {
+                            "type": "number",
+                            "description": (
+                                "Max angle (radians) between adjacent facet normals. "
+                                "Omit to keep OCCT's default."
+                            ),
                         },
                     },
                     "required": ["parts", "joints"],
@@ -1231,6 +1287,9 @@ class CadqueryServer(McpToolServer):
             mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
             xacro=bool(arguments.get("xacro", False)),
             output_path=arguments.get("output_path", ""),
+            color_rgba=(tuple(arguments["color_rgba"]) if arguments.get("color_rgba") else None),
+            mesh_tolerance=arguments.get("mesh_tolerance"),
+            mesh_angular_tolerance=arguments.get("mesh_angular_tolerance"),
         )
 
     async def export_urdf_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1258,6 +1317,8 @@ class CadqueryServer(McpToolServer):
             mesh_uri_prefix=arguments.get("mesh_uri_prefix", ""),
             xacro=bool(arguments.get("xacro", False)),
             output_path=arguments.get("output_path", ""),
+            mesh_tolerance=arguments.get("mesh_tolerance"),
+            mesh_angular_tolerance=arguments.get("mesh_angular_tolerance"),
         )
 
     async def export_sdf(self, arguments: dict[str, Any]) -> dict[str, Any]:

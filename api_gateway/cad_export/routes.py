@@ -167,6 +167,8 @@ async def _stage_parts(bridge: McpBridge, parts: list[PartRef]) -> list[dict[str
             entry["material"] = part.material
         if part.density_kg_m3 is not None:
             entry["density_kg_m3"] = part.density_kg_m3
+        if part.color_rgba is not None:
+            entry["color_rgba"] = part.color_rgba
         staged.append(entry)
     return staged
 
@@ -384,6 +386,12 @@ async def export_urdf_assembly(body: UrdfAssemblyExportRequest) -> UrdfAssemblyE
         mesh_format=body.mesh_format,
         mesh_uri_prefix=body.mesh_uri_prefix,
         xacro=body.xacro,
+        **({"mesh_tolerance": body.mesh_tolerance} if body.mesh_tolerance is not None else {}),
+        **(
+            {"mesh_angular_tolerance": body.mesh_angular_tolerance}
+            if body.mesh_angular_tolerance is not None
+            else {}
+        ),
     )
     node_id = await _persist_robot_description(
         ext=ext,
