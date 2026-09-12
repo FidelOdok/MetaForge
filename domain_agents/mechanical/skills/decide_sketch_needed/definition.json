@@ -1,0 +1,15 @@
+{
+  "name": "decide_sketch_needed",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Deterministic gate: decides whether a design_sketch work product must be authored and human-approved before any real CAD/build tool is invoked.",
+  "phase": 1,
+  "tools_required": [],
+  "input_schema": "schema.DecideSketchNeededInput",
+  "output_schema": "schema.DecideSketchNeededOutput",
+  "timeout_seconds": 5,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["design-review", "sketch", "gate", "cad", "mechanical"]
+}
