@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { Mesh } from 'three';
 import { useUrdfRobot } from '../../hooks/use-urdf-robot';
 import { useUrdfPhysics } from '../../hooks/use-urdf-physics';
 import { fetchNodeFileText, nodeMeshBaseUrl } from '../../api/endpoints/twin';
@@ -49,6 +50,19 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
   useEffect(() => {
     if (parseError) setRobotError(`Failed to parse URDF: ${parseError.message}`);
   }, [parseError, setRobotError]);
+
+  // MET-747: same shadow flags SceneContents sets for GLB meshes -- without
+  // this the viewer's shadow-casting light has nothing to shadow here either.
+  useEffect(() => {
+    if (!robot) return;
+    robot.traverse((child) => {
+      const mesh = child as Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+    });
+  }, [robot]);
 
   const jointsInitialized = useRef<string | null>(null);
   useEffect(() => {
