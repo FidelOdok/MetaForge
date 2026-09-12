@@ -253,6 +253,7 @@ async def bootstrap_tool_registry(
     blob_stager: Any = None,
     component_catalog_store: Any = None,
     component_intent_llm: Any = None,
+    design_sketch_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -290,6 +291,12 @@ async def bootstrap_tool_registry(
         component_intent_llm: Optional ``IntentLLM`` instance (MET-436),
             used only by ``component.search_intent`` to translate a
             free-text goal into structured category/spec candidates.
+        design_sketch_recorder: Optional async ``commit(...)`` (follow-up to
+            MET-740/747). When supplied, registers
+            ``twin.commit_design_sketch``, which persists a self-contained
+            HTML reference sketch as a DESIGN_SKETCH work product -- the
+            human-approval gate before committing to real CAD/build work.
+            ``None`` skips registration (same pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -448,6 +455,7 @@ async def bootstrap_tool_registry(
                     constraint_recorder=constraint_recorder,
                     document_recorder=document_recorder,
                     blob_stager=blob_stager,
+                    design_sketch_recorder=design_sketch_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -41,6 +42,8 @@ from api_gateway.twin.import_service import (
     infer_wp_type,
 )
 from api_gateway.twin.schemas import (
+    ApproveSketchRequest,
+    ApproveSketchResponse,
     BooleanCutRequest,
     BooleanCutResponse,
     TwinNodeListResponse,
@@ -82,6 +85,19 @@ def init_twin(twin: object) -> None:
 def get_twin() -> object:
     """The active twin API (used by the design-flow mechanical handlers)."""
     return _twin
+
+
+# Follow-up to MET-740/747: an injected async ``approve(node_id, ...)`` (built
+# in server.py over ``design_sketch_recorder.make_design_sketch_approver``) —
+# the dashboard's human-approval action for a design_sketch work product.
+# None until the server lifespan wires it in.
+_design_sketch_approver: Any = None
+
+
+def init_design_sketch_approver(approver: Any) -> None:
+    """Wire in the design-sketch approval callable (server lifespan)."""
+    global _design_sketch_approver  # noqa: PLW0603
+    _design_sketch_approver = approver
 
 
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
@@ -394,6 +410,9 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "sdf": "application/xml",
     "usda": "text/plain; charset=utf-8",
     "stl": "model/stl",
+    # design_sketch work products: a self-contained HTML reference sketch,
+    # rendered full-screen in a sandboxed iframe (see FullScreenPreviewModal).
+    "html": "text/html; charset=utf-8",
     # Tool-native text formats preview fine as plain text.
     "kicad_sch": "text/plain; charset=utf-8",
     "kicad_pcb": "text/plain; charset=utf-8",
@@ -866,6 +885,33 @@ async def diff_versions(node_id: UUID, v1: int = Query(...), v2: int = Query(...
         return VersionService.diff(history, v1, v2)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/nodes/{node_id}/approve-sketch", response_model=ApproveSketchResponse)
+async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> ApproveSketchResponse:
+    """Human sign-off on a design_sketch work product (follow-up to MET-740/747).
+
+    The forge/agent side creates a sketch as unapproved (twin.commit_design_sketch);
+    this is the dashboard's side of the gate — a human explicitly approving it
+    before the calling agent is expected to proceed to real CAD/build work.
+    """
+    if _design_sketch_approver is None:
+        raise HTTPException(status_code=503, detail="design-sketch approval is not configured")
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    if wp.type != WorkProductType.DESIGN_SKETCH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Node {node_id} is a {wp.type.value}, not a design_sketch",
+        )
+    try:
+        result = await _design_sketch_approver(str(node_id), approved_by=body.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ApproveSketchResponse(
+        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
+    )
 
 
 # ---------------------------------------------------------------------------
