@@ -651,6 +651,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.blob_stager import make_blob_stager
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
+    from api_gateway.twin.design_sketch_recorder import (
+        make_design_sketch_approver,
+        make_design_sketch_recorder,
+    )
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
@@ -706,6 +710,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # knowledge_service (used for the intent-search fuzzy fallback).
         component_catalog_store=getattr(app.state, "component_catalog_store", None),
         component_intent_llm=getattr(app.state, "component_intent_llm", None),
+        # Follow-up to MET-740/747: registers twin.commit_design_sketch, the
+        # human-approval gate before real CAD/build work on anything
+        # non-trivial or any revision of an already-built design.
+        design_sketch_recorder=make_design_sketch_recorder(twin, project_backend),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -745,6 +753,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_metrics, init_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
+    from api_gateway.twin.routes import init_design_sketch_approver
     from api_gateway.twin.routes import init_twin as init_twin_viewer
 
     chat_backend = await create_backend()
@@ -818,6 +827,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_projects_twin(twin)
     init_twin_viewer(twin)
     init_bom_twin(twin)
+    # Follow-up to MET-740/747: the dashboard's human-approval action for a
+    # design_sketch work product (twin.commit_design_sketch is the agent
+    # side of this same gate, wired above via bootstrap_tool_registry).
+    init_design_sketch_approver(make_design_sketch_approver(twin))
 
     # MET-197 has been in the tree since 2026-03-08 and nothing ever
     # constructed the publisher: `KAFKA_BOOTSTRAP_SERVERS` was passed to the

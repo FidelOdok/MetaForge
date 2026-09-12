@@ -85,3 +85,19 @@ class BooleanCutResponse(BaseModel):
     operation: str
     result_volume_mm3: float
     result_area_mm2: float
+
+
+class ApproveSketchRequest(BaseModel):
+    """Human sign-off on a design_sketch work product (follow-up to MET-740/747)."""
+
+    approved_by: str | None = Field(
+        default=None, description="Identifier of the human approving this sketch."
+    )
+
+
+class ApproveSketchResponse(BaseModel):
+    """Result of approving a design_sketch — the gate's new state."""
+
+    node_id: str
+    approved: bool
+    approved_at: str

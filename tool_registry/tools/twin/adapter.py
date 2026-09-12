@@ -46,6 +46,7 @@ class TwinServer(McpToolServer):
         constraint_recorder: Any = None,
         document_recorder: Any = None,
         blob_stager: Any = None,
+        design_sketch_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -92,6 +93,12 @@ class TwinServer(McpToolServer):
         # id. Same injection seam as decision_recorder; None keeps
         # tool_registry free of api_gateway imports.
         self._blob_stager = blob_stager
+        # Follow-up to MET-740/747: an injected async ``commit(...)`` that
+        # persists a self-contained HTML reference sketch as a
+        # DESIGN_SKETCH work product -- the human-approval gate before
+        # committing to real CAD/build work. Same injection seam as
+        # geometry_recorder; None keeps tool_registry free of api_gateway.
+        self._design_sketch_recorder = design_sketch_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -103,6 +110,8 @@ class TwinServer(McpToolServer):
             self._register_record_constraint_set()
         if document_recorder is not None:
             self._register_record_document()
+        if design_sketch_recorder is not None:
+            self._register_commit_design_sketch()
         if blob_stager is not None:
             self._register_stage_work_product_file()
 
@@ -1045,6 +1054,112 @@ class TwinServer(McpToolServer):
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
             **({"source_tool": source_tool} if source_tool else {}),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.commit_design_sketch (follow-up to MET-740/747)
+    # ------------------------------------------------------------------
+
+    def _register_commit_design_sketch(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_design_sketch",
+                adapter_id="twin",
+                name="Commit Design Sketch",
+                description=(
+                    "Persist a self-contained HTML reference sketch (proportions, "
+                    "topology, range-of-motion preview) as a DESIGN_SKETCH work "
+                    "product -- the human-approval gate MetaForge uses before "
+                    "committing to real CAD/build work on anything non-trivial or "
+                    "any revision of an already-built design. Call this BEFORE "
+                    "authoring real CAD geometry when a sketch is warranted (see "
+                    "the mechanical.decide_sketch_needed skill for when it is); "
+                    "the returned node starts unapproved -- do not proceed to "
+                    "real CAD/build work until a human approves it (dashboard "
+                    "'Approve' action, or GET the node to check "
+                    "metadata.approved)."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Display name for the work product.",
+                        },
+                        "html_content": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": (
+                                "The complete, self-contained sketch document: inline "
+                                "CSS/JS, no external assets, no <!DOCTYPE>/<html>/<head>/"
+                                "<body> wrapper needed -- just the content that would go "
+                                "inside <body>. Rendered full-screen in a sandboxed "
+                                "iframe by the dashboard."
+                            ),
+                        },
+                        "description_text": {
+                            "type": "string",
+                            "description": "Short rationale for what this sketch is checking.",
+                        },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Existing work-product node ids this sketch reviews -- "
+                                "give this when the sketch is about a REVISION to an "
+                                "already-built design. Omit for a brand-new design "
+                                "(nothing built yet to reference)."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "domain": {"type": "string", "description": "Discipline (def mech)."},
+                        "source_tool": {
+                            "type": "string",
+                            "description": "Which tool/skill produced this sketch (provenance).",
+                        },
+                    },
+                    "required": ["name", "html_content"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_design_sketch,
+        )
+
+    async def commit_design_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_design_sketch: 'name' is required (non-empty string)")
+        html_content = arguments.get("html_content")
+        if not html_content or not isinstance(html_content, str):
+            raise ValueError(
+                "twin.commit_design_sketch: 'html_content' is required (non-empty string)"
+            )
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        source_tool = arguments.get("source_tool")
+        return await self._design_sketch_recorder(
+            name=name,
+            html_content=html_content,
+            description_text=arguments.get("description_text") or "",
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            domain=domain if isinstance(domain, str) and domain else "mechanical",
+            **(
+                {"source_tool": source_tool} if isinstance(source_tool, str) and source_tool else {}
+            ),
         )
 
     def _register_stage_work_product_file(self) -> None:

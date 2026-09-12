@@ -48,6 +48,14 @@ class WorkProductType(StrEnum):
     # CAD_MODEL parts + a joint list. Linked to each source part via a
     # PARENT_OF edge (mirrors CAD_SOURCE_SCRIPT's script->geometry edge).
     ROBOT_DESCRIPTION = "robot_description"
+    # A self-contained HTML reference sketch (proportions/topology/range-of-
+    # motion preview) authored BEFORE committing to real CAD/build work --
+    # the human-approval gate the `decide_sketch_needed` mechanical skill
+    # triggers for non-trivial or revision builds. Linked via a PARENT_OF
+    # edge to whatever existing work product it reviews (revision case);
+    # not linked to anything yet for a brand-new design (nothing built to
+    # link to). `metadata.approved`/`metadata.approved_at` track the gate.
+    DESIGN_SKETCH = "design_sketch"
 
 
 class ConstraintSeverity(StrEnum):
