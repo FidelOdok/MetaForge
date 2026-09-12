@@ -39,6 +39,20 @@ export function useUrdfRobot(urdfText: string | null, meshBaseUrl: string) {
     let cancelled = false;
     try {
       const parsed = loader.parse(urdfText);
+      // MET-747 follow-up: URDF/ROS convention is Z-up, but this dashboard's
+      // whole 3D stack assumes Y-up (three.js/OrbitControls default `up`,
+      // and use-urdf-physics.ts sets gravity along -Y, not -Z). urdf-loader
+      // itself applies no Z-up-to-Y-up conversion (verified in its source --
+      // it only rotates URDF <cylinder>/<box> *primitive* geometry for an
+      // unrelated per-shape axis reason, never the robot as a whole), so
+      // every robot rendered exactly as authored: correctly shaped, but
+      // lying on its side relative to what the camera and OrbitControls
+      // treat as "up". A -90 degree rotation about X maps authored +Z
+      // ("up" in URDF) to +Y ("up" in this scene) -- verified live via a
+      // real screenshot (not the blank-readback headless limitation
+      // documented elsewhere this session; a browser-compositor screenshot
+      // is a different code path and does capture real pixels).
+      parsed.rotation.set(-Math.PI / 2, 0, 0);
       if (!cancelled) {
         setRobot(parsed);
         setError(null);

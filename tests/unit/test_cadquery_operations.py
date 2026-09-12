@@ -702,6 +702,28 @@ class TestBuildAssemblyUrdf:
         },
     ]
 
+    def test_mesh_scale_reconciles_mm_geometry_with_meter_joint_origins(self):
+        """MET-747 follow-up: mesh files are authored in millimeters (CadQuery/
+        FreeCAD convention) but joint <origin> is converted to meters. Without
+        a matching mesh scale, a child link's mesh renders collapsed near its
+        parent's origin -- a joint offset in meters is ~1000x smaller than an
+        mm-scale mesh. Live-caught on the quadruped rebuild: joints "worked"
+        (real rotation, real anchor) but every leg piled up at the body
+        instead of standing at its actual mount point."""
+        joints = [
+            {
+                "name": "j1",
+                "type": "fixed",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+            },
+        ]
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'scale="0.001 0.001 0.001"' in xml
+        assert xml.count('scale="0.001 0.001 0.001"') == 4  # 2 links x (visual+collision)
+
     def test_fixed_joint(self):
         joints = [
             {
@@ -847,6 +869,16 @@ class TestBuildSingleLinkUrdf:
             inertia_kgm2=(1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
         )
         assert "<material" not in xml
+
+    def test_mesh_scale_present_on_both_visual_and_collision(self):
+        xml = _build_single_link_urdf(
+            link_name="base_link",
+            mesh_uri="base_link.stl",
+            mass_kg=1.0,
+            com_m=(0.0, 0.0, 0.0),
+            inertia_kgm2=(1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        )
+        assert xml.count('scale="0.001 0.001 0.001"') == 2  # visual + collision
 
 
 class TestStlExportKwargs:
@@ -1005,6 +1037,9 @@ class TestExportSdf:
         assert '<link name="widget_link">' in sdf_text
         assert "<world" not in sdf_text  # standalone model, no world wrapper
         assert sdf_text.count("<mesh>") == 2  # collision + visual
+        # MET-747 follow-up: mm-authored mesh vs meter-scale joint origins --
+        # see _URDF_MESH_SCALE_XYZ's module comment.
+        assert sdf_text.count("<scale>0.001 0.001 0.001</scale>") == 2
         assert Path(result["mesh_file"]).exists()
 
     def test_world_name_wraps_model_and_changes_extension(self, tmp_path):
@@ -1083,6 +1118,8 @@ class TestBuildAssemblySdf:
         assert '<joint name="base_to_arm" type="fixed">' in xml
         assert "<parent>base</parent>" in xml
         assert "<child>arm</child>" in xml
+        # MET-747 follow-up: mm-authored mesh vs meter-scale joint origins.
+        assert xml.count("<scale>0.001 0.001 0.001</scale>") == 4  # 2 links x (visual+collision)
 
     def test_revolute_maps_to_continuous_with_no_fabricated_limit(self):
         joints = [

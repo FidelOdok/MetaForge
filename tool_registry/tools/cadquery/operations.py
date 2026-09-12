@@ -44,6 +44,22 @@ _MM_TO_M = 1e-3
 _MM3_TO_M3 = 1e-9  # (1e-3)^3
 _MM5_TO_M5 = 1e-15  # (1e-3)^5
 
+# URDF/SDF mesh scale (MET-747 follow-up): CadQuery/FreeCAD author every part
+# in millimeters, and the STL exporter above never rescales -- so a mesh
+# file's raw vertex data is numerically in "mm-scale" units. Joint/link
+# origins are correctly converted mm->m (_MM_TO_M) when written, but the
+# <mesh> element itself never declared a matching scale, silently assuming
+# the STL's raw units already equal meters. Invisible for a single-link
+# export (nothing to misalign against), but for any multi-link assembly with
+# real joints, every child link's mesh renders almost exactly on top of its
+# parent's origin -- a joint offset of ~0.1m is ~1000x smaller than a
+# ~100mm-scale mesh, collapsing the whole kinematic tree near the root
+# instead of spreading it out. Live-caught rendering the quadruped rebuild:
+# hip/knee joints "worked" (real anchors, real rotation) but every link
+# visually piled up at the body's origin instead of standing at its actual
+# mount point.
+_URDF_MESH_SCALE_XYZ = f"{_MM_TO_M:.9g} {_MM_TO_M:.9g} {_MM_TO_M:.9g}"
+
 # Conditional CadQuery import
 try:
     import cadquery as cq  # type: ignore[import-untyped]
@@ -322,7 +338,7 @@ def _build_single_link_urdf(
     for tag in ("visual", "collision"):
         section = ET.SubElement(link, tag)
         geometry = ET.SubElement(section, "geometry")
-        ET.SubElement(geometry, "mesh", filename=mesh_uri)
+        ET.SubElement(geometry, "mesh", filename=mesh_uri, scale=_URDF_MESH_SCALE_XYZ)
         if tag == "visual" and color_rgba is not None:
             _add_urdf_material(section, link_name, color_rgba)
 
@@ -397,7 +413,7 @@ def _build_assembly_urdf(
         for tag in ("visual", "collision"):
             section = ET.SubElement(link_el, tag)
             geometry = ET.SubElement(section, "geometry")
-            ET.SubElement(geometry, "mesh", filename=link["mesh_uri"])
+            ET.SubElement(geometry, "mesh", filename=link["mesh_uri"], scale=_URDF_MESH_SCALE_XYZ)
             if tag == "visual" and color_rgba is not None:
                 _add_urdf_material(section, link["name"], color_rgba)
 
@@ -529,6 +545,7 @@ def _build_single_link_sdf(
         geometry = ET.SubElement(section, "geometry")
         mesh = ET.SubElement(geometry, "mesh")
         ET.SubElement(mesh, "uri").text = mesh_uri
+        ET.SubElement(mesh, "scale").text = _URDF_MESH_SCALE_XYZ
 
     ET.indent(sdf, space="  ")
     return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
@@ -603,6 +620,7 @@ def _build_assembly_sdf(
             geometry = ET.SubElement(section, "geometry")
             mesh = ET.SubElement(geometry, "mesh")
             ET.SubElement(mesh, "uri").text = link["mesh_uri"]
+            ET.SubElement(mesh, "scale").text = _URDF_MESH_SCALE_XYZ
 
     for joint in joints:
         fc_type = joint["type"].lower()
