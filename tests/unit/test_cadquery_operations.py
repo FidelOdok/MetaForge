@@ -18,6 +18,8 @@ from tool_registry.tools.cadquery.operations import (
     UnsupportedJointTypeError,
     _build_assembly_sdf,
     _build_assembly_urdf,
+    _build_single_link_urdf,
+    _stl_export_kwargs,
 )
 
 
@@ -529,10 +531,12 @@ class _FakeShapeNamespace:
 
 class _FakeUrdfExporters:
     calls: list[tuple[str, str]] = []
+    kwargs_calls: list[dict] = []
 
     @classmethod
-    def export(cls, _shape, output_path, exportType=None):  # noqa: N803
+    def export(cls, _shape, output_path, exportType=None, **kwargs):  # noqa: N803
         cls.calls.append((output_path, exportType))
+        cls.kwargs_calls.append(kwargs)
         with open(output_path, "wb") as f:  # noqa: PTH123
             f.write(b"fake mesh bytes")
 
@@ -652,6 +656,29 @@ class TestExportUrdf:
         text = Path(result["output_file"]).read_text()
         assert "xacro" not in text
 
+    def test_color_rgba_attaches_material(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf(
+                "part.step", link_name="widget_link", color_rgba=(0.9, 0.1, 0.1, 1.0)
+            )
+        text = Path(result["output_file"]).read_text()
+        assert '<material name="widget_link_material">' in text
+        assert 'rgba="0.9 0.1 0.1 1"' in text
+
+    def test_mesh_tolerance_reaches_exporter(self, tmp_path):
+        _FakeUrdfExporters.kwargs_calls = []
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            ops.export_urdf("part.step", link_name="widget_link", mesh_tolerance=0.01)
+        assert _FakeUrdfExporters.kwargs_calls[-1] == {"tolerance": 0.01}
+
 
 class TestBuildAssemblyUrdf:
     """MET-706 session (tier-2a): multi-link URDF with real joints, built
@@ -760,6 +787,92 @@ class TestBuildAssemblyUrdf:
         with pytest.raises(UnsupportedJointTypeError, match="no single-joint URDF equivalent"):
             _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
 
+    def test_link_with_color_rgba_gets_material_on_visual_only(self):
+        links = [
+            {**self._LINKS[0], "color_rgba": (0.2, 0.25, 0.3, 1.0)},
+            self._LINKS[1],  # no color_rgba -- must stay material-less
+        ]
+        joints = [
+            {
+                "name": "j1",
+                "type": "fixed",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+            },
+        ]
+        xml = _build_assembly_urdf(robot_name="bot", links=links, joints=joints)
+        assert '<material name="base_material">' in xml
+        assert 'rgba="0.2 0.25 0.3 1"' in xml
+        assert "arm_material" not in xml
+        # collision must never carry a <material> -- only <visual> does
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        base_link = next(el for el in root.findall("link") if el.get("name") == "base")
+        assert base_link.find("visual/material") is not None
+        assert base_link.find("collision/material") is None
+
+
+class TestBuildSingleLinkUrdf:
+    """Single-link (tier-1) counterpart of TestBuildAssemblyUrdf -- pure XML
+    logic, no CadQuery involved."""
+
+    def test_color_rgba_attaches_material_to_visual_only(self):
+        xml = _build_single_link_urdf(
+            link_name="base_link",
+            mesh_uri="base_link.stl",
+            mass_kg=1.0,
+            com_m=(0.0, 0.0, 0.0),
+            inertia_kgm2=(1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+            color_rgba=(1.0, 0.5, 0.0, 1.0),
+        )
+        assert '<material name="base_link_material">' in xml
+        assert 'rgba="1 0.5 0 1"' in xml
+
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link = root.find("link")
+        assert link.find("visual/material") is not None
+        assert link.find("collision/material") is None
+
+    def test_no_color_rgba_omits_material_entirely(self):
+        xml = _build_single_link_urdf(
+            link_name="base_link",
+            mesh_uri="base_link.stl",
+            mass_kg=1.0,
+            com_m=(0.0, 0.0, 0.0),
+            inertia_kgm2=(1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        )
+        assert "<material" not in xml
+
+
+class TestStlExportKwargs:
+    """MET-747 follow-on: tessellation-tolerance passthrough helper."""
+
+    def test_both_none_returns_empty_dict(self):
+        assert _stl_export_kwargs("stl", None, None) == {}
+
+    def test_tolerance_only(self):
+        assert _stl_export_kwargs("stl", 0.05, None) == {"tolerance": 0.05}
+
+    def test_both_set(self):
+        assert _stl_export_kwargs("STL", 0.05, 0.1) == {
+            "tolerance": 0.05,
+            "angularTolerance": 0.1,
+        }
+
+    def test_amf_also_accepts_tessellation_kwargs(self):
+        assert _stl_export_kwargs("amf", 0.05, None) == {"tolerance": 0.05}
+
+    def test_non_mesh_format_drops_kwargs_silently(self):
+        # A caller could in principle pass mesh_format="obj" -- tolerance/
+        # angularTolerance mean nothing there, so they must never reach
+        # cq.exporters.export and risk an unexpected-kwarg error.
+        assert _stl_export_kwargs("obj", 0.05, 0.1) == {}
+
 
 class TestExportUrdfAssembly:
     """MET-706 session (tier-2a): the multi-part CadQuery-facing entry point."""
@@ -822,6 +935,42 @@ class TestExportUrdfAssembly:
         ):
             with pytest.raises(ValueError, match="parts is required"):
                 ops.export_urdf_assembly([], [])
+
+    def test_per_part_color_rgba_reaches_the_urdf(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        parts = [
+            {"input_file": "base.step", "link_name": "base", "color_rgba": [0.1, 0.2, 0.3, 1.0]},
+            {"input_file": "arm.step", "link_name": "arm"},
+        ]
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            result = ops.export_urdf_assembly(parts, [], robot_name="my_robot")
+        text = Path(result["output_file"]).read_text()
+        assert '<material name="base_material">' in text
+        assert 'rgba="0.1 0.2 0.3 1"' in text
+        assert "arm_material" not in text
+
+    def test_mesh_tolerance_reaches_every_part_export_call(self, tmp_path):
+        _FakeUrdfExporters.kwargs_calls = []
+        ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
+        parts = [
+            {"input_file": "base.step", "link_name": "base"},
+            {"input_file": "arm.step", "link_name": "arm"},
+        ]
+        with (
+            patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
+            patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
+        ):
+            ops.export_urdf_assembly(
+                parts, [], robot_name="my_robot", mesh_tolerance=0.02, mesh_angular_tolerance=0.1
+            )
+        assert len(_FakeUrdfExporters.kwargs_calls) == 2
+        assert all(
+            kw == {"tolerance": 0.02, "angularTolerance": 0.1}
+            for kw in _FakeUrdfExporters.kwargs_calls
+        )
 
 
 class TestExportSdf:

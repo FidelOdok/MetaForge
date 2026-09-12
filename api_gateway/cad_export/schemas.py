@@ -52,6 +52,17 @@ class PartRef(BaseModel):
     link_name: str = Field(..., min_length=1)
     material: str | None = None
     density_kg_m3: float | None = None
+    color_rgba: list[float] | None = Field(
+        default=None,
+        min_length=4,
+        max_length=4,
+        description=(
+            "[r, g, b, a], each 0-1. Attaches a <material><color> to this "
+            "link's visual geometry in the exported URDF (SDF/USD requests "
+            "ignore it — not yet wired to those formats). Authored design "
+            "color, not a renderer-invented palette."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +145,21 @@ class UrdfAssemblyExportRequest(RobotDescriptionPersistFields):
     mesh_format: MeshFormat = "stl"
     mesh_uri_prefix: str = ""
     xacro: bool = False
+    mesh_tolerance: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Max linear deviation (mm) between the tessellated mesh and the "
+            "true CAD surface, applied to every part — smaller means more "
+            "triangles on curves/fillets and less visible faceting. Omit to "
+            "keep OCCT's default."
+        ),
+    )
+    mesh_angular_tolerance: float | None = Field(
+        default=None,
+        gt=0,
+        description="Max angle (radians) between adjacent facet normals. Omit for OCCT's default.",
+    )
 
 
 class SdfAssemblyExportRequest(RobotDescriptionPersistFields):

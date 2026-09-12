@@ -72,6 +72,36 @@ class ScriptTimeoutError(RuntimeError):
     """Raised when a script exceeds the allowed execution time."""
 
 
+def _stl_export_kwargs(
+    mesh_format: str, tolerance: float | None, angular_tolerance: float | None
+) -> dict[str, float]:
+    """Build the optional tessellation-quality kwargs for ``cq.exporters.export``.
+
+    Every STL export in this module used to call ``cq.exporters.export``
+    with no ``tolerance``/``angularTolerance`` at all, silently taking
+    whichever linear/angular deflection OCCT's own default happens to be --
+    not a deliberate quality choice, just never surfaced. ``tolerance`` is
+    the max linear deviation (mm, same units the rest of this module works
+    in) between the tessellated mesh and the true CAD surface; smaller means
+    more triangles on curved surfaces (rounds, fillets, cylinders) and less
+    visible faceting. ``angular_tolerance`` (radians) bounds the angle
+    between adjacent facet normals the same way. Both stay ``None`` (omit
+    the kwarg, keep OCCT's default) unless a caller asks for something
+    tighter -- this never makes an existing export coarser than before.
+    Only meaningful for a mesh-tessellation format (STL/AMF); silently
+    dropped for any other ``exportType`` so passing them alongside an
+    unrelated ``mesh_format`` never raises.
+    """
+    if mesh_format.upper() not in ("STL", "AMF"):
+        return {}
+    kwargs: dict[str, float] = {}
+    if tolerance is not None:
+        kwargs["tolerance"] = tolerance
+    if angular_tolerance is not None:
+        kwargs["angularTolerance"] = angular_tolerance
+    return kwargs
+
+
 # Builtins whitelist for script sandbox
 _SAFE_BUILTINS = {
     "abs",
@@ -237,6 +267,28 @@ def _robot_root_attrib(name: str, xacro: bool) -> dict[str, str]:
     return attrib
 
 
+def _add_urdf_material(
+    visual_el: ET.Element, link_name: str, color_rgba: tuple[float, float, float, float]
+) -> None:
+    """Attach a ``<material><color rgba="..."/></material>`` to a ``<visual>``.
+
+    This is caller-authored color -- part of the same per-part design
+    metadata (``link_name``/``material``/``density_kg_m3``) already flowing
+    through the URDF exporters -- not a renderer inventing a palette from
+    nothing. ``urdf-loader`` (the dashboard's URDF renderer) already parses
+    ``<material><color>`` into a real ``MeshPhongMaterial``; nothing wrote
+    this tag before, so every robot rendered in the loader's uncolored
+    default (flat gray) regardless of what the part's own color was meant
+    to be. Not a full STEP-color round-trip (reading FreeCAD's own authored
+    ``ShapeColor`` back out of the exported STEP file) -- there is no
+    color-authoring mechanism anywhere in the FreeCAD adapter today to round
+    -trip in the first place; that's further, separate work.
+    """
+    material = ET.SubElement(visual_el, "material", name=f"{link_name}_material")
+    r, g, b, a = color_rgba
+    ET.SubElement(material, "color", rgba=f"{r:.4g} {g:.4g} {b:.4g} {a:.4g}")
+
+
 def _build_single_link_urdf(
     *,
     link_name: str,
@@ -245,6 +297,7 @@ def _build_single_link_urdf(
     com_m: tuple[float, float, float],
     inertia_kgm2: tuple[float, float, float, float, float, float],
     xacro: bool = False,
+    color_rgba: tuple[float, float, float, float] | None = None,
 ) -> str:
     """Build a single-link URDF document (visual + collision + inertial).
 
@@ -258,7 +311,9 @@ def _build_single_link_urdf(
     ``CadqueryOperations.export_urdf``'s docstring).
 
     ``xacro=True`` declares the xacro namespace on the root element -- see
-    ``_robot_root_attrib``'s docstring.
+    ``_robot_root_attrib``'s docstring. ``color_rgba``, when given, attaches
+    a ``<material>`` to the visual (not collision) geometry -- see
+    ``_add_urdf_material``'s docstring.
     """
     ixx, ixy, ixz, iyy, iyz, izz = inertia_kgm2
     robot = ET.Element("robot", attrib=_robot_root_attrib(f"{link_name}_robot", xacro))
@@ -268,6 +323,8 @@ def _build_single_link_urdf(
         section = ET.SubElement(link, tag)
         geometry = ET.SubElement(section, "geometry")
         ET.SubElement(geometry, "mesh", filename=mesh_uri)
+        if tag == "visual" and color_rgba is not None:
+            _add_urdf_material(section, link_name, color_rgba)
 
     inertial = ET.SubElement(link, "inertial")
     ET.SubElement(
@@ -319,8 +376,10 @@ def _build_assembly_urdf(
 ) -> str:
     """Build a multi-link URDF document with real joints.
 
-    ``links``: each ``{name, mesh_uri, mass_kg, com_m, inertia_kgm2}`` --
-    same per-link shape ``_build_single_link_urdf`` uses, just N of them.
+    ``links``: each ``{name, mesh_uri, mass_kg, com_m, inertia_kgm2,
+    color_rgba?}`` -- same per-link shape ``_build_single_link_urdf`` uses,
+    just N of them (``color_rgba``, optional, attaches a ``<material>`` the
+    same way -- see ``_add_urdf_material``'s docstring).
     ``joints``: each FreeCAD joint record's shape directly
     (``{name, type, base, follower, axis, anchor}``, optionally
     ``limits: {lower, upper, effort, velocity}`` for a ``slider`` joint --
@@ -334,10 +393,13 @@ def _build_assembly_urdf(
 
     for link in links:
         link_el = ET.SubElement(robot, "link", name=link["name"])
+        color_rgba = link.get("color_rgba")
         for tag in ("visual", "collision"):
             section = ET.SubElement(link_el, tag)
             geometry = ET.SubElement(section, "geometry")
             ET.SubElement(geometry, "mesh", filename=link["mesh_uri"])
+            if tag == "visual" and color_rgba is not None:
+                _add_urdf_material(section, link["name"], color_rgba)
 
         ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
         com_m = link["com_m"]
@@ -976,6 +1038,9 @@ class CadqueryOperations:
         mesh_uri_prefix: str = "",
         xacro: bool = False,
         output_path: str = "",
+        color_rgba: tuple[float, float, float, float] | None = None,
+        mesh_tolerance: float | None = None,
+        mesh_angular_tolerance: float | None = None,
     ) -> dict[str, Any]:
         """Export a single-link URDF (robot description) for a STEP file.
 
@@ -989,7 +1054,10 @@ class CadqueryOperations:
         namespace declared on the root element -- see
         ``_robot_root_attrib``'s docstring for what that does and doesn't
         mean (no macro directives are generated; MetaForge has no macro
-        parameters to invent).
+        parameters to invent). ``color_rgba`` attaches a visual
+        ``<material>`` -- see ``_add_urdf_material``'s docstring.
+        ``mesh_tolerance``/``mesh_angular_tolerance`` control STL
+        tessellation quality -- see ``_stl_export_kwargs``'s docstring.
         """
         self._require_cadquery()
 
@@ -1015,7 +1083,12 @@ class CadqueryOperations:
             out_dir = os.path.dirname(output_path) or self.work_dir
             mesh_stem = Path(output_path).stem
             mesh_path = os.path.join(out_dir, f"{mesh_stem}.{mesh_format}")
-            cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+            cq.exporters.export(
+                shape,
+                mesh_path,
+                exportType=mesh_format.upper(),
+                **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
+            )
             mesh_uri = mesh_uri_prefix + os.path.basename(mesh_path)
 
             urdf_xml = _build_single_link_urdf(
@@ -1025,6 +1098,7 @@ class CadqueryOperations:
                 com_m=com_m,
                 inertia_kgm2=(ixx, ixy, ixz, iyy, iyz, izz),
                 xacro=xacro,
+                color_rgba=color_rgba,
             )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
                 f.write(urdf_xml)
@@ -1077,6 +1151,8 @@ class CadqueryOperations:
         mesh_uri_prefix: str = "",
         xacro: bool = False,
         output_path: str = "",
+        mesh_tolerance: float | None = None,
+        mesh_angular_tolerance: float | None = None,
     ) -> dict[str, Any]:
         """Export a multi-link URDF with real kinematic joints.
 
@@ -1090,7 +1166,11 @@ class CadqueryOperations:
         mapping (and why ``cylindrical``/``ball`` raise rather than
         approximate) and ``_build_assembly_urdf`` for the URDF assembly.
 
-        ``parts``: each ``{input_file, link_name, material="", density_kg_m3=None}``.
+        ``parts``: each ``{input_file, link_name, material="", density_kg_m3=None,
+        color_rgba=None}`` -- ``color_rgba`` (``[r,g,b,a]``, each 0-1),
+        optional, attaches a visual ``<material>`` to that link -- see
+        ``_add_urdf_material``'s docstring for why this is authored data,
+        not a fabricated render-time palette.
         ``joints``: each ``{name, type, base, follower, axis, anchor, limits?}``
         where ``base``/``follower`` are ``link_name`` values from ``parts``,
         and ``limits`` (``{lower, upper, effort?, velocity?}``) is required
@@ -1098,7 +1178,9 @@ class CadqueryOperations:
 
         ``xacro=True`` writes a ``.xacro``-extension file with the xacro
         namespace declared on the root element -- see
-        ``_robot_root_attrib``'s docstring.
+        ``_robot_root_attrib``'s docstring. ``mesh_tolerance``/
+        ``mesh_angular_tolerance`` control STL tessellation quality (applied
+        uniformly to every part) -- see ``_stl_export_kwargs``'s docstring.
         """
         self._require_cadquery()
 
@@ -1127,8 +1209,14 @@ class CadqueryOperations:
                     shape, part.get("material", ""), part.get("density_kg_m3")
                 )
                 mesh_path = os.path.join(out_dir, f"{link_name}.{mesh_format}")
-                cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+                cq.exporters.export(
+                    shape,
+                    mesh_path,
+                    exportType=mesh_format.upper(),
+                    **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
+                )
                 mesh_files.append(mesh_path)
+                color_rgba = part.get("color_rgba")
                 links.append(
                     {
                         "name": link_name,
@@ -1136,6 +1224,7 @@ class CadqueryOperations:
                         "mass_kg": mp["mass_kg"],
                         "com_m": mp["com_m"],
                         "inertia_kgm2": mp["inertia_kgm2"],
+                        "color_rgba": tuple(color_rgba) if color_rgba else None,
                     }
                 )
 
@@ -1177,6 +1266,8 @@ class CadqueryOperations:
         static: bool = False,
         world_name: str = "",
         output_path: str = "",
+        mesh_tolerance: float | None = None,
+        mesh_angular_tolerance: float | None = None,
     ) -> dict[str, Any]:
         """Export a single-link SDFormat model (Gazebo) for a STEP file.
 
@@ -1217,7 +1308,12 @@ class CadqueryOperations:
             out_dir = os.path.dirname(output_path) or self.work_dir
             mesh_stem = Path(output_path).stem
             mesh_path = os.path.join(out_dir, f"{mesh_stem}.{mesh_format}")
-            cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+            cq.exporters.export(
+                shape,
+                mesh_path,
+                exportType=mesh_format.upper(),
+                **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
+            )
             resolved_mesh_uri = mesh_uri or os.path.basename(mesh_path)
 
             sdf_xml = _build_single_link_sdf(
@@ -1278,6 +1374,8 @@ class CadqueryOperations:
         static: bool = False,
         world_name: str = "",
         output_path: str = "",
+        mesh_tolerance: float | None = None,
+        mesh_angular_tolerance: float | None = None,
     ) -> dict[str, Any]:
         """Export a multi-link SDFormat model with real joints.
 
@@ -1314,7 +1412,12 @@ class CadqueryOperations:
                     shape, part.get("material", ""), part.get("density_kg_m3")
                 )
                 mesh_path = os.path.join(out_dir, f"{link_name}.{mesh_format}")
-                cq.exporters.export(shape, mesh_path, exportType=mesh_format.upper())
+                cq.exporters.export(
+                    shape,
+                    mesh_path,
+                    exportType=mesh_format.upper(),
+                    **_stl_export_kwargs(mesh_format, mesh_tolerance, mesh_angular_tolerance),
+                )
                 mesh_files.append(mesh_path)
                 links.append(
                     {
@@ -1363,6 +1466,8 @@ class CadqueryOperations:
         material: str = "",
         density_kg_m3: float | None = None,
         output_path: str = "",
+        mesh_tolerance: float | None = None,
+        mesh_angular_tolerance: float | None = None,
     ) -> dict[str, Any]:
         """Export a plain-text ``.usda`` (USD) file for a STEP file.
 
@@ -1398,7 +1503,12 @@ class CadqueryOperations:
             out_dir = os.path.dirname(output_path) or self.work_dir
             mesh_stem = Path(output_path).stem
             mesh_path = os.path.join(out_dir, f"{mesh_stem}.stl")
-            cq.exporters.export(shape, mesh_path, exportType="STL")
+            cq.exporters.export(
+                shape,
+                mesh_path,
+                exportType="STL",
+                **_stl_export_kwargs("stl", mesh_tolerance, mesh_angular_tolerance),
+            )
 
             points, face_vertex_indices, face_vertex_counts = parse_stl_mesh(mesh_path)
 
@@ -1457,6 +1567,8 @@ class CadqueryOperations:
         joints: list[dict[str, Any]],
         robot_name: str = "robot",
         output_path: str = "",
+        mesh_tolerance: float | None = None,
+        mesh_angular_tolerance: float | None = None,
     ) -> dict[str, Any]:
         """Export a multi-body ``.usda`` with real UsdPhysics joints.
 
@@ -1494,7 +1606,12 @@ class CadqueryOperations:
                     shape, part.get("material", ""), part.get("density_kg_m3")
                 )
                 mesh_path = os.path.join(out_dir, f"{link_name}.stl")
-                cq.exporters.export(shape, mesh_path, exportType="STL")
+                cq.exporters.export(
+                    shape,
+                    mesh_path,
+                    exportType="STL",
+                    **_stl_export_kwargs("stl", mesh_tolerance, mesh_angular_tolerance),
+                )
                 mesh_files.append(mesh_path)
                 points, face_vertex_indices, face_vertex_counts = parse_stl_mesh(mesh_path)
                 links.append(
