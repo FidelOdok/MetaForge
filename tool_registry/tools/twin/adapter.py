@@ -1244,6 +1244,11 @@ class TwinServer(McpToolServer):
                 },
                 phase=2,
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by compliance.analyze_hazards's
+                # handler via context.mcp.invoke(...), not meant to be picked
+                # ad hoc off a raw chat tool list -- keeps it out of the
+                # OpenAI-family chat tools array (128-entry hard cap).
+                chat_visible=False,
             ),
             handler=self.commit_hazard_analysis,
         )
@@ -1328,6 +1333,10 @@ class TwinServer(McpToolServer):
                 },
                 phase=2,
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by shared.define_system_architecture's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
             ),
             handler=self.commit_system_architecture,
         )
@@ -1418,6 +1427,10 @@ class TwinServer(McpToolServer):
                 },
                 phase=2,
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by mechanical.generate_technical_drawing's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
             ),
             handler=self.commit_technical_drawing,
         )
@@ -1506,6 +1519,10 @@ class TwinServer(McpToolServer):
                 },
                 phase=2,
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by compliance.record_compliance_checklist's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
             ),
             handler=self.commit_compliance_checklist,
         )
@@ -1590,6 +1607,10 @@ class TwinServer(McpToolServer):
                 },
                 phase=2,
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by supply_chain.create_procurement_record's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
             ),
             handler=self.commit_procurement_record,
         )
