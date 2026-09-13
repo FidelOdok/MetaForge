@@ -1,0 +1,21 @@
+{
+  "name": "record_compliance_checklist",
+  "version": "0.1.0",
+  "domain": "compliance",
+  "agent": "compliance",
+  "description": "Generates a compliance checklist (same logic as generate_checklist) and persists it as a COMPLIANCE_CHECKLIST work product.",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.commit_compliance_checklist",
+      "capability": "twin_compliance_checklist",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.RecordComplianceChecklistInput",
+  "output_schema": "schema.RecordComplianceChecklistOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["compliance", "checklist", "regulatory", "certification"]
+}
