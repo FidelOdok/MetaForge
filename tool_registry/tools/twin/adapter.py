@@ -47,6 +47,11 @@ class TwinServer(McpToolServer):
         document_recorder: Any = None,
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
+        hazard_analysis_recorder: Any = None,
+        system_architecture_recorder: Any = None,
+        technical_drawing_recorder: Any = None,
+        compliance_checklist_recorder: Any = None,
+        procurement_record_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -99,6 +104,15 @@ class TwinServer(McpToolServer):
         # committing to real CAD/build work. Same injection seam as
         # geometry_recorder; None keeps tool_registry free of api_gateway.
         self._design_sketch_recorder = design_sketch_recorder
+        # Lifecycle-mapping follow-up (MET-747): five structured-document
+        # work-product types sharing api_gateway.twin.structured_document_
+        # recorder's persistence helper. Same injection seam as every
+        # recorder above; None keeps tool_registry free of api_gateway.
+        self._hazard_analysis_recorder = hazard_analysis_recorder
+        self._system_architecture_recorder = system_architecture_recorder
+        self._technical_drawing_recorder = technical_drawing_recorder
+        self._compliance_checklist_recorder = compliance_checklist_recorder
+        self._procurement_record_recorder = procurement_record_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -112,6 +126,16 @@ class TwinServer(McpToolServer):
             self._register_record_document()
         if design_sketch_recorder is not None:
             self._register_commit_design_sketch()
+        if hazard_analysis_recorder is not None:
+            self._register_commit_hazard_analysis()
+        if system_architecture_recorder is not None:
+            self._register_commit_system_architecture()
+        if technical_drawing_recorder is not None:
+            self._register_commit_technical_drawing()
+        if compliance_checklist_recorder is not None:
+            self._register_commit_compliance_checklist()
+        if procurement_record_recorder is not None:
+            self._register_commit_procurement_record()
         if blob_stager is not None:
             self._register_stage_work_product_file()
 
@@ -1160,6 +1184,435 @@ class TwinServer(McpToolServer):
             **(
                 {"source_tool": source_tool} if isinstance(source_tool, str) and source_tool else {}
             ),
+        )
+
+    # ------------------------------------------------------------------
+    # Structured-document work products (MET-747 lifecycle-mapping follow-up)
+    # ------------------------------------------------------------------
+
+    def _register_commit_hazard_analysis(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_hazard_analysis",
+                adapter_id="twin",
+                name="Commit Hazard Analysis",
+                description=(
+                    "Persist a hazard/risk log (hazard, cause, effect, "
+                    "severity x likelihood -> risk score, mitigation) as a "
+                    "HAZARD_ANALYSIS work product. Called by the "
+                    "compliance.analyze_hazards skill after it computes risk "
+                    "scores -- do not call this directly with unscored data."
+                ),
+                capability="twin_hazard_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "system_name": {"type": "string"},
+                        "hazards": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "hazard": {"type": "string"},
+                                    "cause": {"type": "string"},
+                                    "effect": {"type": "string"},
+                                    "severity": {"type": "integer", "minimum": 1, "maximum": 5},
+                                    "likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
+                                    "mitigation": {"type": "string"},
+                                },
+                                "required": ["hazard", "cause", "effect", "severity", "likelihood"],
+                            },
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "hazards"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "hazard_count": {"type": "integer"},
+                        "highest_risk_score": {"type": "integer"},
+                        "unmitigated_count": {"type": "integer"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_hazard_analysis,
+        )
+
+    async def commit_hazard_analysis(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_hazard_analysis: 'name' is required")
+        hazards = arguments.get("hazards")
+        if not isinstance(hazards, list) or not hazards:
+            raise ValueError("twin.commit_hazard_analysis: 'hazards' must be a non-empty array")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._hazard_analysis_recorder(
+            name=name,
+            system_name=arguments.get("system_name") or name,
+            hazards=hazards,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_system_architecture(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_system_architecture",
+                adapter_id="twin",
+                name="Commit System Architecture",
+                description=(
+                    "Persist a cross-discipline component/interface map (block "
+                    "diagram + interface table) as a SYSTEM_ARCHITECTURE work "
+                    "product -- captures what talks to what before detailed "
+                    "design starts. Called by shared.define_system_architecture."
+                ),
+                capability="twin_system_architecture",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "system_name": {"type": "string"},
+                        "components": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "discipline": {"type": "string"},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["name"],
+                            },
+                        },
+                        "interfaces": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "from": {"type": "string"},
+                                    "to": {"type": "string"},
+                                    "interface_type": {"type": "string"},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["from", "to"],
+                            },
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "components"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "component_count": {"type": "integer"},
+                        "interface_count": {"type": "integer"},
+                        "dangling_interfaces": {"type": "array"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_system_architecture,
+        )
+
+    async def commit_system_architecture(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_system_architecture: 'name' is required")
+        components = arguments.get("components")
+        if not isinstance(components, list) or not components:
+            raise ValueError(
+                "twin.commit_system_architecture: 'components' must be a non-empty array"
+            )
+        interfaces = arguments.get("interfaces")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._system_architecture_recorder(
+            name=name,
+            system_name=arguments.get("system_name") or name,
+            components=components,
+            interfaces=interfaces if isinstance(interfaces, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_technical_drawing(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_technical_drawing",
+                adapter_id="twin",
+                name="Commit Technical Drawing",
+                description=(
+                    "Persist a structured drawing-package spec (dimensions, "
+                    "GD&T callouts, surface finishes, inspection requirements) "
+                    "for a CAD part as a TECHNICAL_DRAWING work product. NOT a "
+                    "rendered 2D vector drawing -- this is the callout DATA a "
+                    "real drawing would encode. Called by "
+                    "mechanical.generate_technical_drawing."
+                ),
+                capability="twin_technical_drawing",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "part_name": {"type": "string"},
+                        "dimensions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "feature": {"type": "string"},
+                                    "nominal_mm": {"type": "number"},
+                                    "tolerance_plus_mm": {"type": "number"},
+                                    "tolerance_minus_mm": {"type": "number"},
+                                },
+                                "required": ["feature", "nominal_mm"],
+                            },
+                        },
+                        "gdt_callouts": {"type": "array"},
+                        "surface_finishes": {"type": "array"},
+                        "inspection_requirements": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Source CAD_MODEL node id(s) this drawing documents.",
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "dimensions"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "dimension_count": {"type": "integer"},
+                        "gdt_callout_count": {"type": "integer"},
+                        "surface_finish_count": {"type": "integer"},
+                        "inspection_requirement_count": {"type": "integer"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_technical_drawing,
+        )
+
+    async def commit_technical_drawing(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_technical_drawing: 'name' is required")
+        dimensions = arguments.get("dimensions")
+        if not isinstance(dimensions, list) or not dimensions:
+            raise ValueError(
+                "twin.commit_technical_drawing: 'dimensions' must be a non-empty array"
+            )
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        gdt_callouts = arguments.get("gdt_callouts")
+        surface_finishes = arguments.get("surface_finishes")
+        inspection_requirements = arguments.get("inspection_requirements")
+        return await self._technical_drawing_recorder(
+            name=name,
+            part_name=arguments.get("part_name") or name,
+            dimensions=dimensions,
+            gdt_callouts=gdt_callouts if isinstance(gdt_callouts, list) else None,
+            surface_finishes=surface_finishes if isinstance(surface_finishes, list) else None,
+            inspection_requirements=(
+                inspection_requirements if isinstance(inspection_requirements, list) else None
+            ),
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_compliance_checklist(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_compliance_checklist",
+                adapter_id="twin",
+                name="Commit Compliance Checklist",
+                description=(
+                    "Persist a generated regulatory checklist (regime, "
+                    "requirement, evidence rows) as a COMPLIANCE_CHECKLIST "
+                    "work product. Called by "
+                    "compliance.record_compliance_checklist after it computes "
+                    "the checklist -- do not call this with raw, unvalidated "
+                    "checklist data."
+                ),
+                capability="twin_compliance_checklist",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "target_markets": {"type": "array", "items": {"type": "string"}},
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "regime": {"type": "string"},
+                                    "category": {"type": "string"},
+                                    "requirement": {"type": "string"},
+                                    "standard": {"type": "string"},
+                                    "evidence_type": {"type": "string"},
+                                    "evidence_status": {"type": "string"},
+                                },
+                                "required": ["regime", "requirement"],
+                            },
+                        },
+                        "coverage_percent": {"type": "number"},
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "items"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "total_items": {"type": "integer"},
+                        "coverage_percent": {"type": "number"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_compliance_checklist,
+        )
+
+    async def commit_compliance_checklist(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_compliance_checklist: 'name' is required")
+        items = arguments.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValueError("twin.commit_compliance_checklist: 'items' must be a non-empty array")
+        target_markets = arguments.get("target_markets")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._compliance_checklist_recorder(
+            name=name,
+            target_markets=target_markets if isinstance(target_markets, list) else [],
+            items=items,
+            coverage_percent=float(arguments.get("coverage_percent") or 0.0),
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_procurement_record(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_procurement_record",
+                adapter_id="twin",
+                name="Commit Procurement Record",
+                description=(
+                    "Persist a purchase-order-style procurement record (line "
+                    "items, quantities, unit costs, distributor, lead time) as "
+                    "a PROCUREMENT_RECORD work product, usually linked back to "
+                    "the BOM it was sourced from. Called by "
+                    "supply_chain.create_procurement_record."
+                ),
+                capability="twin_procurement_record",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "line_items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "part_number": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "quantity": {"type": "number"},
+                                    "unit_cost": {"type": "number"},
+                                    "currency": {"type": "string"},
+                                    "distributor": {"type": "string"},
+                                    "lead_time_days": {"type": "integer"},
+                                },
+                                "required": ["part_number", "quantity", "unit_cost"],
+                            },
+                        },
+                        "notes": {"type": "string"},
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Source BOM node id(s) this record was sourced from.",
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "line_items"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "line_item_count": {"type": "integer"},
+                        "total_cost": {"type": "number"},
+                        "currency": {"type": "string"},
+                        "max_lead_time_days": {"type": "integer"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_procurement_record,
+        )
+
+    async def commit_procurement_record(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_procurement_record: 'name' is required")
+        line_items = arguments.get("line_items")
+        if not isinstance(line_items, list) or not line_items:
+            raise ValueError(
+                "twin.commit_procurement_record: 'line_items' must be a non-empty array"
+            )
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._procurement_record_recorder(
+            name=name,
+            line_items=line_items,
+            notes=arguments.get("notes") or "",
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
 
     def _register_stage_work_product_file(self) -> None:

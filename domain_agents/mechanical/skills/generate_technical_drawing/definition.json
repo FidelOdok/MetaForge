@@ -1,0 +1,21 @@
+{
+  "name": "generate_technical_drawing",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Persists a structured drawing-package spec (dimensions, GD&T, surface finish, inspection) for a CAD part as a TECHNICAL_DRAWING work product.",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.commit_technical_drawing",
+      "capability": "twin_technical_drawing",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.GenerateTechnicalDrawingInput",
+  "output_schema": "schema.GenerateTechnicalDrawingOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["cad", "drawing", "gdt", "tolerance", "mechanical"]
+}

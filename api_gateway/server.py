@@ -662,6 +662,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_robot_description_recorder,
         make_robot_description_updater,
     )
+    from api_gateway.twin.structured_document_recorder import (
+        make_compliance_checklist_recorder,
+        make_hazard_analysis_recorder,
+        make_procurement_record_recorder,
+        make_system_architecture_recorder,
+        make_technical_drawing_recorder,
+    )
 
     decision_recorder = make_decision_recorder(twin, project_backend)
     git_registry = GitRepoRegistry.from_env(twin.graph)
@@ -714,6 +721,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # human-approval gate before real CAD/build work on anything
         # non-trivial or any revision of an already-built design.
         design_sketch_recorder=make_design_sketch_recorder(twin, project_backend),
+        # MET-747 lifecycle-mapping follow-up: five structured-document work
+        # products (hazard analysis, system architecture, technical drawing,
+        # compliance checklist, procurement record), each backed by the
+        # shared structured_document_recorder persistence helper.
+        hazard_analysis_recorder=make_hazard_analysis_recorder(twin, project_backend),
+        system_architecture_recorder=make_system_architecture_recorder(twin, project_backend),
+        technical_drawing_recorder=make_technical_drawing_recorder(twin, project_backend),
+        compliance_checklist_recorder=make_compliance_checklist_recorder(twin, project_backend),
+        procurement_record_recorder=make_procurement_record_recorder(twin, project_backend),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

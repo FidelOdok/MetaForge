@@ -1,0 +1,21 @@
+{
+  "name": "create_procurement_record",
+  "version": "0.1.0",
+  "domain": "supply_chain",
+  "agent": "supply_chain",
+  "description": "Persists a purchase-order-style procurement record (line items, quantities, costs, lead times) as a PROCUREMENT_RECORD work product.",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.commit_procurement_record",
+      "capability": "twin_procurement_record",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.CreateProcurementRecordInput",
+  "output_schema": "schema.CreateProcurementRecordOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["procurement", "bom", "supply-chain", "purchasing"]
+}

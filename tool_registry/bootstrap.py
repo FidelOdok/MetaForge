@@ -254,6 +254,11 @@ async def bootstrap_tool_registry(
     component_catalog_store: Any = None,
     component_intent_llm: Any = None,
     design_sketch_recorder: Any = None,
+    hazard_analysis_recorder: Any = None,
+    system_architecture_recorder: Any = None,
+    technical_drawing_recorder: Any = None,
+    compliance_checklist_recorder: Any = None,
+    procurement_record_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -297,6 +302,14 @@ async def bootstrap_tool_registry(
             HTML reference sketch as a DESIGN_SKETCH work product -- the
             human-approval gate before committing to real CAD/build work.
             ``None`` skips registration (same pattern as ``document_recorder``).
+        hazard_analysis_recorder, system_architecture_recorder,
+            technical_drawing_recorder, compliance_checklist_recorder,
+            procurement_record_recorder: Optional async ``commit(...)``
+            callables (MET-747 lifecycle-mapping follow-up), each built over
+            ``api_gateway.twin.structured_document_recorder``'s shared
+            persistence helper. When supplied, registers the matching
+            ``twin.commit_<type>`` tool. ``None`` skips registration (same
+            pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -456,6 +469,11 @@ async def bootstrap_tool_registry(
                     document_recorder=document_recorder,
                     blob_stager=blob_stager,
                     design_sketch_recorder=design_sketch_recorder,
+                    hazard_analysis_recorder=hazard_analysis_recorder,
+                    system_architecture_recorder=system_architecture_recorder,
+                    technical_drawing_recorder=technical_drawing_recorder,
+                    compliance_checklist_recorder=compliance_checklist_recorder,
+                    procurement_record_recorder=procurement_record_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
