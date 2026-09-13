@@ -2,50 +2,156 @@
 
 from __future__ import annotations
 
-import re
+import math
 from html import escape
 
 from skill_registry.skill_base import SkillBase
 
-from .schema import AuthorDesignSketchInput, AuthorDesignSketchOutput, ProposedChange
+from .schema import AuthorDesignSketchInput, AuthorDesignSketchOutput, Segment
 
-_LEADING_NUMBER = re.compile(r"[-+]?\d*\.?\d+")
+_SVG_SIZE = 260
+_PADDING_FRACTION = 0.22
 
-
-def _leading_number(value: str) -> float | None:
-    match = _LEADING_NUMBER.match(value.strip())
-    return float(match.group()) if match else None
-
-
-def _bar_row(before: str, after: str) -> str:
-    """A dependency-free before/after bar comparison -- CSS width percentages
-    against the larger of the two magnitudes. Empty string when either side
-    isn't a parseable magnitude (a change like 'add a guard' has no bar)."""
-    b, a = _leading_number(before), _leading_number(after)
-    if b is None or a is None or (b <= 0 and a <= 0):
-        return ""
-    scale = max(abs(b), abs(a)) or 1.0
-    b_pct, a_pct = max(2.0, abs(b) / scale * 100), max(2.0, abs(a) / scale * 100)
-    return (
-        '<div class="bars">'
-        f'<div class="bar before" style="width:{b_pct:.0f}%"></div>'
-        f'<div class="bar after" style="width:{a_pct:.0f}%"></div>'
-        "</div>"
-    )
+# (segment, x0, y0, x1, y1) -- one entry per segment, chained end-to-end.
+_ChainPoint = tuple[Segment, float, float, float, float]
 
 
-def _render_html(name: str, subject_name: str, summary: str, changes: list[ProposedChange]) -> str:
-    rows = []
-    for c in changes:
-        rows.append(
-            "<tr>"
-            f"<td>{escape(c.feature)}</td>"
-            f'<td class="before">{escape(c.before)}</td>'
-            f'<td class="after">{escape(c.after)}</td>'
-            f"<td>{_bar_row(c.before, c.after)}</td>"
-            f'<td class="rationale">{escape(c.rationale)}</td>'
-            "</tr>"
+def _chain(segments: list[Segment]) -> list[_ChainPoint]:
+    """Walk the segment list end-to-end into 2D points. Starts pointing
+    "up" (-90 deg in screen coords) so a simple leg/arm chain reads
+    top-to-bottom the way a person would sketch it by hand; each
+    subsequent segment bends by its own joint_angle_deg relative to the
+    direction the previous one was already pointing."""
+    x, y, angle = 0.0, 0.0, -90.0
+    out: list[_ChainPoint] = []
+    for seg in segments:
+        angle += seg.joint_angle_deg
+        rad = math.radians(angle)
+        x1 = x + seg.length_mm * math.cos(rad)
+        y1 = y + seg.length_mm * math.sin(rad)
+        out.append((seg, x, y, x1, y1))
+        x, y = x1, y1
+    return out
+
+
+def _fit_scale(chains: list[list[_ChainPoint]]) -> tuple[float, float, float]:
+    """A single px-per-mm scale + center point fitted across every chain
+    passed in, so a before/after pair is drawn honestly at the same
+    scale -- a longer "after" segment must look longer, not just say so."""
+    xs, ys = [0.0], [0.0]
+    for chain in chains:
+        for _seg, x0, y0, x1, y1 in chain:
+            xs += [x0, x1]
+            ys += [y0, y1]
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+    scale = (_SVG_SIZE * (1 - 2 * _PADDING_FRACTION)) / span
+    return scale, (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+
+def _render_chain_svg(
+    chain: list[_ChainPoint], scale: float, cx: float, cy: float, color: str, caption: str
+) -> str:
+    origin = _SVG_SIZE / 2
+
+    def to_px(x: float, y: float) -> tuple[float, float]:
+        return origin + (x - cx) * scale, origin + (y - cy) * scale
+
+    parts = [f'<svg viewBox="0 0 {_SVG_SIZE} {_SVG_SIZE}" width="100%" height="{_SVG_SIZE}">']
+    for seg, x0, y0, x1, y1 in chain:
+        px0, py0 = to_px(x0, y0)
+        px1, py1 = to_px(x1, y1)
+        stroke_w = max(3.0, seg.thickness_mm * scale)
+        parts.append(
+            f'<line x1="{px0:.1f}" y1="{py0:.1f}" x2="{px1:.1f}" y2="{py1:.1f}" '
+            f'stroke="{color}" stroke-width="{stroke_w:.1f}" stroke-linecap="round" />'
         )
+        parts.append(f'<circle cx="{px0:.1f}" cy="{py0:.1f}" r="3" fill="#1b1d23" />')
+        mx, my = (px0 + px1) / 2, (py0 + py1) / 2
+        parts.append(
+            f'<text x="{mx:.1f}" y="{my:.1f}" font-size="9" fill="#1b1d23" '
+            f'text-anchor="middle" dy="-6">{escape(seg.name)} {seg.length_mm:g}mm</text>'
+        )
+    if chain:
+        _, _, _, tx0, ty0 = chain[-1]
+        tx, ty = to_px(tx0, ty0)
+        parts.append(f'<circle cx="{tx:.1f}" cy="{ty:.1f}" r="3" fill="{color}" />')
+    parts.append(
+        f'<text x="{origin}" y="{_SVG_SIZE - 8}" font-size="11" fill="{color}" '
+        f'text-anchor="middle" font-weight="600">{escape(caption)}</text>'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _dimension_rows(before: list[Segment], after: list[Segment]) -> list[tuple[str, ...]]:
+    before_by_name = {s.name: s for s in before}
+    rows = []
+    for seg in after:
+        prior = before_by_name.get(seg.name)
+        if prior is None:
+            rows.append((seg.name, "—", f"{seg.length_mm:g} mm", "—", f"{seg.thickness_mm:g} mm"))
+        else:
+            rows.append(
+                (
+                    seg.name,
+                    f"{prior.length_mm:g} mm",
+                    f"{seg.length_mm:g} mm",
+                    f"{prior.thickness_mm:g} mm",
+                    f"{seg.thickness_mm:g} mm",
+                )
+            )
+    return rows
+
+
+def _render_html(
+    name: str,
+    subject_name: str,
+    summary: str,
+    before_segments: list[Segment],
+    after_segments: list[Segment],
+    change_notes: list[str],
+) -> str:
+    is_revision = bool(before_segments)
+    after_chain = _chain(after_segments)
+    before_chain = _chain(before_segments) if is_revision else []
+    scale, cx, cy = _fit_scale([c for c in (before_chain, after_chain) if c])
+
+    diagrams = ""
+    if is_revision:
+        diagrams = (
+            '<div class="diagram">'
+            + _render_chain_svg(before_chain, scale, cx, cy, "#6b7280", "Before")
+            + "</div>"
+            '<div class="diagram">'
+            + _render_chain_svg(after_chain, scale, cx, cy, "#1d4ed8", "After")
+            + "</div>"
+        )
+    else:
+        diagrams = (
+            '<div class="diagram">'
+            + _render_chain_svg(after_chain, scale, cx, cy, "#1d4ed8", "Proposed")
+            + "</div>"
+        )
+
+    rows = _dimension_rows(before_segments, after_segments)
+    if is_revision:
+        header = (
+            "<tr><th>Segment</th><th>Length before</th><th>Length after</th>"
+            "<th>Thickness before</th><th>Thickness after</th></tr>"
+        )
+        table_rows = "".join(
+            f"<tr>{''.join(f'<td>{escape(v)}</td>' for v in r)}</tr>" for r in rows
+        )
+    else:
+        header = "<tr><th>Segment</th><th>Length</th><th>Thickness</th></tr>"
+        table_rows = "".join(
+            f"<tr><td>{escape(r[0])}</td><td>{escape(r[2])}</td><td>{escape(r[4])}</td></tr>"
+            for r in rows
+        )
+
+    notes = "".join(f"<li>{escape(n)}</li>" for n in change_notes)
+    notes_block = f'<h2>Notes</h2><ul class="notes">{notes}</ul>' if notes else ""
+
     return f"""\
 <style>
   body {{
@@ -53,42 +159,48 @@ def _render_html(name: str, subject_name: str, summary: str, changes: list[Propo
     color: #1b1d23; margin: 0; padding: 24px;
   }}
   h1 {{ font-size: 20px; margin: 0 0 4px; }}
+  h2 {{
+    font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #6b7280; margin: 20px 0 8px;
+  }}
   .subject {{ color: #6b7280; font-size: 13px; margin: 0 0 16px; }}
   .summary {{ font-size: 14px; margin: 0 0 20px; max-width: 60ch; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+  .diagrams {{ display: flex; gap: 16px; flex-wrap: wrap; }}
+  .diagram {{ background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; width: 260px; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }}
   th, td {{
     text-align: left; padding: 8px 10px;
     border-bottom: 1px solid #e5e7eb; vertical-align: middle;
   }}
   th {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; }}
-  td.before {{ color: #6b7280; }}
-  td.after {{ color: #1d4ed8; font-weight: 600; }}
-  td.rationale {{ color: #4b5563; max-width: 28ch; }}
-  .bars {{ display: flex; flex-direction: column; gap: 3px; width: 120px; }}
-  .bar {{ height: 8px; border-radius: 3px; }}
-  .bar.before {{ background: #d1d5db; }}
-  .bar.after {{ background: #3b82f6; }}
+  ul.notes {{ font-size: 13px; color: #4b5563; margin: 0; padding-left: 20px; }}
 </style>
 <h1>{escape(name)}</h1>
 <p class="subject">{escape(subject_name)}</p>
 <p class="summary">{escape(summary)}</p>
+<div class="diagrams">{diagrams}</div>
+<h2>Dimensions</h2>
 <table>
-  <thead><tr><th>Feature</th><th>Before</th><th>After</th><th>Comparison</th><th>Rationale</th></tr></thead>
-  <tbody>{"".join(rows)}</tbody>
+  <thead>{header}</thead>
+  <tbody>{table_rows}</tbody>
 </table>
+{notes_block}
 """
 
 
 class AuthorDesignSketchHandler(SkillBase[AuthorDesignSketchInput, AuthorDesignSketchOutput]):
-    """Deterministically renders a styled before/after comparison sketch and
-    persists it as a DESIGN_SKETCH work product via twin.commit_design_sketch.
+    """Deterministically renders a scaled 2D kinematic-chain diagram (the
+    actual sketch -- segments drawn end-to-end, proportioned and angled
+    from real mm values) plus a supporting dimension table, and persists
+    it as a DESIGN_SKETCH work product via twin.commit_design_sketch.
 
     Fills the gap between decide_sketch_needed (decides IF a sketch is
     needed) and the raw commit tool (which only stores whatever HTML a
-    caller hands it, with no structure enforced) -- without this skill, a
-    chat agent free-writes arbitrary unstyled prose HTML per call, which is
-    exactly what a design sketch should NOT be: a consistent, reviewable
-    proportions/topology reference, not a paragraph.
+    caller hands it, with no structure enforced) -- and, unlike this
+    skill's first version, actually draws the part instead of only
+    tabulating before/after numbers. A table of "50mm -> 60mm" tells a
+    reviewer a number changed; it doesn't show them what the part looks
+    like, which is the entire point of a sketch.
     """
 
     input_type = AuthorDesignSketchInput
@@ -101,16 +213,20 @@ class AuthorDesignSketchHandler(SkillBase[AuthorDesignSketchInput, AuthorDesignS
         return errors
 
     async def execute(self, input_data: AuthorDesignSketchInput) -> AuthorDesignSketchOutput:
+        is_revision = bool(input_data.before_segments)
         self.logger.info(
             "Authoring design sketch",
             subject_name=input_data.subject_name,
-            change_count=len(input_data.proposed_changes),
+            segment_count=len(input_data.after_segments),
+            is_revision=is_revision,
         )
         html_content = _render_html(
             input_data.name,
             input_data.subject_name,
             input_data.summary,
-            input_data.proposed_changes,
+            input_data.before_segments,
+            input_data.after_segments,
+            input_data.change_notes,
         )
         result = await self.context.mcp.invoke(
             "twin.commit_design_sketch",
@@ -126,6 +242,7 @@ class AuthorDesignSketchHandler(SkillBase[AuthorDesignSketchInput, AuthorDesignS
         )
         return AuthorDesignSketchOutput(
             node_id=result["node_id"],
-            change_count=len(input_data.proposed_changes),
+            segment_count=len(input_data.after_segments),
+            is_revision=is_revision,
             approved=False,
         )

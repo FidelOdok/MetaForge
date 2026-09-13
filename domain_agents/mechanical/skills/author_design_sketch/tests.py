@@ -15,7 +15,7 @@ from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.skill_base import SkillContext
 
 from .handler import AuthorDesignSketchHandler
-from .schema import AuthorDesignSketchInput, ProposedChange
+from .schema import AuthorDesignSketchInput, Segment
 
 
 @pytest.fixture()
@@ -36,9 +36,8 @@ def sample_input() -> AuthorDesignSketchInput:
         name="Leg Revision Sketch",
         subject_name="Quadruped Leg Front-Left",
         summary="Checking thigh/shin proportions before CAD",
-        proposed_changes=[
-            ProposedChange(feature="Thigh length", before="50 mm", after="60 mm"),
-        ],
+        before_segments=[Segment(name="Thigh", length_mm=50, thickness_mm=8)],
+        after_segments=[Segment(name="Thigh", length_mm=60, thickness_mm=8)],
     )
 
 
@@ -52,6 +51,7 @@ class TestAuthorDesignSketchSkill:
         output = await handler.execute(sample_input)
         assert output.node_id == "node-1"
         assert output.approved is False
+        assert output.is_revision is True
 
     async def test_preconditions_catch_missing_tool(
         self, mock_context: SkillContext, sample_input: AuthorDesignSketchInput
