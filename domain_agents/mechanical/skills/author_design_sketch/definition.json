@@ -1,9 +1,9 @@
 {
   "name": "author_design_sketch",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "domain": "mechanical",
   "agent": "mechanical",
-  "description": "Deterministically renders a styled before/after comparison sketch and persists it as a DESIGN_SKETCH work product.",
+  "description": "Deterministically renders a scaled 2D kinematic-chain diagram (segments drawn end-to-end, proportioned from real mm values) and persists it as a DESIGN_SKETCH work product.",
   "phase": 2,
   "tools_required": [
     {

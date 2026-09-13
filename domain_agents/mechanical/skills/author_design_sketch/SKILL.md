@@ -1,37 +1,44 @@
 # author_design_sketch
 
-Deterministically renders a styled before/after comparison sketch and
+Deterministically renders a scaled 2D kinematic-chain diagram -- segments
+drawn end-to-end, proportioned and angled from real mm values -- and
 persists it as a `DESIGN_SKETCH` work product via `twin.commit_design_sketch`.
 
-Fills the gap between `decide_sketch_needed` (decides IF a sketch is
-needed) and the raw commit tool (which only stores whatever HTML a caller
-hands it, with no structure enforced). Without this skill, a chat agent
-free-writes arbitrary unstyled prose HTML per call -- exactly what a
-design sketch should not be: a consistent, reviewable proportions/topology
-reference, not a paragraph.
+v1 of this skill only tabulated before/after numbers ("50mm -> 60mm");
+that's data, not a sketch -- a reviewer can't see what the part looks like
+from a table. v2 actually draws it: a chain of linked segments (e.g. thigh
+-> shin -> foot) rendered as a proportioned diagram, with the dimension
+table kept underneath as supporting detail.
 
 ## What it does
 
-1. Takes a subject, a summary, and a list of proposed changes (feature,
-   before, after, rationale).
-2. Renders a styled HTML table -- when both `before`/`after` parse as a
-   leading numeric magnitude, adds a simple two-bar visual comparison
-   (no chart library, just CSS widths).
-3. Calls `twin.commit_design_sketch` with the rendered HTML.
+1. Takes a subject and a chain of segments (`name`, `length_mm`,
+   `thickness_mm`, `joint_angle_deg` relative to the previous segment).
+2. Walks the chain into 2D points and fits one shared px-per-mm scale
+   across before/after so a size difference is drawn honestly, not just
+   stated.
+3. Renders each chain as an SVG: a line per segment (width = thickness,
+   rounded caps), a joint dot between segments, and a length label.
+4. When `before_segments` is given (a revision), draws Before/After
+   side by side at the same scale. When empty (a brand-new design,
+   nothing built yet), draws a single "Proposed" diagram.
+5. Adds a dimension table below the diagram(s), matched by segment name.
+6. Calls `twin.commit_design_sketch` with the rendered HTML.
 
 ## Input
 
-`name`, `subject_name`, `summary`, `proposed_changes` (feature, before,
-after, rationale), `source_node_ids` (existing work products this sketch
-reviews -- the revision case), `project_id`, `domain`.
+`name`, `subject_name`, `summary`, `after_segments` (required -- the
+proposed chain), `before_segments` (empty for a brand-new design),
+`change_notes`, `source_node_ids`, `project_id`, `domain`.
 
 ## Output
 
-`node_id`, `change_count`, `approved` (always `false` on creation).
+`node_id`, `segment_count`, `is_revision`, `approved` (always `false`).
 
 ## Limitations
 
-The before/after bar is a rough visual aid from parsed leading numbers, not
-a scaled engineering drawing -- mixed units in one comparison (e.g. "50 mm"
-vs. "2 in") are not normalized. Rows without a numeric magnitude (e.g. "add
-a guard") render without a bar.
+Segments are drawn as straight capsule bars, not real part geometry --
+this communicates proportions and topology (lengths, thicknesses, joint
+angles), not manufacturing detail. A single segment still renders as one
+bar (not multi-segment-only); works for anything from a simple bracket to
+a multi-joint limb.
