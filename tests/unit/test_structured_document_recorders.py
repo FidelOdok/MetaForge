@@ -318,6 +318,38 @@ class TestStructuredDocumentAdapterTools:
             "twin.commit_procurement_record",
         } <= set(server.tool_ids)
 
+    async def test_registered_tools_are_not_chat_visible(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MET-747 follow-up: these tools are invoked by their skill's handler
+        via context.mcp.invoke(...), never picked ad hoc off a raw chat tool
+        list -- and keeping them out of that list is what keeps the chat
+        harness's tools array under OpenAI-family's 128-entry hard cap as the
+        registry keeps growing (registering a 129th chat-visible tool 400'd
+        every chat turn platform-wide -- see test_chat_mcp_tools.py)."""
+        from tool_registry.tools.twin.adapter import TwinServer
+        from twin_core.api import InMemoryTwinAPI
+
+        self._patch_blobs(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(
+            twin=twin,
+            hazard_analysis_recorder=make_hazard_analysis_recorder(twin, None),
+            system_architecture_recorder=make_system_architecture_recorder(twin, None),
+            technical_drawing_recorder=make_technical_drawing_recorder(twin, None),
+            compliance_checklist_recorder=make_compliance_checklist_recorder(twin, None),
+            procurement_record_recorder=make_procurement_record_recorder(twin, None),
+        )
+        for tool_id in [
+            "twin.commit_hazard_analysis",
+            "twin.commit_system_architecture",
+            "twin.commit_technical_drawing",
+            "twin.commit_compliance_checklist",
+            "twin.commit_procurement_record",
+        ]:
+            manifest = server._tools[tool_id].manifest  # noqa: SLF001 -- no public accessor
+            assert manifest.chat_visible is False, tool_id
+
     def test_tools_absent_without_recorders(self) -> None:
         from tool_registry.tools.twin.adapter import TwinServer
         from twin_core.api import InMemoryTwinAPI

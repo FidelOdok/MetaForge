@@ -235,6 +235,12 @@ async def mcp_tools_from_bridge(
         tool_id = str(entry.get("tool_id") or entry.get("name") or "").strip()
         if not tool_id:
             continue
+        # MET-747 follow-up: a manifest can opt out of the chat tool list
+        # entirely (e.g. a tool meant to be invoked only from inside a
+        # skill's handler) -- this is a structural restriction, so it wins
+        # even over an explicit `enabled` selection.
+        if entry.get("chat_visible", True) is False:
+            continue
         if enabled is not None and tool_id not in enabled:
             continue
         server, _, tool = tool_id.partition(".")

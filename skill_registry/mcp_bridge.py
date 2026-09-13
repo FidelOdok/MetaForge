@@ -95,12 +95,15 @@ class InMemoryMcpBridge(McpBridge):
         capability: str,
         name: str = "",
         input_schema: dict[str, Any] | None = None,
+        chat_visible: bool = True,
     ) -> None:
         """Register a tool as available.
 
         ``input_schema`` mirrors the tool's ``ToolManifest`` schema so callers
         that surface parameter definitions (e.g. the chat harness) can be
-        exercised; it defaults to an empty dict when omitted.
+        exercised; it defaults to an empty dict when omitted. ``chat_visible``
+        mirrors ``ToolManifest.chat_visible`` (MET-747 follow-up) for exercising
+        ``mcp_tools_from_bridge``'s skill-internal-tool filtering.
         """
         self._available.add(tool_id)
         self._tools.append(
@@ -109,6 +112,7 @@ class InMemoryMcpBridge(McpBridge):
                 "capability": capability,
                 "name": name or tool_id,
                 "input_schema": input_schema or {},
+                "chat_visible": chat_visible,
             }
         )
 

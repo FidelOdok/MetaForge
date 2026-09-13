@@ -86,6 +86,37 @@ async def test_mcp_tools_from_bridge_falls_back_when_no_schema() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_tools_from_bridge_excludes_chat_visible_false() -> None:
+    """MET-747 follow-up: registering a 129th tool 400'd every OpenAI-family
+    chat turn platform-wide (their hard 128-tool-array cap) -- there was no
+    smaller default set to fall back on. Tools meant to be invoked only from
+    inside a skill's handler (via context.mcp.invoke, a direct-by-id call
+    unrelated to this list) opt out via chat_visible=False so the chat tool
+    array can stay under that cap as the registry keeps growing."""
+    bridge = InMemoryMcpBridge()
+    bridge.register_tool("twin.get_node", capability="twin_inspect")
+    bridge.register_tool(
+        "twin.commit_hazard_analysis", capability="twin_hazard_analysis", chat_visible=False
+    )
+    defs = await mcp_tools_from_bridge(bridge)
+    names = {td.name for _server, td in defs}
+    assert names == {"get_node"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_from_bridge_chat_visible_false_wins_over_explicit_enabled() -> None:
+    """A structural chat_visible=False opt-out wins even if a caller's
+    explicit ``enabled`` selection names the tool id -- it's a stronger
+    restriction than the default-all-tools set, not just a display default."""
+    bridge = InMemoryMcpBridge()
+    bridge.register_tool(
+        "twin.commit_hazard_analysis", capability="twin_hazard_analysis", chat_visible=False
+    )
+    defs = await mcp_tools_from_bridge(bridge, enabled={"twin.commit_hazard_analysis"})
+    assert defs == []
+
+
+@pytest.mark.asyncio
 async def test_chat_harness_invokes_mcp_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
