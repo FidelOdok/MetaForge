@@ -17,6 +17,7 @@ import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel, nodeFileUrl } from '../api/endpoints/twin';
 import { FullScreenPreviewModal } from '../components/viewer/FullScreenPreviewModal';
+import { iconForNode } from '../utils/wp-icons';
 import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
 import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
 import { useToast } from '../components/ui/Toast';
@@ -59,13 +60,6 @@ const KC = {
   statusBar: 'rgba(12,14,20,0.95)',
 } as const;
 
-// ── Icon map ─────────────────────────────────────────────────────────────────
-const NODE_ICONS: Record<TwinNode['type'], string> = {
-  work_product: 'description',
-  constraint: 'rule',
-  relationship: 'link',
-  version: 'label',
-};
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -478,7 +472,7 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
       >
         <div className="flex items-center gap-2">
           <span className="material-symbols-outlined" style={{ fontSize: 14, color: KC.orange }}>
-            {NODE_ICONS[node.type]}
+            {iconForNode(node)}
           </span>
           <span className="font-mono text-xs truncate" style={{ color: KC.onSurface, maxWidth: 180 }}>
             {node.name}
@@ -768,7 +762,7 @@ function SceneDropdown({
                     }}
                   >
                     <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: 14 }}>
-                      {NODE_ICONS[n.type]}
+                      {iconForNode(n)}
                     </span>
                     <span className="truncate">{n.name}</span>
                   </button>
@@ -1172,7 +1166,7 @@ export function TwinViewerPage() {
                   >
                     <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: node.status === 'valid' || node.status === 'active' ? KC.green : KC.onSurfaceVariant, flexShrink: 0 }} />
                     <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: 14, color: active ? KC.orange : KC.onSurfaceVariant }}>
-                      {NODE_ICONS[node.type]}
+                      {iconForNode(node)}
                     </span>
                     <span className="flex-1 truncate font-mono" style={{ fontSize: 12, color: active ? KC.onSurface : KC.onSurfaceVariant }}>
                       {node.name}
