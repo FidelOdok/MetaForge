@@ -32,11 +32,12 @@ import structlog
 
 from digital_twin.catalog.query import CatalogQuery, ComponentCatalogRow, ComponentFilter
 from digital_twin.catalog.store import ComponentCatalogStore
+from digital_twin.catalog.taxonomy import CATEGORY_REGISTRY
 from digital_twin.knowledge.intent_search import search_intent
 from digital_twin.knowledge.intent_search import to_dict as intent_to_dict
 from digital_twin.knowledge.intent_translator import IntentLLM
 from digital_twin.knowledge.service import KnowledgeService
-from digital_twin.knowledge.subsystem_templates import SubsystemTemplate
+from digital_twin.knowledge.subsystem_templates import KNOWN_SUBSYSTEMS, SubsystemTemplate
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -70,8 +71,28 @@ class ComponentServer(McpToolServer):
         self._store = search_store
         self._knowledge_service = knowledge_service
         self._llm = llm
-        self._subsystem_templates = subsystem_templates
-        self._known_categories = known_categories
+        # MET-436 follow-up: both of these were never actually populated at
+        # the one real construction site (tool_registry/bootstrap.py) --
+        # `known_categories=None` disables the "reject a category the LLM
+        # invented" guard entirely (translate_intent only validates when
+        # given a list), and `subsystem_templates=None` means a plainly
+        # subsystem-shaped query ("...for a flight controller") never
+        # matches a template and always falls through to LLM-only role
+        # inference. Verified live: the LLM invented category names like
+        # "DC-DC Buck Converter IC" (real name: buck_converter) that
+        # search_parametric correctly rejected, with no fallback catching
+        # it. Defaulting here (rather than requiring every caller to pass
+        # the real registry) means a bare `ComponentServer(search_store=...,
+        # knowledge_service=..., llm=...)` — the only shape actually used in
+        # bootstrap.py — gets a working guard/template set out of the box;
+        # an explicit non-None value from a caller (e.g. a test double) is
+        # still honored, never overridden.
+        self._subsystem_templates = (
+            subsystem_templates if subsystem_templates is not None else KNOWN_SUBSYSTEMS
+        )
+        self._known_categories = (
+            known_categories if known_categories is not None else list(CATEGORY_REGISTRY.keys())
+        )
         self._register_tools()
 
     # ------------------------------------------------------------------

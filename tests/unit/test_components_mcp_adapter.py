@@ -102,6 +102,59 @@ class TestToolRegistration:
         assert "intent_text" in manifest.input_schema["required"]
 
 
+class TestDefaultCategoriesAndTemplates:
+    """The one real construction site (tool_registry/bootstrap.py) never
+    passes ``known_categories``/``subsystem_templates`` explicitly -- these
+    defaults are what makes the "reject an invented category" guard and
+    subsystem-template role merging actually active in production, not just
+    plumbed-but-dormant. Verified live before this fix: the LLM invented
+    category names like "DC-DC Buck Converter IC" that search_parametric
+    correctly rejected, with no fallback ever catching it."""
+
+    def test_known_categories_defaults_to_the_real_taxonomy(self, store: _FakeStore) -> None:
+        from digital_twin.catalog.taxonomy import CATEGORY_REGISTRY
+
+        server = ComponentServer(
+            search_store=store,  # type: ignore[arg-type]
+            knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
+            llm=StubIntentLLM(),
+        )
+        assert server._known_categories == list(CATEGORY_REGISTRY.keys())
+        assert "buck_converter" in server._known_categories
+
+    def test_subsystem_templates_defaults_to_known_subsystems(self, store: _FakeStore) -> None:
+        from digital_twin.knowledge.subsystem_templates import KNOWN_SUBSYSTEMS
+
+        server = ComponentServer(
+            search_store=store,  # type: ignore[arg-type]
+            knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
+            llm=StubIntentLLM(),
+        )
+        assert server._subsystem_templates == KNOWN_SUBSYSTEMS
+        assert "flight_controller" in server._subsystem_templates
+
+    def test_explicit_known_categories_is_not_overridden(self, store: _FakeStore) -> None:
+        server = ComponentServer(
+            search_store=store,  # type: ignore[arg-type]
+            knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
+            llm=StubIntentLLM(),
+            known_categories=["only_this_one"],
+        )
+        assert server._known_categories == ["only_this_one"]
+
+    def test_explicit_empty_subsystem_templates_is_not_overridden(self, store: _FakeStore) -> None:
+        """An explicit empty dict is a real, deliberate choice (e.g. a test
+        double that wants zero template merging) -- only ``None`` should
+        trigger the default, not falsy-but-present values."""
+        server = ComponentServer(
+            search_store=store,  # type: ignore[arg-type]
+            knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
+            llm=StubIntentLLM(),
+            subsystem_templates={},
+        )
+        assert server._subsystem_templates == {}
+
+
 class TestSearchParametric:
     async def test_happy_path(self, server: ComponentServer, store: _FakeStore) -> None:
         store.stub("buck_converter", [_row("MP2459", "buck_converter", cost_usd=0.42)])
