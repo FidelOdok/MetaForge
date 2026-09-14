@@ -34,7 +34,7 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.openrouter_lightrag")
 
-# Defaults pinned for KG entity extraction. Claude 3.5 Sonnet is the
+# Defaults pinned for KG entity extraction. Claude Sonnet is the
 # primary in line with the rest of the platform; Llama 3 70B is the
 # fallback on transient errors.
 # MET-727: the previous defaults, "anthropic/claude-3.5-sonnet" and
@@ -42,10 +42,15 @@ tracer = get_tracer("digital_twin.knowledge.openrouter_lightrag")
 # 404'd on chat/completions -- primary and fallback both -- and the caller
 # caught it and moved on, so passes completed cleanly having synthesized
 # nothing. Verified against Open Router's own /api/v1/models (430 offered):
-# both slugs GONE. These are the direct successors, and claude-sonnet-4.5
-# carries exactly the price claude-3.5-sonnet did ($3/$15 per Mtok), so the
-# original cost/quality intent is preserved rather than quietly changed.
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-4.5"
+# both slugs GONE. MET-727 repointed this at "anthropic/claude-sonnet-4.5" —
+# but that model is *also* absent from Anthropic's own current-generation
+# model table (only 5 / 4.6 / 4.7 / 4.8 / 5.1 are current as of this fix),
+# so it was already partway back into the same trap: OpenRouter's own
+# catalog page still lists retired slugs for reference, so "found in
+# OpenRouter's listing" is not sufficient evidence a model is still live —
+# cross-check against the provider's own current-model table instead.
+# claude-sonnet-5 is Anthropic's actual current Sonnet tier.
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 # Slight temperature room — entity extraction benefits from a little
 # flexibility in span identification, unlike single-property answers

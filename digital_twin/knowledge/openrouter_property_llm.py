@@ -11,7 +11,7 @@ Env vars (consumed by :meth:`OpenRouterPropertyConfig.from_env`):
 
 * ``OPEN_ROUTER_API_KEY`` — required (shared with the consolidation client).
 * ``PROPERTY_EXTRACTION_MODEL`` — primary slug. Default
-  ``anthropic/claude-sonnet-4.5``.
+  ``anthropic/claude-sonnet-5``.
 * ``PROPERTY_EXTRACTION_FALLBACK_MODEL`` — used on retryable errors.
   Default ``meta-llama/llama-3.3-70b-instruct``.
 * ``PROPERTY_EXTRACTION_TEMPERATURE`` — float, default ``0.0``. Extraction
@@ -44,10 +44,17 @@ tracer = get_tracer("digital_twin.knowledge.openrouter_property_llm")
 # 404'd on chat/completions -- primary and fallback both -- and the caller
 # caught it and moved on, so passes completed cleanly having synthesized
 # nothing. Verified against Open Router's own /api/v1/models (430 offered):
-# both slugs GONE. These are the direct successors, and claude-sonnet-4.5
-# carries exactly the price claude-3.5-sonnet did ($3/$15 per Mtok), so the
-# original cost/quality intent is preserved rather than quietly changed.
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-4.5"
+# both slugs GONE. MET-727 repointed this at "anthropic/claude-sonnet-4.5" —
+# but that model is *also* absent from Anthropic's own current-generation
+# model table (only 5 / 4.6 / 4.7 / 4.8 / 5.1 are current as of this fix),
+# so it was already partway back into the same trap: OpenRouter's own
+# catalog page still lists retired slugs for reference, so "found in
+# OpenRouter's listing" is not sufficient evidence a model is still live —
+# cross-check against the provider's own current-model table instead.
+# claude-sonnet-5 is Anthropic's actual current Sonnet tier, and the right
+# cost/latency band for structured single-property extraction (component
+# .search_intent's per-category constraint generation included).
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_MAX_TOKENS = 800

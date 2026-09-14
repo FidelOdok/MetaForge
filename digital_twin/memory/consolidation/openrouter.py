@@ -9,7 +9,7 @@ Env vars (all consumed by ``OpenRouterLLMClient.from_env``):
 
 * ``OPEN_ROUTER_API_KEY`` — required
 * ``CONSOLIDATION_MODEL`` — primary model slug. Defaults to
-  ``anthropic/claude-sonnet-4.5``.
+  ``anthropic/claude-sonnet-5``.
 * ``CONSOLIDATION_FALLBACK_MODEL`` — used when the primary returns a
   retryable error. Defaults to ``meta-llama/llama-3.3-70b-instruct``.
 * ``CONSOLIDATION_TEMPERATURE`` — float, default 0.7.
@@ -36,10 +36,15 @@ tracer = get_tracer("digital_twin.memory.consolidation.openrouter")
 # 404'd on chat/completions -- primary and fallback both -- and the caller
 # caught it and moved on, so passes completed cleanly having synthesized
 # nothing. Verified against Open Router's own /api/v1/models (430 offered):
-# both slugs GONE. These are the direct successors, and claude-sonnet-4.5
-# carries exactly the price claude-3.5-sonnet did ($3/$15 per Mtok), so the
-# original cost/quality intent is preserved rather than quietly changed.
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-4.5"
+# both slugs GONE. MET-727 repointed this at "anthropic/claude-sonnet-4.5" —
+# but that model is *also* absent from Anthropic's own current-generation
+# model table (only 5 / 4.6 / 4.7 / 4.8 / 5.1 are current as of this fix),
+# so it was already partway back into the same trap: OpenRouter's own
+# catalog page still lists retired slugs for reference, so "found in
+# OpenRouter's listing" is not sufficient evidence a model is still live —
+# cross-check against the provider's own current-model table instead.
+# claude-sonnet-5 is Anthropic's actual current Sonnet tier.
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 2000
