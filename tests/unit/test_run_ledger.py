@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.harness.ledger import SqliteRunLedger
+from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
 from orchestrator.harness.runs import InMemoryRunStore
 
 
@@ -79,3 +79,53 @@ def test_persists_across_reopen(tmp_path: Path) -> None:
     assert reopened.get_run("r1") is not None
     assert len(reopened.events("r1")) == 1
     reopened.close()
+
+
+def test_creates_missing_parent_directory(tmp_path: Path) -> None:
+    """Production-harness audit follow-up: a real ~/.metaforge/ path may not
+    exist yet on first run — sqlite3.connect alone would raise."""
+    db = str(tmp_path / "nested" / "dir" / "ledger.db")
+    ledger = SqliteRunLedger(db, clock=lambda: 1.0)
+    ledger.record_run(_run("r1"))
+    assert ledger.get_run("r1") is not None
+    ledger.close()
+
+
+def test_default_ledger_path_uses_home_metaforge_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("METAFORGE_RUNS_LEDGER_PATH", raising=False)
+    path = default_ledger_path()
+    assert path.name == "runs_ledger.db"
+    assert path.parent.name == ".metaforge"
+
+
+def test_default_ledger_path_honors_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("METAFORGE_RUNS_LEDGER_PATH", "/tmp/custom_ledger.db")
+    assert str(default_ledger_path()) == "/tmp/custom_ledger.db"
+
+
+class TestListRuns:
+    """Production-harness audit follow-up: enumerate persisted runs, used to
+    rehydrate an InMemoryRunStore's in-flight runs after a process restart."""
+
+    def test_list_runs_returns_all(self, ledger: SqliteRunLedger) -> None:
+        ledger.record_run(_run("r1"))
+        ledger.record_run(_run("r2"))
+        ids = sorted(r["id"] for r in ledger.list_runs())
+        assert ids == ["r1", "r2"]
+
+    def test_list_runs_empty_ledger(self, ledger: SqliteRunLedger) -> None:
+        assert ledger.list_runs() == []
+
+    def test_list_runs_filters_by_status(self, ledger: SqliteRunLedger) -> None:
+        store = InMemoryRunStore(clock=lambda: 5.0)
+        queued = store.create({}, run_id="queued-run")
+        running = store.create({}, run_id="running-run")
+        store.start("running-run")
+        done = store.create({}, run_id="done-run")
+        store.start("done-run")
+        store.complete("done-run")
+        for run in (queued, running, done):
+            ledger.record_run(store.get(run.id))
+
+        resumable = ledger.list_runs(statuses={"queued", "running"})
+        assert sorted(r["id"] for r in resumable) == ["queued-run", "running-run"]

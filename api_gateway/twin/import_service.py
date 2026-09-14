@@ -218,6 +218,28 @@ class ImportService:
                 url=url,
                 filename=filename,
             )
+        except httpx.RequestError as exc:
+            # MET-705: only ConnectError was caught, so a converter that is
+            # *reachable but broken* -- accepts then drops (ReadError), hangs
+            # (ReadTimeout, on a 120s budget), or breaks protocol -- escaped
+            # this method and failed the whole import. Both the non-200 branch
+            # above and the fallback below make clear extraction is meant to be
+            # best-effort, so a narrow except was the bug, not the intent.
+            logger.warning(
+                "occt_request_failed",
+                url=url,
+                filename=filename,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+        except ValueError as exc:
+            # A 200 carrying a non-JSON body raises out of resp.json().
+            logger.warning(
+                "occt_bad_payload",
+                url=url,
+                filename=filename,
+                error=str(exc),
+            )
 
         return self._basic_metadata(content, filename)
 

@@ -111,6 +111,7 @@ async def _extract_elec_spec(
 ) -> dict[str, Any]:
     """Ask the LLM for a structured electronics spec, normalized (never raises)."""
     from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_metrics
 
     prompt = (
         "You are extracting an electronics design spec for a small board. "
@@ -132,6 +133,7 @@ async def _extract_elec_spec(
             max_steps=1,
             provider=provider,
             model=model,
+            metrics=get_metrics(),
         )
         match = re.search(r"\{.*\}", reply, re.DOTALL)
         spec = json.loads(match.group(0)) if match else {}

@@ -98,6 +98,9 @@ export function useChat(
   // 45-min hard ceiling); only sustained SILENCE aborts it.
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnAbort = useRef<AbortController | null>(null);
+  // When the last SSE event arrived — the POST-resolve fallback consults this
+  // so it never finalizes a turn whose stream is still actively delivering.
+  const lastEventAt = useRef(0);
 
   // Coalesce streamed deltas into ~16 fps repaints. A fast turn can emit 200+
   // deltas in a couple of seconds; calling setPending on each one repaints the
@@ -154,6 +157,7 @@ export function useChat(
     }
   };
   const pokeIdle = () => {
+    lastEventAt.current = Date.now();
     if (!thinkingRef.current || !turnAbort.current) return;
     clearIdle();
     const ac = turnAbort.current;
@@ -432,12 +436,20 @@ export function useChat(
       // The message POST resolves when the turn is done (real gateway; the turn
       // runs inside the POST) OR immediately (async backends), so on resolve we
       // wait a short grace for the SSE `agent.done` and only finalize ourselves
-      // if it never arrives — and only if this is still the active turn.
+      // if it never arrives — and only if this is still the active turn. A turn
+      // whose stream is still actively delivering (events within the grace
+      // window) is NOT finalized — the timer re-arms until the stream goes
+      // quiet, so an early POST resolve can't truncate a long streaming turn.
       const GRACE_MS = 2500;
       const armFallback = (fallback: string) => {
         if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
         fallbackTimer.current = setTimeout(() => {
-          if (turnSeq.current === myTurn) finalizeTurn(fallback);
+          if (turnSeq.current !== myTurn) return;
+          if (Date.now() - lastEventAt.current < GRACE_MS) {
+            armFallback(fallback);
+            return;
+          }
+          finalizeTurn(fallback);
         }, GRACE_MS);
       };
       void client

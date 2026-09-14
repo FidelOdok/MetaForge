@@ -151,6 +151,11 @@ export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: Sc
     scene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
+        // MET-747: every part both casts and receives shadows -- without
+        // this the R3FViewer's shadow-casting light (see its own comment)
+        // has nothing in the scene to actually shadow.
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
         const meshName = mesh.name || mesh.parent?.name || `unnamed_${map.size}`;
         const partName = partLookup.get(meshName) || meshName;
 

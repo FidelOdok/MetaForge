@@ -45,6 +45,17 @@ def test_context_window_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert context_window_for("anthropic", "claude-opus-4-8") == 40_000
 
 
+def test_codex_provider_overrides_the_raw_model_window() -> None:
+    """MET-655: live-caught the openai-codex provider rejecting a 137k-token
+    request as exceeding its context window while the harness's own budget
+    assumed gpt-5.5's raw 400k figure -- context_window_for matched on MODEL
+    only, ignoring that this specific provider enforces a much smaller real
+    limit. A provider-specific override must win over the model lookup."""
+    assert context_window_for("openai-codex", "gpt-5.5") == 100_000
+    # Same model through a different provider still gets the raw figure.
+    assert context_window_for("openai", "gpt-5.5") == 400_000
+
+
 # --- a fake runtime exposing tools like the harness runtime does ------------
 
 

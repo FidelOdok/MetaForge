@@ -1,10 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
-import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory } from '../api/endpoints/twin';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory, approveSketch } from '../api/endpoints/twin';
 
 export const twinKeys = {
   all: ['twin'] as const,
   node: (id: string) => [...twinKeys.all, id] as const,
-  relationships: ['twin', 'relationships'] as const,
+  relationships: (projectId?: string) => ['twin', 'relationships', projectId ?? ''] as const,
 };
 
 // MET-539: keep the Twin view live by polling. React Query only polls while the
@@ -37,10 +37,12 @@ export function useTwinNode(id: string | undefined) {
   });
 }
 
-export function useTwinRelationships() {
+export function useTwinRelationships(projectId?: string) {
   return useQuery({
-    queryKey: twinKeys.relationships,
-    queryFn: getTwinRelationships,
+    // MET-491/MET-653: project scope is part of the cache key so switching
+    // projects refetches the scoped relationship list (mirrors useTwinNodes).
+    queryKey: twinKeys.relationships(projectId),
+    queryFn: () => getTwinRelationships(projectId),
     staleTime: TWIN_RELATIONSHIPS_POLL_MS,
     refetchInterval: TWIN_RELATIONSHIPS_POLL_MS,
   });
@@ -52,5 +54,21 @@ export function useNodeVersionHistory(nodeId: string | undefined) {
     queryFn: () => getNodeVersionHistory(nodeId!),
     enabled: !!nodeId,
     staleTime: 15_000,
+  });
+}
+
+/** Follow-up to MET-740/747: human sign-off on a design_sketch node.
+ * Invalidates the node + its version history so the approval badge and the
+ * new revision it creates show up immediately rather than on the next poll. */
+export function useApproveSketch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeId, approvedBy }: { nodeId: string; approvedBy?: string }) =>
+      approveSketch(nodeId, approvedBy),
+    onSuccess: (_data, { nodeId }) => {
+      queryClient.invalidateQueries({ queryKey: twinKeys.node(nodeId) });
+      queryClient.invalidateQueries({ queryKey: [...twinKeys.all, nodeId, 'versions'] });
+      queryClient.invalidateQueries({ queryKey: twinKeys.all });
+    },
   });
 }

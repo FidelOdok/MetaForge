@@ -6,21 +6,43 @@ TwinAPI, McpBridge, EventBus, WorkflowEngine, Scheduler, and test work_products.
 
 from __future__ import annotations
 
-from uuid import UUID, uuid4
+import os
 
-import pytest
+# MET-701: build no OTLP exporters during tests. `api_gateway.server` calls
+# init_observability() at MODULE scope, so merely importing the app stood up
+# three live exporters aimed at http://localhost:4317 -- where nothing is
+# listening in a test run. The batch processors then spent ~33 seconds at
+# interpreter shutdown trying to flush (measured 33.12s and 33.15s across
+# alternating runs, against 0.39s without them). That is the stall near the
+# end of `pytest tests/unit` that read as a deadlock: sleeping on
+# futex_wait_queue, progress stuck at 98%, wall clock still climbing.
+#
+# Deliberately NOT OTEL_SDK_DISABLED. That also makes the SDK hand out NoOp
+# tracers, so code under test records nothing and the instrumentation tests
+# (test_mcp_otel_instrumentation, test_knowledge_call_context, ...) cannot
+# verify the spans they exist to verify -- 15 of them fail. This switch leaves
+# tracing fully functional and only declines to export.
+#
+# Must happen at conftest import time, not in a fixture: by the time a fixture
+# runs, the test module has already imported the app. setdefault so a
+# developer deliberately profiling telemetry can turn export back on.
+os.environ.setdefault("METAFORGE_OTEL_EXPORT", "off")
 
-from orchestrator.event_bus.events import Event, EventType
-from orchestrator.event_bus.subscribers import EventBus, EventSubscriber
-from orchestrator.workflow_dag import (
+from uuid import UUID, uuid4  # noqa: E402 -- must follow the env setup above
+
+import pytest  # noqa: E402
+
+from orchestrator.event_bus.events import Event, EventType  # noqa: E402
+from orchestrator.event_bus.subscribers import EventBus, EventSubscriber  # noqa: E402
+from orchestrator.workflow_dag import (  # noqa: E402
     InMemoryWorkflowEngine,
     WorkflowDefinition,
     WorkflowStep,
 )
-from skill_registry.mcp_bridge import InMemoryMcpBridge
-from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import WorkProductType
-from twin_core.models.work_product import WorkProduct
+from skill_registry.mcp_bridge import InMemoryMcpBridge  # noqa: E402
+from twin_core.api import InMemoryTwinAPI  # noqa: E402
+from twin_core.models.enums import WorkProductType  # noqa: E402
+from twin_core.models.work_product import WorkProduct  # noqa: E402
 
 
 # Tests marked ``@pytest.mark.integration`` need real backing services

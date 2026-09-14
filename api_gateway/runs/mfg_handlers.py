@@ -117,6 +117,7 @@ async def _extract_mfg_spec(
 ) -> dict[str, Any]:
     """Ask the LLM for a manufacturing package spec (never raises)."""
     from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_metrics
 
     prompt = (
         "You are preparing an honest Phase-1 manufacturing package for a hardware board. "
@@ -137,6 +138,7 @@ async def _extract_mfg_spec(
             max_steps=1,
             provider=provider,
             model=model,
+            metrics=get_metrics(),
         )
         match = re.search(r"\{.*\}", reply, re.DOTALL)
         spec = json.loads(match.group(0)) if match else {}

@@ -21,6 +21,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { TwinNode, TwinRelationship } from '../../types/twin';
+import { WP_TYPE_ICONS } from '../../utils/wp-icons';
 
 // ── KC tokens ─────────────────────────────────────────────────────────────────
 const KC = {
@@ -69,29 +70,10 @@ function edgeColor(type: string) {
   return EDGE_COLOR[type] ?? KC.onSurfaceVariant;
 }
 
-// ── Work-product type → icon name ─────────────────────────────────────────────
-const WP_ICONS: Record<string, string> = {
-  schematic: 'schema',
-  pcb_layout: 'developer_board',
-  bom: 'table_rows',
-  cad_model: 'view_in_ar',
-  firmware_source: 'memory',
-  simulation_result: 'bar_chart',
-  test_plan: 'checklist',
-  test_result: 'fact_check',
-  manufacturing_file: 'precision_manufacturing',
-  gerber: 'layers',
-  pinmap: 'share',
-  prd: 'description',
-  constraint_set: 'rule',
-  pick_and_place: 'place',
-  documentation: 'article',
-};
-
 // ── Custom node ───────────────────────────────────────────────────────────────
 function TwinNode({ data }: { data: TwinNodeData }) {
   const accent = domainColor(data.domain);
-  const icon = WP_ICONS[data.wpType ?? ''] ?? 'description';
+  const icon = WP_TYPE_ICONS[data.wpType ?? ''] ?? 'description';
 
   return (
     <div

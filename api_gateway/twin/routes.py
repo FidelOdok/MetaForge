@@ -6,14 +6,16 @@ Endpoints live under ``/v1/twin``.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
-from api_gateway.convert.service import ConversionService
+from api_gateway.convert.service import ConversionError, ConversionService
 from api_gateway.twin.boolean_ops import (
     BooleanOpError,
     InvalidFormatError,
@@ -40,6 +42,8 @@ from api_gateway.twin.import_service import (
     infer_wp_type,
 )
 from api_gateway.twin.schemas import (
+    ApproveSketchRequest,
+    ApproveSketchResponse,
     BooleanCutRequest,
     BooleanCutResponse,
     TwinNodeListResponse,
@@ -83,6 +87,19 @@ def get_twin() -> object:
     return _twin
 
 
+# Follow-up to MET-740/747: an injected async ``approve(node_id, ...)`` (built
+# in server.py over ``design_sketch_recorder.make_design_sketch_approver``) —
+# the dashboard's human-approval action for a design_sketch work product.
+# None until the server lifespan wires it in.
+_design_sketch_approver: Any = None
+
+
+def init_design_sketch_approver(approver: Any) -> None:
+    """Wire in the design-sketch approval callable (server lifespan)."""
+    global _design_sketch_approver  # noqa: PLW0603
+    _design_sketch_approver = approver
+
+
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
 
 
@@ -117,6 +134,16 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         # git-versioned script backs this node.
         geometryParameters=wp.metadata.get("geometry_features"),
         hasScript=bool(wp.metadata.get("script_node_id")),
+        # MET-740: {parts, joints} for a robot_description node — None for
+        # every other node type. MET-745: api_gateway/cad/builder.py's
+        # build_assembly() independently writes metadata["assembly"] = True
+        # (a bare "was this CAD_MODEL built from multiple parts?" flag) on
+        # unrelated CAD_MODEL nodes, predating MET-740 — a real key-name
+        # collision, not a hypothetical one. Only surface it here when it's
+        # actually the robot_description {parts, joints} shape.
+        assembly=wp.metadata.get("assembly")
+        if isinstance(wp.metadata.get("assembly"), dict)
+        else None,
     )
 
 
@@ -154,10 +181,24 @@ async def list_twin_nodes(
 
 
 @router.get("/relationships", response_model=TwinRelationshipListResponse)
-async def list_twin_relationships() -> TwinRelationshipListResponse:
-    """List all edges in the Digital Twin graph."""
+async def list_twin_relationships(
+    project_id: str | None = None,
+) -> TwinRelationshipListResponse:
+    """List edges in the Digital Twin graph.
+
+    ``project_id`` scopes the view to a single project (MET-491), matching
+    ``list_twin_nodes``. Omitted or empty returns every edge (including
+    unscoped legacy nodes) — preserving the prior global behaviour.
+    """
     with tracer.start_as_current_span("twin.list_relationships") as span:
-        work_products = await _twin.list_work_products()
+        scoped_project: UUID | None = None
+        if project_id:
+            try:
+                scoped_project = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("twin.filter.project_id", project_id)
+        work_products = await _twin.list_work_products(project_id=scoped_project)
         edges = []
         seen: set[str] = set()
         for wp in work_products:
@@ -181,7 +222,7 @@ async def list_twin_relationships() -> TwinRelationshipListResponse:
                     )
                 )
         span.set_attribute("twin.relationships_count", len(edges))
-        logger.info("twin_relationships_listed", count=len(edges))
+        logger.info("twin_relationships_listed", count=len(edges), project_id=project_id)
         return TwinRelationshipListResponse(relationships=edges, total=len(edges))
 
 
@@ -305,7 +346,31 @@ async def get_node_model(
         content, filename = _resolve_blob(wp)
         span.set_attribute("model.filename", filename)
 
-        result = ConversionService().convert(content, filename, quality)
+        try:
+            # MET-725: ConversionService.convert is synchronous and does a
+            # blocking httpx.post with a 120s timeout. Called directly from
+            # this async route it held the event loop for the whole
+            # conversion, so ONE slow CAD conversion served nothing else at
+            # all -- no /health (hence "unhealthy" containers), no chat, no
+            # SSE, and no shutdown progress. to_thread copies the context, so
+            # the OTel span above stays the parent.
+            result = await asyncio.to_thread(
+                ConversionService().convert, content, filename, quality
+            )
+        except ConversionError as exc:
+            # MET-652: this is a client-facing "this content can't be
+            # converted" case (e.g. a STEP with no exportable solids), not a
+            # server fault — previously an unhandled 500 with a full stack
+            # trace on every request for this node.
+            span.record_exception(exc)
+            logger.warning(
+                "node_model_conversion_rejected",
+                node_id=node_id,
+                filename=filename,
+                occt_status=exc.status_code,
+                occt_body=exc.body,
+            )
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.info(
             "node_model_converted",
             node_id=node_id,
@@ -339,6 +404,15 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "gltf": "model/gltf+json",
     "step": "application/step",
     "stp": "application/step",
+    # MET-740: robot-description formats (text-based) + their mesh files.
+    "urdf": "application/xml",
+    "xacro": "application/xml",
+    "sdf": "application/xml",
+    "usda": "text/plain; charset=utf-8",
+    "stl": "model/stl",
+    # design_sketch work products: a self-contained HTML reference sketch,
+    # rendered full-screen in a sandboxed iframe (see FullScreenPreviewModal).
+    "html": "text/html; charset=utf-8",
     # Tool-native text formats preview fine as plain text.
     "kicad_sch": "text/plain; charset=utf-8",
     "kicad_pcb": "text/plain; charset=utf-8",
@@ -422,6 +496,67 @@ async def download_node_file(
         )
 
 
+@router.get("/nodes/{node_id}/files/{filename}")
+async def download_node_named_file(node_id: str, filename: str) -> Response:
+    """Stream one of a work product's NAMED blobs (MET-740 follow-up).
+
+    ``GET /nodes/{id}/file`` only ever serves the primary blob. A
+    ``robot_description`` node stores N additional mesh blobs (one per
+    URDF link) under ``metadata["mesh_files"]`` (link filename -> MinIO
+    object key) — this resolves any of THOSE by filename, or falls back to
+    the primary blob if ``filename`` matches it, so the dashboard's
+    existing URDF preview (which expects every mesh reachable at
+    ``{some_base_url}/{filename}``, exactly like a fresh export's
+    ``_cad_exports/{export_id}/`` directory) can point straight at a
+    persisted node with zero re-export round trip.
+    """
+    with tracer.start_as_current_span("twin.download_node_named_file") as span:
+        span.set_attribute("twin.node_id", node_id)
+        span.set_attribute("twin.filename", filename)
+        try:
+            uid = UUID(node_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid node ID format")
+
+        wp = await _twin.get_work_product(uid)
+        if wp is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+
+        mesh_files = wp.metadata.get("mesh_files")
+        mesh_key = mesh_files.get(filename) if isinstance(mesh_files, dict) else None
+
+        if mesh_key:
+            from api_gateway.twin.blob_store import fetch_work_product_blob
+
+            try:
+                content = fetch_work_product_blob(mesh_key)
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001 - storage misconfigured / object gone
+                raise HTTPException(
+                    status_code=502, detail="Mesh blob could not be read from storage"
+                ) from exc
+        else:
+            content, primary_filename = _resolve_blob(wp)
+            if filename != primary_filename:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"'{filename}' is not a stored file on this work product",
+                )
+
+        media_type = _content_type_for("", filename)
+        span.set_attribute("file.media_type", media_type)
+        span.set_attribute("file.size", len(content))
+        logger.info(
+            "node_named_file_served",
+            node_id=node_id,
+            filename=filename,
+            media_type=media_type,
+            size=len(content),
+        )
+        return Response(content=content, media_type=media_type)
+
+
 @router.delete("/nodes/{node_id}", status_code=204)
 async def delete_node(
     node_id: str,
@@ -453,6 +588,26 @@ async def delete_node(
                 delete_work_product_blob(object_key)
             except Exception as exc:  # noqa: BLE001 — best-effort cleanup
                 logger.warning("wp_blob_delete_failed", key=object_key, error=str(exc))
+
+        # MET-740: a robot_description node stores one extra MinIO object
+        # per link's mesh file (metadata["mesh_files"], link_name -> key) —
+        # clean those up too, same best-effort discipline as the primary blob.
+        mesh_files = wp.metadata.get("mesh_files")
+        if isinstance(mesh_files, dict):
+            from api_gateway.twin.blob_store import delete_work_product_blob
+
+            for link_name, mesh_key in mesh_files.items():
+                if not isinstance(mesh_key, str) or not mesh_key:
+                    continue
+                try:
+                    delete_work_product_blob(mesh_key)
+                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                    logger.warning(
+                        "wp_mesh_blob_delete_failed",
+                        key=mesh_key,
+                        link_name=link_name,
+                        error=str(exc),
+                    )
 
         try:
             await _twin.delete_work_product(uid, cascade=cascade)
@@ -730,6 +885,33 @@ async def diff_versions(node_id: UUID, v1: int = Query(...), v2: int = Query(...
         return VersionService.diff(history, v1, v2)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/nodes/{node_id}/approve-sketch", response_model=ApproveSketchResponse)
+async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> ApproveSketchResponse:
+    """Human sign-off on a design_sketch work product (follow-up to MET-740/747).
+
+    The forge/agent side creates a sketch as unapproved (twin.commit_design_sketch);
+    this is the dashboard's side of the gate — a human explicitly approving it
+    before the calling agent is expected to proceed to real CAD/build work.
+    """
+    if _design_sketch_approver is None:
+        raise HTTPException(status_code=503, detail="design-sketch approval is not configured")
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    if wp.type != WorkProductType.DESIGN_SKETCH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Node {node_id} is a {wp.type.value}, not a design_sketch",
+        )
+    try:
+        result = await _design_sketch_approver(str(node_id), approved_by=body.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ApproveSketchResponse(
+        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
+    )
 
 
 # ---------------------------------------------------------------------------

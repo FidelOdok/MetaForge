@@ -38,6 +38,11 @@ SUPPORTED_CHECK_TYPES = (
     "tool_called",
     "tool_arg_equals",
     "no_duplicate_tool_calls",
+    # MET-569: the mechanical half of the same property. `no_duplicate_tool_calls`
+    # measures model *discipline* (did it emit a duplicate at all); this measures
+    # that a duplicate it did emit COST NOTHING -- the harness served it from the
+    # turn cache instead of re-running the tool.
+    "no_duplicate_tool_executions",
     "reply_is_not_fallback",
     # For gateway_action turns (runner-performed HTTP steps, e.g. approving a
     # gate between agent turns): did the action complete?
@@ -224,6 +229,17 @@ def run_check(check: dict[str, Any], turn: dict[str, Any]) -> bool:
             if key in seen:
                 return False
             seen.add(key)
+        return True
+    if ctype == "no_duplicate_tool_executions":
+        seen_exec: set[tuple[Any, str]] = set()
+        for s in tool_steps(turn):
+            key = (s.get("tool"), canon_args(s.get("arguments")))
+            if key not in seen_exec:
+                seen_exec.add(key)
+                continue
+            obs = s.get("observation")
+            if not (isinstance(obs, dict) and obs.get("cached") is True):
+                return False
         return True
     if ctype == "reply_is_not_fallback":
         return turn_replied(turn)

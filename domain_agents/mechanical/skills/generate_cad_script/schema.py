@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -33,8 +33,18 @@ class GenerateCadScriptInput(BaseModel):
     script: str = Field(
         default="",
         description=(
-            "CadQuery Python script to execute. "
-            "If empty, a fallback script is generated from description/constraints."
+            "Python script to execute, in whichever dialect `backend` selects "
+            "(CadQuery or FreeCAD). If empty, a fallback CadQuery script is "
+            "generated from description/constraints."
+        ),
+    )
+    backend: Literal["cadquery", "freecad"] = Field(
+        default="cadquery",
+        description=(
+            "Which CAD kernel to run `script` against. Falls back to the other "
+            "backend if the preferred one is unavailable. FreeCAD's session "
+            "export only produces STEP, so `output_format` must be 'step' when "
+            "this resolves to freecad."
         ),
     )
     constraints: dict[str, Any] = Field(

@@ -141,6 +141,7 @@ class ComplianceAgent:
             product_category=request.parameters.get("product_category", "consumer_electronics"),
             markets=markets,
         )
+        self._apply_tracked_evidence(checklist)
 
         self._checklists[request.project_id] = checklist
 
@@ -152,6 +153,30 @@ class ComplianceAgent:
             evidenced_count=checklist.evidenced_items,
             coverage_percent=checklist.coverage_percent,
             data={"checklist": checklist.model_dump(mode="json")},
+        )
+
+    def _apply_tracked_evidence(self, checklist: ComplianceChecklist) -> None:
+        """Enrich freshly-generated items with evidence already linked (MET-673).
+
+        ``ChecklistGenerator.generate_checklist`` rebuilds every ``ChecklistItem``
+        from the YAML regime templates on each call, so items always start out
+        MISSING/unlinked -- it has no way to know what's been recorded via
+        ``link_evidence``. Without this step, ``GET /checklist`` permanently
+        reports every item as MISSING no matter how much evidence has been
+        uploaded, even though ``GET /coverage`` (which does consult the
+        tracker) reports the correct count.
+        """
+        evidenced = 0
+        for item in checklist.items:
+            records = self._tracker.get_evidence_for_item(item.id)
+            if records:
+                latest = records[-1]
+                item.evidence_status = latest.status
+                item.evidence_work_product_id = latest.work_product_id
+                evidenced += 1
+        checklist.evidenced_items = evidenced
+        checklist.coverage_percent = round(
+            (evidenced / checklist.total_items * 100.0) if checklist.total_items else 0.0, 2
         )
 
     async def _handle_link_evidence(self, request: ComplianceTaskRequest) -> ComplianceResult:

@@ -1,0 +1,21 @@
+{
+  "name": "author_design_sketch",
+  "version": "0.2.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Deterministically renders a scaled 2D kinematic-chain diagram (segments drawn end-to-end, proportioned from real mm values) and persists it as a DESIGN_SKETCH work product.",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.commit_design_sketch",
+      "capability": "twin_design_sketch",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.AuthorDesignSketchInput",
+  "output_schema": "schema.AuthorDesignSketchOutput",
+  "timeout_seconds": 15,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["sketch", "design-review", "gate", "mechanical"]
+}

@@ -62,5 +62,6 @@ export interface KnowledgeSearchResult {
 export interface KnowledgeSearchQuery {
   query: string;
   knowledge_type?: KnowledgeType;
+  project_id?: string;
   limit?: number;
 }

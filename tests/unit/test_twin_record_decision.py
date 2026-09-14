@@ -127,7 +127,8 @@ class TestRecorder:
         assert len([d for d in decisions if d.content_hash == first["content_hash"]]) == 1
 
     async def test_supersedes_bypasses_dedup(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A superseding record is deliberate — never deduplicated."""
+        """A record with a new supersedes value renders different content —
+        naturally not deduplicated against the thing it supersedes."""
         _patch_blob(monkeypatch)
         twin = InMemoryTwinAPI.create()
         record = make_decision_recorder(twin, None)
@@ -135,6 +136,32 @@ class TestRecorder:
         again = await record(title="D", rationale="r", supersedes=first["node_id"])
         assert again["deduplicated"] is False
         assert again["node_id"] != first["node_id"]
+
+    async def test_repeated_identical_supersedes_call_is_deduplicated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MET-506 follow-up: the original real-world duplicates all carried
+        an identical ``supersedes`` value across retries -- the dedup check
+        used to bypass entirely whenever supersedes was set, so this exact
+        scenario (retry of the same superseding call) still produced
+        duplicates after the first MET-506 fix. Same content + same
+        supersedes must dedupe just like the plain case."""
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+
+        prior = await record(title="Prior decision", rationale="r0", project_id=pid)
+        first = await record(title="D", rationale="r", project_id=pid, supersedes=prior["node_id"])
+        second = await record(title="D", rationale="r", project_id=pid, supersedes=prior["node_id"])
+
+        assert first["deduplicated"] is False
+        assert second["deduplicated"] is True
+        assert second["node_id"] == first["node_id"]
+        decisions = await twin.list_work_products(
+            work_product_type=WorkProductType.DESIGN_DECISION, project_id=UUID(pid)
+        )
+        assert len([d for d in decisions if d.content_hash == first["content_hash"]]) == 1
 
     async def test_blob_failure_degrades_gracefully(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_blob(monkeypatch, fail=True)
@@ -174,6 +201,83 @@ class TestAdapterHandler:
             await server.record_decision({"rationale": "r"})
         with pytest.raises(ValueError, match="rationale"):
             await server.record_decision({"title": "t"})
+
+
+class TestKnowledgeIndexing:
+    """MET-567: a recorded decision must also become searchable knowledge.
+
+    Before this, ``twin.record_decision`` created the node and the blob but
+    published nothing, so the agent could not find with
+    ``knowledge.search(knowledge_type=DESIGN_DECISION)`` the very decision it
+    had just been instructed to record.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_bus(self):
+        from api_gateway.twin.work_product_events import init_work_product_events
+
+        yield
+        init_work_product_events(None)
+
+    async def test_recording_publishes_a_work_product_created_event(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.work_product_events import init_work_product_events
+        from orchestrator.event_bus.events import EventType
+
+        _patch_blob(monkeypatch)
+        published: list[Any] = []
+
+        class _Bus:
+            async def publish(self, event: Any) -> None:
+                published.append(event)
+
+        init_work_product_events(_Bus())
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+
+        result = await record(title="Slot remodel", rationale="slots beat holes")
+
+        assert result["knowledge_indexed"] is True
+        event = published[0]
+        assert event.type is EventType.WORK_PRODUCT_CREATED
+        assert event.data["work_product_id"] == result["node_id"]
+        assert event.data["work_product_type"] == "design_decision"
+        assert "slots beat holes" in event.data["content"]
+        assert event.source == "twin.record_decision"
+
+    async def test_recording_still_succeeds_with_no_bus_wired(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.work_product_events import init_work_product_events
+
+        _patch_blob(monkeypatch)
+        init_work_product_events(None)
+        twin = InMemoryTwinAPI.create()
+
+        result = await make_decision_recorder(twin, None)(title="D", rationale="r")
+
+        assert result["knowledge_indexed"] is False
+        assert await twin.get_work_product(UUID(result["node_id"])) is not None
+
+    async def test_a_publish_failure_never_fails_the_recording(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.work_product_events import init_work_product_events
+
+        _patch_blob(monkeypatch)
+
+        class _BrokenBus:
+            async def publish(self, event: Any) -> None:
+                raise RuntimeError("kafka down")
+
+        init_work_product_events(_BrokenBus())
+        twin = InMemoryTwinAPI.create()
+
+        result = await make_decision_recorder(twin, None)(title="D", rationale="r")
+
+        assert result["knowledge_indexed"] is False
+        assert await twin.get_work_product(UUID(result["node_id"])) is not None
 
 
 def test_design_decision_enum_parses() -> None:

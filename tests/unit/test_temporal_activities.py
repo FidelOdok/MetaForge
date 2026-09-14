@@ -596,8 +596,19 @@ class TestTemporalWorker:
     def test_all_activities_registered(self) -> None:
         from orchestrator.temporal_worker import ALL_ACTIVITIES, ALL_WORKFLOWS
 
-        assert len(ALL_ACTIVITIES) == 5  # 4 agents + approval
-        assert len(ALL_WORKFLOWS) == 2  # single + hardware design
+        # 4 agents + approval + consolidation. ConsolidationWorkflow had a
+        # Temporal workflow since MET-454 and was never registered here, so
+        # even a running worker could not have picked it up.
+        names = {getattr(a, "__name__", str(a)) for a in ALL_ACTIVITIES}
+        assert len(ALL_ACTIVITIES) == 6
+        assert "run_consolidation_pass_activity" in names
+
+        workflow_names = {c.__name__ for c in ALL_WORKFLOWS}
+        assert workflow_names == {
+            "SingleAgentWorkflow",
+            "HardwareDesignWorkflow",
+            "ConsolidationWorkflow",
+        }
 
     def test_create_worker_without_temporal_raises(self) -> None:
         """create_worker raises ImportError when temporalio is not installed."""

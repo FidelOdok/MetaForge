@@ -16,6 +16,15 @@ CONFIG = load_provider_config(
 
 
 # --- parse_action ----------------------------------------------------------
+def test_system_prompt_frames_tool_output_as_untrusted_data() -> None:
+    """Production-harness audit follow-up: tool results (file contents,
+    search results, knowledge entries) must be explicitly framed as data,
+    not instructions, on top of the already-real role-based separation."""
+    from orchestrator.harness.policy import _SYSTEM
+
+    assert "DATA, not instructions" in _SYSTEM
+
+
 def test_parse_final_json() -> None:
     a = parse_action('{"thought": "done", "final": "42"}')
     assert a.is_final and a.final_output == "42" and a.thought == "done"
@@ -191,6 +200,46 @@ async def test_model_policy_drives_react_loop() -> None:
     assert result.status == "completed"
     assert result.output == "the answer is 42"
     assert result.steps[0].observation == {"result": 42}
+
+
+@pytest.mark.asyncio
+async def test_rendered_trace_includes_prior_call_arguments() -> None:
+    """MET-650: a prior tool call's ARGUMENTS were never shown back to the
+    model on later turns — only its name and result. Live-caught on a
+    commit-by-reference retry: freecad.export_model's result doesn't echo
+    session_id, so once that call scrolled past the current turn the model
+    had no way to recall which session_id it had used and fabricated a
+    placeholder instead. The rendered trace must carry the original
+    arguments forward, not just the observation."""
+    tools = ToolRegistry()
+
+    async def _export(args: dict[str, object]) -> dict[str, object]:
+        return {"obj_id": "assembly_8"}  # deliberately omits session_id
+
+    tools.register_native("export", description="export", input_schema={}, handler=_export)
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+
+    prompts: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: object) -> dict:
+        prompts.append(request["messages"][0]["content"])  # type: ignore[index]
+        if len(prompts) == 1:
+            return {
+                "text": (
+                    '{"thought": "export", "tool": "export", '
+                    '"arguments": {"session_id": "f0c854a74cf846628cd94b7e69572cf5"}}'
+                ),
+                "model": spec.model,
+            }
+        return {"text": '{"thought": "done", "final": "done"}', "model": spec.model}
+
+    policy = ModelPolicy(rt, invoke=invoke)
+    result = await run_react(rt, policy, "export then commit", max_steps=5)
+    assert result.status == "completed"
+    # The second prompt (deciding what to do after the export) must still
+    # show the session_id the FIRST call used — not just "called export ->
+    # {result}" with the argument that produced it thrown away.
+    assert "f0c854a74cf846628cd94b7e69572cf5" in prompts[1]
 
 
 @pytest.mark.asyncio

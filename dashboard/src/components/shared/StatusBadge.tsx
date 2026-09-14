@@ -25,6 +25,7 @@ const STATUS_MAP: Record<string, { variant: 'success' | 'warning' | 'error' | 'i
   queued:           { variant: 'default', label: 'Queued'    },
   awaiting_approval:{ variant: 'warning', label: 'Awaiting Approval' },
   canceled:         { variant: 'default', label: 'Canceled'  },
+  abandoned:        { variant: 'warning', label: 'Abandoned' },
 };
 
 // Status dot colors for use in tables/lists
@@ -42,6 +43,7 @@ const DOT_COLORS: Record<string, string> = {
   warning:   '#f59e0b',
   low_stock: '#f59e0b',
   draft:     '#f59e0b',
+  abandoned: '#f59e0b',
 };
 
 interface StatusBadgeProps {

@@ -254,3 +254,82 @@ All folding is deterministic (no model calls): free, instant, reproducible.
 **Deferred by design** (documented here, not built): Letta-style context
 paging, Zep-style temporal knowledge-graph queries in chat, and auto-memory
 files — revisit when the deterministic layers prove insufficient in evals.
+
+## Tool-call hardening (MET-569)
+
+Four properties the tool-calling loop enforces, so a model's mistake costs a
+message rather than an invocation:
+
+- **Schema pre-validation** — `ToolRegistry.invoke` validates model-emitted
+  arguments against the tool's declared `input_schema` before the handler runs
+  (`orchestrator/harness/validation.py`). A missing `required` field, a wrong
+  JSON type, or a value outside a declared `enum` raises `ToolValidationError`,
+  which the loop returns as `{"status": "error", "error": "invalid_arguments",
+  "validation_errors": [...], "hint": "...NOT executed"}` — the model
+  self-corrects without an adapter round-trip or a half-applied side effect.
+  Tools whose manifest declares no schema keep the permissive
+  `{"type": "object"}` fallback and are not validated. `jsonschema` is used
+  when installed; a built-in structural check covers required/type/enum
+  otherwise.
+- **Parallel batched execution** — a provider emitting several independent
+  calls now has them executed with `asyncio.gather` instead of one at a time,
+  with per-call exception isolation (one failure never cancels its siblings)
+  and results reassembled in the model's original call order, which is how
+  providers match results to call ids. A batch containing a
+  `requires_approval` tool runs serially: concurrent approval prompts race for
+  one approver, and a queued call can hit its deny-by-default timeout while
+  the person is still answering the first.
+- **Same-turn duplicate guard** (both loops) — calls are keyed by `(tool,
+  canonical arguments)`. An identical repeat of an already-successful call, whether in
+  the same batch or a later step of the same turn, reuses the stored
+  observation and returns it marked `{"cached": true, ...}` without re-running
+  the tool. Failures are never cached, so a genuine retry really retries, and
+  the cache is turn-scoped, so the same call in a later turn is treated as a
+  legitimate re-read of current state.
+- **Structured error pass-through** (both loops) — a failed call returns a
+  JSON envelope instead of the old `ERROR: <str(exc)>` line. `McpToolError` carries the
+  adapter's own envelope (`payload`), so its status, message, and any hint
+  survive into `details` and the model can distinguish "the container is down,
+  stop trying" from "that argument was wrong, fix it".
+
+### Which loop gets what
+
+The dedup guard and structured errors are **loop-agnostic** and live in
+`orchestrator/harness/tool_exec.py` (`TurnToolCache`, `cached_view`,
+`error_content`), so both `run_native_tools` and `run_react` call in. They
+originally shipped inside the native loop only, which meant any provider whose
+adapter cannot parse native `tool_calls` — Gemini, Bedrock, anything else
+`native_tools_enabled()` returns False for — fell back to ReAct and silently
+kept the old behaviour. Losing a correctness property because of which
+provider a deployment picked is a bad trade.
+
+Schema pre-validation was always shared (it lives in `ToolRegistry.invoke`), as
+are the gate declarations below. **Parallel batched execution stays
+native-only** and always will: the JSON-ReAct protocol emits exactly one tool
+call per step, so there is never a batch to parallelise.
+
+| Property | Native | ReAct |
+| --- | --- | --- |
+| Schema pre-validation | ✅ | ✅ (shared registry) |
+| Parallel batched execution | ✅ | n/a — one call per step |
+| Same-turn duplicate guard | ✅ | ✅ (shared `tool_exec`) |
+| Structured error pass-through | ✅ | ✅ (shared `tool_exec`) |
+| Gate declarations | ✅ | ✅ (shared registry) |
+
+### Gate declarations for chat tools
+
+`ToolSpec.required_gates` had existed since Phase 1 with nothing declaring a
+gate, so the mechanism was dead code and chat could always write. Persistent
+twin and project mutations (`twin.commit_geometry`, `twin.record_decision`,
+`twin.record_constraint_set`, `twin.record_document`, `twin.propose_change`,
+`twin.stage_work_product_file`, `project.create/update/delete`) now declare
+`twin_write` / `project_write`, and the chat runtime wires the evaluator that
+has to exist alongside them — a gated tool with no evaluator never runs at all.
+
+Both gates default to satisfied, so an existing deployment behaves exactly as
+before; `METAFORGE_CHAT_TWIN_WRITES=0` / `METAFORGE_CHAT_PROJECT_WRITES=0`
+give an operator a genuinely read-only chat surface. Reads and `freecad.*` /
+`cadquery.*` authoring stay ungated — the latter only ever touch the adapter's
+ephemeral workspace. The gate is a static precondition; the per-call human
+decision for the same tools remains the separate "ask" tier
+(`requires_approval`).

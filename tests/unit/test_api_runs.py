@@ -6,7 +6,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api_gateway.runs.routes import get_run_store, reset_run_store, router
+from api_gateway.runs.routes import get_run_store, init_run_ledger, reset_run_store, router
+from orchestrator.harness.ledger import SqliteRunLedger
+from orchestrator.harness.runs import RunNotFoundError, RunStatus
 
 
 @pytest.fixture
@@ -84,3 +86,47 @@ def test_approval_bad_decision_422(client: TestClient) -> None:
     run_id = client.post("/v1/runs", json={}).json()["id"]
     resp = client.post(f"/v1/runs/{run_id}/approval", json={"decision": "maybe"})
     assert resp.status_code == 422  # schema validation rejects it
+
+
+class TestRunLedgerDurability:
+    """Production-harness audit follow-up: transitions write through to a
+    wired ledger, and non-terminal runs rehydrate into a fresh store."""
+
+    def test_transitions_write_through_to_the_ledger(self, client: TestClient) -> None:
+        ledger = SqliteRunLedger(":memory:")
+        init_run_ledger(ledger)
+        try:
+            run_id = client.post("/v1/runs", json={"request": {"goal": "widget"}}).json()["id"]
+            persisted = ledger.get_run(run_id)
+            assert persisted is not None
+            assert persisted["status"] == "running"
+            assert persisted["request"] == {"goal": "widget"}
+        finally:
+            reset_run_store()
+
+    def test_init_run_ledger_none_keeps_process_local_behavior(self, client: TestClient) -> None:
+        """The default (no ledger) — every other test in this file — must be
+        completely unaffected by the durability feature existing."""
+        run_id = client.post("/v1/runs", json={}).json()["id"]
+        assert get_run_store().get(run_id) is not None  # no ledger involved at all
+
+    def test_rehydrates_non_terminal_runs_on_init(self, client: TestClient) -> None:
+        ledger = SqliteRunLedger(":memory:")
+        store = get_run_store()
+        running = store.create({"goal": "in flight"}, run_id="was-running")
+        store.start(running.id)
+        ledger.record_run(store.get(running.id))
+        done = store.create({}, run_id="already-done")
+        store.start(done.id)
+        store.complete(done.id)
+        ledger.record_run(store.get(done.id))
+
+        reset_run_store()  # simulates a fresh process: brand-new, empty store
+        init_run_ledger(ledger)
+        try:
+            fresh_store = get_run_store()
+            assert fresh_store.get("was-running").status is RunStatus.RUNNING
+            with pytest.raises(RunNotFoundError):  # terminal runs don't rehydrate
+                fresh_store.get("already-done")
+        finally:
+            reset_run_store()

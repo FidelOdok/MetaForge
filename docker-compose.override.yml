@@ -3,6 +3,13 @@
 # Mounts local source into containers so code changes take effect
 # instantly via hot-reload. No rebuild needed.
 #
+# MET-694: the gateway runs with --timeout-graceful-shutdown. Without it a
+# reload-triggered shutdown waits forever for open connections to close, and a
+# single long-lived SSE stream (chat streaming, a dashboard left open) wedges
+# the whole dev gateway at "Waiting for connections to close" — /health stops
+# answering and every consumer goes down with it. A reload that drops one
+# in-flight stream is strictly better than one that never completes.
+#
 # Usage:
 #   docker compose up gateway dashboard-dev   # Gateway + Vite HMR dashboard
 #   docker compose up                         # Same — override is auto-applied
@@ -16,6 +23,7 @@ services:
       uvicorn api_gateway.server:app
       --host 0.0.0.0 --port 8000 --reload
       --ws websockets-sansio
+      --timeout-graceful-shutdown 10
       --reload-dir /app/api_gateway
       --reload-dir /app/orchestrator
       --reload-dir /app/twin_core
@@ -70,7 +78,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,offer_resolver,component
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -78,6 +86,7 @@ services:
     environment:
       - METAFORGE_ENV=docker
       - NEO4J_URI=bolt://neo4j:7687
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Credentials sourced from .env — same vars the gateway service uses.
       # No literal fallbacks: secret scanners treat a hardcoded user/pass
       # pair in a connection string as a credential leak even for dev defaults.
@@ -86,8 +95,25 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
       - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
+      # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
+      # register with live credentials — the gateway service (docker-compose.yml)
+      # already had this passthrough; this sidecar never did, so distributor
+      # tools always skipped with "missing env vars" here regardless of .env.
+      - DIGIKEY_CLIENT_ID=${DIGIKEY_CLIENT_ID:-}
+      - DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET:-}
+      - DIGIKEY_BASE_URL=${DIGIKEY_BASE_URL:-}
+      - MOUSER_API_KEY=${MOUSER_API_KEY:-}
+      - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
+      - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+      # MET-478 follow-up: without this, kicad.* tools ran in-process inside
+      # this sidecar, which has no kicad-cli binary, so every real call
+      # failed with -32001 even though tools/list looked healthy.
+      - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
+      # MET-658 follow-up: same gap as kicad -- the ccx solver binary isn't
+      # installed in this sidecar image, only in calculix-adapter's own.
+      - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
@@ -121,7 +147,14 @@ services:
       - ./observability:/app/observability
       - ./metaforge:/app/metaforge
       - ./pyproject.toml:/app/pyproject.toml:ro
-      - adapter-workspace:/workspace:ro
+      # Read-write (MET-618 follow-up): twin.stage_work_product_file and
+      # MET-612's boolean-cut staging both write into this shared workspace
+      # so any adapter can load the result — the gateway's own mount above
+      # was already read-write for the same reason; this one was never
+      # updated to match, so any write-needing tool exposed through this
+      # standalone sidecar (used by external MCP clients) failed with
+      # "Read-only file system" no matter which work product it targeted.
+      - adapter-workspace:/workspace
     # Override the gateway image's baked-in HEALTHCHECK (it probes :8000,
     # the gateway's port) — this sidecar serves on :8765, so without this
     # the container reports "unhealthy" forever while working fine.
@@ -171,3 +204,22 @@ services:
     networks:
       - metaforge
     restart: unless-stopped
+
+  # ── Temporal Worker: dev source mounts ──────────────────────────
+  # Same pattern as gateway/mcp-http above: mount the source so a code change
+  # takes effect on `docker compose restart temporal-worker` instead of
+  # requiring a full image rebuild. The worker has no --reload equivalent
+  # (it is not uvicorn), so a restart is the reload.
+  temporal-worker:
+    volumes:
+      - ./api_gateway:/app/api_gateway
+      - ./orchestrator:/app/orchestrator
+      - ./twin_core:/app/twin_core
+      - ./digital_twin:/app/digital_twin
+      - ./shared:/app/shared
+      - ./skill_registry:/app/skill_registry
+      - ./mcp_core:/app/mcp_core
+      - ./tool_registry:/app/tool_registry
+      - ./domain_agents:/app/domain_agents
+      - ./observability:/app/observability
+      - ./pyproject.toml:/app/pyproject.toml:ro

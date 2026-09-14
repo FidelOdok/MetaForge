@@ -4,12 +4,21 @@ import { computeExplodeOffset } from '../explode';
 describe('computeExplodeOffset', () => {
   it('radial spreads a part along its full 3D direction from center', () => {
     const offset = computeExplodeOffset({ x: 1, y: 2, z: 3 }, 'radial', 50);
-    expect(offset).toEqual({ x: 100, y: 200, z: 300 });
+    expect(offset).toEqual({ x: 1, y: 2, z: 3 });
   });
 
   it('axial spreads a part only along Y, ignoring X/Z', () => {
     const offset = computeExplodeOffset({ x: 1, y: 2, z: 3 }, 'axial', 50);
-    expect(offset).toEqual({ x: 0, y: 200, z: 0 });
+    expect(offset).toEqual({ x: 0, y: 2, z: 0 });
+  });
+
+  it('a 100% explode factor (the slider max) keeps parts within a sane multiple of their original distance', () => {
+    // Regression: explodeFactor is a 0-100 percentage (the slider's native
+    // range), not an already-normalized 0-1 fraction. Treating it as 0-1
+    // made every part fly out to 100x its offset at max explode -- so far
+    // outside the camera's fitted view that the whole model vanished.
+    const offset = computeExplodeOffset({ x: 10, y: 10, z: 10 }, 'radial', 100);
+    expect(offset).toEqual({ x: 20, y: 20, z: 20 });
   });
 
   it('radial and axial genuinely differ for the same input (regression: direction used to be ignored)', () => {

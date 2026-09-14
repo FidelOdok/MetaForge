@@ -133,6 +133,7 @@ async def _extract_arch_spec(
 ) -> dict[str, Any]:
     """Ask the LLM for a subsystem decomposition with numeric budgets (never raises)."""
     from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_metrics
 
     prompt = (
         "You are defining the system architecture for a hardware product. Decompose it into "
@@ -152,6 +153,7 @@ async def _extract_arch_spec(
             max_steps=1,
             provider=provider,
             model=model,
+            metrics=get_metrics(),
         )
         match = re.search(r"\{.*\}", reply, re.DOTALL)
         spec = json.loads(match.group(0)) if match else {}

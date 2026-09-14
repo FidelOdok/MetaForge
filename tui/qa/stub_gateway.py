@@ -35,6 +35,12 @@ _threads: list[dict[str, object]] = []
 # event lost on an SSE reconnect. A correct client finalizes the turn anyway
 # (POST-resolve fallback) instead of hanging on "thinking" forever.
 DROP_DONE = "__drop_done__"
+# Script a LONG agentic turn: a stack of agent.thinking / agent.step events and
+# then a tall multi-line streamed answer — the shape of a real 20+-step CAD
+# turn. Reproduces the "glitching while thinking" class of bug where the live
+# (non-Static) region outgrows the terminal and Ink strands garbage frames
+# into scrollback on every repaint.
+LONG_TURN = "__long_turn__"
 REPLY_TOKENS = ["Hello", "! ", "This ", "is ", "the ", "QA ", "stub ", "reply."]
 
 # Per-thread queues bridge POST /messages -> the open GET /stream (like the real
@@ -116,7 +122,10 @@ class Handler(BaseHTTPRequestHandler):
             except queue.Empty:
                 return
             self._emit("agent.typing", {"agent_id": "qa"}, tid)
-            if MALFORMED in content:
+            if LONG_TURN in content:
+                if not self._long_turn(tid):
+                    return
+            elif MALFORMED in content:
                 # Enveloped delta events with NO `delta` field -> parse to "".
                 for _ in range(2):
                     if not self._emit("message.delta", {"agent_id": "agent"}, tid):
@@ -130,6 +139,38 @@ class Handler(BaseHTTPRequestHandler):
             # A dropped-completion turn streams its reply but never signals done.
             if DROP_DONE not in content:
                 self._emit("agent.done", {"agent_id": "qa"}, tid)
+
+    def _long_turn(self, tid: str) -> bool:
+        """A 12-step agentic turn followed by a ~40-line streamed answer,
+        paced so QA can capture the screen mid-turn."""
+        for i in range(12):
+            for j in range(6):  # live reasoning draft, cleared by each step
+                if not self._emit(
+                    "agent.thinking",
+                    {"delta": f"considering approach {i}.{j} for the fixture… ", "kind": "draft"},
+                    tid,
+                ):
+                    return False
+                time.sleep(0.01)
+            if not self._emit("agent.action_started", {"tool": f"freecad.op_{i}"}, tid):
+                return False
+            time.sleep(0.05)
+            step = {
+                "index": i,
+                "thought": f"step {i}: refine the bracket geometry and re-check clearances",
+                "tool": f"freecad.op_{i}",
+                "arguments": {"session": "qa", "op": i, "part": f"bracket_{i}"},
+                "observation": "ok",
+            }
+            if not self._emit("agent.step", {"step": step}, tid):
+                return False
+            time.sleep(0.05)
+        for i in range(40):  # tall final answer: ~40 rendered lines
+            tok = f"- line {i:02d}: the bracket wall thickness was validated against the spec\n"
+            if not self._emit("message.delta", {"delta": tok, "agent_id": "agent"}, tid):
+                return False
+            time.sleep(0.04)
+        return True
 
     def _emit(self, event: str, data: dict, tid: str) -> bool:
         env = {"data": data, "thread_id": tid, "timestamp": "qa"}

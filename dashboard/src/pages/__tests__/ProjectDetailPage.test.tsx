@@ -17,6 +17,16 @@ vi.mock('../../hooks/use-projects', () => ({
   useDeleteProject: () => ({ mutate: mockDeleteMutate, isPending: false }),
 }));
 
+const mockSetActiveProjectId = vi.fn();
+vi.mock('../../hooks/use-active-project', () => ({
+  useActiveProject: () => ({
+    activeProjectId: null as string | null,
+    activeProject: undefined,
+    setActiveProjectId: mockSetActiveProjectId,
+    projects: [] as unknown[],
+  }),
+}));
+
 import { ProjectDetailPage } from '../ProjectDetailPage';
 import { useProject } from '../../hooks/use-projects';
 
@@ -34,6 +44,12 @@ describe('ProjectDetailPage', () => {
     mockUseProject.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useProject>);
     render(<ProjectDetailPage />);
     expect(screen.getByText('Project not found')).toBeInTheDocument();
+  });
+
+  it('sets itself as the active project on mount', () => {
+    mockUseProject.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useProject>);
+    render(<ProjectDetailPage />);
+    expect(mockSetActiveProjectId).toHaveBeenCalledWith('proj-001');
   });
 
   it('renders project details', () => {

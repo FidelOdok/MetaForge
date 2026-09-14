@@ -61,7 +61,10 @@ class FreecadServer(McpToolServer):
         self._ops = FreecadOperations(
             work_dir=self.config.work_dir, timeout=float(self.config.max_operation_time)
         )
-        self._sessions = FreecadSessionStore()
+        self._sessions = FreecadSessionStore(
+            ttl_seconds=self.config.session_ttl_seconds,
+            max_sessions=self.config.max_sessions,
+        )
         self._register_tools()
         self._register_authoring_tools()
 
@@ -73,9 +76,12 @@ class FreecadServer(McpToolServer):
                 adapter_id="freecad",
                 name="Export Geometry",
                 description=(
-                    "Export CAD model to STEP/STL/OBJ/BREP format. Output is written "
-                    "to the adapter's local filesystem only — it is NOT persisted or "
-                    "visible in the project/Twin until twin.commit_geometry is called."
+                    "Export CAD model to STEP/STL/OBJ/BREP format (STEP only today; "
+                    "other formats raise). Output is written to the adapter's local "
+                    "filesystem only — it is NOT persisted or visible in the "
+                    "project/Twin until twin.commit_geometry is called. The response "
+                    "includes step_base64 — pass that directly as "
+                    "twin.commit_geometry's step_base64 argument to persist it."
                 ),
                 capability="cad_export",
                 input_schema={
@@ -103,6 +109,12 @@ class FreecadServer(McpToolServer):
                         "output_file": {"type": "string"},
                         "file_size_bytes": {"type": "integer"},
                         "format": {"type": "string"},
+                        "step_base64": {
+                            "type": "string",
+                            "description": (
+                                "Base64 STEP bytes -- pass to twin.commit_geometry's step_base64."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -955,7 +967,17 @@ class FreecadServer(McpToolServer):
             (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
-                "(escape hatch; assign `result` to surface an object)",
+                "(escape hatch; assign `result` to surface an object). Namespace "
+                "provides: FreeCAD (alias App), Part, math, doc, and the bare "
+                "geometry types Vector/Rotation/Placement/Matrix (no import needed, "
+                "no FreeCAD. prefix required). Blocked anywhere in the script: "
+                "open, __import__, os, sys, subprocess, eval, exec, compile. "
+                "IMPORTANT: never assign the same Shape object to more than one "
+                "document object's .Shape (e.g. once into an assembly compound "
+                "AND again onto its own per-part object) -- this has caused the "
+                "adapter process to crash outright (MET-643). Call shape.copy() "
+                "before each additional assignment if you need both an "
+                "assembly-level compound and per-part representations.",
                 "cad_scripting",
                 obj_schema(
                     {"session_id": sid, "code": {"type": "string"}},
@@ -1538,6 +1560,10 @@ class FreecadServer(McpToolServer):
         obj = self._sessions.get_object(session_id, obj_id)
         step_bytes = self._ops.export_object_step_bytes(obj)
         return {
+            # MET-650: echoed back so a later twin.commit_geometry call (by
+            # reference) can be built directly from this result even if the
+            # arguments that produced it are no longer in view.
+            "session_id": session_id,
             "obj_id": obj_id,
             "format": "step",
             "size_bytes": len(step_bytes),

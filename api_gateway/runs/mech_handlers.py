@@ -65,6 +65,7 @@ async def _extract_part_spec(
 ) -> dict[str, Any]:
     """Ask the LLM for a machinable primitive spec, normalized (never raises)."""
     from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_metrics
 
     prompt = (
         "You are extracting a buildable primitive spec for a mechanical part. "
@@ -84,6 +85,7 @@ async def _extract_part_spec(
             max_steps=1,
             provider=provider,
             model=model,
+            metrics=get_metrics(),
         )
         match = re.search(r"\{.*\}", reply, re.DOTALL)
         spec = json.loads(match.group(0)) if match else {}

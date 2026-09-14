@@ -17,6 +17,11 @@
 services:
   # ── MetaForge Gateway ────────────────────────────────────────────
   gateway:
+    # Prebuilt on every push to main (MET-638) — `docker compose pull gateway`
+    # fetches this instead of building locally. `build:` stays so `--develop`
+    # mode and `docker compose up --build` still work for contributors editing
+    # source; Compose only builds when no local image matches this tag.
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -33,6 +38,15 @@ services:
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+      # MET-478 follow-up: without this, kicad.* tools ran in-process inside
+      # this image, which has no kicad-cli binary, so every real call failed
+      # with -32001 even though tools/list looked healthy.
+      - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
+      # MET-658 follow-up: same gap as kicad -- calculix-adapter's entrypoint
+      # is already HTTP-only, but nothing pointed gateway/mcp-http at it, so
+      # calculix.* ran in-process here where the ccx solver binary isn't
+      # installed (only calculix-adapter's own image bundles it).
+      - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -43,11 +57,32 @@ services:
       # registry incl. openrouter/codex). Without this, chat falls back to the
       # legacy openai/anthropic-only path and ignores other providers.
       - METAFORGE_CHAT_HARNESS=${METAFORGE_CHAT_HARNESS:-off}
+      # Expose skill-layer tools (generate_cad_ir, etc.) to the harness loop,
+      # alongside its existing raw MCP/adapter tools. Independent of
+      # METAFORGE_CHAT_HARNESS above -- newer, less-tested code that touches
+      # the Digital Twin directly, so it stays separately toggleable.
+      - METAFORGE_CHAT_SKILLS=${METAFORGE_CHAT_SKILLS:-off}
       # Tool-call budget for one chat turn (harness_backend.chat_max_steps,
       # default 24). Was never actually forwarded here — a multi-part CAD
       # assembly (5 primitives + holes + assembly + export + commit, plus any
       # retries) can genuinely need more than 24 real tool calls.
       - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
+      # Hard wall-clock budget (seconds) for one chat turn's tool loop
+      # (harness_backend.chat_wall_clock_seconds). Production-harness audit
+      # follow-up: only step-count and context-size were ever bounded before
+      # this. Unset (dev default) keeps the historical unbounded behavior.
+      - METAFORGE_CHAT_WALL_CLOCK_SECONDS=${METAFORGE_CHAT_WALL_CLOCK_SECONDS:-}
+      # Hard dollar-spend budget for one chat turn (native-tools path only —
+      # see orchestrator/harness/providers/pricing.py). Unset (dev default)
+      # keeps the historical unbounded behavior.
+      - METAFORGE_CHAT_MAX_COST_USD=${METAFORGE_CHAT_MAX_COST_USD:-}
+      # Durable /v1/runs ledger (production-harness audit follow-up — the
+      # run store was always process-local despite a real SQLite ledger
+      # existing for exactly this). Path defaults to ~/.metaforge/runs_ledger.db
+      # inside the container; set _DISABLE=on to keep the historical
+      # process-local-only behavior (e.g. ephemeral CI containers).
+      - METAFORGE_RUNS_LEDGER_PATH=${METAFORGE_RUNS_LEDGER_PATH:-}
+      - METAFORGE_RUNS_LEDGER_DISABLE=${METAFORGE_RUNS_LEDGER_DISABLE:-off}
       # Gates the credential-write endpoints (POST/DELETE /v1/harness/credentials,
       # PUT /v1/harness/selection — see api_gateway/harness/routes.py::_require_admin).
       # Unset (dev default) leaves them open with a logged warning; set this on
@@ -315,18 +350,73 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── Temporal Worker (MET-186 — the missing last mile) ───────────
+  # The Temporal server has run since March with ZERO workflow executions
+  # because nothing ever connected a client: `create_worker`/`run_worker` had
+  # no caller outside tests, and there was no worker service here. A worker
+  # runs in its OWN container on purpose -- putting it in the gateway would
+  # couple workflow execution to the API process lifecycle (a --reload cycle
+  # or an API restart would kill in-flight workflows) and to its scaling.
+  temporal-worker:
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "orchestrator.temporal_worker"]
+    environment:
+      - METAFORGE_ENV=docker
+      - TEMPORAL_HOST=temporal:7233
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      # MET-724: the worker synthesizes insights in its own process, so it
+      # needs the same LLM credentials the gateway has. Without the key the
+      # tier degrades to StubLLMClient, which answers confidence 0.0 -- the
+      # validator then rejects every insight, so a worker-driven pass could
+      # fetch, group and synthesize and still accept nothing, forever.
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - CONSOLIDATION_MODEL=${CONSOLIDATION_MODEL:-}
+      - CONSOLIDATION_FALLBACK_MODEL=${CONSOLIDATION_FALLBACK_MODEL:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # MET-726: the worker reuses the gateway image and so inherited its
+    # HEALTHCHECK, which curls localhost:8000/health. The worker serves no
+    # HTTP, so it reported "unhealthy" from the moment it was added while
+    # running perfectly -- and a container that is always unhealthy teaches
+    # everyone to ignore the one signal that would show a genuinely dead one.
+    # This probe asks the thing that matters: is THIS container polling its
+    # task queue (matched on the poller identity's @hostname, so a dead worker
+    # sharing a queue with a healthy peer still fails).
+    healthcheck:
+      test: ["CMD-SHELL", "python -m orchestrator.worker_healthcheck || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── KiCad Adapter (Phase 1 — read-only ERC/DRC/BOM/Gerber) ──────
   kicad-adapter:
     build:
       context: .
       dockerfile: tool_registry/tools/kicad/Dockerfile
     image: metaforge/kicad-adapter:latest
-    stdin_open: true
+    ports:
+      - "8103:8103"
     volumes:
       - adapter-workspace:/workspace
     environment:
       - METAFORGE_ENV=docker
       - KICAD_WORK_DIR=/workspace
+      - KICAD_HTTP_PORT=8103
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     deploy:
       resources:
@@ -334,7 +424,7 @@ services:
           memory: 1G
           cpus: '2'
     healthcheck:
-      test: ["CMD", "kicad-cli", "version"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8103/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -421,10 +511,16 @@ services:
       - FREECAD_HTTP_PORT=8102
       - QT_QPA_PLATFORM=offscreen
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # MET-643: unconfirmed OOM suspected in a container restart that wiped
+      # live sessions mid-turn -- up to max_sessions (32 by default) live
+      # FreeCAD documents can be held in memory at once, which is tight
+      # against the previous 2G limit. Raised as a defensive mitigation.
+      - FREECAD_MAX_SESSIONS=${FREECAD_MAX_SESSIONS:-32}
+      - FREECAD_SESSION_TTL_SECONDS=${FREECAD_SESSION_TTL_SECONDS:-1800}
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
           cpus: '4'
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/health')"]

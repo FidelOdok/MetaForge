@@ -9,12 +9,27 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import UTC, datetime
 from typing import Any
 
 from cli.forge_cli.client import ForgeClient, ForgeClientError, ForgeClientNotFound
 from cli.forge_cli.formatters import format_output
 
 _LIST_COLUMNS = ["id", "status", "created_at", "updated_at"]
+
+
+def _fmt_epoch(value: Any) -> str:
+    """Render a run's epoch-seconds timestamp as human-readable UTC.
+
+    ``/v1/runs`` returns ``created_at``/``updated_at`` as raw Unix seconds
+    (matching the dashboard's own ``HarnessRun.createdAt: number``, which the
+    dashboard formats client-side) -- unlike every other CLI list command,
+    whose date columns are already ISO strings from the backend. Left
+    unformatted, `forge runs list` prints bare floats like ``1787650005.82``.
+    """
+    if not isinstance(value, (int, float)):
+        return str(value) if value else ""
+    return datetime.fromtimestamp(value, tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def _fmt(args: argparse.Namespace) -> str:
@@ -70,7 +85,13 @@ def _list(args: argparse.Namespace, client: ForgeClient) -> Any:
     if _fmt(args) == "json":
         print(format_output(payload, fmt="json"))
         return None
-    rows = [{k: r.get(k, "") for k in _LIST_COLUMNS} for r in runs]
+    rows = [
+        {
+            k: _fmt_epoch(r.get(k, "")) if k in ("created_at", "updated_at") else r.get(k, "")
+            for k in _LIST_COLUMNS
+        }
+        for r in runs
+    ]
     print(format_output(rows, fmt="table", columns=_LIST_COLUMNS))
     return None
 

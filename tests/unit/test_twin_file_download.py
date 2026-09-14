@@ -119,6 +119,92 @@ async def test_download_from_minio_object_key(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Route: GET /nodes/{id}/files/{filename} — named mesh files (MET-740 follow-up)
+# ---------------------------------------------------------------------------
+
+
+async def test_download_named_mesh_file(monkeypatch) -> None:
+    node_id = await _seed(
+        _wp(
+            metadata={
+                "minio_object_key": "work-products/x/model.urdf",
+                "original_filename": "model.urdf",
+                "mesh_files": {
+                    "body.stl": "work-products/x/body.stl",
+                    "leg_fl.stl": "work-products/x/leg_fl.stl",
+                },
+            },
+            fmt="urdf",
+        )
+    )
+    blobs = {
+        "work-products/x/model.urdf": b"<robot/>",
+        "work-products/x/body.stl": b"solid body\nendsolid body\n",
+        "work-products/x/leg_fl.stl": b"solid leg\nendsolid leg\n",
+    }
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: blobs[key])
+
+    resp = await routes.download_node_named_file(node_id, "body.stl")
+
+    assert resp.status_code == 200
+    assert resp.media_type == "model/stl"
+    assert resp.body == b"solid body\nendsolid body\n"
+
+
+async def test_download_named_file_falls_back_to_primary_blob(monkeypatch) -> None:
+    """The URDF itself is fetchable through this same route (same filename
+    as GET /nodes/{id}/file), not just its meshes — one base URL serves
+    every file a URDF preview needs, matching a fresh export's directory
+    shape."""
+    node_id = await _seed(
+        _wp(
+            metadata={
+                "minio_object_key": "work-products/x/model.urdf",
+                "original_filename": "model.urdf",
+                "mesh_files": {"body.stl": "work-products/x/body.stl"},
+            },
+            fmt="urdf",
+        )
+    )
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: b"<robot/>")
+
+    resp = await routes.download_node_named_file(node_id, "model.urdf")
+
+    assert resp.status_code == 200
+    assert resp.body == b"<robot/>"
+
+
+async def test_download_named_file_unknown_filename_404(monkeypatch) -> None:
+    node_id = await _seed(
+        _wp(
+            metadata={
+                "minio_object_key": "work-products/x/model.urdf",
+                "original_filename": "model.urdf",
+                "mesh_files": {"body.stl": "work-products/x/body.stl"},
+            },
+            fmt="urdf",
+        )
+    )
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: b"<robot/>")
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.download_node_named_file(node_id, "nope.stl")
+    assert exc.value.status_code == 404
+
+
+async def test_download_named_file_bad_node_id_400() -> None:
+    with pytest.raises(HTTPException) as exc:
+        await routes.download_node_named_file("not-a-uuid", "body.stl")
+    assert exc.value.status_code == 400
+
+
+async def test_download_named_file_unknown_node_404() -> None:
+    with pytest.raises(HTTPException) as exc:
+        await routes.download_node_named_file(str(uuid4()), "body.stl")
+    assert exc.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Route: get_node_model resolves the source blob durably (MET-522/489)
 # ---------------------------------------------------------------------------
 
@@ -152,6 +238,32 @@ async def test_node_model_uses_minio_blob_when_local_missing(monkeypatch) -> Non
     assert captured["content"] == b"ISO-10303-21; fake"  # came from MinIO, not the dead local path
     assert captured["filename"] == "a.step"
     assert result["metadata"]["parts"][0]["name"] == "Part_1"
+
+
+async def test_node_model_conversion_rejection_returns_422_not_500(monkeypatch) -> None:
+    """MET-652: the OCCT converter rejecting a STEP with no exportable solids
+    (e.g. "Can't export empty scenes!") is a client-facing content problem,
+    not a server fault -- must not surface as an unhandled 500."""
+    from api_gateway.convert.service import ConversionError
+
+    node_id = await _seed(
+        _wp(
+            file_path="/root/.metaforge/work_products/x/empty.step",
+            metadata={"minio_object_key": "work-products/x/empty.step"},
+            fmt="step",
+        )
+    )
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: b"ISO-10303-21; empty")
+
+    def _fake_convert(self, content, filename, quality):  # noqa: ANN001
+        raise ConversionError(500, '{"error": "Can\'t export empty scenes!"}')
+
+    monkeypatch.setattr("api_gateway.convert.service.ConversionService.convert", _fake_convert)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.get_node_model(node_id)
+    assert exc_info.value.status_code == 422
+    assert "empty scenes" in str(exc_info.value.detail)
 
 
 # ---------------------------------------------------------------------------

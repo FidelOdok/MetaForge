@@ -37,6 +37,20 @@ class ToolManifest(BaseModel):
     # progress sink before invocation. Defaults to False so the field is
     # backward-compatible with every existing manifest.
     supports_progress: bool = False
+    # MET-747 follow-up: OpenAI-family chat APIs hard-reject a request whose
+    # ``tools`` array exceeds 128 entries (discovered live: registering a
+    # 129th tool 400'd every chat turn on every OpenAI-family provider,
+    # platform-wide, with no prior safety net anywhere in this codebase).
+    # The harness's chat tool list (api_gateway.chat.harness_backend.
+    # mcp_tools_from_bridge) is built from every registered tool by default
+    # -- there was no smaller default set to fall back on. Tools meant to be
+    # invoked only from inside a skill's handler (via the injected
+    # ``context.mcp.invoke(tool_id, ...)`` -- a direct-by-id call, unrelated
+    # to this list) rather than picked ad hoc by a top-level chat LLM should
+    # set this False to stay out of that array; ``RegistryMcpBridge.invoke()``
+    # still dispatches them by id regardless of this flag. Defaults to True
+    # so every pre-existing manifest keeps today's chat-visible behavior.
+    chat_visible: bool = True
 
 
 # Type alias for tool handler functions

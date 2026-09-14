@@ -20,6 +20,29 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("domain_agents.mechanical.writeback")
 
 
+def _coerce_project_id(value: str) -> UUID | None:
+    """Best-effort UUID coercion for the ``project_id`` field (MET-681).
+
+    ``project_id`` arrives here as a plain string sourced from request
+    parameters / an inherited source WorkProduct -- never validated as a
+    real UUID upstream. Passing a malformed value straight into
+    ``WorkProduct(project_id=...)`` raises a pydantic ``ValidationError``
+    that the caller's broad ``except Exception`` swallows into a mere
+    warning log, silently discarding the *entire* work product write (not
+    just its project scoping). Regression introduced by the MET-676 fix,
+    caught by ``tests/e2e/test_cadquery_e2e.py``'s project-scoped tests,
+    which seed a non-UUID placeholder id -- mirror the same lenient
+    coercion already used by the knowledge MCP adapter's ``_coerce_uuid``.
+    """
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        logger.warning("writeback_invalid_project_id", project_id=value)
+        return None
+
+
 async def writeback_cad(
     twin: Any,
     session_id: UUID,
@@ -68,6 +91,12 @@ async def writeback_cad(
             content_hash="",
             format="step",
             metadata=metadata,
+            # MET-676: project_id must be set on the node itself, not just in
+            # metadata -- GET /v1/twin/nodes?project_id= filters on this real
+            # field, so a node with only metadata["project_id"] set is
+            # invisible to the project's node list even though it shows in
+            # the project's own work_products (Postgres-junction-backed).
+            project_id=_coerce_project_id(project_id),
             created_at=now,
             updated_at=now,
             created_by=f"mechanical-agent:{session_id}",
@@ -134,6 +163,9 @@ async def writeback_mesh(
             if skill_output.get("mesh_file", "")
             else "inp",
             metadata=metadata,
+            # MET-676: see writeback_cad -- the list filter keys on this
+            # real field, not the metadata copy.
+            project_id=_coerce_project_id(project_id),
             created_at=now,
             updated_at=now,
             created_by=f"mechanical-agent:{session_id}",

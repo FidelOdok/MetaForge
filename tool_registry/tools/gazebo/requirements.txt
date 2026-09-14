@@ -1,0 +1,6 @@
+# Gazebo MCP adapter dependencies
+# aiohttp drives the JSON-RPC ``/mcp`` server, mirroring calculix (MET-379).
+aiohttp>=3.9
+pydantic>=2.0
+structlog>=24.0
+opentelemetry-api>=1.20

@@ -1,6 +1,7 @@
-import { Suspense, useCallback, useEffect, useRef } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
@@ -14,6 +15,16 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { SceneContents } from './SceneContents';
 import { BooleanCutPanel } from './BooleanCutPanel';
 import type { PartInfo } from '../../types/viewer';
+
+// MET-747: lazy so an ordinary CAD_MODEL viewer never pulls in
+// urdf-loader/@dimforge/rapier3d-compat (same rationale AssemblyExportPanel's
+// lazy UrdfPreviewPanel import already established).
+const RobotSceneContents = lazy(() =>
+  import('./RobotSceneContents').then((m) => ({ default: m.RobotSceneContents })),
+);
+const RobotControlsOverlay = lazy(() =>
+  import('./RobotControlsOverlay').then((m) => ({ default: m.RobotControlsOverlay })),
+);
 
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -88,6 +99,36 @@ const FIT_DISTANCE_FACTOR = 2.2;
 // the very first frame, or an empty scene) — matches the previous hardcoded
 // camera/target so behavior is unchanged until real bounds are available.
 const DEFAULT_BOUNDS = { center: [0, 0, 0] as [number, number, number], radius: 36 };
+
+/**
+ * MET-747: an invisible-except-for-its-shadow ground plane (a `shadowMaterial`
+ * only ever renders the shadow cast onto it, never a visible surface of its
+ * own) so the new shadow-casting directionalLight (below) has something real
+ * to shadow onto -- previously there was no ground at all (the visible grid
+ * stays disabled per MET-623's shimmer issue; this doesn't touch that).
+ *
+ * Positioned/sized from `modelBounds` when available (GLB path -- computed
+ * once per load by SceneContents). The robot-description path never
+ * computes modelBounds (RobotSceneContents has no equivalent), so this falls
+ * back to a fixed offset guessed from the quadruped reference build's own
+ * scale (~100mm legs) rather than a real per-robot bound -- an honest
+ * approximation, not exact: worst case the catcher plane sits at a slightly
+ * wrong height, which is cosmetic, not a functional bug.
+ */
+function GroundShadowCatcher() {
+  const modelBounds = useViewerStore((s) => s.modelBounds);
+  const center = modelBounds?.center ?? DEFAULT_BOUNDS.center;
+  const radius = modelBounds?.radius ?? DEFAULT_BOUNDS.radius;
+  const groundY = modelBounds?.groundY ?? -100;
+  const size = Math.max(radius * 6, 200);
+
+  return (
+    <mesh position={[center[0], groundY, center[2]]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <planeGeometry args={[size, size]} />
+      <shadowMaterial opacity={0.28} />
+    </mesh>
+  );
+}
 
 /** Registers a camera-reset callback in the store so the button outside Canvas
  * can trigger it, and fits the camera to the loaded model's actual size and
@@ -280,6 +321,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
+  const robotDescription = useViewerStore((s) => s.robotDescription);
   const themeMode = useThemeStore((s) => s.mode);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
 
@@ -291,7 +333,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
 
   const bgColor = isDark ? '#18181b' : '#f4f4f5';
 
-  if (!glbUrl || !manifest) {
+  if (!robotDescription && (!glbUrl || !manifest)) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-zinc-400">
         Upload a STEP file or load a model to view it in 3D
@@ -303,7 +345,14 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
     <div className="twin-canvas relative h-full w-full">
       <Canvas
         camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 10000 }}
-        gl={{ preserveDrawingBuffer: true }}
+        gl={{
+          preserveDrawingBuffer: true,
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.1,
+        }}
+        // MET-747: enables the renderer's shadow map -- without this prop
+        // castShadow/receiveShadow on the light and meshes below are no-ops.
+        shadows
         style={{ background: bgColor }}
         // A click that doesn't hit any mesh (empty grid/background) deselects
         // the active group — the same drei/r3f idiom used for click-to-select.
@@ -318,16 +367,26 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         }}
       >
         <Suspense fallback={<LoadingFallback />}>
-          <SceneContents
-            glbUrl={glbUrl}
-            manifest={manifest}
-            onPartClick={onPartClick}
-          />
+          {robotDescription ? (
+            <RobotSceneContents nodeId={robotDescription.nodeId} />
+          ) : (
+            glbUrl &&
+            manifest && (
+              <SceneContents
+                glbUrl={glbUrl}
+                manifest={manifest}
+                onPartClick={onPartClick}
+              />
+            )
+          )}
         </Suspense>
 
         {/* Boolean-cut cutter preview (MET-612) — translucent red, same Canvas,
             identity transform (v1 scope: both models authored already
-            positioned relative to the target's origin). */}
+            positioned relative to the target's origin). Robot descriptions
+            don't participate in boolean-cut, so no robotDescription guard
+            needed here — booleanCut state is only ever populated from the
+            CAD_MODEL "View 3D Model" flow. */}
         {booleanCut.cutterGlbUrl && booleanCut.cutterManifest && (
           <Suspense fallback={null}>
             <SceneContents
@@ -364,10 +423,25 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         {/* Ground grid temporarily hidden — drei's Grid draws lines via a
             derivative-based shader that shimmers/flickers on its own,
             independent of the z-fighting MET-621 fixed. Restoring it needs a
-            plain-material (baked-texture) plane instead (MET-623). */}
+            plain-material (baked-texture) plane instead (MET-623). The
+            invisible shadow-only catcher below (MET-747) is unaffected by
+            that bug -- a shadowMaterial has no lines to shimmer. */}
+        <GroundShadowCatcher />
 
         <ambientLight intensity={0.4} />
-        <directionalLight position={[50, 50, 25]} intensity={0.8} />
+        <directionalLight
+          position={[50, 50, 25]}
+          intensity={0.8}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-camera-left={-150}
+          shadow-camera-right={150}
+          shadow-camera-top={150}
+          shadow-camera-bottom={-150}
+          shadow-camera-near={1}
+          shadow-camera-far={500}
+          shadow-bias={-0.0005}
+        />
       </Canvas>
 
       {/* Rigid-group Apply/Revert overlay (MET-519) */}
@@ -375,6 +449,15 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
 
       {/* Boolean-cut panel (MET-612) */}
       <BooleanCutPanel onCutComplete={onBooleanCutComplete} />
+
+      {/* Robot-description joint sliders + physics toggle (MET-747) — an
+          HTML sibling of the Canvas, since it needs <input type="range">
+          controls the Canvas itself can't render. */}
+      {robotDescription && (
+        <Suspense fallback={null}>
+          <RobotControlsOverlay />
+        </Suspense>
+      )}
 
       {/* Controls hint overlay — bottom-20 clears both the 32px twin status
           bar and the page's bottom-left Sessions button (bottom:40 + 32px

@@ -44,6 +44,41 @@ class WorkProductType(StrEnum):
     # authored a CAD_MODEL — the real source of truth, git-versioned for
     # diffing. Linked to the CAD_MODEL it produced via a PARENT_OF edge.
     CAD_SOURCE_SCRIPT = "cad_source_script"
+    # MET-740: a URDF/SDF/USD robot description exported from one or more
+    # CAD_MODEL parts + a joint list. Linked to each source part via a
+    # PARENT_OF edge (mirrors CAD_SOURCE_SCRIPT's script->geometry edge).
+    ROBOT_DESCRIPTION = "robot_description"
+    # A self-contained HTML reference sketch (proportions/topology/range-of-
+    # motion preview) authored BEFORE committing to real CAD/build work --
+    # the human-approval gate the `decide_sketch_needed` mechanical skill
+    # triggers for non-trivial or revision builds. Linked via a PARENT_OF
+    # edge to whatever existing work product it reviews (revision case);
+    # not linked to anything yet for a brand-new design (nothing built to
+    # link to). `metadata.approved`/`metadata.approved_at` track the gate.
+    DESIGN_SKETCH = "design_sketch"
+    # Lifecycle-stage additions (follow-up to MET-747's CAD-lifecycle mapping):
+    # a hazard/risk log (hazard, cause, effect, severity x likelihood ->
+    # risk score, mitigation) produced by the compliance domain's
+    # `analyze_hazards` skill.
+    HAZARD_ANALYSIS = "hazard_analysis"
+    # A cross-discipline component/interface map (block diagram + interface
+    # table) produced by the `define_system_architecture` skill -- captures
+    # "what talks to what" before detailed design starts.
+    SYSTEM_ARCHITECTURE = "system_architecture"
+    # A structured drawing-package spec (dimensions, GD&T callouts, surface
+    # finishes, inspection requirements) for a CAD_MODEL part, produced by
+    # `generate_technical_drawing`. Not a rendered 2D vector drawing --
+    # MetaForge has no TechDraw-equivalent generator; this persists the
+    # callout DATA a real drawing would encode, reviewable on its own.
+    TECHNICAL_DRAWING = "technical_drawing"
+    # A generated regulatory checklist (regime/requirement/evidence rows),
+    # produced by `record_compliance_checklist` -- the persisted twin of
+    # what `generate_checklist` already computes in-session.
+    COMPLIANCE_CHECKLIST = "compliance_checklist"
+    # A purchase-order-style record (line items, quantities, unit costs,
+    # distributor, lead time) produced by `create_procurement_record`,
+    # usually linked back to the BOM it was sourced from.
+    PROCUREMENT_RECORD = "procurement_record"
 
 
 class ConstraintSeverity(StrEnum):

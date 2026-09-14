@@ -71,7 +71,22 @@ async def _find_current_work_product(
         candidates = await twin.list_work_products(
             work_product_type=work_product_type, project_id=_UUID(project_id)
         )
-    except Exception:  # noqa: BLE001 — lookup is best-effort
+    except Exception as exc:  # noqa: BLE001 — a commit must not fail over its history
+        # MET-728: returning None here means "no predecessor", so no SUPERSEDES
+        # edge gets created and the regeneration chain (MET-630) loses a link.
+        # The commit still succeeds, which is the right call -- but the caller
+        # cannot otherwise tell "first generation of this part" from "the twin
+        # was briefly unreachable", and for a system whose prime rule is that
+        # everything is versioned and reviewable, a silently broken provenance
+        # chain is the wrong thing to be quiet about.
+        logger.warning(
+            "geometry_predecessor_lookup_failed",
+            project_id=project_id,
+            name=name,
+            work_product_type=str(work_product_type),
+            error=str(exc),
+            consequence="no SUPERSEDES edge; this generation will look like the first",
+        )
         return None
     for candidate in candidates:
         if candidate.name != name:

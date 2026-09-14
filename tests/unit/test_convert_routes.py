@@ -154,3 +154,63 @@ class TestGetMetadata:
         response = await client.get("/v1/convert/abc123/metadata")
         assert response.status_code == 200
         assert response.json() == meta
+
+
+class TestEventLoopIsNotBlocked:
+    """MET-725: ``ConversionService.convert`` is synchronous and does a
+    blocking ``httpx.post`` with a 120s timeout.
+
+    Called directly from an ``async def`` route it held the event loop for the
+    entire conversion, so one slow CAD conversion served nothing else at all --
+    no ``/health`` (hence containers going ``unhealthy``), no chat, no SSE, and
+    no shutdown progress. That is the most likely cause of MET-694's wedge.
+    """
+
+    @pytest.mark.anyio
+    async def test_a_slow_conversion_does_not_starve_the_loop(self, client, mock_service):
+        import asyncio
+        import time
+
+        block_seconds = 0.4
+
+        def _slow_blocking_convert(*_args, **_kwargs):
+            # A real blocking call, not ``await asyncio.sleep`` -- the defect
+            # is specifically that a *synchronous* call cannot yield.
+            time.sleep(block_seconds)
+            return {
+                "hash": "abc123",
+                "glb_url": "/v1/convert/abc123/model.glb",
+                "metadata": {"parts": [], "stats": {}},
+                "cached": False,
+            }
+
+        mock_service.convert.side_effect = _slow_blocking_convert
+
+        ticks = 0
+
+        async def ticker() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.01)
+                ticks += 1
+
+        tick_task = asyncio.create_task(ticker())
+        try:
+            response = await client.post(
+                "/v1/convert",
+                files={
+                    "file": (
+                        "bracket.step",
+                        io.BytesIO(b"ISO-10303-21;"),
+                        "application/octet-stream",
+                    )
+                },
+            )
+        finally:
+            tick_task.cancel()
+
+        assert response.status_code == 200
+        # On the loop this is exactly 0 -- the ticker never gets to run. Off
+        # the loop it fires ~40 times in 0.4s; assert well below that so the
+        # test is not timing-sensitive on a loaded CI box.
+        assert ticks >= 5, f"event loop was starved during the conversion (ticks={ticks})"

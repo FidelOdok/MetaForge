@@ -46,6 +46,13 @@ class TwinServer(McpToolServer):
         constraint_recorder: Any = None,
         document_recorder: Any = None,
         blob_stager: Any = None,
+        design_sketch_recorder: Any = None,
+        hazard_analysis_recorder: Any = None,
+        system_architecture_recorder: Any = None,
+        technical_drawing_recorder: Any = None,
+        compliance_checklist_recorder: Any = None,
+        procurement_record_recorder: Any = None,
+        component_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -92,6 +99,28 @@ class TwinServer(McpToolServer):
         # id. Same injection seam as decision_recorder; None keeps
         # tool_registry free of api_gateway imports.
         self._blob_stager = blob_stager
+        # Follow-up to MET-740/747: an injected async ``commit(...)`` that
+        # persists a self-contained HTML reference sketch as a
+        # DESIGN_SKETCH work product -- the human-approval gate before
+        # committing to real CAD/build work. Same injection seam as
+        # geometry_recorder; None keeps tool_registry free of api_gateway.
+        self._design_sketch_recorder = design_sketch_recorder
+        # Lifecycle-mapping follow-up (MET-747): five structured-document
+        # work-product types sharing api_gateway.twin.structured_document_
+        # recorder's persistence helper. Same injection seam as every
+        # recorder above; None keeps tool_registry free of api_gateway.
+        self._hazard_analysis_recorder = hazard_analysis_recorder
+        self._system_architecture_recorder = system_architecture_recorder
+        self._technical_drawing_recorder = technical_drawing_recorder
+        self._compliance_checklist_recorder = compliance_checklist_recorder
+        self._procurement_record_recorder = procurement_record_recorder
+        # MET-436 follow-up: an injected async ``record(...)`` (make_component_
+        # recorder) that persists one chosen component.search_* result as a
+        # BOMItem graph node + project link. Without it, a search result was
+        # pure chat output -- no reviewable, versioned trace in the twin at
+        # all. Same injection seam as decision_recorder; None keeps
+        # tool_registry free of api_gateway imports.
+        self._component_recorder = component_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -103,8 +132,22 @@ class TwinServer(McpToolServer):
             self._register_record_constraint_set()
         if document_recorder is not None:
             self._register_record_document()
+        if design_sketch_recorder is not None:
+            self._register_commit_design_sketch()
+        if hazard_analysis_recorder is not None:
+            self._register_commit_hazard_analysis()
+        if system_architecture_recorder is not None:
+            self._register_commit_system_architecture()
+        if technical_drawing_recorder is not None:
+            self._register_commit_technical_drawing()
+        if compliance_checklist_recorder is not None:
+            self._register_commit_compliance_checklist()
+        if procurement_record_recorder is not None:
+            self._register_commit_procurement_record()
         if blob_stager is not None:
             self._register_stage_work_product_file()
+        if component_recorder is not None:
+            self._register_record_component_selection()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -590,6 +633,135 @@ class TwinServer(McpToolServer):
         )
 
     # ------------------------------------------------------------------
+    # twin.record_component_selection (MET-436 follow-up)
+    # ------------------------------------------------------------------
+
+    def _register_record_component_selection(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_component_selection",
+                adapter_id="twin",
+                name="Record Component Selection",
+                description=(
+                    "Persist one chosen component.search_parametric/"
+                    "search_intent result as a real BOMItem work product "
+                    "linked to a project — the reviewable, versioned "
+                    "artifact a search result otherwise never becomes. Use "
+                    "after picking an MPN from search results, not for "
+                    "searching itself."
+                ),
+                capability="twin_component_selection",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mpn": {"type": "string", "minLength": 1, "description": "Part number."},
+                        "manufacturer": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Manufacturer name.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Catalog category, e.g. 'buck_converter'.",
+                        },
+                        "purchase_unit": {
+                            "type": "string",
+                            "enum": ["discrete_part", "cots_assembly"],
+                            "description": (
+                                "'discrete_part' (design in) or 'cots_assembly' "
+                                "(complete, ready-to-buy)."
+                            ),
+                        },
+                        "role": {
+                            "type": ["string", "null"],
+                            "description": "Subsystem role, e.g. 'mcu' (from search_intent).",
+                        },
+                        "quantity": {"type": "integer", "minimum": 1, "default": 1},
+                        "unit_cost_usd": {"type": ["number", "null"]},
+                        "specs": {
+                            "type": "object",
+                            "description": "Extra spec fields to store, e.g. from the search row.",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "How found: 'parametric' | 'fuzzy_fallback' | 'manual'.",
+                        },
+                        "distributor": {"type": ["string", "null"]},
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["mpn", "manufacturer", "category", "purchase_unit"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "mpn": {"type": "string"},
+                        "category": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_component_selection,
+        )
+
+    async def record_component_selection(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        mpn = arguments.get("mpn")
+        manufacturer = arguments.get("manufacturer")
+        category = arguments.get("category")
+        purchase_unit = arguments.get("purchase_unit")
+        if not mpn or not isinstance(mpn, str):
+            raise ValueError(
+                "twin.record_component_selection: 'mpn' is required (non-empty string)"
+            )
+        if not manufacturer or not isinstance(manufacturer, str):
+            raise ValueError(
+                "twin.record_component_selection: 'manufacturer' is required (non-empty string)"
+            )
+        if not category or not isinstance(category, str):
+            raise ValueError(
+                "twin.record_component_selection: 'category' is required (non-empty string)"
+            )
+        if purchase_unit not in ("discrete_part", "cots_assembly"):
+            raise ValueError(
+                "twin.record_component_selection: 'purchase_unit' must be "
+                "'discrete_part' or 'cots_assembly'"
+            )
+
+        role = arguments.get("role")
+        quantity = arguments.get("quantity", 1)
+        try:
+            quantity_int = int(quantity)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "twin.record_component_selection: 'quantity' must be an integer"
+            ) from exc
+        unit_cost_usd = arguments.get("unit_cost_usd")
+        specs = arguments.get("specs")
+        source = arguments.get("source")
+        distributor = arguments.get("distributor")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+
+        return await self._component_recorder(
+            mpn=mpn,
+            manufacturer=manufacturer,
+            category=category,
+            purchase_unit=purchase_unit,
+            role=role if isinstance(role, str) else None,
+            quantity=quantity_int,
+            unit_cost_usd=unit_cost_usd if isinstance(unit_cost_usd, (int, float)) else None,
+            specs=specs if isinstance(specs, dict) else None,
+            source=source if isinstance(source, str) else None,
+            distributor=distributor if isinstance(distributor, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
     # twin.record_constraint_set (MET-582)
     # ------------------------------------------------------------------
 
@@ -887,9 +1059,17 @@ class TwinServer(McpToolServer):
                     "product: stores the STEP blob in MinIO, creates a twin node, "
                     "and links it to a project so it renders in the 3D viewer. "
                     "PREFER commit-by-reference: after freecad.export_model, call "
-                    "this with the SAME session_id and obj_id (plus name) and the "
+                    "this with the SAME session_id AND obj_id (plus name) and the "
                     "server fills the STEP itself — you do NOT need to copy the "
-                    "large base64 string. (Passing step_base64 directly also works.)"
+                    "large base64 string. BOTH session_id and obj_id are required "
+                    "together on every call, including retries — obj_id alone is "
+                    "NOT unique (it's a per-session counter, not a global id), so "
+                    "omitting session_id will not match your prior export even "
+                    "though obj_id is correct. (Passing step_base64 directly also "
+                    "works and needs neither id — but when it names an export "
+                    "the server already holds, the server's copy is used, "
+                    "because a copied 30,000-character blob can only be equal "
+                    "or damaged.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -911,7 +1091,11 @@ class TwinServer(McpToolServer):
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "step_base64": {
                             "type": "string",
-                            "description": "Base64 STEP (optional if session_id + obj_id given).",
+                            "description": (
+                                "Base64 STEP. Omit when passing session_id + obj_id: "
+                                "the server substitutes its own copy of that export "
+                                "anyway (MET-684)."
+                            ),
                         },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
@@ -939,6 +1123,18 @@ class TwinServer(McpToolServer):
                                 "metadata alongside 'parameters'."
                             ),
                         },
+                        "source_tool": {
+                            "type": "string",
+                            "description": (
+                                "Which authoring tool produced this geometry, e.g. "
+                                "'cadquery.execute_script' or 'freecad.export_model'. "
+                                "Recorded as the work product's provenance "
+                                "(authored_by/created_by). Defaults to "
+                                "'freecad.export_model', so pass it explicitly when the "
+                                "geometry came from CadQuery — otherwise the node claims "
+                                "a tool that never touched it (MET-693)."
+                            ),
+                        },
                     },
                     "required": ["name"],
                 },
@@ -962,6 +1158,31 @@ class TwinServer(McpToolServer):
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
         if not step_base64 or not isinstance(step_base64, str):
+            # MET-642 S4 finding: reproduced live TWICE with the identical
+            # mechanism -- the model retried commit_geometry with obj_id but
+            # WITHOUT session_id (confirmed via the new geometry_stash logging
+            # below: "session_id": null). The stash keys on (session_id,
+            # obj_id) together -- not obj_id alone -- because obj_id is a
+            # per-session sequential counter (f"{kind}_{n}", see
+            # FreecadSessionStore.register_object), not a globally-unique id;
+            # dropping session_id from the lookup would risk a cross-session
+            # collision, so the fix is a sharper error, not a looser stash.
+            given_obj_id = arguments.get("obj_id")
+            given_session_id = arguments.get("session_id")
+            logger.warning(
+                "commit_geometry_missing_step_base64",
+                session_id=given_session_id,
+                obj_id=given_obj_id,
+                name=name,
+            )
+            if given_obj_id and not given_session_id:
+                raise ValueError(
+                    "twin.commit_geometry: you passed obj_id but no session_id -- "
+                    "commit-by-reference requires BOTH, exactly as given to the "
+                    "freecad.export_model call that produced this obj_id (obj_id "
+                    "alone is not unique across sessions). Re-call with the same "
+                    "session_id you used for export_model, or pass step_base64 directly."
+                )
             raise ValueError(
                 "twin.commit_geometry: no geometry to commit — call freecad.export_model "
                 "first, then commit with the same session_id + obj_id (or pass step_base64)."
@@ -976,6 +1197,15 @@ class TwinServer(McpToolServer):
         parameters = arguments.get("parameters")
         properties = arguments.get("properties")
         script_source = script_source if isinstance(script_source, str) and script_source else None
+        # MET-693: the recorder's `source_tool` defaults to
+        # "freecad.export_model", and this handler never passed one -- so every
+        # commit was stamped as FreeCAD-authored, including CadQuery geometry.
+        # The provenance of a work product has to be accurate: it is what a
+        # reviewer reads to know how the artifact was produced, and script-as-
+        # SSOT diffing (MET-630) depends on knowing which authoring tool the
+        # stored script belongs to.
+        source_tool = arguments.get("source_tool")
+        source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -986,6 +1216,563 @@ class TwinServer(McpToolServer):
             script_source=script_source,
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
+            **({"source_tool": source_tool} if source_tool else {}),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.commit_design_sketch (follow-up to MET-740/747)
+    # ------------------------------------------------------------------
+
+    def _register_commit_design_sketch(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_design_sketch",
+                adapter_id="twin",
+                name="Commit Design Sketch",
+                description=(
+                    "Persist a self-contained HTML reference sketch (proportions, "
+                    "topology, range-of-motion preview) as a DESIGN_SKETCH work "
+                    "product -- the human-approval gate MetaForge uses before "
+                    "committing to real CAD/build work on anything non-trivial or "
+                    "any revision of an already-built design. Call this BEFORE "
+                    "authoring real CAD geometry when a sketch is warranted (see "
+                    "the mechanical.decide_sketch_needed skill for when it is); "
+                    "the returned node starts unapproved -- do not proceed to "
+                    "real CAD/build work until a human approves it (dashboard "
+                    "'Approve' action, or GET the node to check "
+                    "metadata.approved)."
+                ),
+                capability="twin_design_sketch",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Display name for the work product.",
+                        },
+                        "html_content": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": (
+                                "The complete, self-contained sketch document: inline "
+                                "CSS/JS, no external assets, no <!DOCTYPE>/<html>/<head>/"
+                                "<body> wrapper needed -- just the content that would go "
+                                "inside <body>. Rendered full-screen in a sandboxed "
+                                "iframe by the dashboard."
+                            ),
+                        },
+                        "description_text": {
+                            "type": "string",
+                            "description": "Short rationale for what this sketch is checking.",
+                        },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Existing work-product node ids this sketch reviews -- "
+                                "give this when the sketch is about a REVISION to an "
+                                "already-built design. Omit for a brand-new design "
+                                "(nothing built yet to reference)."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "domain": {"type": "string", "description": "Discipline (def mech)."},
+                        "source_tool": {
+                            "type": "string",
+                            "description": "Which tool/skill produced this sketch (provenance).",
+                        },
+                    },
+                    "required": ["name", "html_content"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.commit_design_sketch,
+        )
+
+    async def commit_design_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_design_sketch: 'name' is required (non-empty string)")
+        html_content = arguments.get("html_content")
+        if not html_content or not isinstance(html_content, str):
+            raise ValueError(
+                "twin.commit_design_sketch: 'html_content' is required (non-empty string)"
+            )
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        source_tool = arguments.get("source_tool")
+        return await self._design_sketch_recorder(
+            name=name,
+            html_content=html_content,
+            description_text=arguments.get("description_text") or "",
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            domain=domain if isinstance(domain, str) and domain else "mechanical",
+            **(
+                {"source_tool": source_tool} if isinstance(source_tool, str) and source_tool else {}
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Structured-document work products (MET-747 lifecycle-mapping follow-up)
+    # ------------------------------------------------------------------
+
+    def _register_commit_hazard_analysis(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_hazard_analysis",
+                adapter_id="twin",
+                name="Commit Hazard Analysis",
+                description=(
+                    "Persist a hazard/risk log (hazard, cause, effect, "
+                    "severity x likelihood -> risk score, mitigation) as a "
+                    "HAZARD_ANALYSIS work product. Called by the "
+                    "compliance.analyze_hazards skill after it computes risk "
+                    "scores -- do not call this directly with unscored data."
+                ),
+                capability="twin_hazard_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "system_name": {"type": "string"},
+                        "hazards": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "hazard": {"type": "string"},
+                                    "cause": {"type": "string"},
+                                    "effect": {"type": "string"},
+                                    "severity": {"type": "integer", "minimum": 1, "maximum": 5},
+                                    "likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
+                                    "mitigation": {"type": "string"},
+                                },
+                                "required": ["hazard", "cause", "effect", "severity", "likelihood"],
+                            },
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "hazards"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "hazard_count": {"type": "integer"},
+                        "highest_risk_score": {"type": "integer"},
+                        "unmitigated_count": {"type": "integer"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by compliance.analyze_hazards's
+                # handler via context.mcp.invoke(...), not meant to be picked
+                # ad hoc off a raw chat tool list -- keeps it out of the
+                # OpenAI-family chat tools array (128-entry hard cap).
+                chat_visible=False,
+            ),
+            handler=self.commit_hazard_analysis,
+        )
+
+    async def commit_hazard_analysis(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_hazard_analysis: 'name' is required")
+        hazards = arguments.get("hazards")
+        if not isinstance(hazards, list) or not hazards:
+            raise ValueError("twin.commit_hazard_analysis: 'hazards' must be a non-empty array")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._hazard_analysis_recorder(
+            name=name,
+            system_name=arguments.get("system_name") or name,
+            hazards=hazards,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_system_architecture(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_system_architecture",
+                adapter_id="twin",
+                name="Commit System Architecture",
+                description=(
+                    "Persist a cross-discipline component/interface map (block "
+                    "diagram + interface table) as a SYSTEM_ARCHITECTURE work "
+                    "product -- captures what talks to what before detailed "
+                    "design starts. Called by shared.define_system_architecture."
+                ),
+                capability="twin_system_architecture",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "system_name": {"type": "string"},
+                        "components": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "discipline": {"type": "string"},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["name"],
+                            },
+                        },
+                        "interfaces": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "from": {"type": "string"},
+                                    "to": {"type": "string"},
+                                    "interface_type": {"type": "string"},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["from", "to"],
+                            },
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "components"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "component_count": {"type": "integer"},
+                        "interface_count": {"type": "integer"},
+                        "dangling_interfaces": {"type": "array"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by shared.define_system_architecture's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
+            ),
+            handler=self.commit_system_architecture,
+        )
+
+    async def commit_system_architecture(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_system_architecture: 'name' is required")
+        components = arguments.get("components")
+        if not isinstance(components, list) or not components:
+            raise ValueError(
+                "twin.commit_system_architecture: 'components' must be a non-empty array"
+            )
+        interfaces = arguments.get("interfaces")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._system_architecture_recorder(
+            name=name,
+            system_name=arguments.get("system_name") or name,
+            components=components,
+            interfaces=interfaces if isinstance(interfaces, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_technical_drawing(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_technical_drawing",
+                adapter_id="twin",
+                name="Commit Technical Drawing",
+                description=(
+                    "Persist a structured drawing-package spec (dimensions, "
+                    "GD&T callouts, surface finishes, inspection requirements) "
+                    "for a CAD part as a TECHNICAL_DRAWING work product. NOT a "
+                    "rendered 2D vector drawing -- this is the callout DATA a "
+                    "real drawing would encode. Called by "
+                    "mechanical.generate_technical_drawing."
+                ),
+                capability="twin_technical_drawing",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "part_name": {"type": "string"},
+                        "dimensions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "feature": {"type": "string"},
+                                    "nominal_mm": {"type": "number"},
+                                    "tolerance_plus_mm": {"type": "number"},
+                                    "tolerance_minus_mm": {"type": "number"},
+                                },
+                                "required": ["feature", "nominal_mm"],
+                            },
+                        },
+                        "gdt_callouts": {"type": "array"},
+                        "surface_finishes": {"type": "array"},
+                        "inspection_requirements": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Source CAD_MODEL node id(s) this drawing documents.",
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "dimensions"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "dimension_count": {"type": "integer"},
+                        "gdt_callout_count": {"type": "integer"},
+                        "surface_finish_count": {"type": "integer"},
+                        "inspection_requirement_count": {"type": "integer"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by mechanical.generate_technical_drawing's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
+            ),
+            handler=self.commit_technical_drawing,
+        )
+
+    async def commit_technical_drawing(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_technical_drawing: 'name' is required")
+        dimensions = arguments.get("dimensions")
+        if not isinstance(dimensions, list) or not dimensions:
+            raise ValueError(
+                "twin.commit_technical_drawing: 'dimensions' must be a non-empty array"
+            )
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        gdt_callouts = arguments.get("gdt_callouts")
+        surface_finishes = arguments.get("surface_finishes")
+        inspection_requirements = arguments.get("inspection_requirements")
+        return await self._technical_drawing_recorder(
+            name=name,
+            part_name=arguments.get("part_name") or name,
+            dimensions=dimensions,
+            gdt_callouts=gdt_callouts if isinstance(gdt_callouts, list) else None,
+            surface_finishes=surface_finishes if isinstance(surface_finishes, list) else None,
+            inspection_requirements=(
+                inspection_requirements if isinstance(inspection_requirements, list) else None
+            ),
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_compliance_checklist(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_compliance_checklist",
+                adapter_id="twin",
+                name="Commit Compliance Checklist",
+                description=(
+                    "Persist a generated regulatory checklist (regime, "
+                    "requirement, evidence rows) as a COMPLIANCE_CHECKLIST "
+                    "work product. Called by "
+                    "compliance.record_compliance_checklist after it computes "
+                    "the checklist -- do not call this with raw, unvalidated "
+                    "checklist data."
+                ),
+                capability="twin_compliance_checklist",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "target_markets": {"type": "array", "items": {"type": "string"}},
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "regime": {"type": "string"},
+                                    "category": {"type": "string"},
+                                    "requirement": {"type": "string"},
+                                    "standard": {"type": "string"},
+                                    "evidence_type": {"type": "string"},
+                                    "evidence_status": {"type": "string"},
+                                },
+                                "required": ["regime", "requirement"],
+                            },
+                        },
+                        "coverage_percent": {"type": "number"},
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "items"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "total_items": {"type": "integer"},
+                        "coverage_percent": {"type": "number"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by compliance.record_compliance_checklist's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
+            ),
+            handler=self.commit_compliance_checklist,
+        )
+
+    async def commit_compliance_checklist(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_compliance_checklist: 'name' is required")
+        items = arguments.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValueError("twin.commit_compliance_checklist: 'items' must be a non-empty array")
+        target_markets = arguments.get("target_markets")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._compliance_checklist_recorder(
+            name=name,
+            target_markets=target_markets if isinstance(target_markets, list) else [],
+            items=items,
+            coverage_percent=float(arguments.get("coverage_percent") or 0.0),
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
+        )
+
+    def _register_commit_procurement_record(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_procurement_record",
+                adapter_id="twin",
+                name="Commit Procurement Record",
+                description=(
+                    "Persist a purchase-order-style procurement record (line "
+                    "items, quantities, unit costs, distributor, lead time) as "
+                    "a PROCUREMENT_RECORD work product, usually linked back to "
+                    "the BOM it was sourced from. Called by "
+                    "supply_chain.create_procurement_record."
+                ),
+                capability="twin_procurement_record",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "line_items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "part_number": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "quantity": {"type": "number"},
+                                    "unit_cost": {"type": "number"},
+                                    "currency": {"type": "string"},
+                                    "distributor": {"type": "string"},
+                                    "lead_time_days": {"type": "integer"},
+                                },
+                                "required": ["part_number", "quantity", "unit_cost"],
+                            },
+                        },
+                        "notes": {"type": "string"},
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Source BOM node id(s) this record was sourced from.",
+                        },
+                        "project_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                    },
+                    "required": ["name", "line_items"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "minio_object_key": {"type": ["string", "null"]},
+                        "content_hash": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                        "line_item_count": {"type": "integer"},
+                        "total_cost": {"type": "number"},
+                        "currency": {"type": "string"},
+                        "max_lead_time_days": {"type": "integer"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+                # MET-747 follow-up: invoked by supply_chain.create_procurement_record's
+                # handler via context.mcp.invoke(...) -- see chat_visible's
+                # docstring on ToolManifest.
+                chat_visible=False,
+            ),
+            handler=self.commit_procurement_record,
+        )
+
+    async def commit_procurement_record(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.commit_procurement_record: 'name' is required")
+        line_items = arguments.get("line_items")
+        if not isinstance(line_items, list) or not line_items:
+            raise ValueError(
+                "twin.commit_procurement_record: 'line_items' must be a non-empty array"
+            )
+        source_node_ids = arguments.get("source_node_ids")
+        project_id = arguments.get("project_id")
+        domain = arguments.get("domain")
+        return await self._procurement_record_recorder(
+            name=name,
+            line_items=line_items,
+            notes=arguments.get("notes") or "",
+            source_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
 
     def _register_stage_work_product_file(self) -> None:

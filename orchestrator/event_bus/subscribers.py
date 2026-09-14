@@ -266,12 +266,18 @@ def create_kafka_bus(
     client_id: str = "metaforge-producer",
     workflow_engine: WorkflowEngine | None = None,
     knowledge_service: KnowledgeService | None = None,
+    collector: MetricsCollector | None = None,
 ) -> tuple[EventBus, KafkaEventPublisher]:
     """Create an event bus backed by a ``KafkaEventPublisher``.
 
     Returns a ``(bus, publisher)`` tuple.  The caller is responsible for
     calling ``await publisher.start()`` before publishing and
     ``await publisher.stop()`` on shutdown.
+
+    ``collector`` is forwarded so the durable bus reports the same
+    ``record_message_produced`` metric the in-process one does -- omitting it
+    (as this factory did until the bus was first wired) would have made
+    switching to Kafka silently drop event-bus metrics.
     """
     from orchestrator.event_bus.kafka_producer import KafkaEventPublisher
 
@@ -279,7 +285,7 @@ def create_kafka_bus(
         bootstrap_servers=bootstrap_servers,
         client_id=client_id,
     )
-    bus = EventBus(kafka_publisher=publisher, collector=None)
+    bus = EventBus(kafka_publisher=publisher, collector=collector)
     bus.subscribe(AuditEventSubscriber())
     if workflow_engine is not None:
         bus.subscribe(WorkflowEventSubscriber(workflow_engine))

@@ -3,7 +3,6 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
 import { useSession } from '../hooks/use-sessions';
-import type { AgentEvent, AgentSession } from '../types/session';
 
 // KC color tokens
 const KC = {
@@ -15,32 +14,39 @@ const KC = {
   onSurface: '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
   primary: '#ffb783',
-  running: '#e67e22',
   done: '#3dd68c',
-  pending: '#9a9aaa',
   error: '#ffb4ab',
   info: '#86cfff',
   warning: '#f59e0b',
 } as const;
 
-function statusDotColor(status: AgentSession['status']): string {
-  switch (status) {
-    case 'running': return KC.running;
-    case 'completed': return KC.done;
-    case 'failed': return KC.error;
-    case 'pending': return KC.pending;
-    default: return KC.pending;
-  }
-}
-
-const EVENT_ICON: Record<AgentEvent['type'], string> = {
+// Covers both the MCP capture vocabulary (thought/action/decision/
+// observation/error/result) and the legacy workflow-run vocabulary
+// (task_started/task_completed/task_failed/proposal_created) -- the backend
+// treats event type as an open string, not a closed enum (MET-675), so an
+// unrecognized value falls back to DEFAULT_EVENT_ICON/onSurfaceVariant
+// instead of silently rendering nothing.
+const EVENT_ICON: Record<string, string> = {
+  thought: 'psychology',
+  action: 'bolt',
+  decision: 'call_split',
+  observation: 'visibility',
+  error: 'error',
+  result: 'check_circle',
   task_started: 'play_circle',
   task_completed: 'check_circle',
   task_failed: 'error',
   proposal_created: 'add_circle',
 };
+const DEFAULT_EVENT_ICON = 'radio_button_unchecked';
 
-const EVENT_COLOR: Record<AgentEvent['type'], string> = {
+const EVENT_COLOR: Record<string, string> = {
+  thought: KC.info,
+  action: KC.info,
+  decision: KC.warning,
+  observation: KC.onSurfaceVariant,
+  error: KC.error,
+  result: KC.done,
   task_started: KC.info,
   task_completed: KC.done,
   task_failed: KC.error,
@@ -130,22 +136,7 @@ export function SessionDetailPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span
-            style={{
-              display: 'inline-block',
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: statusDotColor(session.status),
-            }}
-          />
-          <span
-            className="font-mono"
-            style={{ fontSize: 11, color: statusDotColor(session.status) }}
-          >
-            {session.status}
-          </span>
-          <StatusBadge status={session.status} className="ml-1" />
+          <StatusBadge status={session.status} />
         </div>
       </div>
 
@@ -201,9 +192,9 @@ export function SessionDetailPage() {
                 {/* Icon */}
                 <span
                   className="material-symbols-outlined shrink-0"
-                  style={{ fontSize: 15, color: EVENT_COLOR[event.type], lineHeight: 1.4 }}
+                  style={{ fontSize: 15, color: EVENT_COLOR[event.type] ?? KC.onSurfaceVariant, lineHeight: 1.4 }}
                 >
-                  {EVENT_ICON[event.type]}
+                  {EVENT_ICON[event.type] ?? DEFAULT_EVENT_ICON}
                 </span>
 
                 {/* Content */}

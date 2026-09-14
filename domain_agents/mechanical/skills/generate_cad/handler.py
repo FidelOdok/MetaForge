@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 
+from domain_agents.shared.cad_backend import resolve_cad_backend
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -17,12 +18,6 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("skill.generate_cad")
 
 SUPPORTED_SHAPES = {"bracket", "plate", "enclosure", "cylinder"}
-
-# Tool IDs per backend
-_TOOL_IDS = {
-    "cadquery": "cadquery.create_parametric",
-    "freecad": "freecad.create_parametric",
-}
 
 
 class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
@@ -36,32 +31,6 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
 
     input_type = GenerateCadInput
     output_type = GenerateCadOutput
-
-    async def _resolve_backend(self, preferred: str) -> tuple[str, str]:
-        """Resolve which backend tool to use, with fallback.
-
-        Returns:
-            Tuple of (backend_name, tool_id).
-
-        Raises:
-            RuntimeError: If no CAD backend is available.
-        """
-        preferred_tool = _TOOL_IDS[preferred]
-        if await self.context.mcp.is_available(preferred_tool):
-            return preferred, preferred_tool
-
-        # Try fallback
-        fallback = "freecad" if preferred == "cadquery" else "cadquery"
-        fallback_tool = _TOOL_IDS[fallback]
-        if await self.context.mcp.is_available(fallback_tool):
-            self.logger.warning(
-                "Preferred CAD backend unavailable, falling back",
-                preferred=preferred,
-                fallback=fallback,
-            )
-            return fallback, fallback_tool
-
-        raise RuntimeError(f"No CAD backend available. Tried {preferred_tool} and {fallback_tool}.")
 
     async def _commit_geometry(
         self, *, cad_file: str, shape_type: str, material: str, project_id: str | None
@@ -120,9 +89,8 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                 errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         # Check that at least one backend is available
-        cadquery_ok = await self.context.mcp.is_available("cadquery.create_parametric")
-        freecad_ok = await self.context.mcp.is_available("freecad.create_parametric")
-        if not cadquery_ok and not freecad_ok:
+        candidates = await self.context.mcp.list_tools(capability="cad_generation")
+        if not candidates:
             errors.append("No CAD backend available (neither cadquery nor freecad)")
 
         return errors
@@ -153,7 +121,9 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                 )
 
             # 2. Resolve backend (with fallback)
-            backend, tool_id = await self._resolve_backend(input_data.backend)
+            backend, tool_id = await resolve_cad_backend(
+                self.context.mcp, "cad_generation", input_data.backend
+            )
             span.set_attribute("backend.resolved", backend)
 
             # 3. Build output path if not provided

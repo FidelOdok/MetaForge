@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useProject, useUpdateProject, useDeleteProject } from '../hooks/use-projects';
+import { useActiveProject } from '../hooks/use-active-project';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
@@ -78,6 +79,11 @@ export function ProjectDetailPage() {
   const toast = useToast();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
+  const { activeProjectId, setActiveProjectId } = useActiveProject();
+
+  useEffect(() => {
+    if (id && id !== activeProjectId) setActiveProjectId(id);
+  }, [id, activeProjectId, setActiveProjectId]);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');

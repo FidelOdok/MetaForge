@@ -18,7 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     pydantic>=2.0 \
     structlog>=24.0 \
-    opentelemetry-api>=1.20
+    opentelemetry-api>=1.20 \
+    aiohttp>=3.9
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
@@ -67,10 +68,16 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV METAFORGE_ENV=docker
 ENV KICAD_WORK_DIR=/workspace
+ENV KICAD_HTTP_PORT=8103
 
 WORKDIR /workspace
 
+# MET-478 follow-up: HTTP by default (mirrors cadquery/freecad/calculix) so
+# the gateway/sidecar can reach this container as a remote adapter instead
+# of falling back to running kicad.* in-process where kicad-cli isn't
+# installed. ``kicad-cli version`` alone doesn't prove the HTTP server
+# accepted the port.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD kicad-cli version || exit 1
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8103/health')" || exit 1
 
 ENTRYPOINT ["python", "/app/entrypoint.py"]

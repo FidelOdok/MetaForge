@@ -38,18 +38,38 @@ _RETRYABLE_NAMES = frozenset(
     {"RateLimitError", "APITimeoutError", "APIConnectionError", "InternalServerError"}
 )
 
+# Substrings (lowercased) that SDKs across providers use for "the prompt is
+# too big for this model's context window" -- a request-size failure, not a
+# transient one, so it's never retryable and (MET-655 remainder) lets the
+# pipeline skip any later candidate whose window is provably too small too.
+_CONTEXT_LENGTH_MARKERS = (
+    "context length",
+    "context_length_exceeded",
+    "context window",
+    "maximum context",
+    "too many tokens",
+    "exceeds the context",
+)
+
 
 def _classify_error(exc: Exception) -> ProviderError:
     """Map an SDK exception to a ProviderError with retry semantics."""
     status = getattr(exc, "status_code", None)
     if not isinstance(status, int):
         status = None
-    retryable = (
+    message = str(exc) or type(exc).__name__
+    context_length_exceeded = any(marker in message.lower() for marker in _CONTEXT_LENGTH_MARKERS)
+    retryable = not context_length_exceeded and (
         type(exc).__name__ in _RETRYABLE_NAMES
         or status == 429
         or (status is not None and status >= 500)
     )
-    return ProviderError(str(exc) or type(exc).__name__, status_code=status, retryable=retryable)
+    return ProviderError(
+        message,
+        status_code=status,
+        retryable=retryable,
+        context_length_exceeded=context_length_exceeded,
+    )
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
@@ -128,6 +148,33 @@ def _to_anthropic_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+_OPENAI_NAME_DOT = "__"
+
+
+def _sanitize_openai_tool_names(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace the dot in each MetaForge tool id with a double underscore.
+
+    OpenAI-family APIs reject ``function.name`` values that don't match
+    ``^[a-zA-Z0-9_-]+$`` — every MetaForge tool id is dotted
+    (``namespace.action``), so an unmodified schema is always rejected.
+    Every tool id has exactly one dot and none already contains "__", so
+    this is a safe, fully reversible mapping; :func:`_desanitize_openai_tool_name`
+    undoes it when a tool call comes back in the response.
+    """
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        fn = t.get("function")
+        if not isinstance(fn, dict) or "name" not in fn:
+            out.append(t)
+            continue
+        out.append({**t, "function": {**fn, "name": fn["name"].replace(".", _OPENAI_NAME_DOT)}})
+    return out
+
+
+def _desanitize_openai_tool_name(name: str) -> str:
+    return name.replace(_OPENAI_NAME_DOT, ".")
 
 
 def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -261,7 +308,7 @@ async def openai_invoke(
     }
     tools = request.get("tools") if isinstance(request, dict) else None
     if tools:
-        kwargs["tools"] = tools
+        kwargs["tools"] = _sanitize_openai_tool_names(tools)
         kwargs["tool_choice"] = request.get("tool_choice", "auto")
     try:
         resp = await client.chat.completions.create(**kwargs)
@@ -279,7 +326,7 @@ async def openai_invoke(
         tool_calls.append(
             {
                 "id": tc.id,
-                "name": tc.function.name,
+                "name": _desanitize_openai_tool_name(tc.function.name),
                 "arguments": args if isinstance(args, dict) else {},
             }
         )
@@ -305,7 +352,14 @@ async def gemini_invoke(
     """
     system, messages, max_tokens, temperature = _normalize_request(request)
     if client is None:
-        from google import genai
+        # MET-733: google-genai is an optional provider SDK and is in no
+        # dependency group, so mypy's view of `google.genai` depends on which
+        # other `google.*` namespace packages happen to be installed. With
+        # none present it stays quiet; with a sibling present (as on the CI
+        # runner) it resolves `google` and then reports `has no attribute
+        # "genai"`. That divergence is why this passed locally and failed in
+        # CI when the mypy ratchet first covered this package.
+        from google import genai  # type: ignore[attr-defined]
 
         # cast(Any, …): keep the SDK seam untyped — request payloads here are
         # normalized plain dicts, which the SDK accepts at runtime but whose
@@ -644,7 +698,14 @@ async def gemini_stream(
     """Stream a Google Gemini model's text deltas."""
     system, messages, max_tokens, temperature = _normalize_request(request)
     if client is None:
-        from google import genai
+        # MET-733: google-genai is an optional provider SDK and is in no
+        # dependency group, so mypy's view of `google.genai` depends on which
+        # other `google.*` namespace packages happen to be installed. With
+        # none present it stays quiet; with a sibling present (as on the CI
+        # runner) it resolves `google` and then reports `has no attribute
+        # "genai"`. That divergence is why this passed locally and failed in
+        # CI when the mypy ratchet first covered this package.
+        from google import genai  # type: ignore[attr-defined]
 
         # cast(Any, …): keep the SDK seam untyped — request payloads here are
         # normalized plain dicts, which the SDK accepts at runtime but whose
@@ -755,7 +816,7 @@ async def openai_stream_events(
     }
     tools = request.get("tools") if isinstance(request, dict) else None
     if tools:
-        kwargs["tools"] = tools
+        kwargs["tools"] = _sanitize_openai_tool_names(tools)
         kwargs["tool_choice"] = request.get("tool_choice", "auto")
 
     text_parts: list[str] = []
@@ -788,7 +849,10 @@ async def openai_stream_events(
                 # moment its NAME is known — long before arguments finish.
                 if slot["name"] and idx not in announced:
                     announced.add(idx)
-                    yield {"type": "action_started", "name": slot["name"]}
+                    yield {
+                        "type": "action_started",
+                        "name": _desanitize_openai_tool_name(slot["name"]),
+                    }
     except ProviderError:
         raise
     except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
@@ -804,7 +868,7 @@ async def openai_stream_events(
         tool_calls.append(
             {
                 "id": slot["id"],
-                "name": slot["name"],
+                "name": _desanitize_openai_tool_name(slot["name"]),
                 "arguments": args if isinstance(args, dict) else {},
             }
         )

@@ -1,0 +1,21 @@
+{
+  "name": "analyze_hazards",
+  "version": "0.1.0",
+  "domain": "compliance",
+  "agent": "compliance",
+  "description": "Logs hazards, scores risk (severity x likelihood), and persists a HAZARD_ANALYSIS work product.",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.commit_hazard_analysis",
+      "capability": "twin_hazard_analysis",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.AnalyzeHazardsInput",
+  "output_schema": "schema.AnalyzeHazardsOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["hazard", "risk", "safety", "compliance"]
+}

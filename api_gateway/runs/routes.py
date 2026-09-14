@@ -29,12 +29,14 @@ from api_gateway.runs.schemas import (
 )
 from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
+from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
     InvalidTransition,
     Run,
     RunNotFoundError,
+    RunStatus,
 )
 
 logger = structlog.get_logger(__name__)
@@ -47,11 +49,21 @@ router = APIRouter(prefix="/v1/runs", tags=["runs"])
 # transition. reset_run_store() rewires all three for tests.
 _stream_manager = RunStreamManager()
 _gate_coordinator = GateCoordinator()
+# Production-harness audit follow-up: this module's own docstring said
+# "persistence lands in Phase 4" — ledger.py was built (SQLite, described as
+# restart-surviving) but never actually wired to _store. None here means the
+# historical, purely process-local behavior; init_run_ledger() opts in.
+_ledger: SqliteRunLedger | None = None
 
 
 def _on_transition(run: Run) -> None:
     _stream_manager.publish(run)
     _gate_coordinator.on_transition(run)
+    if _ledger is not None:
+        try:
+            _ledger.record_run(run)
+        except Exception as exc:  # noqa: BLE001 - durability must never break a transition
+            logger.warning("run_ledger_write_failed", run_id=run.id, error=str(exc))
 
 
 _store = InMemoryRunStore(on_transition=_on_transition)
@@ -74,11 +86,51 @@ def init_run_store(store: InMemoryRunStore) -> None:
     _store = store
 
 
+_RESUMABLE_STATUSES = {
+    RunStatus.QUEUED.value,
+    RunStatus.RUNNING.value,
+    RunStatus.AWAITING_APPROVAL.value,
+}
+
+
+def init_run_ledger(ledger: SqliteRunLedger | None) -> None:
+    """Wire a durable ledger so run transitions survive a process restart,
+    and rehydrate any non-terminal runs it already has on record.
+
+    ``None`` (the default) keeps every existing test's process-local-only
+    behavior unchanged. A restored run's ``history`` is a single-element
+    placeholder (the ledger persists run state, not the event trace) — an
+    accepted degradation, since resume/gate logic keys off ``status``.
+    """
+    global _ledger
+    _ledger = ledger
+    if ledger is None:
+        return
+    restored = 0
+    for row in ledger.list_runs(statuses=_RESUMABLE_STATUSES):
+        status = RunStatus(row["status"])
+        _store.restore(
+            Run(
+                id=row["id"],
+                status=status,
+                request=row["request"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                error=row["error"],
+                result=row["result"],
+                history=[status],
+            )
+        )
+        restored += 1
+    logger.info("run_ledger_wired", restored=restored)
+
+
 def reset_run_store() -> None:
-    global _store, _stream_manager, _gate_coordinator
+    global _store, _stream_manager, _gate_coordinator, _ledger
     _stream_manager = RunStreamManager()
     _gate_coordinator = GateCoordinator()
     _store = InMemoryRunStore(on_transition=_on_transition)
+    _ledger = None
 
 
 def _is_design_flow(request: dict) -> bool:

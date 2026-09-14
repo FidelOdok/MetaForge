@@ -201,3 +201,21 @@ def test_lightrag_config_defaults_llm_model_func_to_none():
     # When None, the service falls back to ``_noop_llm_model_func`` —
     # naive vector mode keeps its existing behaviour.
     assert cfg.llm_model_func is None
+
+
+def test_an_empty_model_env_falls_back_to_the_default(monkeypatch):
+    """MET-724: compose sets ``LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}``.
+
+    Present-and-empty, not absent. The test above only deletes the variables,
+    so it never covered the shape an actual deployment produces: any install
+    without those entries in its .env would have named the model "" on every
+    ingestion and query.
+    """
+    monkeypatch.setenv("OPEN_ROUTER_API_KEY", "sk-env")
+    monkeypatch.setenv("LIGHTRAG_MODEL", "")
+    monkeypatch.setenv("LIGHTRAG_FALLBACK_MODEL", "")
+
+    cfg = OpenRouterLightRAGConfig.from_env()
+
+    assert cfg.primary_model == DEFAULT_PRIMARY_MODEL
+    assert cfg.fallback_model == DEFAULT_FALLBACK_MODEL

@@ -105,8 +105,10 @@ MetaForge supports two operational modes:
 # Platform core + CLI (Python)
 pip install -e ".[dev]"          # Install in dev mode
 pytest                           # Run tests
-ruff check .                     # Lint
-mypy .                           # Type check
+ruff check . && ruff format --check .   # Lint (CI runs both)
+mypy .                           # Type check — repo-wide; see the mypy note
+                                 # under Testing Requirements for which
+                                 # packages CI actually enforces
 
 # CLI invocation
 python -m cli.forge_cli --help   # See available subcommands
@@ -313,7 +315,25 @@ Key architectural rules:
 
 For Phase 1, the minimum bar per module is:
 
-- **Static Analysis (Level 1)**: `ruff check` and `mypy --strict` pass with zero errors
+- **Static Analysis (Level 1)**: `ruff check` and `ruff format --check` pass with zero errors, and `mypy` passes for the packages CI checks
+
+    **Be precise about the mypy bar** (MET-733), because this line used to
+    claim `mypy --strict` passed with zero errors everywhere and it was 938
+    errors from true. What is actually enforced, in `.github/workflows/ci.yml`:
+
+    ```
+    mypy --follow-imports=silent \
+      digital_twin/ mcp_core/ metaforge/ observability/ \
+      orchestrator/ shared/ skill_registry/ tool_registry/
+    ```
+
+    Those eight are at zero and must stay there. Not yet clean, and therefore
+    not yet enforced: `domain_agents/` (414), `twin_core/` (38),
+    `api_gateway/` (27), and `tests/` (433). If you clean one, add it to that
+    list in the same PR — the point of the list is that it only grows.
+
+    `mypy .` (repo-wide, non-strict) reports the current total. Nothing is run
+    under `--strict` anywhere today.
 - **Unit Tests (Level 2)**: all public functions exercised in isolation via `pytest tests/unit/`
 - **Component Tests (Level 3)**: key module entry points tested with in-memory doubles (`InMemoryTwinAPI`, `InMemoryMcpBridge`)
 - **Integration Tests (Level 5)**: cross-module wiring verified via `pytest tests/integration/`
@@ -353,7 +373,14 @@ The dev environment includes a full observability stack accessible via Grafana M
 
 ### Log Labels
 
-Loki logs are labeled with `service_name` (currently `metaforge-gateway`) and `deployment_environment` (`docker`). Each log entry includes OTel context: `trace_id`, `span_id`, `scope_name` (logger), `severity_text`, and `code_file_path`.
+Loki's **indexed labels** — the only things usable in a `{...}` stream selector — are exactly three: `service_name` (currently `metaforge-gateway`), `deployment_environment` (`docker`), and `service_instance_id`. Verified against `/loki/api/v1/labels`.
+
+Everything else (`severity_text`, `detected_level`, `trace_id`, `span_id`, `scope_name`, `code_file_path`, `code_function_name`, `code_line_number`) arrives as structured metadata, **not** as a label. So a query like `{severity_text=~"ERROR|WARN"}` matches no stream and returns zero results with no error — which reads exactly like "there are no errors". Filter on the line instead:
+
+```logql
+{service_name="metaforge-gateway"} | json | level="error"
+{service_name="metaforge-gateway"} |= "some_event_name"
+```
 
 ### Custom Agents & Commands
 

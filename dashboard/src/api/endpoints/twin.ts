@@ -1,4 +1,4 @@
-import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult } from '../../types/twin';
+import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription } from '../../types/twin';
 import apiClient from '../client';
 
 const MOCK_RELATIONSHIPS: TwinRelationship[] = [
@@ -18,6 +18,7 @@ interface TwinNodeApiResponse {
   updatedAt: string;
   geometryParameters?: { parameters: Record<string, unknown>; properties: Record<string, unknown> } | null;
   hasScript?: boolean;
+  assembly?: AssemblyDescription | null;
 }
 
 export interface TwinNodeScript {
@@ -55,6 +56,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     updatedAt: node.updatedAt,
     geometryParameters: node.geometryParameters ?? undefined,
     hasScript: node.hasScript,
+    assembly: node.assembly ?? undefined,
   }));
 }
 
@@ -72,6 +74,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       updatedAt: node.updatedAt,
       geometryParameters: node.geometryParameters ?? undefined,
       hasScript: node.hasScript,
+      assembly: node.assembly ?? undefined,
     };
   } catch {
     return undefined;
@@ -99,12 +102,15 @@ export async function getNodeScript(id: string): Promise<TwinNodeScript | undefi
   }
 }
 
-export async function getTwinRelationships(): Promise<TwinRelationship[]> {
+export async function getTwinRelationships(projectId?: string): Promise<TwinRelationship[]> {
   // Live edges from the twin graph (backend already returns camelCase fields
   // matching TwinRelationship). Falls back to mocks if the endpoint is absent.
+  // MET-491: scope to a project when one is selected; omit for all projects.
   try {
+    const params = projectId ? { project_id: projectId } : undefined;
     const response = await apiClient.get<{ relationships: TwinRelationship[] }>(
       '/twin/relationships',
+      { params },
     );
     return response.data.relationships ?? [];
   } catch {
@@ -226,6 +232,40 @@ export function nodeFileUrl(nodeId: string, download = false): string {
 export async function fetchNodeFileText(nodeId: string): Promise<string> {
   const { data } = await apiClient.get(`/twin/nodes/${nodeId}/file`, { responseType: 'text' });
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+/** MET-740 follow-up: base URL for a robot_description node's named mesh
+ * files (GET /nodes/{id}/files/{filename}) — same "{base}/{filename}"
+ * shape a fresh export's own _cad_exports/{export_id}/ directory has, so
+ * urdf-loader's workingPath can point straight at a saved node with no
+ * re-export. This route also serves the primary URDF itself, so it can
+ * stand in for the whole file set. */
+export function nodeMeshBaseUrl(nodeId: string): string {
+  return `${FILE_API_BASE}/twin/nodes/${nodeId}/files/`;
+}
+
+// ── Design-sketch approval gate (follow-up to MET-740/747) ──────────────────
+
+export interface ApproveSketchResult {
+  nodeId: string;
+  approved: boolean;
+  approvedAt: string;
+}
+
+interface ApproveSketchApiResponse {
+  node_id: string;
+  approved: boolean;
+  approved_at: string;
+}
+
+/** POST /v1/twin/nodes/{id}/approve-sketch — human sign-off on a
+ * design_sketch work product, flipping its approval gate so the calling
+ * agent/skill is cleared to proceed to real CAD/build work. */
+export async function approveSketch(nodeId: string, approvedBy?: string): Promise<ApproveSketchResult> {
+  const { data } = await apiClient.post<ApproveSketchApiResponse>(`/twin/nodes/${nodeId}/approve-sketch`, {
+    approved_by: approvedBy,
+  });
+  return { nodeId: data.node_id, approved: data.approved, approvedAt: data.approved_at };
 }
 
 // ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────

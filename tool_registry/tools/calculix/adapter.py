@@ -327,6 +327,19 @@ class CalculixServer(McpToolServer):
                     work_dir=self.config.work_dir,
                 )
 
+                # Parse nodal temperature (NDTEMP) results from .frd if available
+                frd_files = [f for f in solver_result.get("result_files", []) if f.endswith(".frd")]
+                if frd_files:
+                    parsed = parse_frd_file(frd_files[0])
+                    temperature = parsed.get("temperature", {})
+                    return {
+                        "max_temperature": temperature.get("max", 0.0),
+                        "min_temperature": temperature.get("min", 0.0),
+                        "temperature_distribution": temperature.get("nodes", {}),
+                        "solver_time": solver_result["solver_time_s"],
+                        "result_files": solver_result["result_files"],
+                    }
+
                 return {
                     "max_temperature": 0.0,
                     "min_temperature": 0.0,

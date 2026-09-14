@@ -153,6 +153,11 @@ class StdioTransport(Transport):
         # subprocess as ``METAFORGE_MCP_CLIENT_KEY`` so the server-side
         # auth check passes. The subprocess inherits the rest of the
         # environment by default (``env=None`` means inherit).
+        # ``None`` is meaningful here -- it means "inherit the parent
+        # environment" (see the note above) -- so the attribute has to admit
+        # it. Without the annotation it was inferred as ``dict[str, str]``
+        # from the first branch alone.
+        self._env: dict[str, str] | None
         if api_key is not None:
             base = dict(env) if env is not None else dict(os.environ)
             base["METAFORGE_MCP_CLIENT_KEY"] = api_key

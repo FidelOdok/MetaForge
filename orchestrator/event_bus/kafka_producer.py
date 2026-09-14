@@ -96,6 +96,18 @@ class KafkaEventPublisher:
         self._producer: Any | None = None
         self._started = False
 
+    @property
+    def started(self) -> bool:
+        """Whether a real producer is attached and publishing.
+
+        ``start()`` swallows every failure by design -- a missing ``aiokafka``
+        or an unreachable broker must not fail gateway boot. That makes this
+        property load-bearing: without it a caller cannot distinguish "durable
+        bus running" from "publisher silently dropping every event", and will
+        log the former while doing the latter.
+        """
+        return self._started and self._producer is not None
+
     # -- lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:

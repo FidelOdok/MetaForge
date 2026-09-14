@@ -277,6 +277,36 @@ class TestToolRegistry:
         assert "calculix" in results
         assert results["calculix"].status == "healthy"
 
+    async def test_close_all_disconnects_every_client(self) -> None:
+        """Remote adapters' HttpTransport sessions must be closed on shutdown
+        (previously never called, leaking an aiohttp ClientSession per
+        adapter until GC finalized it at interpreter exit)."""
+        registry = ToolRegistry()
+        server = _create_calculix_server()
+        await registry.register_adapter(server)
+        client = registry.get_client("calculix")
+        assert client is not None
+        client.disconnect = AsyncMock(wraps=client.disconnect)  # type: ignore[method-assign]
+
+        await registry.close_all()
+
+        client.disconnect.assert_awaited_once_with("calculix")
+
+    async def test_close_all_tolerates_a_failing_client(self) -> None:
+        """One adapter's disconnect() raising must not block the others."""
+        registry = ToolRegistry()
+        server = _create_calculix_server()
+        await registry.register_adapter(server)
+        client = registry.get_client("calculix")
+        assert client is not None
+        client.disconnect = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+        await registry.close_all()  # must not raise
+
+    async def test_close_all_on_empty_registry(self) -> None:
+        registry = ToolRegistry()
+        await registry.close_all()  # must not raise
+
     async def test_register_duplicate_adapter_updates(self) -> None:
         """Re-registering the same adapter should update existing entry."""
         registry = ToolRegistry()

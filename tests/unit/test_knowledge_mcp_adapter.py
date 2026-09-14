@@ -347,6 +347,82 @@ class TestProjectIdForwarding:
 
 
 # ---------------------------------------------------------------------------
+# MET-679: explicit project_id argument beats the ambient MCP call context.
+#
+# session.start's project_id only binds the agent-session capture store for
+# attribution -- it does NOT populate current_context(), which is only ever
+# stamped per-call from transport headers/env. Without an explicit argument,
+# every MCP-driven search/ingest silently fell back to the "default" tenant
+# regardless of which project the caller was actually working in -- the same
+# class of bug as MET-670's REST-route fix, but on the MCP tool surface.
+# ---------------------------------------------------------------------------
+
+
+class TestExplicitProjectIdArgument:
+    async def test_search_prefers_explicit_argument_over_context(
+        self, server: KnowledgeServer
+    ) -> None:
+        from mcp_core.context import McpCallContext, with_context
+
+        context_project = UUID("33333333-3333-4333-8333-333333333333")
+        explicit_project = UUID("44444444-4444-4444-8444-444444444444")
+        with with_context(McpCallContext(project_id=context_project)):
+            await server.handle_search({"query": "anything", "project_id": str(explicit_project)})
+
+        service = server.service  # type: ignore[attr-defined]
+        assert service.search_calls[-1]["project_id"] == explicit_project  # type: ignore[attr-defined]
+
+    async def test_search_explicit_argument_works_with_no_context_bound(
+        self, server: KnowledgeServer
+    ) -> None:
+        # The exact scenario a plain MCP client hits: no session-bound
+        # context at all, only the explicit argument.
+        explicit_project = UUID("55555555-5555-4555-8555-555555555555")
+        await server.handle_search({"query": "anything", "project_id": str(explicit_project)})
+
+        service = server.service  # type: ignore[attr-defined]
+        assert service.search_calls[-1]["project_id"] == explicit_project  # type: ignore[attr-defined]
+
+    async def test_ingest_prefers_explicit_argument_over_context(
+        self, server: KnowledgeServer
+    ) -> None:
+        from mcp_core.context import McpCallContext, with_context
+
+        context_project = UUID("66666666-6666-4666-8666-666666666666")
+        explicit_project = UUID("77777777-7777-4777-8777-777777777777")
+        with with_context(McpCallContext(project_id=context_project)):
+            await server.handle_ingest(
+                {
+                    "content": "body",
+                    "source_path": "/x.md",
+                    "knowledge_type": "session",
+                    "project_id": str(explicit_project),
+                }
+            )
+
+        service = server.service  # type: ignore[attr-defined]
+        assert service.ingest_calls[-1]["project_id"] == explicit_project  # type: ignore[attr-defined]
+
+    async def test_ingest_batch_applies_explicit_project_id_to_every_file(
+        self, server: KnowledgeServer
+    ) -> None:
+        explicit_project = UUID("88888888-8888-4888-8888-888888888888")
+        await server.handle_ingest(
+            {
+                "project_id": str(explicit_project),
+                "files": [
+                    {"content": "a", "source_path": "/a.md", "knowledge_type": "session"},
+                    {"content": "b", "source_path": "/b.md", "knowledge_type": "session"},
+                ],
+            }
+        )
+
+        service = server.service  # type: ignore[attr-defined]
+        assert len(service.ingest_calls) == 2  # type: ignore[attr-defined]
+        assert all(c["project_id"] == explicit_project for c in service.ingest_calls)  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
 # knowledge.extract — MET-433
 # ---------------------------------------------------------------------------
 

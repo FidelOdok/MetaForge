@@ -11,13 +11,23 @@ Env vars (consumed by :meth:`OpenRouterPropertyConfig.from_env`):
 
 * ``OPEN_ROUTER_API_KEY`` — required (shared with the consolidation client).
 * ``PROPERTY_EXTRACTION_MODEL`` — primary slug. Default
-  ``anthropic/claude-3.5-sonnet``.
+  ``anthropic/claude-sonnet-5``.
 * ``PROPERTY_EXTRACTION_FALLBACK_MODEL`` — used on retryable errors.
-  Default ``meta-llama/llama-3-70b-instruct``.
+  Default ``meta-llama/llama-3.3-70b-instruct``.
 * ``PROPERTY_EXTRACTION_TEMPERATURE`` — float, default ``0.0``. Extraction
   is deterministic; temperature stays low.
-* ``PROPERTY_EXTRACTION_MAX_TOKENS`` — int, default ``800``. Single-
-  property JSON payloads are small.
+* ``PROPERTY_EXTRACTION_MAX_TOKENS`` — int, default ``2000``. This
+  client is shared by two very differently-sized JSON payloads: Tier-2/3
+  single-property answers (small — the original ``800`` ceiling was sized
+  for these) and ``component.search_intent``'s multi-category ×
+  multi-constraint translation (a nested array of categories, each with
+  its own constraints array — verified truncating mid-response at 800,
+  "Unterminated string" JSON errors). ``complete(prompt) -> str`` takes
+  no per-call override, so the ceiling has to serve both; 2000 matches
+  ``openrouter_lightrag.py``'s already-proven budget for similarly
+  structured JSON and is a harmless ceiling increase for the small
+  Tier-2/3 case (max_tokens bounds the response, it doesn't force the
+  model to fill it).
 
 The adapter implements :class:`~digital_twin.knowledge.llm_property_extractor.PropertyLLM`
 ``complete(prompt) -> str``: it returns the raw model output so the
@@ -39,10 +49,25 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.openrouter_property_llm")
 
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-3.5-sonnet"
-DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3-70b-instruct"
+# MET-727: the previous defaults, "anthropic/claude-3.5-sonnet" and
+# "meta-llama/llama-3-70b-instruct", were RETIRED from Open Router. Every call
+# 404'd on chat/completions -- primary and fallback both -- and the caller
+# caught it and moved on, so passes completed cleanly having synthesized
+# nothing. Verified against Open Router's own /api/v1/models (430 offered):
+# both slugs GONE. MET-727 repointed this at "anthropic/claude-sonnet-4.5" —
+# but that model is *also* absent from Anthropic's own current-generation
+# model table (only 5 / 4.6 / 4.7 / 4.8 / 5.1 are current as of this fix),
+# so it was already partway back into the same trap: OpenRouter's own
+# catalog page still lists retired slugs for reference, so "found in
+# OpenRouter's listing" is not sufficient evidence a model is still live —
+# cross-check against the provider's own current-model table instead.
+# claude-sonnet-5 is Anthropic's actual current Sonnet tier, and the right
+# cost/latency band for structured single-property extraction (component
+# .search_intent's per-category constraint generation included).
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
+DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 DEFAULT_TEMPERATURE = 0.0
-DEFAULT_MAX_TOKENS = 800
+DEFAULT_MAX_TOKENS = 2000
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_HTTP_REFERER = "https://github.com/FidelOdok/MetaForge"
@@ -83,7 +108,9 @@ class OpenRouterPropertyConfig:
             )
         return cls(
             api_key=api_key,
-            primary_model=os.environ.get("PROPERTY_EXTRACTION_MODEL", DEFAULT_PRIMARY_MODEL),
+            # MET-724: ``or``, not a ``get`` default -- see the note in
+            # openrouter_lightrag.py. Compose sets this to "" by default.
+            primary_model=os.environ.get("PROPERTY_EXTRACTION_MODEL") or DEFAULT_PRIMARY_MODEL,
             fallback_model=os.environ.get(
                 "PROPERTY_EXTRACTION_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL
             ),

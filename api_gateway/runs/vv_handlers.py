@@ -111,6 +111,7 @@ async def _extract_vv_spec(
 ) -> dict[str, Any]:
     """Ask the LLM for a V&V check matrix from the prior phases (never raises)."""
     from api_gateway.chat.harness_backend import run_chat_turn
+    from api_gateway.chat.routes import get_metrics
 
     prompt = (
         "You are recording an honest Phase-1 V&V result for a hardware design. "
@@ -132,6 +133,7 @@ async def _extract_vv_spec(
             max_steps=1,
             provider=provider,
             model=model,
+            metrics=get_metrics(),
         )
         match = re.search(r"\{.*\}", reply, re.DOTALL)
         spec = json.loads(match.group(0)) if match else {}

@@ -35,10 +35,36 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       # TODO: expand to all core modules once existing type errors are fixed
-      - run: mypy --follow-imports=silent shared/
+      # MET-733: this checked `shared/` and nothing else, while CLAUDE.md
+      # documented `mypy .` / `mypy --strict` with zero errors as the bar for
+      # every module. `mypy .` in fact ABORTED (a duplicate module name meant
+      # "errors prevented further checking"), so nobody could see that the
+      # real count was 938.
+      #
+      # A ratchet, not a crusade: every package below is at zero TODAY, so
+      # adding it costs nothing and stops it silently regressing the way
+      # `shared/` alone could not. The 848 errors in `tests/` and
+      # `domain_agents/`, plus twin_core (38) and api_gateway (27), stay out
+      # until someone works them down -- tracked on MET-733.
+      #
+      # Checking these was not academic: it found the Temporal worker calling
+      # configure_logging() with a required argument missing (TypeError into a
+      # bare handler, so the worker never had logging configured at all) and a
+      # cancelled workflow step crashing on `.status` because CancelledError
+      # is a BaseException.
+      - run: |
+          mypy --follow-imports=silent \
+            digital_twin/ \
+            mcp_core/ \
+            metaforge/ \
+            observability/ \
+            orchestrator/ \
+            shared/ \
+            skill_registry/ \
+            tool_registry/
 
   test:
-    name: Unit & Contract Tests
+    name: Tests
     runs-on: [self-hosted, linux, fidel-dev]
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +81,26 @@ jobs:
           else
             echo "No contract tests directory found, skipping"
           fi
+      # MET-730: integration and e2e existed, were maintained, and were never
+      # run here -- so three assertions rotted unnoticed until someone ran
+      # them by hand. The whole pair takes ~18s (91 of the tests skip
+      # themselves without live containers), so there was never a cost
+      # argument for leaving them out. Not -x: with these suites newly
+      # visible, seeing every failure at once beats stopping at the first.
+      - name: Run integration tests (if they exist)
+        run: |
+          if [ -d "tests/integration" ]; then
+            pytest tests/integration/ --tb=short -q
+          else
+            echo "No integration tests directory found, skipping"
+          fi
+      - name: Run e2e tests (if they exist)
+        run: |
+          if [ -d "tests/e2e" ]; then
+            pytest tests/e2e/ --tb=short -q
+          else
+            echo "No e2e tests directory found, skipping"
+          fi
 
   changes:
     name: Detect Changes
@@ -70,9 +116,16 @@ jobs:
           filters: |
             dashboard:
               - 'dashboard/**'
+              # MET-731: the workflow itself counts as a dashboard change.
+              # Without this you can edit -- or break -- the dashboard job and
+              # CI will not run it, because the filter only watched the code
+              # the job tests and not the job doing the testing. It also means
+              # a PR that adds a step to this job cannot exercise the step it
+              # adds.
+              - '.github/workflows/ci.yml'
 
   dashboard:
-    name: Dashboard Type Check
+    name: Dashboard Checks
     runs-on: [self-hosted, linux, fidel-dev]
     needs: changes
     if: needs.changes.outputs.dashboard == 'true'
@@ -85,3 +138,22 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: cd dashboard && npm ci
       - run: cd dashboard && npx tsc --noEmit
+      # MET-732/736: eslint has been dead here since the flat-config
+      # migration -- `"lint": "eslint ."` had no eslint in the dependencies
+      # and no eslint.config.*, so it could not run at all. Restoring it was
+      # not cosmetic: its first run found two `require()` calls in a Vite ESM
+      # bundle that threw ReferenceError at runtime into a bare `catch`,
+      # silently killing trace-context propagation and error recording
+      # (MET-736). Errors fail the build; the react-hooks warnings do not.
+      - run: cd dashboard && npx eslint .
+      # MET-731: this job type-checked and stopped, so the dashboard's 47 test
+      # files / 235 tests never ran anywhere. npm ci is already done above, so
+      # adding them costs only their runtime. Verified all 235 pass on main
+      # first -- unlike MET-730's suites, which had already rotted into three
+      # failures by the time anyone ran them.
+      #
+      # `npm run lint` is deliberately NOT added: eslint is not a dependency
+      # and there is no eslint.config.*, so the script cannot run at all
+      # (MET-732). Repairing it means choosing a lint policy, which is not a
+      # decision to make inside a CI wiring change.
+      - run: cd dashboard && npx vitest run

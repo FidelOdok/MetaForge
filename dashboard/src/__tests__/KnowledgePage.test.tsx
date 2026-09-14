@@ -304,6 +304,28 @@ describe('KnowledgePage', () => {
     expect(screen.queryByRole('region', { name: 'Knowledge sources' })).not.toBeInTheDocument();
   });
 
+  it('scopes the search query to the shared active project (MET-670)', async () => {
+    // Regression: searchKnowledge previously never forwarded project_id at
+    // all, so the search box always fell back to the backend's "default"
+    // tenant regardless of which project was active — a project-scoped
+    // ingest was silently unsearchable from that project's own page.
+    useProjectStore.setState({
+      activeProjectId: '33333333-3333-3333-3333-333333333333',
+      hasSelected: true,
+    });
+    mockListSources.mockResolvedValue([SOURCE_DECISION]);
+    mockSearchKnowledge.mockResolvedValue([SEARCH_HIT]);
+
+    render(<KnowledgePage />);
+    fireEvent.change(screen.getByLabelText(/search knowledge/i), { target: { value: 'regulator' } });
+
+    await waitFor(() => {
+      expect(mockSearchKnowledge).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: '33333333-3333-3333-3333-333333333333' }),
+      );
+    });
+  });
+
   it('shows a "no matches" state for a search with zero hits', async () => {
     mockListSources.mockResolvedValue([]);
     mockSearchKnowledge.mockResolvedValue([]);

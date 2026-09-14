@@ -19,6 +19,7 @@ duck-typed fakes (no FreeCAD, no `Part`, no `Import`).
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -108,13 +109,28 @@ class _FakeImport:
     """Records the object list `Import.export` was called with and writes a
     marker file, so tests can assert on both without real FreeCAD."""
 
-    def __init__(self) -> None:
+    def __init__(self, written: bytes = b"STEP;fake-export;MANIFOLD_SOLID_BREP") -> None:
         self.calls: list[list[object]] = []
+        self._written = written
 
     def export(self, objs: list[object], path: str) -> None:
         self.calls.append(objs)
         with open(path, "wb") as fh:
-            fh.write(b"STEP;fake-export")
+            fh.write(self._written)
+
+
+class _FakeReadShape:
+    """Stand-in for ``Part.Shape()`` used by the post-export roundtrip read."""
+
+    def __init__(self, solid_count: int) -> None:
+        self.Solids = [object()] * solid_count
+
+    def read(self, path: str) -> None:  # noqa: ARG002 -- path unused, path presence is the point
+        pass
+
+
+def _fake_part(solid_count: int) -> SimpleNamespace:
+    return SimpleNamespace(Shape=lambda: _FakeReadShape(solid_count))
 
 
 class TestExportObjectStepBytes:
@@ -150,11 +166,12 @@ class TestExportObjectStepBytes:
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
             patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(1)),
         ):
             result = ops.export_object_step_bytes(assembly)
 
         assert fake_import.calls == [[assembly]]  # the container, not its leaves
-        assert result == b"STEP;fake-export"
+        assert result == b"STEP;fake-export;MANIFOLD_SOLID_BREP"
 
     def test_single_leaf_object_also_goes_through_import_export(
         self, ops: FreecadOperations
@@ -164,7 +181,67 @@ class TestExportObjectStepBytes:
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
             patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(1)),
         ):
             ops.export_object_step_bytes(leaf)
 
         assert fake_import.calls == [[leaf]]
+
+    def test_written_step_with_no_solid_geometry_raises(self, ops: FreecadOperations) -> None:
+        """MET-652: live-caught a case where the source object's .Shape
+        looked valid (so the pre-export _shape_leaves check passed), but
+        Import.export wrote a STEP with only placement/context boilerplate --
+        a dangling SHAPE_REPRESENTATION referencing entities that were never
+        defined, no MANIFOLD_SOLID_BREP anywhere. That file was accepted as a
+        "successful" export and later broke every attempt to view it. The
+        written bytes must be checked too, not just the source object."""
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(
+            written=b"ISO-10303-21;HEADER;...no solids here...END-ISO-10303-21;"
+        )
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
+
+    def test_marker_present_but_roundtrip_read_finds_no_solids_raises(
+        self, ops: FreecadOperations
+    ) -> None:
+        """MET-652 (reopened): live re-caught the gap after the regex fix
+        shipped -- a 23,361-byte STEP that matched _STEP_SOLID_MARKER_RE (a
+        MANIFOLD_SOLID_BREP entity was present in the DATA section) yet
+        opened with zero solids, because the geometry that entity referenced
+        was itself dangling/undefined. The regex alone cannot catch this;
+        reading the file back through the kernel and counting real solids is
+        the only authoritative check."""
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(written=b"STEP;dangling-ref;MANIFOLD_SOLID_BREP")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _fake_part(0)),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)
+
+    def test_roundtrip_read_failure_is_treated_as_no_solids(self, ops: FreecadOperations) -> None:
+        """A STEP file so malformed the kernel can't even open it is exactly
+        as unusable as one with zero solids -- must not be swallowed as a
+        false "success"."""
+
+        class _BrokenPart:
+            @staticmethod
+            def Shape() -> Any:
+                raise RuntimeError("corrupt STEP")
+
+        leaf = _leaf(_Shape())
+        fake_import = _FakeImport(written=b"STEP;fake-export;MANIFOLD_SOLID_BREP")
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Part", _BrokenPart),
+        ):
+            with pytest.raises(ValueError, match="no exportable geometry"):
+                ops.export_object_step_bytes(leaf)

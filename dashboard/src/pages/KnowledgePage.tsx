@@ -165,11 +165,12 @@ export function KnowledgePage() {
   const isSearching = debouncedSearch.length > 0;
 
   const { data: searchResults, isLoading: isSearchLoading } = useQuery({
-    queryKey: ['knowledge', 'search', debouncedSearch, filterType],
+    queryKey: ['knowledge', 'search', debouncedSearch, filterType, activeProjectId ?? ''],
     queryFn: () =>
       searchKnowledge({
         query: debouncedSearch,
         knowledge_type: filterType === 'all' ? undefined : filterType,
+        project_id: activeProjectId ?? undefined,
         limit: 20,
       }),
     enabled: isSearching,

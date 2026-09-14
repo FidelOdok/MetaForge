@@ -67,9 +67,17 @@ def cards_for_domains(cards: list[SkillCard], domains: tuple[str, ...]) -> list[
     return [c for c in cards if c.domain in wanted]
 
 
-def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 12000) -> str:
+def procedural_overlay(cards: list[SkillCard], *, budget_chars: int = 30000) -> str:
     """Concatenate the cards' SKILL.md into a procedural reference block, trimmed
-    to ``budget_chars`` so a phase with many skills can't blow the context."""
+    to ``budget_chars`` so a phase with many skills can't blow the context.
+
+    18000 was the original default; by the time mechanical reached 9 skills its
+    own corpus alone used 17958 of it (42 chars of headroom) -- any further
+    growth in a single domain's skill count would silently start dropping
+    procedures rather than the corpus actually being too large for a modern
+    LLM context window. Raised to 30000 (~7500 tokens) for real per-domain
+    growth headroom; the tiny-budget trimming behaviour itself is unaffected
+    (callers can still pass an explicit ``budget_chars``)."""
     if not cards:
         return ""
     header = (

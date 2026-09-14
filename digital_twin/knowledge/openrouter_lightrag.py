@@ -34,11 +34,24 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.knowledge.openrouter_lightrag")
 
-# Defaults pinned for KG entity extraction. Claude 3.5 Sonnet is the
+# Defaults pinned for KG entity extraction. Claude Sonnet is the
 # primary in line with the rest of the platform; Llama 3 70B is the
 # fallback on transient errors.
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-3.5-sonnet"
-DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3-70b-instruct"
+# MET-727: the previous defaults, "anthropic/claude-3.5-sonnet" and
+# "meta-llama/llama-3-70b-instruct", were RETIRED from Open Router. Every call
+# 404'd on chat/completions -- primary and fallback both -- and the caller
+# caught it and moved on, so passes completed cleanly having synthesized
+# nothing. Verified against Open Router's own /api/v1/models (430 offered):
+# both slugs GONE. MET-727 repointed this at "anthropic/claude-sonnet-4.5" —
+# but that model is *also* absent from Anthropic's own current-generation
+# model table (only 5 / 4.6 / 4.7 / 4.8 / 5.1 are current as of this fix),
+# so it was already partway back into the same trap: OpenRouter's own
+# catalog page still lists retired slugs for reference, so "found in
+# OpenRouter's listing" is not sufficient evidence a model is still live —
+# cross-check against the provider's own current-model table instead.
+# claude-sonnet-5 is Anthropic's actual current Sonnet tier.
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
+DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 # Slight temperature room — entity extraction benefits from a little
 # flexibility in span identification, unlike single-property answers
 # which are pinned at 0.0.
@@ -82,8 +95,13 @@ class OpenRouterLightRAGConfig:
             )
         return cls(
             api_key=api_key,
-            primary_model=os.environ.get("LIGHTRAG_MODEL", DEFAULT_PRIMARY_MODEL),
-            fallback_model=os.environ.get("LIGHTRAG_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL),
+            # MET-724: ``or``, not a ``get`` default -- compose declares these
+            # as ``LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}``, which sets the empty
+            # string rather than leaving the variable absent. Any deployment
+            # without those entries in its .env would otherwise request the
+            # model "" on every ingestion and query.
+            primary_model=os.environ.get("LIGHTRAG_MODEL") or DEFAULT_PRIMARY_MODEL,
+            fallback_model=os.environ.get("LIGHTRAG_FALLBACK_MODEL") or DEFAULT_FALLBACK_MODEL,
             temperature=_env_float("LIGHTRAG_TEMPERATURE", DEFAULT_TEMPERATURE),
             max_tokens=_env_int("LIGHTRAG_MAX_TOKENS", DEFAULT_MAX_TOKENS),
         )

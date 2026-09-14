@@ -26,6 +26,13 @@ class TwinNodeResponse(BaseModel):
     # retrievable via GET /nodes/{id}/script (a CAD_SOURCE_SCRIPT node
     # exists and is linked via metadata.script_node_id).
     hasScript: bool = False  # noqa: N815
+    # MET-740: a robot_description node's {parts, joints} — the exact shape
+    # cadquery.export_urdf_assembly accepts/returns. Kept separate from
+    # `properties` (scalar-only) so the dashboard can reconstruct the full
+    # Assembly export form from an already-fetched node list, with no extra
+    # round trip and no live FreeCAD session required. None for every other
+    # node type.
+    assembly: dict[str, Any] | None = None
 
 
 class TwinNodeScriptResponse(BaseModel):
@@ -78,3 +85,19 @@ class BooleanCutResponse(BaseModel):
     operation: str
     result_volume_mm3: float
     result_area_mm2: float
+
+
+class ApproveSketchRequest(BaseModel):
+    """Human sign-off on a design_sketch work product (follow-up to MET-740/747)."""
+
+    approved_by: str | None = Field(
+        default=None, description="Identifier of the human approving this sketch."
+    )
+
+
+class ApproveSketchResponse(BaseModel):
+    """Result of approving a design_sketch — the gate's new state."""
+
+    node_id: str
+    approved: bool
+    approved_at: str

@@ -145,9 +145,9 @@ class SkillRegistry:
             raise SkillLoadError(definition.name, "schema.py not found", skill_path)
 
         try:
-            schema_module = self._import_module_from_path(
-                str(schema_module_path), f"{definition.name}_schema"
-            )
+            schema_module = self._import_real_submodule(
+                skill_path, "schema"
+            ) or self._import_module_from_path(str(schema_module_path), f"{definition.name}_schema")
         except Exception as exc:
             raise SkillLoadError(
                 definition.name,
@@ -178,7 +178,9 @@ class SkillRegistry:
             raise SkillLoadError(definition.name, "handler.py not found", skill_path)
 
         try:
-            handler_module = self._import_module_from_path(
+            handler_module = self._import_real_submodule(
+                skill_path, "handler"
+            ) or self._import_module_from_path(
                 str(handler_module_path), f"{definition.name}_handler"
             )
         except Exception as exc:
@@ -285,6 +287,30 @@ class SkillRegistry:
             "by_status": by_status,
             "by_domain": by_domain,
         }
+
+    @staticmethod
+    def _import_real_submodule(skill_path: str, submodule: str) -> Any | None:
+        """Import ``<dotted package for skill_path>.<submodule>`` via the normal
+        import system, so a relative import inside it (``from .schema import
+        X`` -- the convention every real skill's ``handler.py`` uses) resolves
+        correctly against its real sibling module.
+
+        ``_import_module_from_path`` loads a file with no package context, so
+        a relative import inside it raises ``ImportError`` ("no known parent
+        package") -- this only ever went unnoticed because this registry's own
+        tests use synthetic fixture skills whose ``handler.py`` doesn't import
+        from ``schema.py`` at all, unlike every real skill.
+
+        Returns ``None`` (never raises) when ``skill_path`` isn't reachable as
+        a real dotted package -- e.g. an ad hoc directory outside any package,
+        such as a fixture under a pytest ``tmp_path`` -- so callers fall back
+        to file-based loading exactly as before.
+        """
+        dotted = ".".join(Path(skill_path).parts)
+        try:
+            return importlib.import_module(f"{dotted}.{submodule}")
+        except Exception:
+            return None
 
     @staticmethod
     def _import_module_from_path(file_path: str, module_name: str) -> Any:

@@ -1,0 +1,21 @@
+{
+  "name": "define_system_architecture",
+  "version": "0.1.0",
+  "domain": "shared",
+  "agent": "shared",
+  "description": "Persists a cross-discipline component/interface map (block diagram) as a SYSTEM_ARCHITECTURE work product.",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "twin.commit_system_architecture",
+      "capability": "twin_system_architecture",
+      "required": true
+    }
+  ],
+  "input_schema": "schema.DefineSystemArchitectureInput",
+  "output_schema": "schema.DefineSystemArchitectureOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["architecture", "systems", "cross-discipline"]
+}

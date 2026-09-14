@@ -1,10 +1,11 @@
 """Phase 3 — cad / sim MCP tools coverage (MET-477).
 
-Three adapters are bootstrap-registered by ``tool_registry``:
-
-* ``cadquery.*`` — 7 tools (post-G2 fallback)
-* ``freecad.*``  — 5 tools
-* ``calculix.*`` — 4 tools
+Four adapters are bootstrap-registered by ``tool_registry``: ``cadquery.*``,
+``freecad.*``, ``calculix.*`` and ``kicad.*``. Per-adapter tool counts are
+deliberately **not** written down here -- MET-730: the counts that used to be
+in this docstring went stale (it claimed a 30-tool total while the assertion
+below it demanded 55, and the real number was 68), so the expectations live in
+the ``_EXPECTED_*_TOOLS`` sets and are checked by set difference instead.
 
 Full happy-path execution requires the real backends (cadquery library,
 FreeCAD headless, ``ccx`` solver). They are not installed in the CI
@@ -16,10 +17,8 @@ backends:
   surface as clean ``McpRpcError`` envelopes — the adapter rejects
   before forwarding to the backend, so this works without the binaries
 
-KiCad has an adapter under ``tool_registry/tools/kicad/`` but is **not
-in the unified MCP bootstrap registry** (``tool_registry.bootstrap``
-ships ``cadquery / freecad / calculix`` only). A regression test
-documents the gap so the suite catches any silent re-wire.
+KiCad joined the unified MCP bootstrap registry in MET-478; the docstring
+here previously still described it as absent.
 """
 
 from __future__ import annotations
@@ -141,21 +140,70 @@ async def test_kicad_tools_register_in_unified_bootstrap(mcp_client):
     assert not missing, f"missing kicad tools post-MET-478: {missing}"
 
 
-async def test_total_cad_sim_tool_count(mcp_client):
-    """Adapter-level total: cadquery=7 + freecad=13 + calculix=4 + kicad=6 = 30.
+_CAD_SIM_ADAPTERS = {"cadquery", "freecad", "calculix", "kicad"}
 
-    The kicad slice landed with MET-478 (unified MCP bootstrap wire-up). freecad
-    grew to 13 with the MET-528 stateful PartDesign authoring tools (5 stateless
-    + 8 authoring).
+
+async def test_every_documented_cad_sim_tool_is_exposed(mcp_client):
+    """The union of the per-adapter expectations, in one assertion.
+
+    MET-730: this replaced a hardcoded ``len(cad_ids) == 55``. That literal
+    had been hand-edited at least three times (most recently "bump
+    cross-adapter tool-count assertions for MET-629") and its own docstring
+    still claimed the total was 30, which is how much a magic number tells
+    you. It also failed for a whole week unnoticed, because CI never ran this
+    suite.
+
+    A count cannot distinguish "a tool was removed" from "a tool was added",
+    which are opposite problems. Set difference says which, and needs no edit
+    when the catalog grows.
     """
     result = await rpc(mcp_client, "tools/list")
     tool_ids = {t.get("name") for t in result.get("tools", [])}
-    cad_ids = {
-        tid
-        for tid in tool_ids
-        if tid and tid.split(".", 1)[0] in {"cadquery", "freecad", "calculix", "kicad"}
-    }
-    assert len(cad_ids) == 55, f"unexpected CAD/sim tool count: {sorted(cad_ids)}"
+
+    expected = (
+        _EXPECTED_CADQUERY_TOOLS
+        | _EXPECTED_FREECAD_TOOLS
+        | _EXPECTED_CALCULIX_TOOLS
+        | _EXPECTED_KICAD_TOOLS
+    )
+    missing = expected - tool_ids
+    assert not missing, f"documented CAD/sim tools absent from tools/list: {sorted(missing)}"
+
+
+async def test_no_tool_id_is_registered_twice(mcp_client):
+    """Two adapters claiming one id is a wiring bug -- the second silently
+    shadows the first at dispatch.
+
+    Being straight about this one's reach: in the default in-process mode it
+    cannot fail, because ``UnifiedMcpServer.__init__`` raises on a collision
+    and the fixture would blow up before the test body runs. It earns its
+    place in the conftest's **live mode** (``METAFORGE_MCP_URL``), where
+    ``tools/list`` is whatever a running server actually serves, and as a
+    guard on that constructor check ever being relaxed.
+    """
+    result = await rpc(mcp_client, "tools/list")
+    names = [t.get("name") for t in result.get("tools", [])]
+
+    assert names, "tools/list returned nothing; this test would pass vacuously"
+    duplicates = {n for n in names if names.count(n) > 1}
+    assert not duplicates, f"tool ids registered more than once: {sorted(duplicates)}"
+
+
+async def test_cad_sim_tool_ids_are_all_well_formed(mcp_client):
+    """Every CAD/sim tool is ``<known adapter>.<tool>``.
+
+    Catches a stray or misnamespaced registration, which is the other thing
+    an exact count would have caught -- without breaking on every legitimate
+    addition.
+    """
+    result = await rpc(mcp_client, "tools/list")
+    tool_ids = {t.get("name") for t in result.get("tools", []) if t.get("name")}
+
+    cad_ids = {tid for tid in tool_ids if tid.split(".", 1)[0] in _CAD_SIM_ADAPTERS}
+    assert cad_ids, "no CAD/sim tools registered at all"
+
+    malformed = {tid for tid in cad_ids if "." not in tid or not tid.split(".", 1)[1]}
+    assert not malformed, f"malformed CAD/sim tool ids: {sorted(malformed)}"
 
 
 # ---------------------------------------------------------------------------

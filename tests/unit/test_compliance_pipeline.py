@@ -598,6 +598,48 @@ class TestComplianceAgent:
         assert result.evidenced_count == 1
         assert result.coverage_percent > 0.0
 
+    @pytest.mark.asyncio
+    async def test_checklist_reflects_linked_evidence_on_regeneration(self, agent):
+        """Regression (MET-673): generate_checklist rebuilds every ChecklistItem
+        from the YAML templates on each call (always starting MISSING), so it
+        must re-apply tracked evidence every time -- otherwise evidence linked
+        via link_evidence never surfaces on a subsequent checklist fetch, even
+        though get_coverage (which queries the tracker directly) reports it
+        correctly. This is exactly the sequence GET /checklist performs after
+        POST /evidence on the dashboard.
+        """
+        await agent.run_task(
+            ComplianceTaskRequest(
+                task_type="generate_checklist",
+                project_id="proj-evidence-visible",
+                parameters={"markets": ["UKCA"]},
+            )
+        )
+        await agent.run_task(
+            ComplianceTaskRequest(
+                task_type="link_evidence",
+                project_id="proj-evidence-visible",
+                parameters={
+                    "checklist_item_id": "UKCA-SAF-001",
+                    "evidence_type": "TEST_REPORT",
+                    "title": "EN 62368-1 Test Report",
+                },
+            )
+        )
+        result = await agent.run_task(
+            ComplianceTaskRequest(
+                task_type="generate_checklist",
+                project_id="proj-evidence-visible",
+                parameters={"markets": ["UKCA"]},
+            )
+        )
+        assert result.success is True
+        assert result.evidenced_count == 1
+        assert result.coverage_percent > 0.0
+        items = result.data["checklist"]["items"]
+        item = next(i for i in items if i["id"] == "UKCA-SAF-001")
+        assert item["evidence_status"] == "UPLOADED"
+
 
 # ===========================================================================
 # 6. API route tests
@@ -626,7 +668,7 @@ class TestComplianceAPI:
         return TestClient(app)
 
     def test_get_checklist_single_market(self, client):
-        resp = client.get("/api/v1/compliance/proj-1/checklist?markets=UKCA")
+        resp = client.get("/v1/compliance/proj-1/checklist?markets=UKCA")
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == "proj-1"
@@ -634,7 +676,7 @@ class TestComplianceAPI:
         assert len(data["items"]) >= 15
 
     def test_get_checklist_multi_market(self, client):
-        resp = client.get("/api/v1/compliance/proj-2/checklist?markets=UKCA,CE")
+        resp = client.get("/v1/compliance/proj-2/checklist?markets=UKCA,CE")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_items"] > 0
@@ -642,15 +684,15 @@ class TestComplianceAPI:
         assert "CE" in data["target_markets"]
 
     def test_get_checklist_invalid_market(self, client):
-        resp = client.get("/api/v1/compliance/proj-3/checklist?markets=INVALID")
+        resp = client.get("/v1/compliance/proj-3/checklist?markets=INVALID")
         assert resp.status_code == 400
 
     def test_link_evidence_endpoint(self, client):
         # Generate checklist first
-        client.get("/api/v1/compliance/proj-ev/checklist?markets=UKCA")
+        client.get("/v1/compliance/proj-ev/checklist?markets=UKCA")
         # Link evidence
         resp = client.post(
-            "/api/v1/compliance/proj-ev/evidence",
+            "/v1/compliance/proj-ev/evidence",
             json={
                 "checklist_item_id": "UKCA-SAF-001",
                 "evidence_type": "TEST_REPORT",
@@ -666,30 +708,30 @@ class TestComplianceAPI:
 
     def test_get_evidence_endpoint(self, client):
         # Generate checklist and link evidence
-        client.get("/api/v1/compliance/proj-ge/checklist?markets=UKCA")
+        client.get("/v1/compliance/proj-ge/checklist?markets=UKCA")
         client.post(
-            "/api/v1/compliance/proj-ge/evidence",
+            "/v1/compliance/proj-ge/evidence",
             json={
                 "checklist_item_id": "UKCA-EMC-001",
                 "evidence_type": "TEST_REPORT",
                 "title": "EMC Report",
             },
         )
-        resp = client.get("/api/v1/compliance/proj-ge/evidence/UKCA-EMC-001")
+        resp = client.get("/v1/compliance/proj-ge/evidence/UKCA-EMC-001")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]["title"] == "EMC Report"
 
     def test_get_evidence_empty(self, client):
-        resp = client.get("/api/v1/compliance/proj-x/evidence/NONEXISTENT")
+        resp = client.get("/v1/compliance/proj-x/evidence/NONEXISTENT")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_get_coverage_endpoint(self, client):
         # Generate checklist
-        client.get("/api/v1/compliance/proj-cov/checklist?markets=PSTI")
-        resp = client.get("/api/v1/compliance/proj-cov/coverage")
+        client.get("/v1/compliance/proj-cov/checklist?markets=PSTI")
+        resp = client.get("/v1/compliance/proj-cov/coverage")
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == "proj-cov"
@@ -697,26 +739,51 @@ class TestComplianceAPI:
         assert data["coverage_percent"] == 0.0
 
     def test_get_coverage_no_checklist(self, client):
-        resp = client.get("/api/v1/compliance/nonexistent/coverage")
+        resp = client.get("/v1/compliance/nonexistent/coverage")
         assert resp.status_code == 404
 
     def test_coverage_increases_after_evidence(self, client):
         """Coverage should increase after evidence is linked."""
-        client.get("/api/v1/compliance/proj-inc/checklist?markets=PSTI")
+        client.get("/v1/compliance/proj-inc/checklist?markets=PSTI")
         # Link evidence to one item
         client.post(
-            "/api/v1/compliance/proj-inc/evidence",
+            "/v1/compliance/proj-inc/evidence",
             json={
                 "checklist_item_id": "PSTI-PWD-001",
                 "evidence_type": "TEST_REPORT",
                 "title": "Password Test",
             },
         )
-        resp = client.get("/api/v1/compliance/proj-inc/coverage")
+        resp = client.get("/v1/compliance/proj-inc/coverage")
         assert resp.status_code == 200
         data = resp.json()
         assert data["evidenced_items"] == 1
         assert data["coverage_percent"] > 0.0
+
+    def test_checklist_endpoint_reflects_linked_evidence(self, client):
+        """Regression (MET-673): the dashboard's actual sequence -- GET
+        /checklist, POST /evidence, then GET /checklist again -- must show
+        the item as no longer MISSING. Previously the second GET rebuilt the
+        checklist from the YAML templates with no awareness of the evidence
+        just linked, so the item stayed MISSING forever despite /coverage
+        already reporting it as evidenced.
+        """
+        client.get("/v1/compliance/proj-refetch/checklist?markets=UKCA")
+        client.post(
+            "/v1/compliance/proj-refetch/evidence",
+            json={
+                "checklist_item_id": "UKCA-SAF-001",
+                "evidence_type": "TEST_REPORT",
+                "title": "Safety Report",
+            },
+        )
+        resp = client.get("/v1/compliance/proj-refetch/checklist?markets=UKCA")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["evidenced_items"] == 1
+        item = next(i for i in data["items"] if i["id"] == "UKCA-SAF-001")
+        assert item["evidence_status"] == "UPLOADED"
+        assert item["evidence_work_product_id"] is None  # no work_product linked in this test
 
 
 # ===========================================================================

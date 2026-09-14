@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 import structlog
@@ -52,10 +53,10 @@ class InMemoryEventFetcher(EventFetcher):
 
     The store doesn't expose a "list-all" method by design — search is
     embedding-driven — so this fetcher reaches into the
-    ``InMemoryExperienceStore`` private dict for testing. For pgvector
-    the production path lands in a future iteration that uses the
-    ``agent_experiences`` table directly with a ``timestamp BETWEEN``
-    query.
+    ``InMemoryExperienceStore`` private dict. That dict only exists on the
+    in-memory adapter, so a pgvector deployment must use
+    :class:`PgVectorEventFetcher` instead (MET-567) — pointing this fetcher
+    at ``PgVectorExperienceStore`` silently returns an empty batch forever.
     """
 
     def __init__(self, store: ExperienceStore) -> None:
@@ -110,3 +111,69 @@ class InMemoryEventFetcher(EventFetcher):
         if isinstance(raw, dict):
             return list(raw.values())
         return []
+
+
+@runtime_checkable
+class WindowedExperienceStore(Protocol):
+    """An experience store that can return a time-window batch.
+
+    Structural, not nominal, so :class:`PgVectorEventFetcher` works against
+    ``PgVectorExperienceStore`` without importing it (keeping the asyncpg
+    dependency out of the consolidation package) and against a test double.
+    """
+
+    async def list_window(
+        self,
+        *,
+        since: datetime | None = ...,
+        until: datetime | None = ...,
+        project_id: UUID | None = ...,
+        agent_code: str | None = ...,
+        min_importance: float = ...,
+        limit: int = ...,
+    ) -> list[ExperienceMemory]: ...
+
+
+class PgVectorEventFetcher(EventFetcher):
+    """Reads the consolidation batch straight out of ``agent_experiences`` (MET-567).
+
+    The production counterpart to :class:`InMemoryEventFetcher`. Filtering,
+    ordering, and the ``limit`` cut all push down into SQL
+    (``PgVectorExperienceStore.list_window``) instead of being applied to a
+    Python snapshot, so a corpus larger than memory still consolidates.
+
+    Pair it with the pgvector experience store; wiring the in-memory fetcher
+    to a pgvector store is the exact defect this class exists to close (the
+    private-dict snapshot is always empty there, so every pass synthesised
+    nothing and ``memory.list_insights`` never returned a row).
+    """
+
+    def __init__(self, store: WindowedExperienceStore) -> None:
+        self._store = store
+
+    async def fetch(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        project_id: UUID | None = None,
+        min_importance: float = DEFAULT_MIN_IMPORTANCE,
+        limit: int = DEFAULT_FETCH_LIMIT,
+    ) -> list[ExperienceMemory]:
+        rows = await self._store.list_window(
+            since=since,
+            until=until,
+            project_id=project_id,
+            min_importance=min_importance,
+            limit=limit,
+        )
+        logger.info(
+            "consolidation_fetch_completed",
+            backend="pgvector",
+            returned=len(rows),
+            project_id=str(project_id) if project_id else None,
+            since=since.isoformat() if since else None,
+            until=until.isoformat() if until else None,
+            min_importance=min_importance,
+        )
+        return rows

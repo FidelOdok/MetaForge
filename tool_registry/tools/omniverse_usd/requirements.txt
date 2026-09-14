@@ -1,0 +1,11 @@
+# OpenUSD conversion MCP adapter dependencies
+# aiohttp drives the JSON-RPC ``/mcp`` server, mirroring calculix/gazebo.
+# usd-core, trimesh, and scipy are plain PyPI wheels (no conda, no GPU,
+# no NVIDIA account needed) -- verified installable/importable 2026-08-25.
+aiohttp>=3.9
+pydantic>=2.0
+structlog>=24.0
+opentelemetry-api>=1.20
+usd-core>=23.0
+trimesh>=4.0
+scipy>=1.11

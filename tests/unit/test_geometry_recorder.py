@@ -148,6 +148,63 @@ class TestCommitGeometryAdapter:
         assert wp.type == WorkProductType.CAD_MODEL
         assert out["model_url"].endswith("/model")
 
+    @staticmethod
+    def _patch_blobs(monkeypatch: pytest.MonkeyPatch) -> None:
+        import digital_twin.storage.work_product_blobs as blobs
+
+        monkeypatch.setattr(
+            blobs,
+            "store_work_product_blob",
+            lambda nid, fn, content, content_type="": f"work-products/{nid}/{fn}",
+        )
+
+    async def test_source_tool_records_the_real_authoring_tool(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # MET-693: the handler never passed source_tool, so the recorder's
+        # "freecad.export_model" default stamped EVERY commit -- CadQuery
+        # geometry included. Provenance is what a reviewer reads to know how an
+        # artifact was produced, and script-as-SSOT diffing (MET-630) needs to
+        # know which authoring tool the stored script belongs to.
+        from uuid import UUID
+
+        from tool_registry.tools.twin.adapter import TwinServer
+        from twin_core.api import InMemoryTwinAPI
+
+        self._patch_blobs(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
+
+        out = await server.commit_geometry(
+            {
+                "step_base64": _STEP_B64,
+                "name": "CadQuery Bracket",
+                "source_tool": "cadquery.execute_script",
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp is not None
+        assert wp.created_by == "cadquery.execute_script"
+
+    async def test_source_tool_defaults_when_not_supplied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Back-compat: an omitted source_tool keeps the historical default
+        # rather than becoming empty/unknown.
+        from uuid import UUID
+
+        from tool_registry.tools.twin.adapter import TwinServer
+        from twin_core.api import InMemoryTwinAPI
+
+        self._patch_blobs(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
+
+        out = await server.commit_geometry({"step_base64": _STEP_B64, "name": "FreeCAD Part"})
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp is not None
+        assert wp.created_by == "freecad.export_model"
+
     def test_tool_absent_without_recorder(self) -> None:
         from tool_registry.tools.twin.adapter import TwinServer
         from twin_core.api import InMemoryTwinAPI
@@ -165,6 +222,22 @@ class TestCommitGeometryAdapter:
             await server.commit_geometry({"name": "x"})
         with pytest.raises(ValueError, match="name"):
             await server.commit_geometry({"step_base64": _STEP_B64})
+
+    async def test_obj_id_without_session_id_gets_a_specific_error(self) -> None:
+        """MET-650 finding: reproduced live TWICE (S4) -- the model retried
+        commit_geometry with obj_id but dropped session_id, and the generic
+        "no geometry to commit" error gave it nothing to self-correct from,
+        so it just repeated the same mistake until the turn exhausted its
+        context window. obj_id alone can never match (it's a per-session
+        counter, not a globally-unique id), so this exact shape gets its own
+        actionable message instead of the generic one."""
+        from tool_registry.tools.twin.adapter import TwinServer
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
+        with pytest.raises(ValueError, match="you passed obj_id but no session_id"):
+            await server.commit_geometry({"obj_id": "assembly_8", "name": "x"})
 
 
 # --------------------------------------------------------------------------

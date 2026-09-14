@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { logger } from '../lib/logger';
 
@@ -28,15 +29,18 @@ export class ErrorBoundary extends Component<Props, State> {
       componentStack: info.componentStack ?? undefined,
     });
 
-    // Record on active OTel span if available
-    try {
-      const { trace } = require('@opentelemetry/api');
-      const span = trace.getActiveSpan();
-      if (span) {
-        span.recordException(error);
-      }
-    } catch {
-      // OTel not available — ignore
+    // MET-736: this was a `require('@opentelemetry/api')` inside a try with
+    // an empty catch. `require` is undefined in a browser ESM module and Vite
+    // does not shim it for app code, so it threw ReferenceError on the first
+    // line and the empty handler swallowed it -- an error-boundary trip was
+    // never recorded on its span, silently, since this was written.
+    //
+    // The guard was never needed: @opentelemetry/api is a hard dependency of
+    // this package. getActiveSpan() already returns undefined when there is
+    // no active span, which is the only case worth handling.
+    const span = trace.getActiveSpan();
+    if (span) {
+      span.recordException(error);
     }
   }
 

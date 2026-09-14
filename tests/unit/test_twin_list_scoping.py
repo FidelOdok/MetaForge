@@ -1,9 +1,9 @@
-"""Project scoping for GET /v1/twin/nodes (MET-491).
+"""Project scoping for GET /v1/twin/nodes and /v1/twin/relationships (MET-491, MET-653).
 
-The Digital Twin list endpoint gained a ``project_id`` filter so the
-dashboard can show one project at a time instead of every node globally.
-Omitted / empty = all projects (incl. unscoped); a specific id returns
-only that project's nodes.
+The Digital Twin list endpoints gained a ``project_id`` filter so the
+dashboard can show one project at a time instead of every node/edge
+globally. Omitted / empty = all projects (incl. unscoped); a specific id
+returns only that project's nodes/edges.
 """
 
 from __future__ import annotations
@@ -16,16 +16,22 @@ from fastapi import HTTPException
 
 from api_gateway.twin import routes
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import WorkProductType
+from twin_core.models.enums import EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
 
 
-def _wp(name: str, project_id: UUID | None) -> WorkProduct:
+def _wp(
+    name: str,
+    project_id: UUID | None,
+    *,
+    wp_type: WorkProductType = WorkProductType.CAD_MODEL,
+    metadata: dict | None = None,
+) -> WorkProduct:
     now = datetime.now(UTC)
     return WorkProduct(
         id=uuid4(),
         name=name,
-        type=WorkProductType.CAD_MODEL,
+        type=wp_type,
         domain="mechanical",
         file_path="/workspace/x.step",
         content_hash="h",
@@ -34,14 +40,16 @@ def _wp(name: str, project_id: UUID | None) -> WorkProduct:
         created_at=now,
         updated_at=now,
         created_by="test",
+        metadata=metadata or {},
     )
 
 
-async def _seed(*wps: WorkProduct) -> None:
+async def _seed(*wps: WorkProduct) -> InMemoryTwinAPI:
     twin = InMemoryTwinAPI.create()
     for wp in wps:
         await twin.create_work_product(wp)
     routes._twin = twin  # route reads the module-level twin
+    return twin
 
 
 async def test_scoped_to_project_returns_only_that_project() -> None:
@@ -73,10 +81,73 @@ async def test_empty_project_id_is_treated_as_all_projects() -> None:
     assert resp.total == 2
 
 
+async def test_boolean_assembly_metadata_on_cad_model_does_not_500() -> None:
+    """MET-745 regression: api_gateway/cad/builder.py's build_assembly()
+    writes metadata["assembly"] = True (a bare bool flag) on CAD_MODEL
+    nodes, independently of and predating the robot_description
+    {parts, joints} "assembly" shape MET-740 added. A node list containing
+    both must not 500 — the bool-flagged node's `assembly` response field
+    should come back None, not raise a Pydantic validation error.
+    """
+    pa = uuid4()
+    cad_with_bool_flag = _wp(
+        "Assembled Enclosure", pa, metadata={"assembly": True, "part_count": 3}
+    )
+    robot = _wp(
+        "Quadruped",
+        pa,
+        wp_type=WorkProductType.ROBOT_DESCRIPTION,
+        metadata={"assembly": {"parts": [{"link_name": "body"}], "joints": []}},
+    )
+    await _seed(cad_with_bool_flag, robot)
+
+    resp = await routes.list_twin_nodes(project_id=str(pa))
+
+    by_name = {n.name: n for n in resp.nodes}
+    assert by_name["Assembled Enclosure"].assembly is None
+    assert by_name["Quadruped"].assembly == {"parts": [{"link_name": "body"}], "joints": []}
+
+
 async def test_invalid_project_id_returns_400() -> None:
     await _seed(_wp("A", uuid4()))
 
     with pytest.raises(HTTPException) as exc:
         await routes.list_twin_nodes(project_id="not-a-uuid")
+
+    assert exc.value.status_code == 400
+
+
+async def test_relationships_scoped_to_project_excludes_other_projects_edges() -> None:
+    pa, pb = uuid4(), uuid4()
+    a1, a2 = _wp("A1", pa), _wp("A2", pa)
+    b1, b2 = _wp("B1", pb), _wp("B2", pb)
+    twin = await _seed(a1, a2, b1, b2)
+    await twin.add_edge(a1.id, a2.id, EdgeType.DEPENDS_ON)
+    await twin.add_edge(b1.id, b2.id, EdgeType.DEPENDS_ON)
+
+    resp = await routes.list_twin_relationships(project_id=str(pa))
+
+    assert {(e.sourceId, e.targetId) for e in resp.relationships} == {(str(a1.id), str(a2.id))}
+    assert resp.total == 1
+
+
+async def test_relationships_no_project_returns_every_edge() -> None:
+    pa, pb = uuid4(), uuid4()
+    a1, a2 = _wp("A1", pa), _wp("A2", pa)
+    b1, b2 = _wp("B1", pb), _wp("B2", pb)
+    twin = await _seed(a1, a2, b1, b2)
+    await twin.add_edge(a1.id, a2.id, EdgeType.DEPENDS_ON)
+    await twin.add_edge(b1.id, b2.id, EdgeType.DEPENDS_ON)
+
+    resp = await routes.list_twin_relationships()
+
+    assert resp.total == 2
+
+
+async def test_relationships_invalid_project_id_returns_400() -> None:
+    await _seed(_wp("A", uuid4()))
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.list_twin_relationships(project_id="not-a-uuid")
 
     assert exc.value.status_code == 400

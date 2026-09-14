@@ -9,9 +9,9 @@ Env vars (all consumed by ``OpenRouterLLMClient.from_env``):
 
 * ``OPEN_ROUTER_API_KEY`` — required
 * ``CONSOLIDATION_MODEL`` — primary model slug. Defaults to
-  ``anthropic/claude-3.5-sonnet``.
+  ``anthropic/claude-sonnet-5``.
 * ``CONSOLIDATION_FALLBACK_MODEL`` — used when the primary returns a
-  retryable error. Defaults to ``meta-llama/llama-3-70b-instruct``.
+  retryable error. Defaults to ``meta-llama/llama-3.3-70b-instruct``.
 * ``CONSOLIDATION_TEMPERATURE`` — float, default 0.7.
 * ``CONSOLIDATION_MAX_TOKENS`` — int, default 2000.
 """
@@ -31,8 +31,21 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("digital_twin.memory.consolidation.openrouter")
 
-DEFAULT_PRIMARY_MODEL = "anthropic/claude-3.5-sonnet"
-DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3-70b-instruct"
+# MET-727: the previous defaults, "anthropic/claude-3.5-sonnet" and
+# "meta-llama/llama-3-70b-instruct", were RETIRED from Open Router. Every call
+# 404'd on chat/completions -- primary and fallback both -- and the caller
+# caught it and moved on, so passes completed cleanly having synthesized
+# nothing. Verified against Open Router's own /api/v1/models (430 offered):
+# both slugs GONE. MET-727 repointed this at "anthropic/claude-sonnet-4.5" —
+# but that model is *also* absent from Anthropic's own current-generation
+# model table (only 5 / 4.6 / 4.7 / 4.8 / 5.1 are current as of this fix),
+# so it was already partway back into the same trap: OpenRouter's own
+# catalog page still lists retired slugs for reference, so "found in
+# OpenRouter's listing" is not sufficient evidence a model is still live —
+# cross-check against the provider's own current-model table instead.
+# claude-sonnet-5 is Anthropic's actual current Sonnet tier.
+DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
+DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 2000
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -75,8 +88,16 @@ class OpenRouterConfig:
             )
         return cls(
             api_key=api_key,
-            primary_model=os.environ.get("CONSOLIDATION_MODEL", DEFAULT_PRIMARY_MODEL),
-            fallback_model=os.environ.get("CONSOLIDATION_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL),
+            # MET-724: ``or`` rather than a ``get`` default, because compose
+            # declares optional config as ``VAR=${VAR:-}`` -- which sets the
+            # variable to the empty string, not absent. A ``get`` default would
+            # then select the model "" and every request would fail. The
+            # sibling ``_env_float``/``_env_int`` helpers below already treat
+            # "" as absent; these two string reads were the exception.
+            primary_model=os.environ.get("CONSOLIDATION_MODEL") or DEFAULT_PRIMARY_MODEL,
+            fallback_model=(
+                os.environ.get("CONSOLIDATION_FALLBACK_MODEL") or DEFAULT_FALLBACK_MODEL
+            ),
             temperature=_env_float("CONSOLIDATION_TEMPERATURE", DEFAULT_TEMPERATURE),
             max_tokens=_env_int("CONSOLIDATION_MAX_TOKENS", DEFAULT_MAX_TOKENS),
         )

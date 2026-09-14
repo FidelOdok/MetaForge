@@ -91,8 +91,9 @@ class TestTelemetryMetricsGroupAccess:
 
     def test_all_metrics_returns_32(self) -> None:
         # 32 originally; +5 retrieval metrics in MET-326; +1 knowledge in MET-401;
-        # +1 twin in MET-439; +6 consolidation in MET-454/455.
-        assert len(MetricsRegistry.all_metrics()) == 45
+        # +1 twin in MET-439; +6 consolidation in MET-454/455;
+        # +5 harness (production-harness audit follow-up).
+        assert len(MetricsRegistry.all_metrics()) == 50
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -107,6 +108,7 @@ class TestTelemetryMetricsGroupAccess:
             + len(MetricsRegistry.knowledge_metrics())
             + len(MetricsRegistry.twin_metrics())
             + len(MetricsRegistry.consolidation_metrics())
+            + len(MetricsRegistry.harness_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

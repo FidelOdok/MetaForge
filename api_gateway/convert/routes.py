@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import structlog
@@ -66,7 +67,9 @@ async def upload_and_convert(
 
         service = get_service()
         try:
-            result = service.convert(content, filename, quality)
+            # MET-725: see api_gateway/twin/routes.py -- convert() blocks
+            # for up to 120s, which stalls every other request on the loop.
+            result = await asyncio.to_thread(service.convert, content, filename, quality)
         except Exception as exc:
             logger.error("conversion_failed", filename=filename, error=str(exc))
             span.record_exception(exc)
