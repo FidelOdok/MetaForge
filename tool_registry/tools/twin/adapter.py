@@ -52,6 +52,7 @@ class TwinServer(McpToolServer):
         technical_drawing_recorder: Any = None,
         compliance_checklist_recorder: Any = None,
         procurement_record_recorder: Any = None,
+        component_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -113,6 +114,13 @@ class TwinServer(McpToolServer):
         self._technical_drawing_recorder = technical_drawing_recorder
         self._compliance_checklist_recorder = compliance_checklist_recorder
         self._procurement_record_recorder = procurement_record_recorder
+        # MET-436 follow-up: an injected async ``record(...)`` (make_component_
+        # recorder) that persists one chosen component.search_* result as a
+        # BOMItem graph node + project link. Without it, a search result was
+        # pure chat output -- no reviewable, versioned trace in the twin at
+        # all. Same injection seam as decision_recorder; None keeps
+        # tool_registry free of api_gateway imports.
+        self._component_recorder = component_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -138,6 +146,8 @@ class TwinServer(McpToolServer):
             self._register_commit_procurement_record()
         if blob_stager is not None:
             self._register_stage_work_product_file()
+        if component_recorder is not None:
+            self._register_record_component_selection()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -620,6 +630,135 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
             supersedes=supersedes if isinstance(supersedes, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_component_selection (MET-436 follow-up)
+    # ------------------------------------------------------------------
+
+    def _register_record_component_selection(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_component_selection",
+                adapter_id="twin",
+                name="Record Component Selection",
+                description=(
+                    "Persist one chosen component.search_parametric/"
+                    "search_intent result as a real BOMItem work product "
+                    "linked to a project — the reviewable, versioned "
+                    "artifact a search result otherwise never becomes. Use "
+                    "after picking an MPN from search results, not for "
+                    "searching itself."
+                ),
+                capability="twin_component_selection",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mpn": {"type": "string", "minLength": 1, "description": "Part number."},
+                        "manufacturer": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Manufacturer name.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Catalog category, e.g. 'buck_converter'.",
+                        },
+                        "purchase_unit": {
+                            "type": "string",
+                            "enum": ["discrete_part", "cots_assembly"],
+                            "description": (
+                                "'discrete_part' (design in) or 'cots_assembly' "
+                                "(complete, ready-to-buy)."
+                            ),
+                        },
+                        "role": {
+                            "type": ["string", "null"],
+                            "description": "Subsystem role, e.g. 'mcu' (from search_intent).",
+                        },
+                        "quantity": {"type": "integer", "minimum": 1, "default": 1},
+                        "unit_cost_usd": {"type": ["number", "null"]},
+                        "specs": {
+                            "type": "object",
+                            "description": "Extra spec fields to store, e.g. from the search row.",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "How found: 'parametric' | 'fuzzy_fallback' | 'manual'.",
+                        },
+                        "distributor": {"type": ["string", "null"]},
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["mpn", "manufacturer", "category", "purchase_unit"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "mpn": {"type": "string"},
+                        "category": {"type": "string"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_component_selection,
+        )
+
+    async def record_component_selection(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        mpn = arguments.get("mpn")
+        manufacturer = arguments.get("manufacturer")
+        category = arguments.get("category")
+        purchase_unit = arguments.get("purchase_unit")
+        if not mpn or not isinstance(mpn, str):
+            raise ValueError(
+                "twin.record_component_selection: 'mpn' is required (non-empty string)"
+            )
+        if not manufacturer or not isinstance(manufacturer, str):
+            raise ValueError(
+                "twin.record_component_selection: 'manufacturer' is required (non-empty string)"
+            )
+        if not category or not isinstance(category, str):
+            raise ValueError(
+                "twin.record_component_selection: 'category' is required (non-empty string)"
+            )
+        if purchase_unit not in ("discrete_part", "cots_assembly"):
+            raise ValueError(
+                "twin.record_component_selection: 'purchase_unit' must be "
+                "'discrete_part' or 'cots_assembly'"
+            )
+
+        role = arguments.get("role")
+        quantity = arguments.get("quantity", 1)
+        try:
+            quantity_int = int(quantity)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "twin.record_component_selection: 'quantity' must be an integer"
+            ) from exc
+        unit_cost_usd = arguments.get("unit_cost_usd")
+        specs = arguments.get("specs")
+        source = arguments.get("source")
+        distributor = arguments.get("distributor")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+
+        return await self._component_recorder(
+            mpn=mpn,
+            manufacturer=manufacturer,
+            category=category,
+            purchase_unit=purchase_unit,
+            role=role if isinstance(role, str) else None,
+            quantity=quantity_int,
+            unit_cost_usd=unit_cost_usd if isinstance(unit_cost_usd, (int, float)) else None,
+            specs=specs if isinstance(specs, dict) else None,
+            source=source if isinstance(source, str) else None,
+            distributor=distributor if isinstance(distributor, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
         )
 
     # ------------------------------------------------------------------

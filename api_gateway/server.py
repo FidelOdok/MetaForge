@@ -649,6 +649,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.routes import workflow as approval_workflow
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.blob_stager import make_blob_stager
+    from api_gateway.twin.component_recorder import make_component_recorder
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.design_sketch_recorder import (
@@ -730,6 +731,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         technical_drawing_recorder=make_technical_drawing_recorder(twin, project_backend),
         compliance_checklist_recorder=make_compliance_checklist_recorder(twin, project_backend),
         procurement_record_recorder=make_procurement_record_recorder(twin, project_backend),
+        # MET-436 follow-up: without this, a component.search_* result was
+        # pure chat output -- no reviewable, versioned trace in the twin.
+        # Persists a chosen result as a BOMItem work product + project link.
+        component_recorder=make_component_recorder(twin, project_backend),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

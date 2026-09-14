@@ -235,6 +235,17 @@ class TwinAPI(ABC):
         """List Bill-of-Materials line items, optionally scoped to a project."""
         ...
 
+    @abstractmethod
+    async def add_bom_item(self, item: BOMItem) -> BOMItem:
+        """Persist one BOM line item (MET-436 follow-up).
+
+        Mirrors :meth:`add_component` exactly — a plain graph-node write,
+        no dedup. Callers that need a canonical singleton (e.g. "don't
+        double-add the same MPN") do that check themselves before calling,
+        the same way ``add_component`` leaves it to its caller.
+        """
+        ...
+
     # --- Datasheets (MET-430) ---
 
     @abstractmethod
@@ -680,6 +691,10 @@ class InMemoryTwinAPI(TwinAPI):
     async def find_components(self, query: dict[str, Any]) -> list[Component]:
         nodes = await self._graph.list_nodes(node_type=NodeType.COMPONENT, filters=query)
         return nodes  # type: ignore[return-value]
+
+    async def add_bom_item(self, item: BOMItem) -> BOMItem:
+        result = await self._graph.add_node(item)
+        return result  # type: ignore[return-value]
 
     # --- Datasheets (MET-430) ---
 

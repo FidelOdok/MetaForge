@@ -259,6 +259,7 @@ async def bootstrap_tool_registry(
     technical_drawing_recorder: Any = None,
     compliance_checklist_recorder: Any = None,
     procurement_record_recorder: Any = None,
+    component_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -310,6 +311,12 @@ async def bootstrap_tool_registry(
             persistence helper. When supplied, registers the matching
             ``twin.commit_<type>`` tool. ``None`` skips registration (same
             pattern as ``document_recorder``).
+        component_recorder: Optional async ``record(...)`` (make_component_
+            recorder, MET-436 follow-up). When supplied, registers
+            ``twin.record_component_selection``, which persists one chosen
+            ``component.search_*`` result as a BOMItem work product + project
+            link. ``None`` skips registration (same pattern as
+            ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -474,6 +481,7 @@ async def bootstrap_tool_registry(
                     technical_drawing_recorder=technical_drawing_recorder,
                     compliance_checklist_recorder=compliance_checklist_recorder,
                     procurement_record_recorder=procurement_record_recorder,
+                    component_recorder=component_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
