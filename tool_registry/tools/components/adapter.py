@@ -25,7 +25,7 @@ here).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import structlog
@@ -35,7 +35,7 @@ from digital_twin.catalog.store import ComponentCatalogStore
 from digital_twin.catalog.taxonomy import CATEGORY_REGISTRY
 from digital_twin.knowledge.intent_search import search_intent
 from digital_twin.knowledge.intent_search import to_dict as intent_to_dict
-from digital_twin.knowledge.intent_translator import IntentLLM
+from digital_twin.knowledge.intent_translator import IntentLLM, KnownCategories
 from digital_twin.knowledge.service import KnowledgeService
 from digital_twin.knowledge.subsystem_templates import KNOWN_SUBSYSTEMS, SubsystemTemplate
 from observability.tracing import get_tracer
@@ -65,7 +65,7 @@ class ComponentServer(McpToolServer):
         knowledge_service: KnowledgeService,
         llm: IntentLLM,
         subsystem_templates: Mapping[str, SubsystemTemplate] | None = None,
-        known_categories: Sequence[str] | None = None,
+        known_categories: KnownCategories | None = None,
     ) -> None:
         super().__init__(adapter_id="component", version="0.1.0")
         self._store = search_store
@@ -87,11 +87,30 @@ class ComponentServer(McpToolServer):
         # bootstrap.py — gets a working guard/template set out of the box;
         # an explicit non-None value from a caller (e.g. a test double) is
         # still honored, never overridden.
+        #
+        # MET-436 follow-up #2: `known_categories` defaults to a *mapping*
+        # of category -> its real queryable field names (not just a bare
+        # list of category names). Verified live after the category-name
+        # fix above: with the right category name, the LLM still invented
+        # plausible-but-wrong constraint property names ("output_voltage",
+        # "output_current") instead of the real schema ("v_out",
+        # "i_out_max") -- each one sinks the *entire* category's parametric
+        # attempt (digital_twin.catalog.query fails loudly with
+        # UnknownCatalogFieldError on an unknown field) and silently forces
+        # every search down to the weaker fuzzy fallback. The mapping both
+        # grounds the prompt on the real field vocabulary per category and
+        # lets translate_intent drop an individual bad field rather than
+        # losing the whole category.
         self._subsystem_templates = (
             subsystem_templates if subsystem_templates is not None else KNOWN_SUBSYSTEMS
         )
         self._known_categories = (
-            known_categories if known_categories is not None else list(CATEGORY_REGISTRY.keys())
+            known_categories
+            if known_categories is not None
+            else {
+                name: tuple(f.name for f in spec.queryable_fields())
+                for name, spec in CATEGORY_REGISTRY.items()
+            }
         )
         self._register_tools()
 

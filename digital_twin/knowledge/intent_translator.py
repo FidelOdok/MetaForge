@@ -17,7 +17,7 @@ convention in this codebase.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -38,6 +38,18 @@ _ALLOWED_OPS: tuple[CatalogFilterOp, ...] = ("==", "!=", ">=", "<=", ">", "<", "
 
 _DEFAULT_CANDIDATE_CONFIDENCE = 0.5
 _DEFAULT_CONSTRAINT_CONFIDENCE = 0.6
+
+# ``known_categories`` accepts either shape:
+# - ``Mapping[str, Sequence[str]]`` — category name -> its real queryable
+#   field names (from ``CATEGORY_REGISTRY``). This is what lets the prompt
+#   ground the model on *field* names, not just category names, and lets
+#   ``translate_intent`` drop an invented field the same way it already
+#   drops an invented category. This is what ``ComponentServer`` passes in
+#   production.
+# - plain ``Sequence[str]`` — category names only, no field-level grounding
+#   or validation (kept for backward compatibility with existing callers/
+#   tests that only care about category-name validation).
+KnownCategories = Mapping[str, Sequence[str]] | Sequence[str]
 
 
 class IntentLLM(Protocol):
@@ -126,7 +138,7 @@ class IntentTranslation:
 def build_intent_prompt(
     intent_text: str,
     *,
-    known_categories: Sequence[str] | None,
+    known_categories: KnownCategories | None,
     known_subsystems: Sequence[str] | None,
 ) -> str:
     """Build the single-shot intent-translation prompt.
@@ -135,13 +147,42 @@ def build_intent_prompt(
     instruction to the model, not mechanically — ``translate_intent`` can't
     verify a model isn't lying about provenance, only prompt it clearly and
     document the limitation (see that function's docstring).
+
+    When ``known_categories`` is a ``Mapping`` (category -> its real
+    queryable field names), each category's actual field vocabulary is
+    listed too — not just the category name. Without this, the model has
+    nothing to ground constraint *property* names on and reliably invents
+    plausible-but-wrong ones (``output_voltage`` instead of the real
+    ``v_out``), which then fails ``digital_twin.catalog.query``'s
+    fail-loud ``UnknownCatalogFieldError`` and silently forces every
+    search down to the weaker fuzzy fallback. A plain ``Sequence[str]``
+    (category names only) still grounds category choice but not field
+    names — kept for backward compatibility with callers that don't have
+    a field map handy.
     """
-    categories_hint = (
-        f"Valid categories — choose ONLY from this list, do not invent others: "
-        f"{', '.join(sorted(known_categories))}\n"
-        if known_categories
-        else ""
-    )
+    if isinstance(known_categories, Mapping):
+        category_names = sorted(known_categories)
+        categories_hint = (
+            (
+                "Valid categories and their queryable constraint fields — choose "
+                "ONLY from these category names, and for each category's "
+                "constraints use ONLY that category's listed field names (do not "
+                "invent field names):\n"
+                + "\n".join(
+                    f"- {cat}: {', '.join(sorted(known_categories[cat]))}" for cat in category_names
+                )
+                + "\n"
+            )
+            if category_names
+            else ""
+        )
+    else:
+        categories_hint = (
+            f"Valid categories — choose ONLY from this list, do not invent others: "
+            f"{', '.join(sorted(known_categories))}\n"
+            if known_categories
+            else ""
+        )
     subsystems_hint = (
         f'Known subsystem names — set "subsystem" to one of these if the intent '
         f"matches, else null: {', '.join(sorted(known_subsystems))}\n"
@@ -249,7 +290,7 @@ async def translate_intent(
     llm: IntentLLM,
     *,
     intent_text: str,
-    known_categories: Sequence[str] | None = None,
+    known_categories: KnownCategories | None = None,
     known_subsystems: Sequence[str] | None = None,
 ) -> IntentTranslation:
     """Translate free-text intent into category candidates + spec bounds.
@@ -265,6 +306,15 @@ async def translate_intent(
     truth for what categories exist, not the model's guess. Dropped names
     are reported via ``parse_error`` (non-fatal — surviving candidates are
     still returned) rather than failing the whole translation.
+
+    When ``known_categories`` is a ``Mapping`` (category -> real field
+    names), the same distrust applies one level deeper: a constraint whose
+    ``property`` isn't in that category's known field list is dropped
+    (not passed through to the parametric query, where it would raise
+    ``UnknownCatalogFieldError`` and sink the *entire* category's
+    parametric attempt over one bad field). This is a defensive backstop —
+    the prompt already lists the real field names — for whatever the model
+    still gets wrong.
     """
     with tracer.start_as_current_span("intent_translator.translate_intent") as span:
         span.set_attribute("intent.text_length", len(intent_text))
@@ -302,9 +352,17 @@ async def translate_intent(
                 parse_error="response missing a 'categories' array",
             )
 
-        known_set = set(known_categories) if known_categories else None
+        known_fields_by_category = (
+            known_categories if isinstance(known_categories, Mapping) else None
+        )
+        known_set = (
+            set(known_fields_by_category)
+            if known_fields_by_category is not None
+            else (set(known_categories) if known_categories else None)
+        )
         candidates: list[CategoryCandidate] = []
         dropped: list[str] = []
+        dropped_fields: list[str] = []
         for raw_cat in raw_categories:
             if not isinstance(raw_cat, dict):
                 continue
@@ -330,11 +388,21 @@ async def translate_intent(
             except (TypeError, ValueError):
                 confidence = _DEFAULT_CANDIDATE_CONFIDENCE
 
-            constraints = tuple(
-                c
-                for raw_c in (raw_cat.get("constraints") or [])
-                if (c := _parse_constraint(raw_c)) is not None
+            allowed_fields = (
+                set(known_fields_by_category[category])
+                if known_fields_by_category is not None and category in known_fields_by_category
+                else None
             )
+            constraints_list: list[IntentConstraint] = []
+            for raw_c in raw_cat.get("constraints") or []:
+                c = _parse_constraint(raw_c)
+                if c is None:
+                    continue
+                if allowed_fields is not None and c.property not in allowed_fields:
+                    dropped_fields.append(f"{category}.{c.property}")
+                    continue
+                constraints_list.append(c)
+            constraints = tuple(constraints_list)
 
             candidates.append(
                 CategoryCandidate(
@@ -346,16 +414,23 @@ async def translate_intent(
                 )
             )
 
-        parse_error = (
-            f"dropped categories not in the known taxonomy: {dropped}" if dropped else None
-        )
+        parse_error_parts: list[str] = []
+        if dropped:
+            parse_error_parts.append(f"dropped categories not in the known taxonomy: {dropped}")
+        if dropped_fields:
+            parse_error_parts.append(
+                f"dropped constraints with unknown field names: {dropped_fields}"
+            )
+        parse_error = "; ".join(parse_error_parts) if parse_error_parts else None
         span.set_attribute("intent.candidate_count", len(candidates))
         span.set_attribute("intent.dropped_count", len(dropped))
+        span.set_attribute("intent.dropped_field_count", len(dropped_fields))
         logger.info(
             "intent_translated",
             subsystem=subsystem_hint,
             candidate_count=len(candidates),
             dropped_count=len(dropped),
+            dropped_field_count=len(dropped_fields),
         )
         return IntentTranslation(
             raw_intent=intent_text,
@@ -372,6 +447,7 @@ __all__ = [
     "IntentConstraintSource",
     "IntentLLM",
     "IntentTranslation",
+    "KnownCategories",
     "StubIntentLLM",
     "build_intent_prompt",
     "translate_intent",

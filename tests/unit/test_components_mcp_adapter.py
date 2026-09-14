@@ -119,8 +119,23 @@ class TestDefaultCategoriesAndTemplates:
             knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
             llm=StubIntentLLM(),
         )
-        assert server._known_categories == list(CATEGORY_REGISTRY.keys())
+        assert set(server._known_categories) == set(CATEGORY_REGISTRY.keys())
         assert "buck_converter" in server._known_categories
+
+    def test_known_categories_default_maps_to_real_field_names(self, store: _FakeStore) -> None:
+        """MET-436 follow-up #2: the default isn't just category names --
+        it's category -> real queryable field names, so the intent prompt
+        can ground constraint property names too (the LLM was inventing
+        "output_voltage" instead of the real "v_out")."""
+        server = ComponentServer(
+            search_store=store,  # type: ignore[arg-type]
+            knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
+            llm=StubIntentLLM(),
+        )
+        buck_fields = server._known_categories["buck_converter"]
+        assert "v_out" in buck_fields
+        assert "i_out_max" in buck_fields
+        assert "output_voltage" not in buck_fields
 
     def test_subsystem_templates_defaults_to_known_subsystems(self, store: _FakeStore) -> None:
         from digital_twin.knowledge.subsystem_templates import KNOWN_SUBSYSTEMS
