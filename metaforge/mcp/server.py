@@ -549,6 +549,7 @@ async def build_unified_server(
     blob_stager: Any = None,
     component_catalog_store: Any = None,
     component_intent_llm: Any = None,
+    component_recorder: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -579,6 +580,12 @@ async def build_unified_server(
     component.search_intent) registers only when both are supplied,
     together with ``knowledge_service`` (reused for the intent-search
     fuzzy fallback) — same runtime-injected pattern as ``knowledge``.
+
+    ``component_recorder`` (MET-436 follow-up): when supplied, registers
+    ``twin.record_component_selection``, which persists one chosen
+    ``component.search_*`` result as a BOMItem work product + project
+    link. ``None`` skips registration (same pattern as
+    ``decision_recorder``).
     """
     registry: ToolRegistry = await bootstrap_tool_registry(
         adapter_ids=adapter_ids,
@@ -595,6 +602,7 @@ async def build_unified_server(
         blob_stager=blob_stager,
         component_catalog_store=component_catalog_store,
         component_intent_llm=component_intent_llm,
+        component_recorder=component_recorder,
     )
     capture = (
         SessionCapture(agent_session_store)

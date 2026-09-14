@@ -1044,6 +1044,17 @@ async def _bootstrap(
         blob_stager = make_blob_stager(twin)
     except Exception as exc:  # noqa: BLE001 — degrade; stage_work_product_file just absent
         logger.warning("mcp_blob_stager_init_failed", error=str(exc))
+    # MET-436 follow-up: mirror the decision recorder so
+    # twin.record_component_selection works over the sidecar too — without
+    # it, a component.search_* result stays pure chat output here even
+    # though the gateway-hosted API already persists it as a BOMItem.
+    component_recorder = None
+    try:
+        from api_gateway.twin.component_recorder import make_component_recorder
+
+        component_recorder = make_component_recorder(twin, project_backend)
+    except Exception as exc:  # noqa: BLE001 — degrade; record_component_selection just absent
+        logger.warning("mcp_component_recorder_init_failed", error=str(exc))
     # MET-436: the parametric component catalog + the intent-translation
     # LLM. Both are None-able independently — component.* just stays
     # unregistered (component_mcp_adapter_skipped) unless the catalog
@@ -1067,6 +1078,7 @@ async def _bootstrap(
         blob_stager=blob_stager,
         component_catalog_store=component_catalog_store,
         component_intent_llm=component_intent_llm,
+        component_recorder=component_recorder,
     )
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
 
