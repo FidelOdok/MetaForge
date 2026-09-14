@@ -23,6 +23,7 @@ import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-expo
 import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
+import { resolveGatewayHref } from '../lib/gatewayConfig';
 
 // MET-720: names the cadquery adapter's material density table
 // (tool_registry/tools/cadquery/materials.py) actually recognizes.
@@ -446,7 +447,7 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         materials: result.metadata.materials ?? [],
         stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
       };
-      const glbUrl = result.glb_url.startsWith('/v1/') ? `/api${result.glb_url}` : result.glb_url;
+      const glbUrl = resolveGatewayHref(result.glb_url);
       loadModel(glbUrl, manifest);
       setViewMode('3d');
     } catch (err) {
@@ -909,7 +910,7 @@ export function TwinViewerPage() {
           materials: result.metadata.materials ?? [],
           stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
         };
-        const url = result.glb_url.startsWith('/v1/') ? `/api${result.glb_url}` : result.glb_url;
+        const url = resolveGatewayHref(result.glb_url);
         loadModel(url, m);
         setLoadedModelNodeId(n.id);
         setModelLoadError(null);

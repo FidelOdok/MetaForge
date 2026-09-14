@@ -85,6 +85,8 @@ nav:
       - Project Structure: project-structure.md
       - Capability Matrix: capability-matrix.md
       - Troubleshooting: troubleshooting.md
+  - Deployment:
+      - Vercel (dashboard + marketing): deployment/vercel.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
       - Codex: integrations/codex.md

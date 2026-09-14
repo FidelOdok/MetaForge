@@ -1,4 +1,5 @@
 import apiClient from '../client';
+import { resolveGatewayHref } from '../../lib/gatewayConfig';
 
 // Robotics-sim export (MET-719/720). Field names mirror the backend's
 // Pydantic schemas (api_gateway/cad_export/schemas.py) 1:1 rather than being
@@ -242,8 +243,8 @@ export async function getSessionJoints(sessionId: string): Promise<SessionJoints
 }
 
 /** Prefix a gateway-relative download_url (e.g. "/v1/cad-export/download/...")
- * for use in a raw `<a href>` outside apiClient — same idiom TwinViewerPage
- * already applies to glb_url. */
+ * for use in a raw `<a href>` outside apiClient — same idiom the viewer applies
+ * to glb_url. Resolves against the configured gateway when there is one. */
 export function toDownloadHref(url: string): string {
-  return url.startsWith('/v1/') ? `/api${url}` : url;
+  return resolveGatewayHref(url);
 }

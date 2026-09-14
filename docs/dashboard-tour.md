@@ -43,6 +43,7 @@ flowchart LR
     know["/knowledge"]
     srcDetail["/knowledge/sources/:id"]
     asst["/assistant"]
+    settings["/settings"]
 
     home --> proj
     proj --> projDetail
@@ -55,6 +56,7 @@ flowchart LR
     home --> know
     know --> srcDetail
     home --> asst
+    home --> settings
 ```
 
 ## `/projects` — project list
@@ -193,6 +195,26 @@ The L1 knowledge corpus, served as a sortable, filterable table.
 Drill-in for one source. v1 ships a placeholder; the full chunk
 viewer is on the v2 list. The CLI's `sources show` command is the
 faster path for now (see [`cli-reference.md`](cli-reference.md)).
+
+## `/settings` — gateway configuration
+
+Reached from the cog at the foot of the nav rail.
+
+**Gateway.** Which gateway the dashboard sends its API calls to, as an address
+and a port, with a **Test connection** button that probes `GET /health` before
+you commit to the value. Leaving both fields empty keeps the default behaviour:
+same-origin relative paths, which the Vite dev server and the Docker image's
+nginx both proxy to the gateway themselves. Setting an address is what makes a
+separately-hosted dashboard — on Vercel, say — able to reach a gateway running
+on your own machine. See
+[Vercel deployment](deployment/vercel.md) for that setup.
+
+The value is held in `localStorage`, so it is per-browser and never leaves the
+machine. Saving one clears the React Query cache, since everything already
+fetched came from the previous gateway.
+
+The page also warns when the chosen combination will be blocked by the browser
+as mixed content — an HTTPS dashboard calling an HTTP gateway.
 
 ## `/assistant` — chat panel
 

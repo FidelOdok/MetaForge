@@ -122,3 +122,6 @@ evals/reports/
 # Local scratch artifacts (architecture briefings, visual reports) — never committed
 .artifacts/
 
+
+# Vercel CLI local link/state
+.vercel/

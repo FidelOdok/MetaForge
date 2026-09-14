@@ -1,5 +1,6 @@
 import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription } from '../../types/twin';
 import apiClient from '../client';
+import { apiUrl } from '../../lib/gatewayConfig';
 
 const MOCK_RELATIONSHIPS: TwinRelationship[] = [
   { id: 'rel-001', sourceId: 'node-001', targetId: 'node-004', type: 'constrained_by', label: 'Stress constraint' },
@@ -218,14 +219,14 @@ export async function getNodeVersionHistory(nodeId: string): Promise<WorkProduct
 }
 
 // ── Work-product file download / open / preview (MET-483) ───────────────────
-// The browser fetches blobs directly from the gateway via the Vite proxy, so
-// these are full ``/api/v1`` URLs (not the apiClient baseURL-relative paths)
-// suitable for <a href>, <img src>, and <iframe src>.
-const FILE_API_BASE = '/api/v1';
+// The browser fetches blobs straight from the gateway, so these are full URLs
+// (not the apiClient base-relative paths) suitable for <a href>, <img src>,
+// and <iframe src>. `apiUrl` resolves against the configured gateway, falling
+// back to the original relative ``/api/v1`` when none is set.
 
 /** URL the browser hits to open (inline) or download a work product's file. */
 export function nodeFileUrl(nodeId: string, download = false): string {
-  return `${FILE_API_BASE}/twin/nodes/${nodeId}/file${download ? '?download=true' : ''}`;
+  return apiUrl(`/twin/nodes/${nodeId}/file${download ? '?download=true' : ''}`);
 }
 
 /** Fetch a text-previewable work-product blob as a string (for inline preview). */
@@ -241,7 +242,7 @@ export async function fetchNodeFileText(nodeId: string): Promise<string> {
  * re-export. This route also serves the primary URDF itself, so it can
  * stand in for the whole file set. */
 export function nodeMeshBaseUrl(nodeId: string): string {
-  return `${FILE_API_BASE}/twin/nodes/${nodeId}/files/`;
+  return apiUrl(`/twin/nodes/${nodeId}/files/`);
 }
 
 // ── Design-sketch approval gate (follow-up to MET-740/747) ──────────────────

@@ -5,6 +5,7 @@ import {
 } from '../api/endpoints/convert';
 import { useViewerStore } from '../store/viewer-store';
 import type { ModelManifest } from '../types/viewer';
+import { resolveGatewayHref } from '../lib/gatewayConfig';
 
 export const conversionKeys = {
   all: ['conversion'] as const,
@@ -26,9 +27,7 @@ export function useUploadAndConvert() {
         materials: result.metadata.materials,
         stats: result.metadata.stats,
       };
-      const glbUrl = result.glb_url.startsWith('/v1/')
-        ? `/api${result.glb_url}`
-        : result.glb_url;
+      const glbUrl = resolveGatewayHref(result.glb_url);
       loadModel(glbUrl, manifest);
     },
   });
