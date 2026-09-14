@@ -29,6 +29,22 @@ def test_prompt_lists_known_categories() -> None:
     assert "ldo" in prompt
 
 
+def test_prompt_lists_field_names_when_known_categories_is_a_mapping() -> None:
+    """MET-436 follow-up #2: a bare category-name list can't ground
+    constraint *field* names, which is why the LLM was inventing
+    "output_voltage" instead of the real "v_out". A mapping form embeds
+    the real per-category field vocabulary in the prompt."""
+    prompt = build_intent_prompt(
+        "anything",
+        known_categories={"buck_converter": ("v_out", "i_out_max", "efficiency")},
+        known_subsystems=None,
+    )
+    assert "buck_converter" in prompt
+    assert "v_out" in prompt
+    assert "i_out_max" in prompt
+    assert "do not invent field names" in prompt.lower()
+
+
 def test_prompt_instructs_never_mark_unstated_as_stated() -> None:
     """The honesty requirement is enforced via prompting, not mechanically
     (translate_intent can't verify a model isn't lying about provenance) —
@@ -183,6 +199,84 @@ async def test_unknown_category_dropped_not_trusted() -> None:
     assert result.candidates[0].category == "buck_converter"
     assert result.parse_error is not None
     assert "made_up_category_xyz" in result.parse_error
+
+
+async def test_unknown_field_name_dropped_not_trusted() -> None:
+    """MET-436 follow-up #2: when known_categories is a mapping (category ->
+    real field names), a constraint property the LLM invented is dropped --
+    not passed through to the parametric query, where it would raise
+    UnknownCatalogFieldError and sink the whole category. A valid field in
+    the same category is kept."""
+    response = json.dumps(
+        {
+            "subsystem": None,
+            "reasoning": None,
+            "categories": [
+                {
+                    "category": "buck_converter",
+                    "purchase_unit": "discrete_part",
+                    "role": None,
+                    "confidence": 0.9,
+                    "constraints": [
+                        {
+                            "property": "output_voltage",
+                            "op": "==",
+                            "value": 5,
+                            "source": "stated",
+                            "confidence": 1.0,
+                        },
+                        {
+                            "property": "v_out",
+                            "op": "==",
+                            "value": 5,
+                            "source": "stated",
+                            "confidence": 1.0,
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    llm = StubIntentLLM(lambda _prompt: response)
+    result = await translate_intent(
+        llm,
+        intent_text="5V buck converter",
+        known_categories={"buck_converter": ("v_out", "i_out_max", "efficiency")},
+    )
+
+    assert len(result.candidates) == 1
+    constraints = result.candidates[0].constraints
+    assert len(constraints) == 1
+    assert constraints[0].property == "v_out"
+    assert result.parse_error is not None
+    assert "buck_converter.output_voltage" in result.parse_error
+
+
+async def test_field_validation_skipped_for_plain_sequence_known_categories() -> None:
+    """A bare category-name list (no field map) grounds category choice
+    only -- it must not drop constraints, since there's nothing to validate
+    them against."""
+    response = json.dumps(
+        {
+            "subsystem": None,
+            "reasoning": None,
+            "categories": [
+                {
+                    "category": "buck_converter",
+                    "purchase_unit": "discrete_part",
+                    "role": None,
+                    "confidence": 0.9,
+                    "constraints": [{"property": "output_voltage", "op": "==", "value": 5}],
+                }
+            ],
+        }
+    )
+    llm = StubIntentLLM(lambda _prompt: response)
+    result = await translate_intent(
+        llm, intent_text="5V buck converter", known_categories=["buck_converter"]
+    )
+    assert len(result.candidates[0].constraints) == 1
+    assert result.candidates[0].constraints[0].property == "output_voltage"
 
 
 async def test_no_known_categories_trusts_everything() -> None:

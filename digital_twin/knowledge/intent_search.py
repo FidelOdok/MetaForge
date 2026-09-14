@@ -32,7 +32,7 @@ direction.
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -45,6 +45,7 @@ from digital_twin.knowledge.intent_translator import (
     CategoryCandidate,
     IntentConstraint,
     IntentLLM,
+    KnownCategories,
     translate_intent,
 )
 from digital_twin.knowledge.service import KnowledgeService
@@ -311,7 +312,7 @@ async def search_intent(
     search_parametric: ParametricSearchCallable,
     knowledge_service: KnowledgeService,
     subsystem_templates: Mapping[str, SubsystemTemplate] | None = None,
-    known_categories: Sequence[str] | None = None,
+    known_categories: KnownCategories | None = None,
     top_k_per_role: int = 5,
 ) -> IntentSearchResult:
     """Translate ``intent_text`` and search each resulting category/role.
