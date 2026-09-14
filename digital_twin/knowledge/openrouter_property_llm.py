@@ -16,8 +16,18 @@ Env vars (consumed by :meth:`OpenRouterPropertyConfig.from_env`):
   Default ``meta-llama/llama-3.3-70b-instruct``.
 * ``PROPERTY_EXTRACTION_TEMPERATURE`` — float, default ``0.0``. Extraction
   is deterministic; temperature stays low.
-* ``PROPERTY_EXTRACTION_MAX_TOKENS`` — int, default ``800``. Single-
-  property JSON payloads are small.
+* ``PROPERTY_EXTRACTION_MAX_TOKENS`` — int, default ``2000``. This
+  client is shared by two very differently-sized JSON payloads: Tier-2/3
+  single-property answers (small — the original ``800`` ceiling was sized
+  for these) and ``component.search_intent``'s multi-category ×
+  multi-constraint translation (a nested array of categories, each with
+  its own constraints array — verified truncating mid-response at 800,
+  "Unterminated string" JSON errors). ``complete(prompt) -> str`` takes
+  no per-call override, so the ceiling has to serve both; 2000 matches
+  ``openrouter_lightrag.py``'s already-proven budget for similarly
+  structured JSON and is a harmless ceiling increase for the small
+  Tier-2/3 case (max_tokens bounds the response, it doesn't force the
+  model to fill it).
 
 The adapter implements :class:`~digital_twin.knowledge.llm_property_extractor.PropertyLLM`
 ``complete(prompt) -> str``: it returns the raw model output so the
@@ -57,7 +67,7 @@ tracer = get_tracer("digital_twin.knowledge.openrouter_property_llm")
 DEFAULT_PRIMARY_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 DEFAULT_TEMPERATURE = 0.0
-DEFAULT_MAX_TOKENS = 800
+DEFAULT_MAX_TOKENS = 2000
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_HTTP_REFERER = "https://github.com/FidelOdok/MetaForge"
