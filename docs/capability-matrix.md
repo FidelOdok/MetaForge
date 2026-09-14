@@ -87,6 +87,8 @@ when the gateway supplies their backend).
 | `session` | `session.log_event` | Append a thought / action / decision / … to a session | live-verified |
 | `session` | `session.complete` | Close a session with terminal status + summary | live-verified |
 | `offer_resolver` (injected, no required backend) | `distributors.resolve_offers` | Fan out to whichever of Digi-Key/Mouser/Nexar are configured, per MPN — quantity-aware price-tier selection, MOQ-forced overbuy, stock sufficiency (never just `stock>0`), deadline-vs-cost ranking. Registers even with zero distributor credentials; "no offers found" is a normal result, not an error (MET-436) | live-verified (fidel-dev) |
+| `web` (requires `BRAVE_API_KEY`) | `web.search` | Ranked public-web results (title/url/snippet) via the Brave Search API — current datasheets, standards, vendor docs, errata. Not registered at all when the key is unset, so an agent never sees a tool that cannot work (MET-7) | live-verified |
+| `web` | `web.fetch` | Fetch one public http(s) URL as readable text. SSRF-guarded: private/loopback/link-local hosts refused on the initial URL **and every redirect hop**; http/https + ports 80/443 only; 2 MB body cap; textual content types only. Content is returned inside an explicit untrusted-data fence. Pair with `knowledge.ingest` (`source_path=<url>`) to keep a source (MET-7) | live-verified |
 
 Session capture also runs **server-side** (every tool call → an `action`
 event, MET-496) — see [`session-capture.md`](session-capture.md) for the full

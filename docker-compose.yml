@@ -111,6 +111,10 @@ services:
       - MOUSER_API_KEY=${MOUSER_API_KEY:-}
       - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      # Web search (MET-7). Same skip-when-unset contract as the distributor
+      # keys above: without this, web.search / web.fetch are not registered
+      # at all rather than registered-but-always-empty.
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     volumes:
       # Read-write (MET-612): boolean-cut staging writes input STEP files here
       # for the adapter containers to read by the same absolute path.
