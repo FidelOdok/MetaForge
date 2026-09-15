@@ -51,12 +51,15 @@ class WebSearchProvider(ABC):
 
     @abstractmethod
     async def search(self, query: str, *, limit: int = 10) -> list[SearchHit]:
-        """Ranked hits for ``query``.
+        """Ranked hits for ``query``, or raise :class:`WebSearchError` on failure.
 
-        Implementations return an empty list rather than raising when the
-        provider is unreachable or unauthenticated -- same contract as
-        ``DistributorAdapter.search_parts``, so a degraded search reads as
-        "no results" to the agent instead of aborting its turn.
+        Deliberately the OPPOSITE of ``DistributorAdapter.search_parts``'s
+        contract: a failed call here must raise, never degrade to ``[]``.
+        The two are indistinguishable to a caller that only sees an empty
+        list -- a 429/unreachable-provider read as "the index genuinely
+        matched nothing," and the agent stated that as fact for a query
+        that was never answered. Return ``[]`` only for a real, completed
+        "no results" outcome.
         """
 
     async def close(self) -> None:
@@ -65,7 +68,11 @@ class WebSearchProvider(ABC):
 
 
 class WebSearchError(RuntimeError):
-    """Raised for caller-fixable search failures (bad arguments)."""
+    """Raised for a search that FAILED -- caller-fixable bad arguments
+    (``coerce_limit``) as well as provider-side failures (unconfigured key,
+    rate-limited, unreachable -- see :class:`WebSearchProvider`). Never
+    raised for a completed query that genuinely matched nothing; that's an
+    empty list, not an error."""
 
 
 DEFAULT_LIMIT = 10
