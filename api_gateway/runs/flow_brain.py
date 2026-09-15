@@ -125,6 +125,12 @@ class ReActPhaseBrain:
             provider=self._provider,
             model=self._model,
             metrics=get_metrics(),
+            # MET-747 follow-up: scope the registered MCP tools to this
+            # phase's disciplines (plus the always-visible core adapters) --
+            # the direct fix for the OpenAI 128-tool-array cap as the tool
+            # catalog keeps growing; search_tools is the mid-turn escape
+            # hatch if a phase genuinely needs a tool outside its scope.
+            domains=phase.disciplines,
             # MET-707: this turn is unattended — nothing will ever resolve a
             # requires_approval tool call's /v1/chat/tool_approvals entry for
             # a design-flow-originated run, so chat's 30-minute default
