@@ -35,6 +35,11 @@ dependencies = [
     # variant (MET-377).
     "aiohttp>=3.9",
     "pyyaml>=6.0",
+    # ``web.fetch`` PDF extraction (tool_registry/tools/web/pdf.py). Declared
+    # explicitly: it was only present in dev venvs as a transitive of an
+    # undeclared package, so the gateway image -- which installs
+    # ``.[gateway,kafka,temporal]`` -- would not have had it.
+    "pypdf>=5.0",
     # Harness tool-argument pre-validation (MET-569). Present transitively via
     # the OTel/provider stack, but the harness depends on it directly now, so
     # it is pinned explicitly rather than relying on someone else's transitive.

@@ -43,6 +43,8 @@ MAX_REDIRECTS = 3
 MAX_BYTES = 2_000_000
 REQUEST_TIMEOUT_SECONDS = 10.0
 
+PDF_CONTENT_PREFIX = "application/pdf"
+
 ALLOWED_CONTENT_PREFIXES = (
     "text/html",
     "text/plain",
@@ -51,6 +53,10 @@ ALLOWED_CONTENT_PREFIXES = (
     "application/json",
     "application/xml",
     "text/xml",
+    # Datasheets, app notes and reference manuals are PDFs — refusing them made
+    # web.fetch nearly useless for hardware work. Extracted via pypdf, not
+    # decoded (see tools/web/pdf.py).
+    PDF_CONTENT_PREFIX,
 )
 
 
@@ -153,9 +159,15 @@ async def assert_public_host(url: str) -> list[str]:
 
 
 def content_type_allowed(content_type: str) -> bool:
-    """True for textual content types we can usefully reduce to text."""
+    """True for content types we can usefully reduce to text."""
     base = (content_type or "").split(";", 1)[0].strip().lower()
     return any(base.startswith(prefix) for prefix in ALLOWED_CONTENT_PREFIXES)
+
+
+def is_pdf(content_type: str) -> bool:
+    """True when the response should go through the PDF extractor."""
+    base = (content_type or "").split(";", 1)[0].strip().lower()
+    return base.startswith(PDF_CONTENT_PREFIX)
 
 
 class _TextExtractor(HTMLParser):

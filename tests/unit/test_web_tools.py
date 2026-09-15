@@ -124,7 +124,9 @@ def test_html_to_text_survives_malformed_markup() -> None:
         ("text/plain", True),
         ("application/json", True),
         ("image/png", False),
-        ("application/pdf", False),
+        # PDF became readable when pypdf extraction landed — datasheets are
+        # the main thing a hardware agent needs web.fetch for.
+        ("application/pdf", True),
         ("", False),
     ],
 )
@@ -138,7 +140,7 @@ async def test_non_textual_content_type_is_refused() -> None:
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
-        with pytest.raises(UnsafeUrlError, match="not textual"):
+        with pytest.raises(UnsafeUrlError, match="not readable"):
             await fetch_page("https://example.com/logo.png", client=client)
     finally:
         await client.aclose()
@@ -202,14 +204,23 @@ async def test_brave_search_parses_and_strips_highlight_markup() -> None:
     assert hits[0].published == "2024-01-02"
 
 
-async def test_brave_search_without_key_returns_empty_not_raise() -> None:
+async def test_brave_search_without_key_raises() -> None:
+    """Was "returns empty, never raises". Changed deliberately: an agent that
+    cannot tell "nothing matched" from "I could not look" reports a
+    misconfiguration as a fact about the world."""
     provider = BraveSearchProvider(client=_brave_client(_BRAVE_PAYLOAD), api_key="")
-    assert await provider.search("anything") == []
+    with pytest.raises(WebSearchError, match="not configured"):
+        await provider.search("anything")
 
 
-async def test_brave_search_degrades_on_http_error() -> None:
+async def test_brave_search_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same change: a 429 must not masquerade as an empty result set. See
+    tests/unit/test_web_tools_pdf_and_errors.py for the full regression."""
+    monkeypatch.setattr("tool_registry.tools.web.brave._BACKOFF_SECONDS", 0.0)
     provider = BraveSearchProvider(client=_brave_client({}, status=429), api_key="k")
-    assert await provider.search("anything") == []
+    provider._rate_limiter._rate = 1000.0
+    with pytest.raises(WebSearchError):
+        await provider.search("anything")
 
 
 @pytest.mark.parametrize("bad", [0, 21, "abc", 1.5e9])
