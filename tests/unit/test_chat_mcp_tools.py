@@ -116,6 +116,131 @@ async def test_mcp_tools_from_bridge_chat_visible_false_wins_over_explicit_enabl
     assert defs == []
 
 
+class TestDomainScoping:
+    """MET-747 follow-up: ``domains`` trims the MCP tool schema list a turn
+    starts with -- the direct lever for staying under OpenAI's 128-tool-array
+    cap for domain-aware callers (design-flow phases). Exercised against the
+    real ``domain_agents`` skill corpus on disk (no fixture skills), since
+    that's exactly what production wiring reads."""
+
+    @pytest.mark.asyncio
+    async def test_domains_none_registers_everything_unchanged(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.get_node", capability="twin_inspect")
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        defs = await mcp_tools_from_bridge(bridge, domains=None)
+        assert {td.name for _s, td in defs} == {"get_node", "run_drc"}
+
+    @pytest.mark.asyncio
+    async def test_domains_keeps_core_adapters_always_visible(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.get_node", capability="twin_inspect")
+        bridge.register_tool("project.get", capability="project_read")
+        bridge.register_tool("knowledge.search", capability="knowledge")
+        defs = await mcp_tools_from_bridge(bridge, domains=("mechanical",))
+        assert {td.name for _s, td in defs} == {"get_node", "get", "search"}
+
+    @pytest.mark.asyncio
+    async def test_domains_admits_the_discipline_own_tools(self) -> None:
+        """freecad.pad_sketch is declared by a real mechanical skill's
+        ``tools_required`` -- a mechanical-scoped turn must see it."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("freecad.pad_sketch", capability="cad_author")
+        defs = await mcp_tools_from_bridge(bridge, domains=("mechanical",))
+        assert {td.name for _s, td in defs} == {"pad_sketch"}
+
+    @pytest.mark.asyncio
+    async def test_domains_excludes_other_disciplines_tools(self) -> None:
+        """kicad.run_drc is declared only by an electronics skill -- a
+        mechanical-scoped turn must NOT see it (this is the cap-avoidance
+        payoff: fewer irrelevant schemas sent to the model)."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("freecad.pad_sketch", capability="cad_author")
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        defs = await mcp_tools_from_bridge(bridge, domains=("mechanical",))
+        assert {td.name for _s, td in defs} == {"pad_sketch"}
+
+    @pytest.mark.asyncio
+    async def test_domains_union_across_multiple_disciplines(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("freecad.pad_sketch", capability="cad_author")
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        defs = await mcp_tools_from_bridge(bridge, domains=("mechanical", "electronics"))
+        assert {td.name for _s, td in defs} == {"pad_sketch", "run_drc"}
+
+    @pytest.mark.asyncio
+    async def test_empty_domains_tuple_is_treated_as_no_scoping(self) -> None:
+        """A phase with no declared disciplines (``Phase.disciplines`` default
+        ``()``) must not accidentally scope down to core-only -- it keeps the
+        pre-MET-747 behavior of registering everything available."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        defs = await mcp_tools_from_bridge(bridge, domains=())
+        assert {td.name for _s, td in defs} == {"run_drc"}
+
+
+class TestSearchToolsMetaTool:
+    """MET-747 follow-up: ``search_tools`` is the mid-turn escape hatch for a
+    domain-scoped turn that genuinely needs an out-of-scope tool."""
+
+    @pytest.mark.asyncio
+    async def test_registers_a_matching_out_of_scope_tool(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.get_node", capability="twin_inspect")
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        ctx = await _build_context("thread-1", CredentialStore(), bridge, domains=("mechanical",))
+        before = {t.name for t in ctx.runtime.tools.all_tools()}
+        assert "mcp_kicad_run_drc" not in before
+
+        result = await ctx.runtime.call_tool("search_tools", {"query": "kicad"})
+        assert result["registered"] == ["mcp_kicad_run_drc"]
+
+        after = {t.name for t in ctx.runtime.tools.all_tools()}
+        assert "mcp_kicad_run_drc" in after
+
+    @pytest.mark.asyncio
+    async def test_calling_the_newly_registered_tool_works(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        bridge.register_tool_response("kicad.run_drc", {"violations": 0})
+        ctx = await _build_context("thread-1", CredentialStore(), bridge, domains=("mechanical",))
+        await ctx.runtime.call_tool("search_tools", {"query": "kicad"})
+        result = await ctx.runtime.call_tool("mcp_kicad_run_drc", {})
+        assert result == {"violations": 0}
+
+    @pytest.mark.asyncio
+    async def test_no_match_reports_nothing_registered(self) -> None:
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.get_node", capability="twin_inspect")
+        ctx = await _build_context("thread-1", CredentialStore(), bridge, domains=("mechanical",))
+        result = await ctx.runtime.call_tool("search_tools", {"query": "nonexistent_widget"})
+        assert result["registered"] == []
+
+    @pytest.mark.asyncio
+    async def test_already_registered_tool_is_reported_not_reregistered(self) -> None:
+        """Searching for a tool that's already in scope (e.g. a core adapter,
+        or one the domain already admitted) must not raise DuplicateToolError."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.get_node", capability="twin_inspect")
+        ctx = await _build_context("thread-1", CredentialStore(), bridge, domains=("mechanical",))
+        result = await ctx.runtime.call_tool("search_tools", {"query": "get_node"})
+        assert result["registered"] == []
+        assert "mcp_twin_get_node" in result["already_available"]
+
+    @pytest.mark.asyncio
+    async def test_empty_query_is_rejected(self) -> None:
+        bridge = InMemoryMcpBridge()
+        ctx = await _build_context("thread-1", CredentialStore(), bridge)
+        with pytest.raises(ValueError, match="query"):
+            await ctx.runtime.call_tool("search_tools", {"query": ""})
+
+    @pytest.mark.asyncio
+    async def test_not_registered_without_an_mcp_bridge(self) -> None:
+        ctx = await _build_context("thread-1", CredentialStore(), None)
+        names = {t.name for t in ctx.runtime.tools.all_tools()}
+        assert "search_tools" not in names
+
+
 @pytest.mark.asyncio
 async def test_chat_harness_invokes_mcp_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

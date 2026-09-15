@@ -346,7 +346,6 @@ async def run_native_tools(
     more tools than the provider accepts fails every turn with a 400 before
     the model reads a token — see ``_select_tools`` for which tools survive.
     """
-    tools = _tool_schemas(runtime, max_tools=max_tools)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
     # MET-569: successful (tool, arguments) results for this turn only —
@@ -427,6 +426,15 @@ async def run_native_tools(
                 break
             if max_context_tokens is not None:
                 messages = compact_native_messages(messages, max_tokens=max_context_tokens)
+            # MET-747 follow-up: recomputed every round-trip (not hoisted
+            # before the loop) so a tool registered mid-turn -- e.g. by the
+            # `search_tools` meta-tool's handler calling
+            # `runtime.tools.register_mcp(...)` -- is callable by the model
+            # on its very next step, not just on a fresh turn. `max_tools` is
+            # re-applied on every recompute too, since a mid-turn
+            # registration can just as easily push the live count back over
+            # the provider's cap (#747).
+            tools = _tool_schemas(runtime, max_tools=max_tools)
             resp = await _model_call({"system": system, "messages": messages, "tools": tools})
             _tally(resp)
             text = resp.get("text", "") if isinstance(resp, dict) else str(resp)

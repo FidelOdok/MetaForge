@@ -56,8 +56,9 @@ from orchestrator.harness.providers.registry import (
 )
 from orchestrator.harness.react import run_react
 from orchestrator.harness.runtime import OnApprovalRequest
-from orchestrator.harness.tools import Handler
+from orchestrator.harness.tools import DuplicateToolError, Handler, ToolRegistry
 from skill_registry.mcp_bridge import McpBridge
+from skill_registry.skill_context import SkillCard, load_skill_cards, tool_ids_for_domains
 
 logger = structlog.get_logger(__name__)
 
@@ -216,8 +217,53 @@ def chat_gate_check(gate: str) -> bool:
     return os.environ.get(env_var, "").strip().lower() not in _FALSY
 
 
+# MET-747 follow-up: adapters that stay visible regardless of `domains`
+# scoping -- cross-cutting infrastructure (project/twin/session/knowledge/...)
+# or component sourcing, none of which is owned by a single discipline's
+# skills. Everything else (cadquery, freecad, calculix, kicad, spice, gazebo,
+# isaac_sim, omniverse_usd) is discipline-specific and only stays registered
+# when `domains` selects a discipline that declares it via a skill's
+# `tools_required` (see `tool_ids_for_domains`).
+_CORE_ADAPTER_SERVERS = frozenset(
+    {
+        "twin",
+        "project",
+        "session",
+        "run",
+        "knowledge",
+        "memory",
+        "constraint",
+        "web",
+        "component",
+        "digikey",
+        "mouser",
+        "nexar",
+        "distributors",
+    }
+)
+
+_skill_cards_cache: list[SkillCard] | None = None
+
+
+def _cached_skill_cards() -> list[SkillCard]:
+    """Process-wide cache of the skill card corpus (MET-747 follow-up).
+
+    ``load_skill_cards`` does real file reads -- every skill's
+    ``definition.json`` + ``SKILL.md`` -- cheap once per phase brain
+    construction (``flow_brain.py`` already keeps its own copy) but too
+    expensive to redo on every chat message, which is the cadence
+    ``mcp_tools_from_bridge`` runs at.
+    """
+    global _skill_cards_cache
+    if _skill_cards_cache is None:
+        _skill_cards_cache = load_skill_cards()
+    return _skill_cards_cache
+
+
 async def mcp_tools_from_bridge(
-    bridge: McpBridge, enabled: set[str] | None = None
+    bridge: McpBridge,
+    enabled: set[str] | None = None,
+    domains: tuple[str, ...] | None = None,
 ) -> list[tuple[str, NativeToolDef]]:
     """Adapt a provider's MCP bridge tools into harness ``NativeToolDef``s.
 
@@ -233,7 +279,21 @@ async def mcp_tools_from_bridge(
     ``enabled`` (a set of tool ids) restricts which tools are registered — the
     chat UI's tools/connectors selector passes the user's choice; ``None`` means
     register all available.
+
+    ``domains`` (MET-747 follow-up), when given, additionally restricts the
+    result to the always-visible ``_CORE_ADAPTER_SERVERS`` plus whichever
+    discipline-specific tool ids the named domains' skills declare
+    (``tool_ids_for_domains``) -- e.g. a mechanical-only phase never sees
+    kicad/spice tools. This is the direct lever for staying under OpenAI's
+    128-tool-array cap on domain-aware callers (design-flow phases);
+    ``search_tools`` (``make_search_tools_tool``) is the complementary
+    mid-turn escape hatch for when a scoped turn genuinely needs a tool
+    outside its discipline. ``None`` (the default) registers every available
+    tool, unchanged from before this parameter existed.
     """
+    domain_allow: set[str] | None = None
+    if domains:
+        domain_allow = set(tool_ids_for_domains(_cached_skill_cards(), domains))
     tools = await bridge.list_tools()
     defs: list[tuple[str, NativeToolDef]] = []
     for entry in tools:
@@ -251,6 +311,12 @@ async def mcp_tools_from_bridge(
         server, _, tool = tool_id.partition(".")
         if not tool:
             server, tool = "mcp", tool_id
+        if (
+            domain_allow is not None
+            and server not in _CORE_ADAPTER_SERVERS
+            and tool_id not in domain_allow
+        ):
+            continue
         capability = entry.get("capability")
         description = f"{tool_id} ({capability})" if capability else tool_id
 
@@ -283,6 +349,111 @@ async def mcp_tools_from_bridge(
             )
         )
     return defs
+
+
+# MET-747 follow-up: cap on how many new tools one `search_tools` call
+# registers -- a broad keyword shouldn't dump the entire catalog back in and
+# defeat the point of scoping it down in the first place.
+_MAX_TOOL_SEARCH_RESULTS = 8
+
+
+def make_search_tools_tool(
+    bridge: McpBridge,
+    enabled: set[str] | None,
+    runtime_cell: dict[str, Any],
+) -> NativeToolDef:
+    """``search_tools`` — dynamic mid-turn tool discovery (MET-747 follow-up).
+
+    Domain-scoping (``mcp_tools_from_bridge``'s ``domains`` param) trims the
+    schema list a turn starts with — necessary to stay under OpenAI's 128-
+    tool-array cap — but it means a turn can genuinely need a tool its
+    discipline didn't declare (a mechanical phase that turns out to need a
+    KiCad footprint check). This tool searches the full available catalog
+    (still respecting the user's own ``enabled`` connector selection, just not
+    the domain trim) and registers any match directly onto the live
+    ``ToolRegistry``. ``run_native_tools`` rebuilds the OpenAI function-schema
+    list every round-trip, so a newly registered tool is callable by the
+    model on its very next step — no second turn needed.
+
+    The handler closure is built here, before ``build_agent_runtime``
+    constructs the ``ToolRegistry`` it will register into, so it can't close
+    over that registry directly. Instead it reads the live runtime out of
+    ``runtime_cell`` at CALL time (the handler only ever actually runs later,
+    once the loop starts) — the caller populates
+    ``runtime_cell["runtime"] = ctx.runtime`` immediately after
+    ``build_agent_runtime`` returns.
+    """
+
+    async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+        query = str(arguments.get("query", "")).strip().lower()
+        if not query:
+            raise ValueError("search_tools: 'query' is required (non-empty string)")
+        runtime = runtime_cell.get("runtime")
+        if runtime is None:
+            raise RuntimeError("search_tools: runtime not ready yet")
+        catalog = await mcp_tools_from_bridge(bridge, enabled)
+        known = {t.name for t in runtime.tools.all_tools()}
+        registered: list[str] = []
+        already: list[str] = []
+        for server, tdef in catalog:
+            haystack = f"{tdef.name} {tdef.description}".lower()
+            if query not in haystack:
+                continue
+            full_name = ToolRegistry.mcp_name(server, tdef.name)
+            if full_name in known:
+                already.append(full_name)
+                continue
+            if len(registered) >= _MAX_TOOL_SEARCH_RESULTS:
+                continue
+            try:
+                runtime.tools.register_mcp(
+                    server,
+                    tdef.name,
+                    description=tdef.description,
+                    input_schema=tdef.input_schema,
+                    handler=tdef.handler,
+                    required_gates=tdef.required_gates,
+                    requires_approval=tdef.requires_approval,
+                )
+            except DuplicateToolError:
+                already.append(full_name)
+                continue
+            registered.append(full_name)
+            known.add(full_name)
+        if not registered and not already:
+            return {
+                "registered": [],
+                "already_available": [],
+                "instruction": f"No tool matched '{query}'. Try a different keyword.",
+            }
+        instruction = (
+            f"Registered {len(registered)} tool(s) — call them directly by name now."
+            if registered
+            else "All matching tools were already available — call them directly by name."
+        )
+        return {"registered": registered, "already_available": already, "instruction": instruction}
+
+    return NativeToolDef(
+        name="search_tools",
+        description=(
+            "Search the full tool catalog by keyword (e.g. 'kicad', 'fea', "
+            "'component search') and register any match so you can call it "
+            "directly by name on your very next step. Use this when the task "
+            "needs a capability outside your current tool list — never guess "
+            "or invent a tool name that isn't already available."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword to search tool names/descriptions for.",
+                }
+            },
+            "required": ["query"],
+        },
+        handler=handler,
+    )
 
 
 _FALSY = {"0", "false", "off", "no"}
@@ -668,6 +839,7 @@ async def _build_context(
     metrics: MetricsCollector | None = None,
     on_approval_request: OnApprovalRequest | None = None,
     approval_timeout_seconds: float | None = None,
+    domains: tuple[str, ...] | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -689,17 +861,29 @@ async def _build_context(
     pauses. ``approval_timeout_seconds``, when given, overrides
     :func:`chat_approval_timeout_seconds` -- design-flow (MET-707) passes a
     short value here since its unattended turns have no approver to wait
-    for."""
+    for. ``domains`` (MET-747 follow-up), when given, scopes the registered
+    MCP tools to the always-visible core adapters plus whichever
+    discipline-specific tools those domains' skills declare (see
+    ``mcp_tools_from_bridge``); when an ``mcp_bridge`` is present, the
+    ``search_tools`` meta-tool is also registered so the loop can still pull
+    in an out-of-scope tool mid-turn if the task genuinely needs one."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
-    mcp_tools = await mcp_tools_from_bridge(mcp_bridge, enabled) if mcp_bridge is not None else []
+    mcp_tools = (
+        await mcp_tools_from_bridge(mcp_bridge, enabled, domains) if mcp_bridge is not None else []
+    )
     native_tools = (
         [make_set_project_scope_tool(session_id, chat_backend)] if chat_backend is not None else []
     )
+    # MET-747 follow-up: the runtime this closes over doesn't exist yet
+    # (built_agent_runtime constructs it below) -- populated right after.
+    runtime_cell: dict[str, Any] = {}
+    if mcp_bridge is not None:
+        native_tools = native_tools + [make_search_tools_tool(mcp_bridge, enabled, runtime_cell)]
     if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
         native_tools = native_tools + await skill_tools_from_registry(
             twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
         )
-    return build_agent_runtime(
+    ctx = build_agent_runtime(
         provider_config_from_env(provider=provider, model=model),
         credentials=store,
         session_id=session_id,
@@ -718,6 +902,8 @@ async def _build_context(
             else chat_approval_timeout_seconds()
         ),
     )
+    runtime_cell["runtime"] = ctx.runtime
+    return ctx
 
 
 async def run_chat_turn(
@@ -740,6 +926,7 @@ async def run_chat_turn(
     wall_clock_seconds: float | None = None,
     approval_timeout_seconds: float | None = None,
     project_id: str | None = None,
+    domains: tuple[str, ...] | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -760,7 +947,9 @@ async def run_chat_turn(
     default -- see :func:`design_flow_approval_timeout_seconds`.
     ``project_id`` scopes the turn's memory deposit (MET-567) to a project;
     tool-using turns are recorded as experiences so the memory tier learns from
-    chat, not just from the orchestrator's Temporal path.
+    chat, not just from the orchestrator's Temporal path. ``domains``
+    (MET-747 follow-up) scopes the registered MCP tools to those disciplines
+    plus the always-visible core adapters -- see ``_build_context``.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -778,6 +967,7 @@ async def run_chat_turn(
         twin=twin,
         metrics=metrics,
         approval_timeout_seconds=approval_timeout_seconds,
+        domains=domains,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
@@ -1122,6 +1312,7 @@ async def run_chat_turn_streaming(
     metrics: MetricsCollector | None = None,
     wall_clock_seconds: float | None = None,
     project_id: str | None = None,
+    domains: tuple[str, ...] | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -1147,7 +1338,9 @@ async def run_chat_turn_streaming(
     follow-up), when given, is notified ``(run_id, tool, arguments)`` the
     moment a `requires_approval` tool call pauses — resolved by a separate
     ``POST /v1/chat/tool_approvals/{run_id}`` request, never by this turn.
-    ``project_id`` scopes this turn's memory deposit (MET-567).
+    ``project_id`` scopes this turn's memory deposit (MET-567). ``domains``
+    (MET-747 follow-up) scopes the registered MCP tools -- see
+    ``_build_context``.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -1165,6 +1358,7 @@ async def run_chat_turn_streaming(
         twin=twin,
         metrics=metrics,
         on_approval_request=on_approval_request,
+        domains=domains,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
