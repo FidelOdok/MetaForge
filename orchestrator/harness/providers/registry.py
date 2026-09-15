@@ -145,6 +145,39 @@ def get_profile(provider_id: str) -> ProviderProfile:
         raise UnknownProviderError(provider_id) from exc
 
 
+# OpenAI rejects a ``tools`` array longer than 128 entries outright:
+#   400 invalid_request_error / array_above_max_length
+#   "Invalid 'tools': array too long. Expected an array with maximum
+#    length 128, but got an array with length 130 instead."
+# It is a request-shape limit, not a token-budget one, so the harness's
+# existing token accounting (trace_token_budget, chat_context_stats)
+# cannot see it: every turn 400s before the model reads anything, no
+# matter how small the prompt. Keyed on API *family* rather than model,
+# because the cap belongs to the endpoint contract.
+_MAX_TOOLS_BY_FAMILY: dict[str, int] = {OPENAI: 128}
+
+
+def max_tools_for(provider_id: str | None) -> int | None:
+    """Hard cap on the ``tools`` array for a provider, or ``None`` if uncapped.
+
+    Anthropic publishes no comparable limit, so anthropic-family providers
+    return ``None`` and keep the historical unbounded behaviour.
+
+    Note this is deliberately conservative for OpenAI-compatible gateways
+    (OpenRouter, vLLM, ...): a request routed through one to a non-OpenAI
+    model may well accept more than 128, but we cannot know the eventual
+    backend from the provider id. Capping slightly early costs a couple of
+    tools; capping late costs the entire turn.
+    """
+    if not provider_id:
+        return None
+    try:
+        family = get_profile(provider_id).api_family
+    except UnknownProviderError:
+        return None
+    return _MAX_TOOLS_BY_FAMILY.get(family)
+
+
 def resolve_provider(
     provider_id: str,
     model: str,

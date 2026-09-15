@@ -59,6 +59,7 @@ from api_gateway.chat.streaming import (
     notify_agent_thinking,
     notify_agent_typing,
     notify_context_stats,
+    notify_error,
     notify_message_delta,
     notify_tool_approval_requested,
     stream_manager,
@@ -475,10 +476,19 @@ async def _invoke_agent(
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error("harness_chat_failed", error=str(exc))
-                # MET-591 (live-caught): the turn is over — say so on the
-                # stream. Without this, SSE clients whose turn errored got
-                # typing + context.stats and then silence forever (no
-                # agent.done), which read as a hung turn instead of a failure.
+                # Put the CAUSE on the stream, not just the fact that the turn
+                # ended. `notify_error` existed but had no call site anywhere,
+                # while the TUI has always handled the `error` event (sets
+                # stats.errored + errorMsg, useChat.ts). So a real provider
+                # failure -- e.g. a 400 for an over-long tools array -- reached
+                # the user as the generic "(no reply — the agent produced no
+                # output)", with the actual reason visible only in gateway
+                # logs. The error message built below never reached the TUI
+                # either: it renders assistant deltas, not the returned record.
+                try:
+                    await notify_error(thread.id, str(exc))
+                except Exception:  # noqa: BLE001 — notification is best-effort
+                    logger.warning("error_notify_failed", thread_id=thread.id)
                 try:
                     await notify_agent_done(thread.id, "harness-agent")
                 except Exception:  # noqa: BLE001 — notification is best-effort
