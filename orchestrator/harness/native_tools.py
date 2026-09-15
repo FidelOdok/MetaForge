@@ -41,6 +41,7 @@ from orchestrator.harness.tool_exec import (
     dedup_key,
     error_content,
 )
+from orchestrator.harness.tools import NATIVE
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.native_tools")
@@ -67,10 +68,75 @@ NATIVE_SYSTEM = (
 )
 
 
-def _tool_schemas(runtime: HarnessRuntime) -> list[dict[str, Any]]:
-    """Build OpenAI-style function schemas from the runtime's registered tools."""
+def _select_tools(specs: list[Any], max_tools: int) -> tuple[list[Any], list[str]]:
+    """Choose at most ``max_tools`` specs -> (kept, dropped names).
+
+    Naive truncation is not acceptable here. ``all_tools()`` returns specs
+    sorted by name, so slicing the tail deletes whole adapters alphabetically
+    — ``twin.*`` and ``web.*`` go first, which is precisely backwards.
+
+    Policy instead: keep every native tool (few, curated, session-critical —
+    ``chat.set_project_scope`` and the skill layer), then fill the remaining
+    budget round-robin across MCP origins so each adapter keeps a share and
+    no capability disappears wholesale.
+    """
+    natives = [s for s in specs if s.origin == NATIVE]
+    mcp = [s for s in specs if s.origin != NATIVE]
+
+    if len(natives) >= max_tools:
+        # Pathological, but never silently send an over-long array.
+        kept = natives[:max_tools]
+        dropped = [s.name for s in specs if s not in kept]
+        return kept, dropped
+
+    by_origin: dict[str, list[Any]] = {}
+    for spec in mcp:
+        by_origin.setdefault(spec.origin, []).append(spec)
+
+    budget = max_tools - len(natives)
+    chosen: list[Any] = []
+    queues = list(by_origin.values())
+    while budget > 0 and any(queues):
+        for queue in queues:
+            if not queue:
+                continue
+            chosen.append(queue.pop(0))
+            budget -= 1
+            if budget == 0:
+                break
+
+    kept_set = {id(s) for s in natives} | {id(s) for s in chosen}
+    kept = [s for s in specs if id(s) in kept_set]
+    dropped = [s.name for s in specs if id(s) not in kept_set]
+    return kept, dropped
+
+
+def _tool_schemas(runtime: HarnessRuntime, max_tools: int | None = None) -> list[dict[str, Any]]:
+    """Build OpenAI-style function schemas from the runtime's registered tools.
+
+    ``max_tools`` enforces the provider's hard cap on the ``tools`` array
+    (see ``providers.registry.max_tools_for``). Exceeding it is a 400 that
+    kills the turn before the model sees a token, so the cap is applied here
+    — loudly, never as a silent slice.
+    """
+    specs = runtime.tools.all_tools()
+    dropped: list[str] = []
+    if max_tools is not None and len(specs) > max_tools:
+        specs, dropped = _select_tools(specs, max_tools)
+        logger.warning(
+            "tool_schemas_truncated",
+            limit=max_tools,
+            kept=len(specs),
+            dropped=len(dropped),
+            dropped_tools=dropped[:20],
+            reason=(
+                "provider caps the tools array; dropped tools are NOT callable "
+                "this turn — narrow the enabled tool set to choose deliberately"
+            ),
+        )
+
     schemas: list[dict[str, Any]] = []
-    for t in runtime.tools.all_tools():
+    for t in specs:
         params = (
             t.input_schema
             if isinstance(t.input_schema, dict) and t.input_schema.get("type") == "object"
@@ -247,6 +313,7 @@ async def run_native_tools(
     cost_provider: str = "",
     cost_model: str = "",
     pricing: TokenPricing | None = None,
+    max_tools: int | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
 
@@ -273,8 +340,13 @@ async def run_native_tools(
     against. An unpriced provider/model pair means the cap is silently NOT
     enforced for this turn (unknown cost is never treated as zero cost) —
     ``None`` for any of these three keeps the historical unbounded behavior.
+
+    ``max_tools`` caps the ``tools`` array at the provider's hard limit
+    (``providers.registry.max_tools_for``). Without it, a runtime holding
+    more tools than the provider accepts fails every turn with a 400 before
+    the model reads a token — see ``_select_tools`` for which tools survive.
     """
-    tools = _tool_schemas(runtime)
+    tools = _tool_schemas(runtime, max_tools=max_tools)
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
     # MET-569: successful (tool, arguments) results for this turn only —

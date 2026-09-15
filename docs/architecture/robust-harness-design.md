@@ -255,6 +255,55 @@ All folding is deterministic (no model calls): free, instant, reproducible.
 paging, Zep-style temporal knowledge-graph queries in chat, and auto-memory
 files — revisit when the deterministic layers prove insufficient in evals.
 
+## Provider tool-array cap
+
+Context compaction above budgets **tokens**. A provider also caps the
+**number** of tools per request, which token accounting cannot see: OpenAI
+rejects a `tools` array longer than 128 entries with
+
+```
+400 invalid_request_error / array_above_max_length
+"Invalid 'tools': array too long. Expected an array with maximum length 128,
+ but got an array with length 130 instead."
+```
+
+This is a request-*shape* limit, so it fires before the model reads a token —
+every turn fails identically, including a bare `hello`, no matter how small
+the prompt. It was reached in practice once the gateway registered 130 tools
+(12 native + 118 MCP); adding any adapter pushes an OpenAI-family deployment
+over it.
+
+`providers.registry.max_tools_for(provider)` returns the cap by API family
+(OpenAI: 128; Anthropic publishes none, so `None` = unbounded), and
+`_tool_schemas(runtime, max_tools=...)` enforces it request-side.
+
+Selection is **not** a tail slice. `all_tools()` is name-sorted, so slicing
+deletes whole adapters alphabetically — `twin.*` and `web.*` go first, which
+is exactly backwards. Instead:
+
+- every **native** tool is kept (few, curated, session-critical — e.g.
+  `chat.set_project_scope` and the skill layer);
+- the remaining budget is filled **round-robin across MCP origins**, so each
+  adapter keeps a share and no capability vanishes wholesale;
+- the drop is **loud** — `tool_schemas_truncated` logs the limit, counts, and
+  the dropped tool names.
+
+Capping is a safety net, not a substitute for choosing. A deployment near the
+limit should narrow the tool set deliberately (the dashboard's tool selector
+sends `enabled_tools`; the forge CLI currently sends none and therefore always
+ships the full registry).
+
+## Surfacing turn failures
+
+When a harness turn raises, the route emits a `notify_error` SSE event
+carrying the exception text *before* `agent.done`. Without it the client saw
+typing, then `agent.done`, then nothing — which the forge TUI reports as
+`(no reply — the agent produced no output)`, with the real cause visible only
+in gateway logs. `notify_error` had existed unused since MET-219 while the TUI
+already handled the event; only the call site was missing. The error
+`ChatMessageRecord` the route returns does not close this gap on its own — the
+TUI renders streamed assistant deltas, not the returned record.
+
 ## Tool-call hardening (MET-569)
 
 Four properties the tool-calling loop enforces, so a model's mistake costs a

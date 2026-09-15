@@ -48,7 +48,12 @@ from orchestrator.harness.providers import (
 from orchestrator.harness.providers.adapters import default_stream_events
 from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
-from orchestrator.harness.providers.registry import ANTHROPIC, OPENAI, get_profile
+from orchestrator.harness.providers.registry import (
+    ANTHROPIC,
+    OPENAI,
+    get_profile,
+    max_tools_for,
+)
 from orchestrator.harness.react import run_react
 from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import Handler
@@ -801,6 +806,10 @@ async def run_chat_turn(
             max_cost_usd=chat_max_cost_usd(),
             cost_provider=cost_provider,
             cost_model=cost_model,
+            # Provider hard cap on the tools array — unrelated to the token
+            # budget above. Exceeding it 400s the turn before the model reads
+            # anything, so it must be enforced request-side.
+            max_tools=max_tools_for(provider or os.environ.get("METAFORGE_LLM_PROVIDER")),
         )
     else:
         policy = ModelPolicy(
@@ -1249,6 +1258,10 @@ async def run_chat_turn_streaming(
             max_cost_usd=chat_max_cost_usd(),
             cost_provider=cost_provider,
             cost_model=cost_model,
+            # Provider hard cap on the tools array — unrelated to the token
+            # budget above. Exceeding it 400s the turn before the model reads
+            # anything, so it must be enforced request-side.
+            max_tools=max_tools_for(provider or os.environ.get("METAFORGE_LLM_PROVIDER")),
         )
     else:
         policy = ModelPolicy(
