@@ -7,17 +7,22 @@ import './index.css';
 import './store/theme-store';
 
 // Observability — init before React render.
-// RUM ships to collectors proxied at /faro and /otlp. Those routes only exist
-// behind the production reverse proxy; the Vite dev server has no such proxy,
-// so initialising RUM in dev just spams the console with 404s (MET-507). Gate
-// on a production build, with an explicit VITE_RUM_ENABLED opt-in for dev when
-// a collector is actually wired up.
+// RUM ships to collectors at the same-origin paths /faro and /otlp. Those
+// routes exist only where a reverse proxy provides them, which in practice
+// means the bundled Docker image's nginx.conf. Initialising RUM anywhere else
+// just spams 404s (MET-507).
+//
+// This used to key off `import.meta.env.PROD`, on the assumption that a
+// production build implies that proxy. Hosting the dashboard statically —
+// Vercel — breaks the assumption: the build is PROD, the collector routes are
+// not there, and every page load 404s twice. So the switch is now explicit and
+// off by default; `dashboard/Dockerfile` sets it for the one image that does
+// serve those paths.
 import { initFaro } from './lib/faro';
 import { initTelemetry } from './lib/telemetry';
 import { initWebVitals } from './lib/web-vitals';
 
-const rumEnabled =
-  import.meta.env.PROD || import.meta.env.VITE_RUM_ENABLED === 'true';
+const rumEnabled = import.meta.env.VITE_RUM_ENABLED === 'true';
 if (rumEnabled) {
   initFaro();
   initTelemetry();

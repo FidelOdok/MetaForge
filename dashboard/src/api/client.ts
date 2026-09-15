@@ -1,23 +1,32 @@
 import { context as otelContext, propagation } from '@opentelemetry/api';
 import axios from 'axios';
 import { logger } from '../lib/logger';
+import { apiBase } from '../lib/gatewayConfig';
 
 /**
  * Base Axios instance for all MetaForge API requests.
  *
- * The Vite dev server proxies `/api` to the Gateway at `http://localhost:8000`,
- * so we only need a relative `baseURL` here.
+ * `baseURL` is deliberately *not* set here. It used to be the constant
+ * `/api/v1`, which worked only because something in front of the app rewrote
+ * it: the Vite dev proxy in dev, `location /api/` in `nginx.conf` for the
+ * Docker image. A statically hosted dashboard (Vercel) has no such proxy and
+ * must call whatever gateway the user configured, so the base is resolved per
+ * request in the interceptor below. With no gateway configured `apiBase()`
+ * returns the original relative `/api/v1`, leaving dev and Docker unchanged.
  */
 const apiClient = axios.create({
-  baseURL: '/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 30_000,
 });
 
-// -- Request interceptor: log + inject W3C trace context ------------------
+// -- Request interceptor: resolve base + log + inject W3C trace context ----
 apiClient.interceptors.request.use((config) => {
+  // Resolved per request, not at module load: the user can change the gateway
+  // from Settings at any time and in-flight-after callers must see it.
+  config.baseURL = apiBase();
+
   logger.debug('api_request', {
     method: config.method?.toUpperCase(),
     url: config.url,

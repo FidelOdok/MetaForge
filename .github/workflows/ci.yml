@@ -108,6 +108,7 @@ jobs:
     if: github.event_name == 'pull_request'
     outputs:
       dashboard: ${{ steps.filter.outputs.dashboard }}
+      marketing: ${{ steps.filter.outputs.marketing }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -122,6 +123,11 @@ jobs:
               # the job tests and not the job doing the testing. It also means
               # a PR that adds a step to this job cannot exercise the step it
               # adds.
+              - '.github/workflows/ci.yml'
+            marketing:
+              - 'marketing/**'
+              # Same reasoning as the dashboard filter above: a change to this
+              # workflow counts as a change to what it tests.
               - '.github/workflows/ci.yml'
 
   dashboard:
@@ -157,3 +163,28 @@ jobs:
       # (MET-732). Repairing it means choosing a lint policy, which is not a
       # decision to make inside a CI wiring change.
       - run: cd dashboard && npx vitest run
+
+  marketing:
+    name: Marketing Site Checks
+    runs-on: [self-hosted, linux, fidel-dev]
+    needs: changes
+    if: needs.changes.outputs.marketing == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: marketing/package-lock.json
+      - run: cd marketing && npm ci
+      - run: cd marketing && npx tsc --noEmit
+      - run: cd marketing && npx eslint .
+      # src/__tests__/claims.test.tsx guards the scope claims CLAUDE.md marks
+      # as things this project must never overstate -- Phase 1 is 6-7
+      # disciplines, KiCad is read-only until Phase 2, the timeline is six
+      # months. A landing page is exactly where those drift, so the assertions
+      # have to run somewhere that blocks a merge.
+      - run: cd marketing && npx vitest run
+      # The deployed artefact is the build output, so build it here rather
+      # than discovering a broken build in Vercel's logs.
+      - run: cd marketing && npm run build

@@ -72,14 +72,21 @@ export function Sidebar() {
 
       {/* Bottom: settings + avatar */}
       <div className="flex flex-col items-center gap-1 pb-3">
-        <button
-          type="button"
+        <NavLink
+          to="/settings"
           title="Settings"
-          className="flex items-center justify-center rounded text-on-surface-variant hover:bg-surface-high transition-colors"
+          className={({ isActive }) =>
+            [
+              'flex items-center justify-center rounded transition-colors',
+              isActive
+                ? 'text-primary-container bg-surface-high'
+                : 'text-on-surface-variant hover:bg-surface-high hover:text-on-surface',
+            ].join(' ')
+          }
           style={{ width: 32, height: 32 }}
         >
           <span className="material-symbols-outlined">settings</span>
-        </button>
+        </NavLink>
         <div
           className="flex shrink-0 items-center justify-center rounded-full"
           style={{

@@ -6,6 +6,7 @@ import { useBooleanCut } from '../../hooks/use-boolean-cut';
 import { getNodeModel } from '../../api/endpoints/twin';
 import { useToast } from '../ui/Toast';
 import type { ModelManifest } from '../../types/viewer';
+import { resolveGatewayHref } from '../../lib/gatewayConfig';
 
 // Kinetic Console palette (see project_kinetic_console_design) — this file
 // predates that token set living anywhere shared/importable (same rationale
@@ -67,7 +68,7 @@ export function BooleanCutPanel({ onCutComplete }: BooleanCutPanelProps) {
         materials: result.metadata.materials ?? [],
         stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
       };
-      const glbUrl = result.glb_url.startsWith('/v1/') ? `/api${result.glb_url}` : result.glb_url;
+      const glbUrl = resolveGatewayHref(result.glb_url);
       setBooleanCutCutter(cutterNodeId, glbUrl, manifest);
     } catch (err) {
       console.error('Failed to load cutter model:', err);

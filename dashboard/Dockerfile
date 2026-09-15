@@ -11,6 +11,10 @@ COPY package.json ./
 RUN npm install
 
 COPY . .
+
+# This image's nginx.conf proxies /faro and /otlp to the collectors, so RUM has
+# somewhere to ship to. It is off by default everywhere else (see src/main.tsx).
+ENV VITE_RUM_ENABLED=true
 RUN npx vite build
 
 # ── Stage 2: serve ──────────────────────────────────────────────────

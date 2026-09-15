@@ -1,5 +1,6 @@
 import apiClient from '../client';
 import type { ModelManifest } from '../../types/viewer';
+import { apiUrl } from '../../lib/gatewayConfig';
 
 interface ConversionResult {
   hash: string;
@@ -27,8 +28,9 @@ export async function getConversionResult(hash: string, quality = 'standard'): P
   return data;
 }
 
+/** URL the GLB loader fetches directly — absolute once a gateway is configured. */
 export function getGlbUrl(hash: string, quality = 'standard'): string {
-  return `/api/v1/convert/${hash}/glb?quality=${quality}`;
+  return apiUrl(`/convert/${hash}/glb?quality=${quality}`);
 }
 
 // ── Mock fallback for development (no backend needed) ──────────────
