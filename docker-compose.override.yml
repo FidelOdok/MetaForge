@@ -105,6 +105,12 @@ services:
       - MOUSER_API_KEY=${MOUSER_API_KEY:-}
       - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      # MET-7: same gap as the distributor creds above -- web.search/
+      # web.fetch need this to register with a live key; the gateway
+      # service (docker-compose.yml) already had this passthrough, this
+      # sidecar never did, so the web adapter always skipped with
+      # "missing env vars: BRAVE_API_KEY" here regardless of .env.
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       # MET-478 follow-up: without this, kicad.* tools ran in-process inside
