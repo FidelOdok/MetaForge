@@ -293,6 +293,31 @@ limit should narrow the tool set deliberately (the dashboard's tool selector
 sends `enabled_tools`; the forge CLI currently sends none and therefore always
 ships the full registry).
 
+### Domain scoping and dynamic discovery
+
+`enabled_tools` is a *user's* explicit choice. `mcp_tools_from_bridge`'s
+`domains` param is the analogous lever for a *caller* that already knows
+which disciplines a turn belongs to: the design-flow executor passes
+`domains=phase.disciplines` (`flow_brain.py`), and only the always-visible
+core adapters (`twin`, `project`, `session`, `knowledge`, `memory`,
+`constraint`, `web`, `component`, and the distributor adapters) plus each
+named discipline's own tools are registered — `tool_ids_for_domains`
+(`skill_registry/skill_context.py`) reuses the tool scope every skill already
+declares via `tools_required`, so a mechanical-only phase never sees
+`kicad.*`/`spice.*` schemas at all. `domains=None` (the default) registers
+everything, unchanged from before this existed; plain ad-hoc chat has no
+discipline signal today and stays unscoped.
+
+Scoping down trades completeness for headroom, so a scoped turn can still
+call `search_tools` — a native tool that searches the *full* catalog by
+keyword and registers any match directly onto the live `ToolRegistry`. Since
+`_tool_schemas` is recomputed every round-trip (not once before the loop), a
+tool `search_tools` registers mid-turn is callable by the model on its very
+next step. Its handler is built before `build_agent_runtime` constructs the
+`ToolRegistry` it registers into, so it reads the live runtime out of a
+mutable cell (`runtime_cell["runtime"]`, populated right after
+`build_agent_runtime` returns) rather than closing over it directly.
+
 ## Surfacing turn failures
 
 When a harness turn raises, the route emits a `notify_error` SSE event
