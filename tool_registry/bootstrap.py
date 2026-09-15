@@ -125,6 +125,7 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     {"knowledge", "constraint", "twin", "project", "run", "session", "memory"}
     | {"digikey", "mouser", "nexar"}
     | {"component", "offer_resolver"}
+    | {"web"}
 )
 
 
@@ -791,6 +792,41 @@ async def bootstrap_tool_registry(
                 reason=(
                     "not in adapter_ids"
                     if adapter_ids and "offer_resolver" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Web search MCP adapter (MET-7) -----
+        # Same env-keyed shape as the distributors above: registers only when
+        # a search key is present, otherwise skips with a reason. Skipping is
+        # the right default — an agent that sees web.search in tools/list but
+        # gets an empty list from every call has no way to tell "nothing
+        # matched" from "nobody configured a key" (the silent-fallback rot
+        # this codebase keeps re-learning), so the tool simply isn't offered.
+        if _is_adapter_enabled("web") and (not adapter_ids or "web" in adapter_ids):
+            if os.environ.get("BRAVE_API_KEY"):
+                try:
+                    from tool_registry.tools.web.brave import BraveSearchProvider
+                    from tool_registry.tools.web.mcp_adapter import WebMcpServer
+
+                    server = WebMcpServer(provider=BraveSearchProvider())
+                    await registry.register_adapter(server)
+                    registered.append("web")
+                    logger.info("web_mcp_adapter_registered", provider="Brave")
+                except Exception as exc:
+                    logger.error("web_mcp_adapter_failed", error=str(exc))
+                    span.record_exception(exc)
+                    failed.append("web")
+            else:
+                skipped.append("web")
+                logger.info("web_mcp_adapter_skipped", reason="missing env vars: BRAVE_API_KEY")
+        else:
+            skipped.append("web")
+            logger.info(
+                "web_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "web" not in adapter_ids
                     else "disabled via config"
                 ),
             )
