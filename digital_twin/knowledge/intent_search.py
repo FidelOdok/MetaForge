@@ -407,6 +407,17 @@ def _role_result_to_dict(result: RoleResult) -> dict[str, Any]:
                 "source": rc.source,
                 "score": None if rc.score is None else round(rc.score, 4),
                 "cost_usd": rc.cost_usd,
+                # Only a parametric hit's ``raw`` is a ComponentCatalogRow —
+                # a fuzzy_fallback hit's ``raw`` is a BomCandidate, which
+                # carries none of these, so they're None there. Callers that
+                # need the full row (specs/extraction_meta too) still need a
+                # follow-up component.search_parametric/knowledge.extract
+                # call; this only saves the common case of "show a photo /
+                # link a CAD model for this candidate" without one.
+                "datasheet_url": getattr(rc.raw, "datasheet_url", None) or None,
+                "image_url": getattr(rc.raw, "image_url", None) or None,
+                "footprint": getattr(rc.raw, "footprint", None) or None,
+                "cad_model_url": getattr(rc.raw, "cad_model_url", None) or None,
             }
             for rc in result.candidates
         ],

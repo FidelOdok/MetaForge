@@ -54,6 +54,9 @@ async def index_component(
     cost_usd: float | None = None,
     lifecycle: str = "active",
     datasheet_url: str = "",
+    image_url: str = "",
+    footprint: str = "",
+    cad_model_url: str = "",
     llm: PropertyLLM | None = None,
     search: SearchCallable | None = None,
     min_trusted_confidence: float = 0.4,
@@ -63,6 +66,12 @@ async def index_component(
     ``llm``/``search`` are forwarded verbatim to
     ``extract_properties_for_mpn`` — passing neither restricts extraction
     to Tier-1 verbatim table matches, same as that function's own default.
+
+    ``image_url``/``footprint``/``cad_model_url`` are caller-supplied only
+    (MET-436 follow-up) — like ``datasheet_url``, no extraction pipeline
+    populates them from the datasheet automatically. ``footprint`` is the
+    exact PCB land-pattern (e.g. an IPC-7351 name), distinct from the
+    coarser per-category ``package`` SpecField (e.g. ``"SOIC-8"``).
     """
     spec = CATEGORY_REGISTRY.get(category)
     if spec is None:
@@ -148,6 +157,9 @@ async def index_component(
             specs=specs,
             extraction_meta=extraction_meta,
             schema_version=1,
+            image_url=image_url,
+            footprint=footprint,
+            cad_model_url=cad_model_url,
             indexed_at=datetime.now(UTC),
         )
     )

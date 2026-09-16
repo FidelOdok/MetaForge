@@ -27,3 +27,10 @@ class BOMItem(NodeBase):
     specifications: dict = Field(default_factory=dict)
     global_asset_id: str | None = None
     supplier: str | None = None
+    datasheet_url: str | None = None
+    image_url: str | None = None
+    footprint: str | None = None
+    """PCB land-pattern/footprint identifier (e.g. an IPC-7351 name) —
+    distinct from a coarser package family name, which callers are free to
+    put in ``specifications`` instead."""
+    cad_model_url: str | None = None

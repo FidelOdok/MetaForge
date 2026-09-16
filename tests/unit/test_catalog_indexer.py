@@ -197,3 +197,42 @@ async def test_explicit_datasheet_url_overrides_extracted_source_path():
     )
 
     assert store.upserted[0].datasheet_url == "https://example.com/explicit.pdf"
+
+
+@pytest.mark.asyncio
+async def test_media_geometry_fields_are_caller_supplied_only():
+    """MET-436 follow-up: no extraction pipeline populates image/footprint/
+    CAD -- they're pure pass-through, like an explicit datasheet_url."""
+    twin = _FakeTwin(_FakeDatasheet(_full_buck_converter_table()))
+    store = _FakeStore()
+
+    await index_component(
+        twin,
+        mpn="MP2459",
+        manufacturer="MPS",
+        category="buck_converter",
+        store=store,
+        image_url="https://example.com/mp2459.png",
+        footprint="SOT65P210X110-6N",
+        cad_model_url="https://example.com/mp2459.step",
+    )
+
+    row = store.upserted[0]
+    assert row.image_url == "https://example.com/mp2459.png"
+    assert row.footprint == "SOT65P210X110-6N"
+    assert row.cad_model_url == "https://example.com/mp2459.step"
+
+
+@pytest.mark.asyncio
+async def test_media_geometry_fields_default_to_empty_string():
+    twin = _FakeTwin(_FakeDatasheet(_full_buck_converter_table()))
+    store = _FakeStore()
+
+    await index_component(
+        twin, mpn="MP2459", manufacturer="MPS", category="buck_converter", store=store
+    )
+
+    row = store.upserted[0]
+    assert row.image_url == ""
+    assert row.footprint == ""
+    assert row.cad_model_url == ""

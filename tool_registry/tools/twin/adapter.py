@@ -688,6 +688,22 @@ class TwinServer(McpToolServer):
                             "description": "How found: 'parametric' | 'fuzzy_fallback' | 'manual'.",
                         },
                         "distributor": {"type": ["string", "null"]},
+                        "datasheet_url": {"type": ["string", "null"]},
+                        "image_url": {
+                            "type": ["string", "null"],
+                            "description": "Product photo/rendering URL, when known.",
+                        },
+                        "footprint": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "PCB land-pattern/footprint id (e.g. an IPC-7351 name) -- "
+                                "distinct from the coarser package name, which goes in 'specs'."
+                            ),
+                        },
+                        "cad_model_url": {
+                            "type": ["string", "null"],
+                            "description": "3D/CAD model (e.g. STEP) URL, when known.",
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -743,6 +759,10 @@ class TwinServer(McpToolServer):
         specs = arguments.get("specs")
         source = arguments.get("source")
         distributor = arguments.get("distributor")
+        datasheet_url = arguments.get("datasheet_url")
+        image_url = arguments.get("image_url")
+        footprint = arguments.get("footprint")
+        cad_model_url = arguments.get("cad_model_url")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
 
@@ -757,6 +777,10 @@ class TwinServer(McpToolServer):
             specs=specs if isinstance(specs, dict) else None,
             source=source if isinstance(source, str) else None,
             distributor=distributor if isinstance(distributor, str) else None,
+            datasheet_url=datasheet_url if isinstance(datasheet_url, str) else None,
+            image_url=image_url if isinstance(image_url, str) else None,
+            footprint=footprint if isinstance(footprint, str) else None,
+            cad_model_url=cad_model_url if isinstance(cad_model_url, str) else None,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
         )

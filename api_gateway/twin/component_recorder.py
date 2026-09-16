@@ -49,6 +49,10 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
         specs: dict[str, Any] | None = None,
         source: str | None = None,
         distributor: str | None = None,
+        datasheet_url: str | None = None,
+        image_url: str | None = None,
+        footprint: str | None = None,
+        cad_model_url: str | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
@@ -91,6 +95,10 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
                 specifications=specifications,
                 global_asset_id=global_asset_id,
                 supplier=distributor,
+                datasheet_url=datasheet_url,
+                image_url=image_url,
+                footprint=footprint,
+                cad_model_url=cad_model_url,
                 project_id=project_id,  # pydantic coerces str → UUID
             )
             created = await twin.add_bom_item(item)
