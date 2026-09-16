@@ -177,6 +177,41 @@ def _desanitize_openai_tool_name(name: str) -> str:
     return name.replace(_OPENAI_NAME_DOT, ".")
 
 
+def _sanitize_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Apply the same dot->``__`` mapping to ``tool_calls`` echoed in history.
+
+    Live-caught (MET-747 follow-up): OpenAI validates ``function.name`` against
+    ``^[a-zA-Z0-9_-]+$`` on ``messages[].tool_calls[]`` too, not just on the
+    outgoing ``tools`` schema. The native loop's own bookkeeping
+    (``native_tools.py``) stores the DESANITIZED (dotted) name in the assistant
+    message it appends to history — correct for the harness's internal
+    ``ToolRegistry`` lookups — so a turn's first round-trip (whose ``tools=``
+    went through ``_sanitize_openai_tool_names``) succeeds, but the SECOND
+    round-trip 400s the moment that history is resent, for any tool whose id
+    has a dot (``chat.set_project_scope`` is the common one — hit on a plain
+    "switch project" turn, which almost always continues past that one call).
+    A single dot is a safe, fully reversible marker the same way
+    :func:`_sanitize_openai_tool_names` treats it.
+    """
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        tool_calls = m.get("tool_calls")
+        if not tool_calls:
+            out.append(m)
+            continue
+        sanitized_calls = []
+        for tc in tool_calls:
+            fn = tc.get("function") if isinstance(tc, dict) else None
+            if not isinstance(fn, dict) or "name" not in fn:
+                sanitized_calls.append(tc)
+                continue
+            sanitized_calls.append(
+                {**tc, "function": {**fn, "name": fn["name"].replace(".", _OPENAI_NAME_DOT)}}
+            )
+        out.append({**m, "tool_calls": sanitized_calls})
+    return out
+
+
 def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Translate OpenAI-canonical messages to Anthropic content-block form.
 
@@ -294,6 +329,10 @@ async def openai_invoke(
     system, messages, max_tokens, temperature = _normalize_request(request)
     if system:
         messages = [{"role": "system", "content": system}, *messages]
+    # MET-747 follow-up: sanitize any dotted tool_calls already sitting in
+    # history (from an earlier round-trip in this same turn) — see
+    # _sanitize_openai_messages.
+    messages = _sanitize_openai_messages(messages)
     if client is None:
         from openai import AsyncOpenAI
 
@@ -795,6 +834,8 @@ async def openai_stream_events(
     system, messages, max_tokens, temperature = _normalize_request(request)
     if system:
         messages = [{"role": "system", "content": system}, *messages]
+    # MET-747 follow-up: same message-history sanitization as openai_invoke.
+    messages = _sanitize_openai_messages(messages)
     if client is None:
         from openai import AsyncOpenAI
 
