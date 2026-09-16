@@ -19,7 +19,7 @@ import pytest
 from api_gateway.twin.component_recorder import make_component_recorder
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import NodeType
+from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 
 
 class _FakeProjectBackend:
@@ -193,6 +193,89 @@ class TestRecorder:
         )
         assert r2["project_linked"] is False
         assert be2.links == []
+
+    async def test_links_to_project_bom_work_product_via_real_edge(self) -> None:
+        """The orphan gap: a BOMItem with only the Postgres project-junction
+        link and no graph edge is flagged by TwinAPI.find_orphans() (BOM_ITEM
+        is a "dependent" node type) and unreachable via twin.thread_for. A
+        real CONTAINS edge from the project's BOM work product fixes both."""
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        be = _FakeProjectBackend()
+        record = make_component_recorder(twin, be)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            project_id=pid,
+        )
+
+        bom_wp_id = result["bom_work_product_id"]
+        assert bom_wp_id is not None
+        wp = await twin.get_work_product(UUID(bom_wp_id))
+        assert wp is not None
+        assert wp.type == WorkProductType.BOM
+        assert str(wp.project_id) == pid
+
+        edges = await twin.get_edges(UUID(bom_wp_id), direction="outgoing")
+        assert any(
+            e.edge_type == EdgeType.CONTAINS and e.target_id == UUID(result["node_id"])
+            for e in edges
+        )
+
+        orphans = await twin.find_orphans()
+        assert UUID(result["node_id"]) not in orphans.orphan_bom_items
+
+    async def test_reuses_the_same_bom_work_product_across_calls(self) -> None:
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        be = _FakeProjectBackend()
+        record = make_component_recorder(twin, be)
+
+        r1 = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            project_id=pid,
+        )
+        r2 = await record(
+            mpn="TPS62840",
+            manufacturer="TI",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            project_id=pid,
+        )
+
+        assert r1["bom_work_product_id"] == r2["bom_work_product_id"]
+        # Exactly one "bom" link created (on the first call only), plus one
+        # "bom_item" link per recorded selection.
+        bom_links = [link_type for *_rest, link_type in be.links if link_type == "bom"]
+        assert len(bom_links) == 1
+
+        edges = await twin.get_edges(UUID(r1["bom_work_product_id"]), direction="outgoing")
+        linked_targets = {e.target_id for e in edges if e.edge_type == EdgeType.CONTAINS}
+        assert linked_targets == {UUID(r1["node_id"]), UUID(r2["node_id"])}
+
+    async def test_no_bom_work_product_when_unscoped(self) -> None:
+        """No project_id means no parent work product to attach to -- the
+        BOMItem stays an orphan, same as before this fix (unavoidable
+        without a project scope)."""
+        twin = InMemoryTwinAPI.create()
+        record = make_component_recorder(twin, None)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+        )
+
+        assert result["bom_work_product_id"] is None
+        edges = await twin.get_edges(UUID(result["node_id"]), direction="incoming")
+        assert edges == []
 
     async def test_requires_mpn_manufacturer_category(self) -> None:
         twin = InMemoryTwinAPI.create()
