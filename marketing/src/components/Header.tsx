@@ -4,14 +4,16 @@ import { DASHBOARD_URL, GITHUB_URL, NAV_LINKS } from '../site';
 
 function Logo() {
   return (
-    <a href="#top" className="flex items-center gap-2.5" aria-label="MetaForge home">
-      <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary-container text-[15px] font-bold tracking-tight text-surface"
-        aria-hidden="true"
-      >
-        M
-      </span>
-      <span className="text-[15px] font-semibold tracking-tight text-on-surface">MetaForge</span>
+    <a href="#top" className="flex items-center" aria-label="MetaForge home">
+      {/* The lockup is a fixed-proportion asset, so it is sized by height only.
+          Marketing is dark-only (see index.css), hence the -dark variant. */}
+      <img
+        src="/logo/metaforge-wordmark-dark.svg"
+        alt="MetaForge"
+        width={146}
+        height={40}
+        className="h-10 w-auto"
+      />
     </a>
   );
 }
