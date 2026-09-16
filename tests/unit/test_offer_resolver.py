@@ -417,3 +417,71 @@ async def test_close_is_a_deliberate_noop_and_does_not_close_borrowed_adapters()
     server = OfferResolverServer(adapters=[adapter])
     await server.close()
     assert closed == []
+
+
+# ---------------------------------------------------------------------------
+# currency_mismatch flag (no FX conversion -- see module/OfferResolution docs)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_currency_mismatch_flagged_when_offers_span_currencies():
+    """A real scenario, not hypothetical: a UK-region Mouser account
+    returns GBP while DigiKey returns USD for the same MPN. Ranking still
+    runs (best effort), but the caller must be told not to trust it."""
+    digikey = _FakeAdapter(
+        "DigiKey",
+        pricing=[PricingBreak(quantity=1, unit_price=0.60, currency="USD")],
+        availability=AvailabilityInfo(stock_qty=1000, lead_time_days=2, minimum_order_qty=1),
+    )
+    mouser = _FakeAdapter(
+        "Mouser",
+        pricing=[PricingBreak(quantity=1, unit_price=1.21, currency="GBP")],
+        availability=AvailabilityInfo(stock_qty=1000, lead_time_days=30, minimum_order_qty=1),
+    )
+
+    resolution = await resolve_offers_for_item([digikey, mouser], "MP2459", required_qty=1)
+
+    assert resolution.status == "ok"
+    assert resolution.currency_mismatch is True
+    assert resolution.reason is not None
+    assert "USD" in resolution.reason and "GBP" in resolution.reason
+
+
+@pytest.mark.asyncio
+async def test_currency_mismatch_false_when_all_offers_share_a_currency():
+    digikey = _FakeAdapter(
+        "DigiKey",
+        pricing=[PricingBreak(quantity=1, unit_price=0.60, currency="USD")],
+        availability=AvailabilityInfo(stock_qty=1000, lead_time_days=2, minimum_order_qty=1),
+    )
+    mouser = _FakeAdapter(
+        "Mouser",
+        pricing=[PricingBreak(quantity=1, unit_price=0.58, currency="USD")],
+        availability=AvailabilityInfo(stock_qty=1000, lead_time_days=5, minimum_order_qty=1),
+    )
+
+    resolution = await resolve_offers_for_item([digikey, mouser], "MP2459", required_qty=1)
+
+    assert resolution.currency_mismatch is False
+    assert resolution.reason is None
+
+
+@pytest.mark.asyncio
+async def test_currency_mismatch_flagged_in_insufficient_stock_case():
+    digikey = _FakeAdapter(
+        "DigiKey",
+        pricing=[PricingBreak(quantity=1, unit_price=0.60, currency="USD")],
+        availability=AvailabilityInfo(stock_qty=0, lead_time_days=2, minimum_order_qty=1),
+    )
+    mouser = _FakeAdapter(
+        "Mouser",
+        pricing=[PricingBreak(quantity=1, unit_price=1.21, currency="GBP")],
+        availability=AvailabilityInfo(stock_qty=0, lead_time_days=30, minimum_order_qty=1),
+    )
+
+    resolution = await resolve_offers_for_item([digikey, mouser], "MP2459", required_qty=100)
+
+    assert resolution.status == "insufficient_stock_everywhere"
+    assert resolution.currency_mismatch is True
+    assert "WARNING" in (resolution.reason or "")

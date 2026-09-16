@@ -662,6 +662,17 @@ class KnowledgeServer(McpToolServer):
                                 '``{"supply_voltage": ["VCC", "VDD"]}``).'
                             ),
                         },
+                        "purchase_unit": {
+                            "type": "string",
+                            "enum": ["discrete_part", "cots_assembly"],
+                            "description": (
+                                "Narrow candidates to knowledge entries tagged "
+                                "metadata={'purchase_unit': ...} at ingest time -- "
+                                "degrades to an unfiltered search (see "
+                                "purchase_unit_filter_degraded in the response) "
+                                "rather than losing recall against an untagged corpus."
+                            ),
+                        },
                     },
                     "required": ["search_query", "constraints"],
                 },
@@ -672,6 +683,7 @@ class KnowledgeServer(McpToolServer):
                         "candidates_evaluated": {"type": "integer"},
                         "total_search_hits": {"type": "integer"},
                         "query_time_ms": {"type": "number"},
+                        "purchase_unit_filter_degraded": {"type": "boolean"},
                     },
                 },
                 phase=2,
@@ -1044,6 +1056,15 @@ class KnowledgeServer(McpToolServer):
                     "knowledge.populate_bom: 'aliases' must be an object mapping "
                     "property → list[str]"
                 )
+            purchase_unit = arguments.get("purchase_unit")
+            if purchase_unit is not None and purchase_unit not in (
+                "discrete_part",
+                "cots_assembly",
+            ):
+                raise ValueError(
+                    "knowledge.populate_bom: 'purchase_unit' must be "
+                    "'discrete_part' or 'cots_assembly'"
+                )
 
             span.set_attribute("bom.search_query_length", len(search_query))
             span.set_attribute("bom.constraint_count", len(constraints))
@@ -1057,6 +1078,7 @@ class KnowledgeServer(McpToolServer):
                 top_k=top_k_int,
                 candidate_limit=candidate_limit_int,
                 property_aliases=aliases,
+                purchase_unit=purchase_unit,
             )
 
             span.set_attribute("bom.candidates_evaluated", result.candidates_evaluated)

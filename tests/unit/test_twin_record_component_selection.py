@@ -32,6 +32,28 @@ class _FakeProjectBackend:
         self.links.append((project_id, wp_id, name, link_type))
 
 
+class _FakeRow:
+    def __init__(self, **kwargs: object) -> None:
+        self.datasheet_url = kwargs.get("datasheet_url", "")
+        self.image_url = kwargs.get("image_url", "")
+        self.footprint = kwargs.get("footprint", "")
+        self.cad_model_url = kwargs.get("cad_model_url", "")
+        self.cost_usd = kwargs.get("cost_usd")
+
+
+class _FakeCatalogStore:
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, str], _FakeRow] = {}
+        self.get_calls: list[tuple[str, str]] = []
+
+    def stub(self, mpn: str, manufacturer: str, **fields: object) -> None:
+        self.rows[(mpn, manufacturer)] = _FakeRow(**fields)
+
+    async def get(self, mpn: str, manufacturer: str) -> _FakeRow | None:
+        self.get_calls.append((mpn, manufacturer))
+        return self.rows.get((mpn, manufacturer))
+
+
 class TestRecorder:
     async def test_creates_bom_item_node(self) -> None:
         twin = InMemoryTwinAPI.create()
@@ -84,6 +106,86 @@ class TestRecorder:
         assert item.image_url == "https://example.com/mp2459.png"
         assert item.footprint == "SOT65P210X110-6N"
         assert item.cad_model_url == "https://example.com/mp2459.step"
+
+    async def test_auto_fills_media_geometry_and_cost_from_catalog_store(self) -> None:
+        """Without this, a caller has to manually copy every field from a
+        prior component.search_parametric hit even though the same row is
+        already sitting in the catalog under (mpn, manufacturer)."""
+        twin = InMemoryTwinAPI.create()
+        store = _FakeCatalogStore()
+        store.stub(
+            "MP2459",
+            "MPS",
+            datasheet_url="https://example.com/mp2459.pdf",
+            image_url="https://example.com/mp2459.png",
+            footprint="SOT65P210X110-6N",
+            cad_model_url="https://example.com/mp2459.step",
+            cost_usd=0.42,
+        )
+        record = make_component_recorder(twin, None, catalog_store=store)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+        )
+
+        assert store.get_calls == [("MP2459", "MPS")]
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.datasheet_url == "https://example.com/mp2459.pdf"
+        assert item.image_url == "https://example.com/mp2459.png"
+        assert item.footprint == "SOT65P210X110-6N"
+        assert item.cad_model_url == "https://example.com/mp2459.step"
+        assert item.unit_cost == 0.42
+        assert item.priced_at is not None  # auto-filled cost still gets a timestamp
+
+    async def test_explicit_fields_win_over_catalog_store(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        store = _FakeCatalogStore()
+        store.stub(
+            "MP2459", "MPS", image_url="https://catalog.example.com/wrong.png", cost_usd=0.99
+        )
+        record = make_component_recorder(twin, None, catalog_store=store)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            image_url="https://caller.example.com/explicit.png",
+            unit_cost_usd=0.42,
+        )
+
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.image_url == "https://caller.example.com/explicit.png"
+        assert item.unit_cost == 0.42
+
+    async def test_catalog_lookup_skipped_when_no_store_given(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        record = make_component_recorder(twin, None)  # no catalog_store
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+        )
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.image_url is None
+
+    async def test_catalog_miss_leaves_fields_none(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        store = _FakeCatalogStore()  # nothing stubbed -> get() returns None
+        record = make_component_recorder(twin, None, catalog_store=store)
+        result = await record(
+            mpn="UNKNOWN-MPN",
+            manufacturer="Acme",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+        )
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.image_url is None
+        assert item.unit_cost is None
 
     async def test_purchase_url_and_pricing_provenance_stored(self) -> None:
         """Follow-up: a price is a snapshot, not a fact -- priced_at must be
@@ -276,6 +378,45 @@ class TestRecorder:
         assert result["bom_work_product_id"] is None
         edges = await twin.get_edges(UUID(result["node_id"]), direction="incoming")
         assert edges == []
+
+    async def test_does_not_reuse_a_document_shaped_bom_work_product(self) -> None:
+        """A BOM work product created by the unrelated whole-CSV-blob
+        recorder (api_gateway/twin/bom_recorder.py) or the CSV importer has
+        no 'kind' marker -- it must never be silently reused as this
+        recorder's container, which would conflate two different kinds of
+        artifact under one node."""
+        from twin_core.models.work_product import WorkProduct
+
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+
+        foreign_bom = await twin.create_work_product(
+            WorkProduct(
+                name="electronics-bom.csv",
+                type=WorkProductType.BOM,
+                domain="electronics",
+                file_path="",
+                content_hash="deadbeef",
+                format="csv",
+                metadata={"line_items": 3},
+                created_by="electronics.record_bom",
+                project_id=pid,
+            )
+        )
+
+        record = make_component_recorder(twin, None)
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            project_id=pid,
+        )
+
+        assert result["bom_work_product_id"] is not None
+        assert result["bom_work_product_id"] != str(foreign_bom.id)
+        new_wp = await twin.get_work_product(UUID(result["bom_work_product_id"]))
+        assert new_wp.metadata.get("kind") == "component_selection_container"
 
     async def test_requires_mpn_manufacturer_category(self) -> None:
         twin = InMemoryTwinAPI.create()

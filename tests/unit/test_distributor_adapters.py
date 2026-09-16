@@ -101,6 +101,7 @@ MOUSER_DETAIL_RESPONSE = {
                 "LifecycleStatus": "New Product",
                 "DataSheetUrl": "https://example.com/esp32.pdf",
                 "ProductDetailUrl": "https://www.mouser.com/ProductDetail/356-ESP32WRM32E",
+                "ImagePath": "https://www.mouser.com/images/mouserelectronics/images/esp32_t.jpg",
                 "Min": 1,
                 "Category": "RF Modules",
                 "ProductAttributes": [
@@ -596,6 +597,9 @@ class TestMouserAdapter:
         assert detail.category == "RF Modules"
         assert "Frequency" in detail.specs
         assert detail.product_url == "https://www.mouser.com/ProductDetail/356-ESP32WRM32E"
+        assert (
+            detail.image_url == "https://www.mouser.com/images/mouserelectronics/images/esp32_t.jpg"
+        )
 
     async def test_get_part_details_not_found(self, adapter, mock_client):
         mock_client.post.return_value = _mock_response(MOUSER_EMPTY_RESPONSE)

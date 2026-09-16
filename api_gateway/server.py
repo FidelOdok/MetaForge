@@ -734,7 +734,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # MET-436 follow-up: without this, a component.search_* result was
         # pure chat output -- no reviewable, versioned trace in the twin.
         # Persists a chosen result as a BOMItem work product + project link.
-        component_recorder=make_component_recorder(twin, project_backend),
+        # catalog_store lets it auto-fill image/footprint/CAD/cost from an
+        # already-indexed catalog row when the caller doesn't pass them.
+        component_recorder=make_component_recorder(
+            twin,
+            project_backend,
+            catalog_store=getattr(app.state, "component_catalog_store", None),
+        ),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

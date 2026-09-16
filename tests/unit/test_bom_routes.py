@@ -41,6 +41,37 @@ class TestMapping:
         assert c.unitPrice == 0.0
         assert c.category == "uncategorized"
 
+    def test_maps_media_purchase_and_price_currency_fields(self) -> None:
+        """MET-436 follow-up: image/purchase/datasheet/footprint/CAD +
+        price_currency must reach the dashboard, not just live on the twin."""
+        item = BOMItem(
+            part_number="MP2459",
+            manufacturer="MPS",
+            image_url="https://example.com/mp2459.png",
+            purchase_url="https://www.digikey.com/en/products/detail/x/497-17363-ND",
+            datasheet_url="https://example.com/mp2459.pdf",
+            footprint="SOT65P210X110-6N",
+            cad_model_url="https://example.com/mp2459.step",
+            price_currency="GBP",
+        )
+        c = _item_to_component(item)
+        assert c.imageUrl == "https://example.com/mp2459.png"
+        assert c.purchaseUrl == "https://www.digikey.com/en/products/detail/x/497-17363-ND"
+        assert c.datasheetUrl == "https://example.com/mp2459.pdf"
+        assert c.footprint == "SOT65P210X110-6N"
+        assert c.cadModelUrl == "https://example.com/mp2459.step"
+        assert c.priceCurrency == "GBP"
+
+    def test_media_purchase_fields_default_none_price_currency_defaults_usd(self) -> None:
+        item = BOMItem(part_number="x", manufacturer="y")
+        c = _item_to_component(item)
+        assert c.imageUrl is None
+        assert c.purchaseUrl is None
+        assert c.datasheetUrl is None
+        assert c.footprint is None
+        assert c.cadModelUrl is None
+        assert c.priceCurrency == "USD"
+
 
 class TestRoute:
     async def test_empty_returns_empty_not_error(self) -> None:

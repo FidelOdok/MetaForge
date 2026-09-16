@@ -253,8 +253,8 @@ def test_parse_constraints_rejects_negative_weight():
 class _Hit:
     """Tiny stand-in for a SearchHit — mirrors the duck-typed fields."""
 
-    def __init__(self, mpn: str, source_path: str, chunk_index: int):
-        self.metadata = {"mpn": mpn}
+    def __init__(self, mpn: str, source_path: str, chunk_index: int, **extra_metadata: Any):
+        self.metadata = {"mpn": mpn, **extra_metadata}
         self.source_path = source_path
         self.heading = "Electrical Characteristics"
         self.chunk_index = chunk_index
@@ -270,6 +270,7 @@ class _StubKnowledgeService:
     def __init__(self) -> None:
         self._hits_by_query: dict[str, list[_Hit]] = {}
         self._props: dict[str, dict[str, dict[str, Any]]] = {}
+        self.search_calls: list[dict[str, Any] | None] = []
 
     def stub_search(self, query: str, hits: list[_Hit]) -> None:
         self._hits_by_query[query] = hits
@@ -282,8 +283,13 @@ class _StubKnowledgeService:
         query: str,
         top_k: int,
         knowledge_type: Any = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[_Hit]:
-        return list(self._hits_by_query.get(query, []))[:top_k]
+        self.search_calls.append(filters)
+        hits = list(self._hits_by_query.get(query, []))
+        if filters:
+            hits = [h for h in hits if all(h.metadata.get(k) == v for k, v in filters.items())]
+        return hits[:top_k]
 
     async def extract_properties(
         self,
@@ -467,3 +473,73 @@ async def test_to_dict_renders_wire_safe_shape():
     assert cr["property"] == "v"
     assert cr["passed"] is True
     assert cr["margin"] == pytest.approx(0.2)
+
+
+# ---------- populate_bom: purchase_unit filter (MET-436 follow-up) ----------
+
+
+@pytest.mark.asyncio
+async def test_purchase_unit_filter_narrows_to_tagged_hits():
+    svc = _StubKnowledgeService()
+    svc.stub_search(
+        "flight_controller x",
+        [
+            _Hit(
+                mpn="CUBE-ORANGE",
+                source_path="d://cube",
+                chunk_index=0,
+                purchase_unit="cots_assembly",
+            ),
+            _Hit(
+                mpn="RANDOM-IC", source_path="d://ic", chunk_index=0, purchase_unit="discrete_part"
+            ),
+        ],
+    )
+    svc.stub_extract("CUBE-ORANGE", {})
+    svc.stub_extract("RANDOM-IC", {})
+
+    result = await populate_bom(
+        svc,  # type: ignore[arg-type]
+        search_query="flight_controller x",
+        constraints=[],
+        purchase_unit="cots_assembly",
+    )
+
+    assert result.purchase_unit_filter_degraded is False
+    assert {c.mpn for c in result.suggestions} == {"CUBE-ORANGE"}
+    assert svc.search_calls[0] == {"purchase_unit": "cots_assembly"}
+
+
+@pytest.mark.asyncio
+async def test_purchase_unit_filter_degrades_to_unfiltered_when_untagged():
+    """The corpus has zero purchase_unit-tagged hits for this query -- must
+    still surface the untagged hits (no silent recall loss), but say so."""
+    svc = _StubKnowledgeService()
+    svc.stub_search(
+        "buck converter x",
+        [_Hit(mpn="MP2459", source_path="d://mp2459", chunk_index=0)],  # untagged
+    )
+    svc.stub_extract("MP2459", {})
+
+    result = await populate_bom(
+        svc,  # type: ignore[arg-type]
+        search_query="buck converter x",
+        constraints=[],
+        purchase_unit="discrete_part",
+    )
+
+    assert result.purchase_unit_filter_degraded is True
+    assert {c.mpn for c in result.suggestions} == {"MP2459"}
+    assert svc.search_calls == [{"purchase_unit": "discrete_part"}, None]
+
+
+@pytest.mark.asyncio
+async def test_no_purchase_unit_given_skips_filtering_entirely():
+    svc = _StubKnowledgeService()
+    svc.stub_search("x", [_Hit(mpn="A", source_path="d://a", chunk_index=0)])
+    svc.stub_extract("A", {})
+
+    result = await populate_bom(svc, search_query="x", constraints=[])  # type: ignore[arg-type]
+
+    assert result.purchase_unit_filter_degraded is False
+    assert svc.search_calls == [None]
