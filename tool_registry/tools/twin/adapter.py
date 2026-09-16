@@ -704,6 +704,25 @@ class TwinServer(McpToolServer):
                             "type": ["string", "null"],
                             "description": "3D/CAD model (e.g. STEP) URL, when known.",
                         },
+                        "purchase_url": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Public product/detail page to actually buy the part -- e.g. a "
+                                "distributor search result's 'product_url'."
+                            ),
+                        },
+                        "price_currency": {
+                            "type": "string",
+                            "default": "USD",
+                            "description": "ISO 4217 currency code for unit_cost_usd.",
+                        },
+                        "priced_distributor": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Which distributor unit_cost_usd came from, if different from "
+                                "'distributor' (e.g. a resolve_offers comparison)."
+                            ),
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -763,6 +782,9 @@ class TwinServer(McpToolServer):
         image_url = arguments.get("image_url")
         footprint = arguments.get("footprint")
         cad_model_url = arguments.get("cad_model_url")
+        purchase_url = arguments.get("purchase_url")
+        price_currency = arguments.get("price_currency", "USD")
+        priced_distributor = arguments.get("priced_distributor")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
 
@@ -781,6 +803,11 @@ class TwinServer(McpToolServer):
             image_url=image_url if isinstance(image_url, str) else None,
             footprint=footprint if isinstance(footprint, str) else None,
             cad_model_url=cad_model_url if isinstance(cad_model_url, str) else None,
+            purchase_url=purchase_url if isinstance(purchase_url, str) else None,
+            price_currency=price_currency if isinstance(price_currency, str) else "USD",
+            priced_distributor=(
+                priced_distributor if isinstance(priced_distributor, str) else None
+            ),
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
         )

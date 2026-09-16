@@ -12,6 +12,7 @@ query SearchParts($query: String!, $limit: Int!) {
           name
         }
         shortDescription
+        octopartUrl
         bestDatasheet {
           url
         }
@@ -55,6 +56,7 @@ query PartDetails($mpn: String!) {
           name
         }
         shortDescription
+        octopartUrl
         bestDatasheet {
           url
         }

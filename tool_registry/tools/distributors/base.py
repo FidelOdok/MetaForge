@@ -45,6 +45,15 @@ class PartSearchResult(BaseModel):
     lead_time_days: int | None = Field(default=None, description="Lead time in days")
     lifecycle_status: LifecycleStatus = Field(default=LifecycleStatus.UNKNOWN)
     datasheet_url: str | None = Field(default=None, description="URL to datasheet")
+    # Follow-up to the image/footprint/CAD gap: the public product/detail
+    # page a human or agent would actually open to buy the part -- distinct
+    # from any internal API endpoint URL an adapter might build to make the
+    # request itself (e.g. DigiKey's own ``_product_url()`` helper, which is
+    # an API call target, never surfaced to callers). Mapped from each
+    # vendor's own response field (DigiKey ``ProductUrl``, Mouser
+    # ``ProductDetailUrl``, Nexar/Octopart ``octopartUrl``) -- same field
+    # this vendor's API already returns alongside ``datasheet_url`` above.
+    product_url: str | None = Field(default=None, description="Public product/detail page URL")
 
 
 class PartDetail(PartSearchResult):

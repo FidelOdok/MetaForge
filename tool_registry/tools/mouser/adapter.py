@@ -170,6 +170,7 @@ class MouserAdapter(DistributorAdapter):
                     lead_time_days=_parse_lead_time(part.get("LeadTime", "")),
                     lifecycle_status=_map_lifecycle(part.get("LifecycleStatus", "")),
                     datasheet_url=part.get("DataSheetUrl"),
+                    product_url=part.get("ProductDetailUrl"),
                 )
             )
         return results
@@ -194,6 +195,7 @@ class MouserAdapter(DistributorAdapter):
             lead_time_days=_parse_lead_time(part.get("LeadTime", "")),
             lifecycle_status=_map_lifecycle(part.get("LifecycleStatus", "")),
             datasheet_url=part.get("DataSheetUrl"),
+            product_url=part.get("ProductDetailUrl"),
             specs=specs,
             package=specs.get("Package / Case", ""),
             category=part.get("Category", ""),

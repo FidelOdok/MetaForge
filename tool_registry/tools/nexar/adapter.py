@@ -190,6 +190,7 @@ class NexarAdapter(DistributorAdapter):
                         if part.get("bestDatasheet")
                         else None
                     ),
+                    product_url=part.get("octopartUrl"),
                 )
             )
         return results
@@ -219,6 +220,7 @@ class NexarAdapter(DistributorAdapter):
             datasheet_url=(
                 part.get("bestDatasheet", {}).get("url") if part.get("bestDatasheet") else None
             ),
+            product_url=part.get("octopartUrl"),
             specs=specs,
             package=specs.get("Package / Case", ""),
             category=part.get("category", {}).get("name", "") if part.get("category") else "",

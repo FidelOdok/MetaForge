@@ -14,6 +14,7 @@ blob-worthy document.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -53,6 +54,9 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
         image_url: str | None = None,
         footprint: str | None = None,
         cad_model_url: str | None = None,
+        purchase_url: str | None = None,
+        price_currency: str = "USD",
+        priced_distributor: str | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
@@ -86,6 +90,13 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
 
             global_asset_id = f"urn:metaforge:bom:{_urn_segment(manufacturer)}:{_urn_segment(mpn)}"
 
+            # A price is a snapshot, not a fact -- capture *when* it was
+            # taken here, at the moment of recording, rather than trusting
+            # a caller-supplied timestamp (which could be stale or simply
+            # wrong). None when no cost is given at all: there's nothing to
+            # timestamp.
+            priced_at = datetime.now(UTC) if unit_cost_usd is not None else None
+
             item = BOMItem(
                 part_number=mpn,
                 manufacturer=manufacturer,
@@ -99,6 +110,13 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
                 image_url=image_url,
                 footprint=footprint,
                 cad_model_url=cad_model_url,
+                purchase_url=purchase_url,
+                priced_at=priced_at,
+                price_currency=price_currency,
+                # Defaults to the buy-from supplier when the caller didn't
+                # separately say which distributor's quote this price came
+                # from (the common case: source==distributor).
+                priced_distributor=priced_distributor if priced_distributor else distributor,
                 project_id=project_id,  # pydantic coerces str → UUID
             )
             created = await twin.add_bom_item(item)

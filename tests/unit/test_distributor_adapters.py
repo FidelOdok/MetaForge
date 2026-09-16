@@ -40,6 +40,7 @@ DIGIKEY_SEARCH_RESPONSE = {
             "ManufacturerLeadWeeks": "12",
             "ProductStatus": "Active",
             "DatasheetUrl": "https://example.com/datasheet.pdf",
+            "ProductUrl": "https://www.digikey.com/en/products/detail/x/497-17363-ND",
         },
     ],
 }
@@ -53,6 +54,8 @@ DIGIKEY_DETAIL_RESPONSE = {
     "ManufacturerLeadWeeks": "12",
     "ProductStatus": "Active",
     "DatasheetUrl": "https://example.com/datasheet.pdf",
+    "ProductUrl": "https://www.digikey.com/en/products/detail/x/497-17363-ND",
+    "PhotoUrl": "https://example.com/stm32f405.png",
     "MinimumOrderQuantity": 1,
     "QuantityOnOrder": 200,
     "Category": {"Name": "Microcontrollers"},
@@ -79,6 +82,7 @@ MOUSER_SEARCH_RESPONSE = {
                 "LeadTime": "8 Weeks",
                 "LifecycleStatus": "New Product",
                 "DataSheetUrl": "https://example.com/esp32.pdf",
+                "ProductDetailUrl": "https://www.mouser.com/ProductDetail/356-ESP32WRM32E",
             },
         ],
     },
@@ -96,6 +100,7 @@ MOUSER_DETAIL_RESPONSE = {
                 "LeadTime": "8 Weeks",
                 "LifecycleStatus": "New Product",
                 "DataSheetUrl": "https://example.com/esp32.pdf",
+                "ProductDetailUrl": "https://www.mouser.com/ProductDetail/356-ESP32WRM32E",
                 "Min": 1,
                 "Category": "RF Modules",
                 "ProductAttributes": [
@@ -129,6 +134,7 @@ NEXAR_SEARCH_RESPONSE = {
                         "mpn": "ATmega328P-AU",
                         "manufacturer": {"name": "Microchip"},
                         "shortDescription": "8-bit AVR MCU",
+                        "octopartUrl": "https://octopart.com/atmega328p-au-microchip-12345",
                         "bestDatasheet": {"url": "https://example.com/atmega.pdf"},
                         "sellers": [
                             {
@@ -186,6 +192,7 @@ NEXAR_DETAIL_RESPONSE = {
                         "mpn": "ATmega328P-AU",
                         "manufacturer": {"name": "Microchip"},
                         "shortDescription": "8-bit AVR MCU",
+                        "octopartUrl": "https://octopart.com/atmega328p-au-microchip-12345",
                         "bestDatasheet": {"url": "https://example.com/atmega.pdf"},
                         "sellers": [
                             {
@@ -284,6 +291,13 @@ class TestSharedModels:
         assert d.footprint == "SOT65P210X110-6N"
         assert d.cad_model_url == "https://example.com/x.step"
 
+    def test_product_url_defaults_none(self):
+        assert PartSearchResult(mpn="X", distributor="Y").product_url is None
+
+    def test_product_url_settable(self):
+        r = PartSearchResult(mpn="X", distributor="Y", product_url="https://example.com/product/x")
+        assert r.product_url == "https://example.com/product/x"
+
     def test_pricing_break_validation(self):
         pb = PricingBreak(quantity=10, unit_price=1.5, currency="EUR")
         assert pb.quantity == 10
@@ -356,6 +370,7 @@ class TestDigiKeyAdapter:
         assert results[0].distributor == "DigiKey"
         assert results[0].stock_qty == 5000
         assert results[0].lifecycle_status == LifecycleStatus.ACTIVE
+        assert results[0].product_url == "https://www.digikey.com/en/products/detail/x/497-17363-ND"
 
     async def test_search_parts_empty(self, adapter, mock_client):
         token_resp = _mock_response(DIGIKEY_TOKEN_RESPONSE)
@@ -384,6 +399,8 @@ class TestDigiKeyAdapter:
         assert detail.package == "LQFP-64"
         assert detail.category == "Microcontrollers"
         assert "Core" in detail.specs
+        assert detail.product_url == "https://www.digikey.com/en/products/detail/x/497-17363-ND"
+        assert detail.image_url == "https://example.com/stm32f405.png"
 
     async def test_get_part_details_not_found(self, adapter, mock_client):
         token_resp = _mock_response(DIGIKEY_TOKEN_RESPONSE)
@@ -554,6 +571,7 @@ class TestMouserAdapter:
         assert results[0].distributor == "Mouser"
         assert results[0].stock_qty == 2500
         assert results[0].lead_time_days == 56  # 8 weeks * 7
+        assert results[0].product_url == "https://www.mouser.com/ProductDetail/356-ESP32WRM32E"
 
     async def test_search_parts_empty(self, adapter, mock_client):
         mock_client.post.return_value = _mock_response(MOUSER_EMPTY_RESPONSE)
@@ -577,6 +595,7 @@ class TestMouserAdapter:
         assert detail.package == "Module"
         assert detail.category == "RF Modules"
         assert "Frequency" in detail.specs
+        assert detail.product_url == "https://www.mouser.com/ProductDetail/356-ESP32WRM32E"
 
     async def test_get_part_details_not_found(self, adapter, mock_client):
         mock_client.post.return_value = _mock_response(MOUSER_EMPTY_RESPONSE)
@@ -680,6 +699,7 @@ class TestNexarAdapter:
         assert results[0].distributor == "Nexar"
         assert results[0].stock_qty == 10000  # best offer
         assert results[0].lifecycle_status == LifecycleStatus.ACTIVE
+        assert results[0].product_url == "https://octopart.com/atmega328p-au-microchip-12345"
 
     async def test_search_parts_empty(self, adapter, mock_client):
         token_resp = _mock_response(NEXAR_TOKEN_RESPONSE)
@@ -706,6 +726,7 @@ class TestNexarAdapter:
         assert detail.mpn == "ATmega328P-AU"
         assert detail.package == "TQFP-32"
         assert detail.category == "Microcontrollers"
+        assert detail.product_url == "https://octopart.com/atmega328p-au-microchip-12345"
 
     async def test_get_part_details_not_found(self, adapter, mock_client):
         token_resp = _mock_response(NEXAR_TOKEN_RESPONSE)

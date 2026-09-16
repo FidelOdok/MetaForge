@@ -11,6 +11,7 @@ recorder itself, then the twin adapter handler that calls it).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -83,6 +84,67 @@ class TestRecorder:
         assert item.image_url == "https://example.com/mp2459.png"
         assert item.footprint == "SOT65P210X110-6N"
         assert item.cad_model_url == "https://example.com/mp2459.step"
+
+    async def test_purchase_url_and_pricing_provenance_stored(self) -> None:
+        """Follow-up: a price is a snapshot, not a fact -- priced_at must be
+        auto-captured at record time (never caller-supplied), and
+        priced_distributor defaults to the buy-from supplier."""
+        twin = InMemoryTwinAPI.create()
+        record = make_component_recorder(twin, None)
+        before = datetime.now(UTC)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            unit_cost_usd=0.42,
+            distributor="DigiKey",
+            purchase_url="https://www.digikey.com/en/products/detail/x/497-17363-ND",
+        )
+        after = datetime.now(UTC)
+
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.purchase_url == "https://www.digikey.com/en/products/detail/x/497-17363-ND"
+        assert item.price_currency == "USD"
+        assert item.priced_distributor == "DigiKey"
+        assert item.priced_at is not None
+        assert before <= item.priced_at <= after
+
+    async def test_priced_distributor_can_differ_from_supplier(self) -> None:
+        """A price captured via a comparison (e.g. resolve_offers) against a
+        cheaper source than the buy-from supplier must say so."""
+        twin = InMemoryTwinAPI.create()
+        record = make_component_recorder(twin, None)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+            unit_cost_usd=0.35,
+            distributor="Mouser",
+            priced_distributor="DigiKey",
+        )
+
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.supplier == "Mouser"
+        assert item.priced_distributor == "DigiKey"
+
+    async def test_priced_at_none_when_no_cost_given(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        record = make_component_recorder(twin, None)
+
+        result = await record(
+            mpn="MP2459",
+            manufacturer="MPS",
+            category="buck_converter",
+            purchase_unit="discrete_part",
+        )
+
+        item = await twin.graph.get_node(UUID(result["node_id"]))
+        assert item.priced_at is None
+        assert item.purchase_url is None
 
     async def test_quantity_defaults_to_one_and_floors_at_one(self) -> None:
         twin = InMemoryTwinAPI.create()
@@ -180,6 +242,27 @@ class TestAdapterHandler:
         assert item.image_url == "https://example.com/mp2459.png"
         assert item.footprint == "SOT65P210X110-6N"
         assert item.cad_model_url == "https://example.com/mp2459.step"
+
+    async def test_handler_passes_through_purchase_and_pricing_fields(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, component_recorder=make_component_recorder(twin, None))
+        out = await server.record_component_selection(
+            {
+                "mpn": "MP2459",
+                "manufacturer": "MPS",
+                "category": "buck_converter",
+                "purchase_unit": "discrete_part",
+                "unit_cost_usd": 0.42,
+                "purchase_url": "https://www.digikey.com/en/products/detail/x/497-17363-ND",
+                "price_currency": "EUR",
+                "priced_distributor": "DigiKey",
+            }
+        )
+        item = await twin.graph.get_node(UUID(out["node_id"]))
+        assert item.purchase_url == "https://www.digikey.com/en/products/detail/x/497-17363-ND"
+        assert item.price_currency == "EUR"
+        assert item.priced_distributor == "DigiKey"
+        assert item.priced_at is not None
 
     def test_record_component_selection_absent_without_recorder(self) -> None:
         server = TwinServer(twin=InMemoryTwinAPI.create())
