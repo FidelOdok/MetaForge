@@ -8,17 +8,67 @@ import type { BomComponent } from '../types/bom';
 type SortField = 'designator' | 'partNumber' | 'description' | 'manufacturer' | 'quantity' | 'unitPrice' | 'status';
 type SortDir = 'asc' | 'desc';
 
+// Common ISO 4217 symbols. Falls back to "<code> " prefix for anything else
+// (e.g. "SEK 42.00") rather than silently mislabeling a non-USD price as $.
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  GBP: '£',
+  EUR: '€',
+  JPY: '¥',
+};
+
+function formatPrice(amount: number, currency: string): string {
+  const symbol = CURRENCY_SYMBOLS[currency];
+  return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
+}
+
 function BomRow({ component }: { component: BomComponent }) {
   return (
     <tr
       className="hover:bg-[#282a30] cursor-default"
       style={{ height: '36px', borderBottom: '1px solid rgba(65,72,90,0.1)' }}
     >
+      <td className="px-3">
+        {component.imageUrl ? (
+          <img
+            src={component.imageUrl}
+            alt={component.partNumber}
+            className="rounded"
+            style={{ width: '20px', height: '20px', objectFit: 'contain', background: '#191b22' }}
+          />
+        ) : (
+          <div style={{ width: '20px', height: '20px' }} />
+        )}
+      </td>
       <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
         {component.designator}
       </td>
       <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
-        {component.partNumber}
+        {component.purchaseUrl ? (
+          <a
+            href={component.purchaseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+            title="Open product page"
+          >
+            {component.partNumber}
+          </a>
+        ) : (
+          component.partNumber
+        )}
+        {component.datasheetUrl && (
+          <a
+            href={component.datasheetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open datasheet"
+            className="material-symbols-outlined align-middle ml-1 text-on-surface-variant hover:text-on-surface"
+            style={{ fontSize: '13px' }}
+          >
+            description
+          </a>
+        )}
       </td>
       <td className="px-3 text-xs text-on-surface-variant">
         {component.description}
@@ -30,7 +80,7 @@ function BomRow({ component }: { component: BomComponent }) {
         {component.quantity}
       </td>
       <td className="px-3 text-right font-mono text-xs text-on-surface">
-        ${component.unitPrice.toFixed(2)}
+        {formatPrice(component.unitPrice, component.priceCurrency)}
       </td>
       <td className="px-3">
         <StatusBadge status={component.status} />
@@ -87,7 +137,7 @@ export function BomPage() {
   }
 
   function handleExportCsv() {
-    const header = ['Ref', 'Part Number', 'Description', 'Manufacturer', 'Qty', 'Unit Price', 'Status'];
+    const header = ['Ref', 'Part Number', 'Description', 'Manufacturer', 'Qty', 'Unit Price', 'Currency', 'Status', 'Purchase URL', 'Datasheet URL'];
     const rows = sorted.map((c) => [
       c.designator,
       c.partNumber,
@@ -95,7 +145,10 @@ export function BomPage() {
       c.manufacturer,
       String(c.quantity),
       c.unitPrice.toFixed(2),
+      c.priceCurrency,
       c.status,
+      c.purchaseUrl ?? '',
+      c.datasheetUrl ?? '',
     ]);
     const csv = [header, ...rows].map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -256,6 +309,10 @@ export function BomPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr style={{ background: '#191b22' }}>
+                <th
+                  style={{ height: '32px', borderBottom: '1px solid rgba(65,72,90,0.2)', width: '32px' }}
+                  aria-label="Image"
+                />
                 {(
                   [
                     { field: 'designator' as SortField, label: 'Ref', align: 'left' },

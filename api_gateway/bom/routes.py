@@ -47,9 +47,15 @@ class BomComponentResponse(BaseModel):
     manufacturer: str
     quantity: int
     unitPrice: float  # noqa: N815
+    priceCurrency: str  # noqa: N815 — ISO 4217, e.g. "USD"/"GBP"
     status: Literal["available", "low_stock", "out_of_stock", "alternate_needed"]
     category: str
     projectId: str  # noqa: N815
+    imageUrl: str | None = None  # noqa: N815
+    purchaseUrl: str | None = None  # noqa: N815
+    datasheetUrl: str | None = None  # noqa: N815
+    footprint: str | None = None
+    cadModelUrl: str | None = None  # noqa: N815
 
 
 class BomListResponse(BaseModel):
@@ -70,9 +76,15 @@ def _item_to_component(item: BOMItem) -> BomComponentResponse:
         manufacturer=item.manufacturer,
         quantity=item.quantity,
         unitPrice=float(item.unit_cost) if item.unit_cost is not None else 0.0,
+        priceCurrency=item.price_currency or "USD",
         status=status,  # type: ignore[arg-type]
         category=str(specs.get("category", "uncategorized")),
         projectId=str(item.project_id) if item.project_id else "",
+        imageUrl=item.image_url or None,
+        purchaseUrl=item.purchase_url or None,
+        datasheetUrl=item.datasheet_url or None,
+        footprint=item.footprint or None,
+        cadModelUrl=item.cad_model_url or None,
     )
 
 

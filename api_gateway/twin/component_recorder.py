@@ -18,6 +18,16 @@ find_orphans()`` treats ``BOM_ITEM`` as a "dependent" node type expected to be
 reachable from a parent work product (see its docstring), so every BOMItem
 recorded before this fix showed up as an orphan and was unreachable via
 ``twin.thread_for``.
+
+That work product is deliberately NOT just any ``WorkProductType.BOM`` node
+found for the project -- ``api_gateway/twin/bom_recorder.py`` (the
+electronics agent's whole-CSV-blob BOM) and ``import_service.py``'s CSV
+importer can also create ``BOM`` work products, and those are a different
+kind of artifact (one opaque document blob) from this module's "container of
+individually-queryable BOMItem line items" -- attaching one to the other's
+node would silently conflate two unrelated representations. The container
+this module creates carries an explicit ``metadata["kind"]`` marker so the
+lookup only ever finds/reuses its own.
 """
 
 from __future__ import annotations
@@ -35,6 +45,7 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.component_recorder")
 
 _BOM_WORK_PRODUCT_NAME = "Bill of Materials"
+_CONTAINER_KIND = "component_selection_container"
 
 
 def _urn_segment(value: str) -> str:
@@ -45,14 +56,16 @@ def _urn_segment(value: str) -> str:
 async def _find_or_create_bom_work_product(
     twin: Any, project_backend: Any, project_id: str
 ) -> str | None:
-    """Return the project's ``BOM`` work product id, creating one if absent.
+    """Return this recorder's own container ``BOM`` work product id for the
+    project, creating one if absent.
 
-    One per project (looked up by ``work_product_type=BOM`` + ``project_id``,
-    same shape as ``decision_recorder``'s content-hash dedup lookup) -- every
-    recorded component selection links to the same container rather than
-    minting a new work product per call. Best-effort: any failure here must
-    never block the BOMItem write itself, so callers get ``None`` (no edge
-    added) rather than an exception.
+    One per project, identified by ``metadata["kind"] == _CONTAINER_KIND`` --
+    ``list_work_products`` has no metadata filter, so every ``BOM`` work
+    product for the project is fetched and filtered client-side; a
+    document-shaped ``BOM`` from ``bom_recorder``/``import_service`` (no such
+    marker) is never matched and never reused. Best-effort: any failure here
+    must never block the BOMItem write itself, so callers get ``None`` (no
+    edge added) rather than an exception.
     """
     from twin_core.models.enums import WorkProductType
     from twin_core.models.work_product import WorkProduct
@@ -62,8 +75,9 @@ async def _find_or_create_bom_work_product(
         existing = await twin.list_work_products(
             work_product_type=WorkProductType.BOM, project_id=scope
         )
-        if existing:
-            return str(existing[0].id)
+        for wp in existing:
+            if (wp.metadata or {}).get("kind") == _CONTAINER_KIND:
+                return str(wp.id)
 
         now = datetime.now(UTC)
         wp = WorkProduct(
@@ -73,7 +87,7 @@ async def _find_or_create_bom_work_product(
             file_path="",
             content_hash="",
             format="",
-            metadata={"created_by": "twin.record_component_selection"},
+            metadata={"created_by": "twin.record_component_selection", "kind": _CONTAINER_KIND},
             created_at=now,
             updated_at=now,
             created_by="twin.record_component_selection",
@@ -96,12 +110,23 @@ async def _find_or_create_bom_work_product(
         return None
 
 
-def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
+def make_component_recorder(
+    twin: Any, project_backend: Any = None, catalog_store: Any = None
+) -> Any:
     """Return an async ``record(...)`` bound to a twin + project backend.
 
     The returned callable is what the twin MCP adapter invokes; binding the
     dependencies here keeps the adapter free of api_gateway/twin_core
     imports, matching every other recorder in this package.
+
+    ``catalog_store`` (optional, a ``ComponentCatalogStore``) lets the
+    recorder auto-fill ``datasheet_url``/``image_url``/``footprint``/
+    ``cad_model_url``/``unit_cost_usd`` from an already-indexed catalog row
+    when the caller leaves them unset -- without this, a caller has to
+    manually copy every field across from a prior ``component.
+    search_parametric`` call even though the same data already lives in the
+    catalog under the same (mpn, manufacturer). Only fills fields the caller
+    left ``None``; an explicit caller-supplied value always wins.
     """
 
     async def record(
@@ -139,6 +164,35 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
             span.set_attribute("component.mpn", mpn)
             span.set_attribute("component.category", category)
             span.set_attribute("component.purchase_unit", purchase_unit)
+
+            # Auto-fill from the catalog when the caller left a field unset --
+            # never overrides an explicit caller-supplied value (including an
+            # explicit empty string, which is why this checks ``is None``,
+            # not falsiness). A lookup failure degrades silently to "nothing
+            # filled in", same as every other best-effort facet here.
+            if catalog_store is not None and (
+                datasheet_url is None
+                or image_url is None
+                or footprint is None
+                or cad_model_url is None
+                or unit_cost_usd is None
+            ):
+                try:
+                    row = await catalog_store.get(mpn, manufacturer)
+                except Exception as exc:  # noqa: BLE001 — auto-fill is best-effort
+                    row = None
+                    logger.warning("component_selection_catalog_lookup_failed", error=str(exc))
+                if row is not None:
+                    if datasheet_url is None:
+                        datasheet_url = row.datasheet_url or None
+                    if image_url is None:
+                        image_url = row.image_url or None
+                    if footprint is None:
+                        footprint = row.footprint or None
+                    if cad_model_url is None:
+                        cad_model_url = row.cad_model_url or None
+                    if unit_cost_usd is None:
+                        unit_cost_usd = row.cost_usd
 
             description = category if not role else f"{category} ({role})"
             specifications: dict[str, Any] = {

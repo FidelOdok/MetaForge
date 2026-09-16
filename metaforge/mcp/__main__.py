@@ -1044,6 +1044,15 @@ async def _bootstrap(
         blob_stager = make_blob_stager(twin)
     except Exception as exc:  # noqa: BLE001 — degrade; stage_work_product_file just absent
         logger.warning("mcp_blob_stager_init_failed", error=str(exc))
+    # MET-436: the parametric component catalog + the intent-translation
+    # LLM. Both are None-able independently — component.* just stays
+    # unregistered (component_mcp_adapter_skipped) unless the catalog
+    # store, the LLM, AND knowledge_service (reused for the intent-search
+    # fuzzy fallback) are all available. Built before component_recorder
+    # below so the recorder can auto-fill image/footprint/CAD/cost from an
+    # already-indexed catalog row.
+    component_catalog_store = await _build_component_catalog_store()
+    component_intent_llm = _build_component_intent_llm()
     # MET-436 follow-up: mirror the decision recorder so
     # twin.record_component_selection works over the sidecar too — without
     # it, a component.search_* result stays pure chat output here even
@@ -1052,16 +1061,11 @@ async def _bootstrap(
     try:
         from api_gateway.twin.component_recorder import make_component_recorder
 
-        component_recorder = make_component_recorder(twin, project_backend)
+        component_recorder = make_component_recorder(
+            twin, project_backend, catalog_store=component_catalog_store
+        )
     except Exception as exc:  # noqa: BLE001 — degrade; record_component_selection just absent
         logger.warning("mcp_component_recorder_init_failed", error=str(exc))
-    # MET-436: the parametric component catalog + the intent-translation
-    # LLM. Both are None-able independently — component.* just stays
-    # unregistered (component_mcp_adapter_skipped) unless the catalog
-    # store, the LLM, AND knowledge_service (reused for the intent-search
-    # fuzzy fallback) are all available.
-    component_catalog_store = await _build_component_catalog_store()
-    component_intent_llm = _build_component_intent_llm()
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         knowledge_service=knowledge_service,

@@ -196,6 +196,7 @@ class MouserAdapter(DistributorAdapter):
             lifecycle_status=_map_lifecycle(part.get("LifecycleStatus", "")),
             datasheet_url=part.get("DataSheetUrl"),
             product_url=part.get("ProductDetailUrl"),
+            image_url=part.get("ImagePath") or None,
             specs=specs,
             package=specs.get("Package / Case", ""),
             category=part.get("Category", ""),

@@ -280,7 +280,21 @@ async def _search_one_role(
             search_query=f"{candidate.category} {intent_text}",
             constraints=bom_constraints,
             top_k=top_k,
+            # MET-436 follow-up: narrows the fuzzy fallback to knowledge
+            # entries tagged with the same purchase_unit at ingest time
+            # (KnowledgeService.search's filters contract -- see the
+            # Knowledge Ingestion Playbook), so a cots_assembly role's
+            # fallback doesn't surface a random discrete part that just
+            # happened to score well on keywords. Degrades to unfiltered
+            # (flagged below) rather than losing recall against an
+            # untagged corpus.
+            purchase_unit=candidate.purchase_unit,
         )
+        if bom_result.purchase_unit_filter_degraded:
+            warnings.append(
+                f"no {candidate.purchase_unit!r}-tagged knowledge hits for category "
+                f"{candidate.category!r} -- fuzzy fallback used an unfiltered search instead"
+            )
         role_candidates2 = tuple(
             RoleCandidate(
                 mpn=bc.mpn, source="fuzzy_fallback", score=bc.score, cost_usd=None, raw=bc
@@ -317,13 +331,17 @@ async def search_intent(
 ) -> IntentSearchResult:
     """Translate ``intent_text`` and search each resulting category/role.
 
-    Known gap (per the MET-436 plan, not solved here): the mode-2 fallback
-    for ``cots_assembly`` roles needs ``KnowledgeType.COMPONENT`` search
-    results taggable by ``purchase_unit`` to reliably distinguish "a
-    complete board" from "a random discrete part that happened to match" —
-    today's knowledge-ingestion pipeline has no such metadata key, so a
-    fuzzy-fallback hit for a COTS role should be treated as lower-trust than
-    a parametric hit for the same role.
+    Closed follow-up (was: "Known gap, per the MET-436 plan, not solved
+    here"): the mode-2 fallback now passes ``candidate.purchase_unit`` to
+    ``populate_bom``, which filters on a ``purchase_unit`` knowledge
+    metadata key (stampable today via ``knowledge.ingest``'s ``metadata``
+    argument — no ingestion-pipeline code change was needed, per the
+    Knowledge Ingestion Playbook's filter contract). Degrades to an
+    unfiltered search (flagged via ``warnings``, see
+    ``purchase_unit_filter_degraded``) when the corpus has no tagged hits
+    yet, rather than silently losing recall — so a fuzzy-fallback hit for a
+    COTS role should still be treated as lower-trust than a parametric hit
+    until enough of the corpus is actually tagged.
     """
     with tracer.start_as_current_span("intent_search.search_intent") as span:
         t0 = time.monotonic()

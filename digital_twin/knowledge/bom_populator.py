@@ -106,6 +106,14 @@ class BomPopulateResult:
     constraints and got dropped from ``suggestions``."""
     total_search_hits: int
     query_time_ms: float
+    purchase_unit_filter_degraded: bool = False
+    """True when ``purchase_unit`` was given but the filtered search came
+    back empty and this fell back to an unfiltered search (MET-436
+    follow-up). Signals "the corpus has no purchase_unit-tagged hits for
+    this query" to the caller -- e.g. intent_search.py's cots_assembly
+    fuzzy fallback -- so a caller can tell "correctly narrowed, nothing
+    matched" from "we couldn't narrow it at all" rather than silently
+    treating an untagged corpus as if it had zero recall regression."""
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +292,7 @@ async def populate_bom(
     top_k: int = 5,
     candidate_limit: int = 30,
     property_aliases: dict[str, list[str]] | None = None,
+    purchase_unit: str | None = None,
 ) -> BomPopulateResult:
     """Run the auto-BOM pipeline against a KnowledgeService.
 
@@ -297,15 +306,39 @@ async def populate_bom(
     score 0.0) when fewer than ``top_k`` candidates pass — gives the
     UX a "we looked but nothing fits" surface instead of an empty
     list. They're sorted to the end.
+
+    ``purchase_unit`` (MET-436 follow-up), when given, narrows the
+    surfaced candidates to knowledge entries tagged
+    ``metadata={"purchase_unit": ...}`` at ingest time (the Knowledge
+    Ingestion Playbook's "no code change required" filter contract — see
+    ``digital_twin/knowledge/consumer.py`` and ``knowledge.ingest``'s
+    ``metadata`` argument for where a producer stamps it). Two-pass,
+    never a silent recall regression against an untagged corpus: if the
+    filtered search returns nothing, this retries unfiltered and reports
+    ``purchase_unit_filter_degraded=True`` rather than returning an empty
+    result just because nothing in the corpus happens to be tagged yet.
     """
     t0 = time.monotonic()
 
-    # 1. Surface candidate chunks
-    hits = await service.search(
-        query=search_query,
-        top_k=candidate_limit,
-        knowledge_type=KnowledgeType.COMPONENT,
-    )
+    # 1. Surface candidate chunks — filtered by purchase_unit first when
+    # asked, falling back to unfiltered on a filtered miss (see docstring).
+    purchase_unit_filter_degraded = False
+    hits: list[Any] = []
+    if purchase_unit:
+        hits = await service.search(
+            query=search_query,
+            top_k=candidate_limit,
+            knowledge_type=KnowledgeType.COMPONENT,
+            filters={"purchase_unit": purchase_unit},
+        )
+        if not hits:
+            purchase_unit_filter_degraded = True
+    if not hits:
+        hits = await service.search(
+            query=search_query,
+            top_k=candidate_limit,
+            knowledge_type=KnowledgeType.COMPONENT,
+        )
 
     # 2. Deduplicate by MPN; keep the first chunk's source/citation per MPN.
     by_mpn: dict[str, _RawCandidate] = {}
@@ -406,6 +439,7 @@ async def populate_bom(
         candidates_evaluated=len(scored),
         total_search_hits=len(hits),
         query_time_ms=round(elapsed_ms, 2),
+        purchase_unit_filter_degraded=purchase_unit_filter_degraded,
     )
 
 
@@ -446,6 +480,7 @@ def to_dict(result: BomPopulateResult) -> dict[str, Any]:
         "candidates_evaluated": result.candidates_evaluated,
         "total_search_hits": result.total_search_hits,
         "query_time_ms": result.query_time_ms,
+        "purchase_unit_filter_degraded": result.purchase_unit_filter_degraded,
     }
 
 

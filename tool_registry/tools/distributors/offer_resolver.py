@@ -84,7 +84,28 @@ class Offer(BaseModel):
     meets_deadline: bool | None = None
 
     price_extrapolated_below_min_tier: bool = False
-    is_multi_seller_aggregate: bool = False
+    is_multi_seller_aggregate: bool = Field(
+        default=False,
+        description=(
+            "True for Nexar/Octopart: its GraphQL response already carries "
+            "separate sellers[]/offers[] per MPN (confirmed in nexar/adapter.py "
+            "-- e.g. DigiKey and Mouser as distinct sellers under one part), "
+            "but NexarAdapter flattens them into one aggregate Offer (best "
+            "stock, cheapest/de-duplicated pricing) because DistributorAdapter's "
+            "shared contract is one PartDetail/AvailabilityInfo per MPN per "
+            "adapter -- the same method shape DigiKey/Mouser (real single "
+            "sellers) use. This one aggregate Offer may not be atomically "
+            "purchasable at exactly its stated price+stock+lead-time -- that "
+            "combination could be split across several of Nexar's underlying "
+            "sellers. Genuinely disaggregating per seller needs more than "
+            "touching nexar/adapter.py: DistributorAdapter's per-MPN-single- "
+            "result contract and offer_resolver.py's one-Offer-per-configured-"
+            "adapter fan-out (_fetch_one/resolve_offers_for_item) would both "
+            "need to become one-to-many. Not done here -- deferred until "
+            "there's a live Nexar account this session's Nexar credentials to "
+            "verify a redesign against (none exist yet on fidel-dev)."
+        ),
+    )
     partial_data: bool = False
     fetched_at: datetime
 
@@ -99,6 +120,17 @@ class OfferResolution(BaseModel):
     reason: str | None = None
     offers: list[Offer] = Field(default_factory=list)
     insufficient_offers: list[Offer] = Field(default_factory=list)
+    currency_mismatch: bool = Field(
+        default=False,
+        description=(
+            "True when the returned offers span more than one currency. "
+            "There is no FX-rate source in this layer (see module docstring) "
+            "-- total_committed_cost/unit_price_at_qty are still compared as "
+            "raw numbers across offers when this is True, which is NOT a "
+            "meaningful price comparison. A caller must check each offer's "
+            "own `currency` field before trusting cross-offer cost ranking."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +395,26 @@ async def resolve_offers_for_item(
                 ),
             )
 
+        # No FX-rate source in this layer (see module + OfferResolution
+        # docstrings) -- cost-ranking two offers priced in different
+        # currencies as if their numbers were directly comparable would be
+        # silently wrong, not just imprecise. Surface the mismatch instead
+        # of fabricating a conversion.
+        currencies = {offer.currency for offer in all_offers}
+        currency_mismatch = len(currencies) > 1
+        mismatch_note = (
+            f" WARNING: offers span multiple currencies ({', '.join(sorted(currencies))}) -- "
+            "cost ranking compares raw numbers, not real value; check each offer's own "
+            "currency before trusting it."
+            if currency_mismatch
+            else ""
+        )
+        if currency_mismatch:
+            span.set_attribute("offer_resolver.currency_mismatch", True)
+            logger.warning(
+                "offer_resolver_currency_mismatch", mpn=mpn, currencies=sorted(currencies)
+            )
+
         sufficient = [offer for offer in all_offers if offer.meets_qty]
         insufficient = [offer for offer in all_offers if not offer.meets_qty]
 
@@ -377,9 +429,11 @@ async def resolve_offers_for_item(
                 deadline_days=deadline_days,
                 status="insufficient_stock_everywhere",
                 reason=(
-                    f"Found {len(all_offers)} offer(s) but none had >= {required_qty} in stock."
+                    f"Found {len(all_offers)} offer(s) but none had >= {required_qty} "
+                    f"in stock.{mismatch_note}"
                 ),
                 offers=ranked_insufficient,
+                currency_mismatch=currency_mismatch,
             )
 
         ranked = sorted(sufficient, key=lambda o: _sort_key(o, deadline_days))
@@ -390,8 +444,10 @@ async def resolve_offers_for_item(
             required_qty=required_qty,
             deadline_days=deadline_days,
             status="ok",
+            reason=mismatch_note.strip() or None,
             offers=ranked,
             insufficient_offers=insufficient,
+            currency_mismatch=currency_mismatch,
         )
 
 
