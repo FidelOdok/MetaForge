@@ -110,6 +110,9 @@ dashboard/test-results/
 *.png
 # ...except committed documentation images (docs/assets/).
 !docs/assets/**/*.png
+# ...and the marketing site's shipped brand assets. These are served, not
+# generated at build time, so the blanket rule would 404 them in production.
+!marketing/public/**/*.png
 
 # Playwright MCP logs
 .playwright-mcp/
