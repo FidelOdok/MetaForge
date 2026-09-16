@@ -215,6 +215,7 @@ class DigiKeyAdapter(DistributorAdapter):
                     lead_time_days=_parse_lead_time(product.get("ManufacturerLeadWeeks")),
                     lifecycle_status=_map_lifecycle(product.get("ProductStatus", "")),
                     datasheet_url=product.get("DatasheetUrl"),
+                    product_url=product.get("ProductUrl"),
                 )
             )
         return results
@@ -234,6 +235,8 @@ class DigiKeyAdapter(DistributorAdapter):
             lead_time_days=_parse_lead_time(data.get("ManufacturerLeadWeeks")),
             lifecycle_status=_map_lifecycle(data.get("ProductStatus", "")),
             datasheet_url=data.get("DatasheetUrl"),
+            product_url=data.get("ProductUrl"),
+            image_url=data.get("PhotoUrl"),
             specs=specs,
             package=specs.get("Package / Case", ""),
             category=data.get("Category", {}).get("Name", ""),
