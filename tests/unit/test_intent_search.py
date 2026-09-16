@@ -22,6 +22,9 @@ def _row(
     *,
     purchase_unit: str = "discrete_part",
     cost_usd: float | None = None,
+    image_url: str = "",
+    footprint: str = "",
+    cad_model_url: str = "",
 ) -> ComponentCatalogRow:
     return ComponentCatalogRow(
         id=uuid4(),
@@ -35,6 +38,9 @@ def _row(
         specs={},
         extraction_meta={},
         schema_version=1,
+        image_url=image_url,
+        footprint=footprint,
+        cad_model_url=cad_model_url,
     )
 
 
@@ -198,6 +204,92 @@ async def test_parametric_hit_skips_fuzzy_fallback() -> None:
     assert role.candidates[0].source == "parametric"
     assert result.buy_complete == ()
     assert knowledge_service.search_calls == []
+
+
+async def test_to_dict_surfaces_media_geometry_fields_for_parametric_hits() -> None:
+    """MET-436 follow-up: a parametric hit's image/footprint/CAD fields must
+    reach the MCP wire shape via to_dict(), not just live on the row."""
+    from digital_twin.knowledge.intent_search import to_dict
+
+    search_parametric = _FakeSearchParametric()
+    search_parametric.stub(
+        "buck_converter",
+        [
+            _row(
+                "MP2459",
+                "buck_converter",
+                cost_usd=0.42,
+                image_url="https://example.com/mp2459.png",
+                footprint="SOT65P210X110-6N",
+                cad_model_url="https://example.com/mp2459.step",
+            )
+        ],
+    )
+    knowledge_service = _FakeKnowledgeService()
+    llm = StubIntentLLM(
+        lambda _p: _llm_response(
+            subsystem=None,
+            categories=[
+                {
+                    "category": "buck_converter",
+                    "purchase_unit": "discrete_part",
+                    "role": None,
+                    "confidence": 0.9,
+                    "constraints": [{"property": "v_out", "op": "==", "value": 5}],
+                }
+            ],
+        )
+    )
+
+    result = await search_intent(
+        intent_text="5V buck converter",
+        llm=llm,
+        search_parametric=search_parametric,
+        knowledge_service=knowledge_service,
+    )
+    candidate = to_dict(result)["build_from_parts"][0]["candidates"][0]
+    assert candidate["image_url"] == "https://example.com/mp2459.png"
+    assert candidate["footprint"] == "SOT65P210X110-6N"
+    assert candidate["cad_model_url"] == "https://example.com/mp2459.step"
+
+
+async def test_to_dict_media_geometry_fields_are_none_for_fuzzy_fallback_hits() -> None:
+    """A BomCandidate (fuzzy-fallback hit) carries none of these fields --
+    they must come back None, not raise or silently pick up a stray attr."""
+    from digital_twin.knowledge.intent_search import to_dict
+
+    search_parametric = _FakeSearchParametric()  # empty -> forces fallback
+    knowledge_service = _FakeKnowledgeService()
+    knowledge_service.stub_search("buck_converter", [_hit("MP2459")])
+    knowledge_service.stub_extract(
+        "MP2459", {"v_out": {"value": 5, "unit": "V", "confidence": 1.0, "method": "verbatim"}}
+    )
+    llm = StubIntentLLM(
+        lambda _p: _llm_response(
+            subsystem=None,
+            categories=[
+                {
+                    "category": "buck_converter",
+                    "purchase_unit": "discrete_part",
+                    "role": None,
+                    "confidence": 0.9,
+                    "constraints": [{"property": "v_out", "op": "==", "value": 5}],
+                }
+            ],
+        )
+    )
+
+    result = await search_intent(
+        intent_text="5V buck converter",
+        llm=llm,
+        search_parametric=search_parametric,
+        knowledge_service=knowledge_service,
+    )
+    candidate = to_dict(result)["build_from_parts"][0]["candidates"][0]
+    assert candidate["source"] == "fuzzy_fallback"
+    assert candidate["image_url"] is None
+    assert candidate["footprint"] is None
+    assert candidate["cad_model_url"] is None
 
 
 # ---------- parametric miss falls back to fuzzy ----------

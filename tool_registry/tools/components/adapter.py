@@ -357,6 +357,9 @@ def _row_to_dict(row: ComponentCatalogRow) -> dict[str, Any]:
         "specs": row.specs,
         "extraction_meta": row.extraction_meta,
         "schema_version": row.schema_version,
+        "image_url": row.image_url,
+        "footprint": row.footprint,
+        "cad_model_url": row.cad_model_url,
         "indexed_at": row.indexed_at.isoformat(),
     }
 

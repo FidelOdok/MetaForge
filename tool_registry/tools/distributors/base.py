@@ -53,6 +53,15 @@ class PartDetail(PartSearchResult):
     specs: dict[str, Any] = Field(default_factory=dict, description="Technical specifications")
     package: str = Field(default="", description="Package type (e.g. QFP-48)")
     category: str = Field(default="", description="Part category")
+    # MET-436 follow-up: schema-only for now -- none of the three concrete
+    # adapters (digikey/mouser/nexar) parse these out of their raw API
+    # response yet (unverified vendor field names; a wrong guess here would
+    # be worse than an honest None). ``package`` above is the coarse family
+    # name (e.g. "QFN-24"); ``footprint`` is the exact PCB land pattern
+    # (e.g. an IPC-7351 name), a different, finer-grained concept.
+    image_url: str | None = Field(default=None, description="Product photo/rendering URL")
+    footprint: str | None = Field(default=None, description="PCB land-pattern/footprint id")
+    cad_model_url: str | None = Field(default=None, description="3D/CAD model (e.g. STEP) URL")
 
 
 class AvailabilityInfo(BaseModel):

@@ -76,6 +76,19 @@ class TestSchemaStatements:
         )
         assert len(index_stmts) == expected
 
+    def test_media_geometry_columns_have_an_additive_migration(self) -> None:
+        """MET-436 follow-up: CREATE TABLE IF NOT EXISTS is a no-op against
+        a table that already exists from before these columns were added --
+        each new column needs its own idempotent ALTER TABLE ADD COLUMN IF
+        NOT EXISTS statement, not just a spot in the CREATE TABLE body."""
+        stmts = schema_statements()
+        for column in ("image_url", "footprint", "cad_model_url"):
+            assert any(
+                stmt.startswith("ALTER TABLE component_catalog ADD COLUMN IF NOT EXISTS")
+                and column in stmt
+                for stmt in stmts
+            ), f"missing additive migration for {column!r}"
+
     def test_custom_taxonomy_subset_only_generates_its_own_indexes(self) -> None:
         subset = {"buck_converter": CATEGORY_REGISTRY["buck_converter"]}
         stmts = schema_statements(subset)

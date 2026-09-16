@@ -262,6 +262,28 @@ class TestSharedModels:
         assert d.package == "QFP"
         assert isinstance(d, PartSearchResult)
 
+    def test_part_detail_media_geometry_fields_default_none(self):
+        """MET-436 follow-up: schema-only fields -- no adapter populates
+        these from a real vendor response yet, so they must default to
+        None rather than an empty string (distinguishable from "known
+        empty")."""
+        d = PartDetail(mpn="X", distributor="Y")
+        assert d.image_url is None
+        assert d.footprint is None
+        assert d.cad_model_url is None
+
+    def test_part_detail_media_geometry_fields_settable(self):
+        d = PartDetail(
+            mpn="X",
+            distributor="Y",
+            image_url="https://example.com/x.png",
+            footprint="SOT65P210X110-6N",
+            cad_model_url="https://example.com/x.step",
+        )
+        assert d.image_url == "https://example.com/x.png"
+        assert d.footprint == "SOT65P210X110-6N"
+        assert d.cad_model_url == "https://example.com/x.step"
+
     def test_pricing_break_validation(self):
         pb = PricingBreak(quantity=10, unit_price=1.5, currency="EUR")
         assert pb.quantity == 10

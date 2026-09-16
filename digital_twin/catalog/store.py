@@ -83,6 +83,9 @@ def schema_statements(taxonomy: dict[str, CategorySpec] | None = None) -> list[s
             cost_usd DOUBLE PRECISION,
             lifecycle TEXT NOT NULL DEFAULT 'active',
             datasheet_url TEXT NOT NULL DEFAULT '',
+            image_url TEXT NOT NULL DEFAULT '',
+            footprint TEXT NOT NULL DEFAULT '',
+            cad_model_url TEXT NOT NULL DEFAULT '',
             specs JSONB NOT NULL DEFAULT '{}'::jsonb,
             extraction_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
             schema_version INTEGER NOT NULL DEFAULT 1,
@@ -91,6 +94,14 @@ def schema_statements(taxonomy: dict[str, CategorySpec] | None = None) -> list[s
             UNIQUE (mpn, manufacturer)
         )
         """,
+        # MET-436 follow-up: additive migration for a table that may already
+        # exist from before these columns were introduced -- CREATE TABLE IF
+        # NOT EXISTS above is a no-op against a live deployment's existing
+        # table, so the new columns need their own idempotent statement.
+        "ALTER TABLE component_catalog ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE component_catalog ADD COLUMN IF NOT EXISTS footprint TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE component_catalog ADD COLUMN IF NOT EXISTS "
+        "cad_model_url TEXT NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_component_catalog_category ON component_catalog (category)",
         "CREATE INDEX IF NOT EXISTS idx_component_catalog_lifecycle "
         "ON component_catalog (lifecycle)",
@@ -181,9 +192,10 @@ class ComponentCatalogStore:
                         INSERT INTO component_catalog
                             (id, mpn, manufacturer, category, purchase_unit, cost_usd,
                              lifecycle, datasheet_url, specs, extraction_meta,
-                             schema_version, indexed_at, updated_at)
+                             schema_version, image_url, footprint, cad_model_url,
+                             indexed_at, updated_at)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11,
-                                now(), now())
+                                $12, $13, $14, now(), now())
                         ON CONFLICT (mpn, manufacturer) DO UPDATE SET
                             category = EXCLUDED.category,
                             purchase_unit = EXCLUDED.purchase_unit,
@@ -193,10 +205,14 @@ class ComponentCatalogStore:
                             specs = EXCLUDED.specs,
                             extraction_meta = EXCLUDED.extraction_meta,
                             schema_version = EXCLUDED.schema_version,
+                            image_url = EXCLUDED.image_url,
+                            footprint = EXCLUDED.footprint,
+                            cad_model_url = EXCLUDED.cad_model_url,
                             updated_at = now()
                         RETURNING id, mpn, manufacturer, category, purchase_unit, cost_usd,
                                   lifecycle, datasheet_url, specs, extraction_meta,
-                                  schema_version, indexed_at
+                                  schema_version, image_url, footprint, cad_model_url,
+                                  indexed_at
                         """,
                         row.id,
                         row.mpn,
@@ -209,6 +225,9 @@ class ComponentCatalogStore:
                         json.dumps(row.specs),
                         json.dumps(row.extraction_meta),
                         row.schema_version,
+                        row.image_url,
+                        row.footprint,
+                        row.cad_model_url,
                     )
                 logger.info("component_catalog_upserted", mpn=row.mpn, category=row.category)
                 assert record is not None  # INSERT ... RETURNING always yields one row
@@ -227,7 +246,8 @@ class ComponentCatalogStore:
                         """
                         SELECT id, mpn, manufacturer, category, purchase_unit, cost_usd,
                                lifecycle, datasheet_url, specs, extraction_meta,
-                               schema_version, indexed_at
+                               schema_version, image_url, footprint, cad_model_url,
+                               indexed_at
                         FROM component_catalog WHERE mpn = $1 AND manufacturer = $2
                         """,
                         mpn,
@@ -294,6 +314,9 @@ def _row_from_record(record: Any) -> ComponentCatalogRow:
         specs=specs or {},
         extraction_meta=extraction_meta or {},
         schema_version=record["schema_version"],
+        image_url=record["image_url"],
+        footprint=record["footprint"],
+        cad_model_url=record["cad_model_url"],
         indexed_at=indexed_at if indexed_at is not None else datetime.now(UTC),
     )
 

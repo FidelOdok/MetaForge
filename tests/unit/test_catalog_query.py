@@ -199,6 +199,27 @@ def test_unsupported_op_raises():
         )
 
 
+def test_select_includes_media_geometry_columns():
+    """MET-436 follow-up: image_url/footprint/cad_model_url must round-trip
+    through the SELECT list, same as datasheet_url already does."""
+    sql, _ = build_sql(CatalogQuery())
+    assert "image_url" in sql
+    assert "footprint" in sql
+    assert "cad_model_url" in sql
+
+
+def test_footprint_filterable_as_base_column():
+    """footprint is a base column (like datasheet_url), not a per-category
+    spec -- filterable without a category set, unlike a specs field."""
+    sql, params = build_sql(
+        CatalogQuery(
+            filters=[ComponentFilter(property="footprint", op="==", value="SOP65P640X120-8N")]
+        )
+    )
+    assert "footprint = $1" in sql
+    assert params[0] == "SOP65P640X120-8N"
+
+
 def test_mpns_dedups_preserving_order():
     from uuid import uuid4
 

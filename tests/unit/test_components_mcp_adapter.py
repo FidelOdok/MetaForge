@@ -13,7 +13,15 @@ from digital_twin.knowledge.intent_translator import StubIntentLLM
 from tool_registry.tools.components.adapter import ComponentServer
 
 
-def _row(mpn: str, category: str, cost_usd: float | None = None) -> ComponentCatalogRow:
+def _row(
+    mpn: str,
+    category: str,
+    cost_usd: float | None = None,
+    *,
+    image_url: str = "",
+    footprint: str = "",
+    cad_model_url: str = "",
+) -> ComponentCatalogRow:
     return ComponentCatalogRow(
         id=uuid4(),
         mpn=mpn,
@@ -26,6 +34,9 @@ def _row(mpn: str, category: str, cost_usd: float | None = None) -> ComponentCat
         specs={"v_out": 5.0},
         extraction_meta={},
         schema_version=1,
+        image_url=image_url,
+        footprint=footprint,
+        cad_model_url=cad_model_url,
     )
 
 
@@ -183,6 +194,29 @@ class TestSearchParametric:
         assert len(store.queries) == 1
         assert store.queries[0].category == "buck_converter"
         assert store.queries[0].filters[0].property == "v_out"
+
+    async def test_row_wire_shape_includes_media_geometry_fields(
+        self, server: ComponentServer, store: _FakeStore
+    ) -> None:
+        """MET-436 follow-up: image_url/footprint/cad_model_url must reach
+        the MCP wire shape, not just live on ComponentCatalogRow."""
+        store.stub(
+            "buck_converter",
+            [
+                _row(
+                    "MP2459",
+                    "buck_converter",
+                    image_url="https://example.com/mp2459.png",
+                    footprint="SOT65P210X110-6N",
+                    cad_model_url="https://example.com/mp2459.step",
+                )
+            ],
+        )
+        result = await server.handle_search_parametric({"category": "buck_converter"})
+        row = result["rows"][0]
+        assert row["image_url"] == "https://example.com/mp2459.png"
+        assert row["footprint"] == "SOT65P210X110-6N"
+        assert row["cad_model_url"] == "https://example.com/mp2459.step"
 
     async def test_missing_category_raises(self, server: ComponentServer) -> None:
         with pytest.raises(ValueError, match="category"):

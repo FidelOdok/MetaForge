@@ -39,6 +39,13 @@ _BASE_COLUMNS: dict[str, str] = {
     "cost_usd": "cost_usd",
     "lifecycle": "lifecycle",
     "datasheet_url": "datasheet_url",
+    # MET-436 follow-up: media/geometry metadata, same shape as
+    # datasheet_url -- caller-supplied at index time (no extraction
+    # pipeline populates these yet), display/equality-filterable, never
+    # range-queried.
+    "image_url": "image_url",
+    "footprint": "footprint",
+    "cad_model_url": "cad_model_url",
 }
 
 _CAST_SQL: dict[str, str] = {
@@ -103,6 +110,20 @@ class ComponentCatalogRow:
     specs: dict[str, Any]
     extraction_meta: dict[str, Any]
     schema_version: int
+    image_url: str = ""
+    """URL to a product photo/rendering, when available. Caller-supplied
+    at index time -- no extraction pipeline populates this yet."""
+    footprint: str = ""
+    """PCB land-pattern/footprint identifier (e.g. an IPC-7351 name like
+    ``"SOP65P640X120-8N"``) -- distinct from the coarse per-category
+    ``package`` SpecField (e.g. ``"SOIC-8"``), which names the physical
+    package family, not the exact land pattern. Caller-supplied; no
+    extraction pipeline populates this yet."""
+    cad_model_url: str = ""
+    """URL to a 3D/CAD model (STEP, etc.), when available. Caller-supplied
+    -- see ``digital_twin.datasheets.package_spec`` +
+    ``freecad.generate_ic_package`` for the separate, not-yet-wired path
+    that can *generate* one from a datasheet's package-outline text."""
     indexed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     """Server-assigned on first insert; ``store.upsert()`` sets this via
     ``now()`` on INSERT and leaves it untouched on UPDATE (``updated_at``
@@ -226,7 +247,8 @@ def build_sql(query: CatalogQuery) -> tuple[str, list[Any]]:
 
     sql = (
         "SELECT id, mpn, manufacturer, category, purchase_unit, cost_usd, "
-        "lifecycle, datasheet_url, specs, extraction_meta, schema_version, indexed_at "
+        "lifecycle, datasheet_url, specs, extraction_meta, schema_version, "
+        "image_url, footprint, cad_model_url, indexed_at "
         f"FROM component_catalog{where_sql}{order_sql}{limit_sql}{offset_sql}"
     )
     return sql, params
