@@ -9,6 +9,15 @@ chosen search result as a ``BOMItem`` graph node and links it to its project,
 mirroring :func:`make_decision_recorder`'s project-link facet without the
 markdown/MinIO facet — a BOMItem is a small structured record, not a
 blob-worthy document.
+
+Every recorded ``BOMItem`` is also linked, via a real graph edge, to its
+project's ``BOM`` work product (created on first use, reused after). Without
+this a ``BOMItem`` had ONLY the Postgres project-junction link (which puts it
+on the Projects page) and no edge in the graph at all -- ``TwinAPI.
+find_orphans()`` treats ``BOM_ITEM`` as a "dependent" node type expected to be
+reachable from a parent work product (see its docstring), so every BOMItem
+recorded before this fix showed up as an orphan and was unreachable via
+``twin.thread_for``.
 """
 
 from __future__ import annotations
@@ -16,6 +25,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import structlog
 
@@ -24,10 +34,66 @@ from observability.tracing import get_tracer
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.component_recorder")
 
+_BOM_WORK_PRODUCT_NAME = "Bill of Materials"
+
 
 def _urn_segment(value: str) -> str:
     """Sanitize one segment of the ``BOMItem.global_asset_id`` URN."""
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-") or "unknown"
+
+
+async def _find_or_create_bom_work_product(
+    twin: Any, project_backend: Any, project_id: str
+) -> str | None:
+    """Return the project's ``BOM`` work product id, creating one if absent.
+
+    One per project (looked up by ``work_product_type=BOM`` + ``project_id``,
+    same shape as ``decision_recorder``'s content-hash dedup lookup) -- every
+    recorded component selection links to the same container rather than
+    minting a new work product per call. Best-effort: any failure here must
+    never block the BOMItem write itself, so callers get ``None`` (no edge
+    added) rather than an exception.
+    """
+    from twin_core.models.enums import WorkProductType
+    from twin_core.models.work_product import WorkProduct
+
+    try:
+        scope = UUID(project_id)
+        existing = await twin.list_work_products(
+            work_product_type=WorkProductType.BOM, project_id=scope
+        )
+        if existing:
+            return str(existing[0].id)
+
+        now = datetime.now(UTC)
+        wp = WorkProduct(
+            name=_BOM_WORK_PRODUCT_NAME,
+            type=WorkProductType.BOM,
+            domain="electronics",
+            file_path="",
+            content_hash="",
+            format="",
+            metadata={"created_by": "twin.record_component_selection"},
+            created_at=now,
+            updated_at=now,
+            created_by="twin.record_component_selection",
+            project_id=project_id,
+        )
+        created = await twin.create_work_product(wp)
+        wp_id = str(getattr(created, "id", wp.id))
+
+        if project_backend is not None:
+            try:
+                await project_backend.link_work_product(
+                    project_id, wp_id, _BOM_WORK_PRODUCT_NAME, "bom"
+                )
+            except Exception as exc:  # noqa: BLE001 — link is best-effort
+                logger.warning("bom_work_product_project_link_failed", error=str(exc))
+
+        return wp_id
+    except Exception as exc:  # noqa: BLE001 — never block the BOMItem write
+        logger.warning("bom_work_product_lookup_failed", project_id=project_id, error=str(exc))
+        return None
 
 
 def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
@@ -128,6 +194,7 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
             # this repo's operational notes: node.project_id alone only
             # covers the /twin filter, not the Projects page.
             linked = False
+            bom_wp_id: str | None = None
             if project_id and project_backend is not None:
                 try:
                     await project_backend.link_work_product(
@@ -137,6 +204,29 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
                 except Exception as exc:  # noqa: BLE001 — link is best-effort
                     logger.warning("component_selection_project_link_failed", error=str(exc))
 
+            # Graph edge to the project's BOM work product — without this the
+            # BOMItem has no place in the digital thread at all: unreachable
+            # via twin.thread_for, and flagged an orphan by find_orphans()
+            # (BOM_ITEM is a "dependent" node type). Only possible when the
+            # call is project-scoped; an unscoped recording has no parent
+            # work product to attach to and stays an orphan, same as today.
+            if project_id:
+                from twin_core.models.enums import EdgeType
+
+                bom_wp_id = await _find_or_create_bom_work_product(
+                    twin, project_backend, project_id
+                )
+                if bom_wp_id is not None:
+                    try:
+                        await twin.add_edge(UUID(bom_wp_id), UUID(node_id), EdgeType.CONTAINS)
+                    except Exception as exc:  # noqa: BLE001 — edge is best-effort
+                        logger.warning(
+                            "component_selection_bom_edge_failed",
+                            bom_work_product_id=bom_wp_id,
+                            error=str(exc),
+                        )
+                        bom_wp_id = None
+
             logger.info(
                 "component_selection_recorded",
                 node_id=node_id,
@@ -144,12 +234,14 @@ def make_component_recorder(twin: Any, project_backend: Any = None) -> Any:
                 category=category,
                 project_id=project_id,
                 linked=linked,
+                bom_work_product_id=bom_wp_id,
             )
             return {
                 "node_id": node_id,
                 "mpn": mpn,
                 "category": category,
                 "project_linked": linked,
+                "bom_work_product_id": bom_wp_id,
             }
 
     return record

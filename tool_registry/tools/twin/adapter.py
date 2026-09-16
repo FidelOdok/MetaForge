@@ -735,6 +735,15 @@ class TwinServer(McpToolServer):
                         "mpn": {"type": "string"},
                         "category": {"type": "string"},
                         "project_linked": {"type": "boolean"},
+                        "bom_work_product_id": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "The project's BOM work product this selection was linked to "
+                                "(CONTAINS edge) -- null when unscoped (no project_id given) or "
+                                "if the link failed (best-effort, the BOMItem write still "
+                                "succeeds)."
+                            ),
+                        },
                     },
                 },
                 phase=2,
