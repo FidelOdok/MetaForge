@@ -11,6 +11,7 @@ from orchestrator.harness.providers.adapters import (
     _classify_error,
     _desanitize_openai_tool_name,
     _normalize_request,
+    _sanitize_openai_messages,
     _sanitize_openai_tool_names,
     default_invoke,
 )
@@ -193,3 +194,68 @@ async def test_openai_invoke_sanitizes_outgoing_tool_names_and_desanitizes_reply
     sent = client.chat.completions.calls[0]["tools"]
     assert sent[0]["function"]["name"] == "twin__commit_geometry"
     assert out["tool_calls"] == [{"id": "call_1", "name": "twin.commit_geometry", "arguments": {}}]
+
+
+# --- MET-747 follow-up: dotted tool_calls echoed back in message HISTORY ---
+# OpenAI validates `function.name` against the same pattern on
+# `messages[].tool_calls[].function.name`, not just on the outgoing `tools`
+# schema — live-caught: a turn's first round-trip (schema sanitized) succeeds,
+# but the SECOND round-trip 400s the moment that history (built by
+# native_tools.py from the DESANITIZED/dotted name) is resent. Hit in
+# production on a plain "switch project" turn (`chat.set_project_scope`),
+# which almost always continues past that one call.
+def test_sanitize_openai_messages_replaces_dot_in_tool_calls_history() -> None:
+    messages = [
+        {"role": "user", "content": "switch to quadruped"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "chat.set_project_scope", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+    ]
+    out = _sanitize_openai_messages(messages)
+    assert out[1]["tool_calls"][0]["function"]["name"] == "chat__set_project_scope"
+    # original left untouched (no in-place mutation)
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "chat.set_project_scope"
+
+
+def test_sanitize_openai_messages_passes_through_messages_without_tool_calls() -> None:
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "tool", "tool_call_id": "x", "content": "ok"},
+    ]
+    assert _sanitize_openai_messages(messages) == messages
+
+
+@pytest.mark.asyncio
+async def test_openai_invoke_sanitizes_dotted_tool_calls_already_in_history() -> None:
+    """The second round-trip of a turn: history already carries a dotted
+    tool_calls entry from the first round-trip's (successful) call."""
+    client = FakeOpenAI(resp=_openai_resp("done"))
+    history = [
+        {"role": "user", "content": "switch to quadruped"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "chat.set_project_scope", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+    ]
+    await openai_invoke(OPENAI, {"messages": history}, client=client)
+    sent = client.chat.completions.calls[0]["messages"]
+    assistant_msg = next(m for m in sent if m.get("role") == "assistant" and m.get("tool_calls"))
+    assert assistant_msg["tool_calls"][0]["function"]["name"] == "chat__set_project_scope"
