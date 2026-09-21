@@ -243,6 +243,13 @@ class GoalDrivenRequirementsHandler:
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
         from twin_core.models.enums import WorkProductType
 
+        # FORGE-48/49: G0 (Intent) and G1 (Needs) now run before this phase in
+        # every flow, so their PhaseOutcome summaries are already in
+        # context.completed and land in `prior` below -- the extraction
+        # prompt sees the recorded intent/need for free, with no extra code
+        # here. This handler deliberately does NOT also emit its own
+        # intent/stakeholder_need entities (that would duplicate G0/G1's own
+        # deliverable, not extend it).
         prior = "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed) or "(none)"
         spec = await self._extract(goal, prior, provider=self._provider, model=self._model)
 

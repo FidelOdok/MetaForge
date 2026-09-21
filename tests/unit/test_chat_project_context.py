@@ -167,3 +167,59 @@ async def test_prd_alone_also_counts(monkeypatch: pytest.MonkeyPatch) -> None:
     brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([_wp("PRD", "prd")]))
     assert brief is not None
     assert "NO recorded requirements" not in brief
+
+
+# --------------------------------------------------------------------------
+# Intent/needs discovery directive (FORGE-49, epic FORGE-35)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bare_project_brief_carries_intent_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No intent/stakeholder_need in the project -> the brief must tell the
+    agent to elicit WHY the product exists before recording an intent."""
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([]))
+    assert brief is not None
+    assert "NO recorded intent" in brief
+    assert "twin.record_engineering_entity" in brief
+    assert "entity_type='intent'" in brief
+
+
+@pytest.mark.asyncio
+async def test_intent_alone_clears_the_intent_directive(monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project([_wp("Desktop quadruped intent", "intent")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+    assert brief is not None
+    assert "NO recorded intent" not in brief
+
+
+@pytest.mark.asyncio
+async def test_stakeholder_need_alone_also_clears_the_intent_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project([_wp("Operator safety need", "stakeholder_need")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+    assert brief is not None
+    assert "NO recorded intent" not in brief
+
+
+@pytest.mark.asyncio
+async def test_project_with_requirements_gets_the_go_deeper_nudge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project([_wp("Bracket requirements", "constraint_set")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+    assert brief is not None
+    assert "parent_refs" in brief
+    assert "traceable" in brief
+
+
+@pytest.mark.asyncio
+async def test_project_without_requirements_gets_no_go_deeper_nudge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([]))
+    assert brief is not None
+    assert "traceable" not in brief

@@ -178,7 +178,9 @@ DESIGN_V1 = FlowDefinition(
                 "Author the primary geometry / schematic for the load-bearing or "
                 "functionally-critical subsystem using the available CAD/EDA tools, name "
                 "every part meaningfully, and record the design rationale (material, "
-                "dimensions, safety factor target) into the twin."
+                "dimensions, safety factor target) into the twin. If sizing derives a "
+                "specific numeric spec, record it with `twin.record_constraint_set` and set "
+                "`parent_refs` to the requirement it implements."
             ),
             expected_artifacts=("cad_model", "schematic", "design_decision"),
             # The load-bearing geometry MUST be committed to the twin (via
@@ -287,7 +289,11 @@ HARDWARE_V1 = FlowDefinition(
                 "compute, cost) across them. Select the actuator class, sensor suite, "
                 "compute platform, and power source with rationale, checking each against "
                 "its budget. Record the architecture and the selection decisions into the "
-                "twin."
+                "twin. Whenever you quantify a subsystem-level requirement derived from a "
+                "system-level one (e.g. this subsystem's mass/power allocation), record it "
+                "with `twin.record_constraint_set` and set `parent_refs` to the system-level "
+                "requirement it implements, so the chain from intent down to this allocation "
+                "stays traceable."
             ),
             expected_artifacts=("design_decision",),
             required_deliverables=("design_decision",),
@@ -310,7 +316,11 @@ HARDWARE_V1 = FlowDefinition(
                 "meaningfully, choose material and key dimensions against a safety-factor "
                 "target, and PERSIST the geometry with the commit-geometry tool so it "
                 "becomes a viewable cad_model in the twin — a described-but-uncommitted "
-                "model does NOT count. Record the design rationale."
+                "model does NOT count. Record the design rationale. If you quantify a "
+                "component-level spec derived from a system/subsystem requirement (e.g. this "
+                "part's load capacity or safety factor), record it with "
+                "`twin.record_constraint_set` and set `parent_refs` to the requirement it "
+                "implements."
             ),
             expected_artifacts=("cad_model", "design_decision"),
             required_deliverables=("cad_model",),
@@ -472,7 +482,10 @@ MECH_V1 = FlowDefinition(
                 "after what it actually is; choose the material; then PERSIST it with the "
                 "commit-geometry tool so it becomes a viewable cad_model (a described-but-"
                 "uncommitted model does NOT count). Record the design rationale: the "
-                "dimensions, the material, and how the section carries the load."
+                "dimensions, the material, and how the section carries the load. If sizing this "
+                "part derives a specific numeric spec (e.g. a section dimension driven by the "
+                "load case), record it with `twin.record_constraint_set` and set `parent_refs` "
+                "to the system requirement it implements."
             ),
             expected_artifacts=("cad_model", "design_decision"),
             required_deliverables=("cad_model",),

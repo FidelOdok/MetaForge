@@ -282,8 +282,20 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
 
     # MET-584: requirements-discovery directive. Chat has no gates, so the
     # elicitation nudge lives in the brief — the enforcement twin of this is
-    # the design-flow Requirements gate (MET-582/583).
+    # the design-flow Requirements gate (MET-582/583), and — for intent/needs
+    # specifically — the G0/G1 gates (FORGE-48, epic FORGE-35).
     types = {str(getattr(wp.type, "value", wp.type)) for wp in project.work_products}
+    if not types & {"intent", "stakeholder_need"}:
+        lines.append(
+            "\nThis project has NO recorded intent or stakeholder needs (no "
+            "intent or stakeholder_need entity). Before substantive design "
+            "work, elicit WHY this product exists and who it's for — ask the "
+            "user rather than assuming. Record the intent first with "
+            "`twin.record_engineering_entity` (`entity_type='intent'`, give it "
+            "a short `title` so later entries can reference it), then any "
+            "stakeholder needs the same way (`entity_type='stakeholder_need'`, "
+            "`parent_refs=[the intent's title]`, `relation='motivates'`)."
+        )
     if not types & {"prd", "constraint_set"}:
         lines.append(
             "\nThis project has NO recorded requirements or constraints (no prd "
@@ -292,7 +304,19 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
             "key quantified requirements from the user (loads, mass/envelope "
             "budgets, power, cost, safety factors) and record them with "
             "`twin.record_constraint_set` (and the rationale with "
-            "`twin.record_decision`). Ask before you assume."
+            "`twin.record_decision`). Ask before you assume. If an intent/need "
+            "was recorded above, link each requirement back to it with "
+            "`parent_refs=[the need's title]`."
+        )
+    if types & {"prd", "constraint_set"}:
+        lines.append(
+            "\nAs the design goes deeper — sizing a specific subsystem or "
+            "component — quantify what THAT specifically needs (e.g. this "
+            "leg's actuator torque, not just the system's overall payload) "
+            "and record it with `twin.record_constraint_set`, setting "
+            "`parent_refs` to the higher-level requirement it implements. This "
+            "keeps the chain from stated intent down to a specific part "
+            "traceable instead of stopping at the system level."
         )
 
     lines.append(
