@@ -79,11 +79,70 @@ class FlowDefinition:
 # --------------------------------------------------------------------------
 # Built-in flows
 # --------------------------------------------------------------------------
+#
+# G0 (Intent) and G1 (Needs) -- Engineering Intent & Requirements Harness
+# (FORGE-35/48) -- precede every flow's "requirements" phase (G2). Defined
+# once and shared across flows: same objective, same gate, regardless of
+# which lifecycle they precede. Producible today via
+# twin.record_engineering_entity (FORGE-45/47); the richer multi-agent
+# Intent Interpreter / Clarification Agent split (spec section 26) is
+# FORGE-38 (Phase 3), not this pass -- the generic ReAct phase brain drives
+# these two phases for now, same as any phase with no deterministic handler.
+
+_INTENT_PHASE = Phase(
+    id="intent",
+    title="Intent",
+    objective=(
+        "Establish WHY this product is being built, before any requirements. From "
+        "the stated goal, identify: the system's purpose, its primary "
+        "stakeholder(s), the initial operating context, the system boundary (what's "
+        "in scope vs out of scope), and the desired outcome. Record ONE intent "
+        "entity capturing this with the record-engineering-entity tool "
+        "(entity_type='intent'), scoped to the project."
+    ),
+    expected_artifacts=("intent",),
+    required_deliverables=("intent",),
+    gate=Gate(
+        name="Intent sign-off",
+        criteria=(
+            "System purpose stated",
+            "Primary stakeholder(s) identified",
+            "System boundary (in/out of scope) defined",
+            "Desired outcome stated",
+        ),
+    ),
+)
+
+_NEEDS_PHASE = Phase(
+    id="needs",
+    title="Stakeholder Needs",
+    objective=(
+        "Identify the stakeholder needs this product must satisfy, tracing back to "
+        "the recorded intent. For each stakeholder, capture their need in plain "
+        "language -- avoid premature implementation detail (that's what "
+        "requirements are for, next phase). Record each with the "
+        "record-engineering-entity tool (entity_type='stakeholder_need', "
+        "parent_refs=[the intent's title], relation='motivates'), scoped to the "
+        "project."
+    ),
+    expected_artifacts=("stakeholder_need",),
+    required_deliverables=("stakeholder_need",),
+    gate=Gate(
+        name="Needs sign-off",
+        criteria=(
+            "Stakeholder set identified",
+            "Each stakeholder's need captured in plain language",
+            "Needs trace to the recorded intent",
+        ),
+    ),
+)
 
 DESIGN_V1 = FlowDefinition(
     id="design_v1",
     name="Design vertical (Requirements -> Design -> Simulation)",
     phases=(
+        _INTENT_PHASE,
+        _NEEDS_PHASE,
         Phase(
             id="requirements",
             title="Requirements",
@@ -104,6 +163,10 @@ DESIGN_V1 = FlowDefinition(
                     "Functional requirements enumerated",
                     "Key constraints quantified",
                     "Primary load/use case defined",
+                    # FORGE-48: G2's own criterion per the spec (section 23) --
+                    # advisory for now, same as the other three; real
+                    # enforcement needs FORGE-38/39's traceability agent.
+                    "Parent traceability exists (requirements trace to a need)",
                 ),
             ),
         ),
@@ -184,6 +247,8 @@ HARDWARE_V1 = FlowDefinition(
     name="Hardware & robotics lifecycle (Requirements → Architecture → Mechanical → "
     "Electronics → Firmware → V&V → Manufacturing)",
     phases=(
+        _INTENT_PHASE,
+        _NEEDS_PHASE,
         Phase(
             id="requirements",
             title="Requirements",
@@ -208,6 +273,7 @@ HARDWARE_V1 = FlowDefinition(
                     "Functional requirements enumerated",
                     "Key constraints quantified (mass/power/DOF/cost as applicable)",
                     "Primary use / motion case defined",
+                    "Parent traceability exists (requirements trace to a need)",
                 ),
             ),
         ),
@@ -374,6 +440,8 @@ MECH_V1 = FlowDefinition(
     id="mech_v1",
     name="Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
     phases=(
+        _INTENT_PHASE,
+        _NEEDS_PHASE,
         Phase(
             id="requirements",
             title="Requirements",
@@ -391,6 +459,7 @@ MECH_V1 = FlowDefinition(
                     "Load case quantified (magnitude + location)",
                     "Material class and safety-factor target stated",
                     "Mass / envelope budget stated",
+                    "Parent traceability exists (requirements trace to a need)",
                 ),
             ),
         ),

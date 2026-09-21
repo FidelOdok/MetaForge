@@ -1071,6 +1071,7 @@ class TwinServer(McpToolServer):
                         "node_id": {"type": "string"},
                         "entity_type": {"type": "string"},
                         "parent_ids": {"type": "array", "items": {"type": "string"}},
+                        "project_linked": {"type": "boolean"},
                     },
                 },
                 phase=1,

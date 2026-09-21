@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 from orchestrator.design_flow.spec import HARDWARE_V1, get_flow
+from twin_core.models.engineering_entity import EngineeringEntityType
 from twin_core.models.enums import WorkProductType
 
-VALID_TYPES = {t.value for t in WorkProductType}
+# FORGE-48: a required_deliverable is either a WorkProductType value or an
+# Engineering Intent & Requirements Harness EngineeringEntityType value
+# (twin.record_engineering_entity, FORGE-45/47) -- G0/G1's "intent"/
+# "stakeholder_need" deliverables are the latter, not the former.
+VALID_TYPES = {t.value for t in WorkProductType} | set(get_args(EngineeringEntityType))
 # Producible today (have a creation tool), so they may be *required* at a gate.
 # constraint_set: twin.record_constraint_set (MET-582).
-PRODUCIBLE = {"design_decision", "cad_model", "constraint_set"}
+# intent/stakeholder_need: twin.record_engineering_entity (FORGE-45/47).
+PRODUCIBLE = {"design_decision", "cad_model", "constraint_set", "intent", "stakeholder_need"}
 
 
 def test_hardware_flow_registered_and_ordered() -> None:
     flow = get_flow("hardware_v1")
     assert flow is HARDWARE_V1
     assert [p.id for p in flow.phases] == [
+        "intent",
+        "needs",
         "requirements",
         "architecture",
         "design",
@@ -44,11 +54,13 @@ def test_required_deliverables_are_producible_today() -> None:
     assert "cad_model" in design.required_deliverables
 
 
-def test_all_artifact_types_are_valid_work_products() -> None:
+def test_all_artifact_types_are_valid_work_products_or_engineering_entities() -> None:
     # Guards against typos in expected/required artifact type strings.
     for p in HARDWARE_V1.phases:
         for t in (*p.expected_artifacts, *p.required_deliverables):
-            assert t in VALID_TYPES, f"{p.id}: '{t}' is not a WorkProductType"
+            assert t in VALID_TYPES, (
+                f"{p.id}: '{t}' is not a WorkProductType or EngineeringEntityType"
+            )
 
 
 def test_covers_the_core_disciplines() -> None:

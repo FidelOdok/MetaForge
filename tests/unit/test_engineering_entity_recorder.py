@@ -15,6 +15,18 @@ from twin_core.models.enums import EdgeType
 PROJECT_ID = "11111111-1111-4111-8111-111111111111"
 
 
+class _FakeProjectBackend:
+    """Mirrors test_constraint_recorder.py's fake -- same generic
+    link_work_product(project_id, wp_id, wp_name, wp_type) contract every
+    recorder in this package uses."""
+
+    def __init__(self) -> None:
+        self.links: list[tuple[str, str, str, str]] = []
+
+    async def link_work_product(self, project_id: str, wp_id: str, name: str, wp_type: str) -> None:
+        self.links.append((project_id, wp_id, name, wp_type))
+
+
 @pytest.mark.asyncio
 async def test_records_an_entity_with_no_parents() -> None:
     twin = InMemoryTwinAPI.create()
@@ -140,6 +152,53 @@ async def test_unresolvable_parent_ref_raises_and_does_not_create_the_entity() -
         )
     # Loud failure must not leave a half-created orphan node behind.
     assert await twin.list_engineering_entities(project_id=UUID(PROJECT_ID)) == []
+
+
+# --- FORGE-48: project linking (the readiness check for G0/G1 depends on this) ---
+
+
+@pytest.mark.asyncio
+async def test_links_the_entity_to_the_project_when_a_backend_is_given() -> None:
+    twin = InMemoryTwinAPI.create()
+    backend = _FakeProjectBackend()
+    record = make_engineering_entity_recorder(twin, backend)
+
+    out = await record(
+        entity_type="intent",
+        statement="Build a desktop quadruped platform.",
+        title="Desktop quadruped intent",
+        project_id=PROJECT_ID,
+    )
+    assert out["project_linked"] is True
+    assert backend.links == [(PROJECT_ID, out["node_id"], "Desktop quadruped intent", "intent")]
+
+
+@pytest.mark.asyncio
+async def test_no_link_attempted_without_a_backend() -> None:
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)  # no project_backend
+    out = await record(entity_type="intent", statement="x", project_id=PROJECT_ID)
+    assert out["project_linked"] is False
+
+
+@pytest.mark.asyncio
+async def test_no_link_attempted_without_a_project_id() -> None:
+    twin = InMemoryTwinAPI.create()
+    backend = _FakeProjectBackend()
+    record = make_engineering_entity_recorder(twin, backend)
+    out = await record(entity_type="intent", statement="x")  # no project_id
+    assert out["project_linked"] is False
+    assert backend.links == []
+
+
+@pytest.mark.asyncio
+async def test_link_falls_back_to_a_truncated_statement_when_no_title_given() -> None:
+    twin = InMemoryTwinAPI.create()
+    backend = _FakeProjectBackend()
+    record = make_engineering_entity_recorder(twin, backend)
+    long_statement = "x" * 100
+    await record(entity_type="risk", statement=long_statement, project_id=PROJECT_ID)
+    assert backend.links[0][2] == long_statement[:60]
 
 
 @pytest.mark.asyncio
