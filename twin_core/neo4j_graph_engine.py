@@ -241,6 +241,18 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.version import Version
 
             return Version.model_validate(data)
+        elif node_type == NodeType.ENGINEERING_ENTITY:
+            # FORGE-68: without this branch, every Engineering Intent &
+            # Requirements Harness entity (intent/need/objective/assumption/
+            # question/risk/verification_case/evidence, FORGE-44) silently
+            # degrades to a generic NodeBase on read-back from Neo4j -- no
+            # entity_type/statement/title/parent_refs -- invisible to
+            # InMemoryTwinAPI.create()'s pure in-memory engine (stores the
+            # real object by reference, no serialize round trip), so this
+            # only ever manifested against a real deployment.
+            from twin_core.models.engineering_entity import EngineeringEntity
+
+            return EngineeringEntity.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 

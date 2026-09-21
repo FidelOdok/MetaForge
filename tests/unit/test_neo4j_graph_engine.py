@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from twin_core.models.base import EdgeBase, NodeBase
+from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
 from twin_core.neo4j_graph_engine import (
@@ -248,6 +249,28 @@ class TestNodeOperations:
 
         result = await engine.get_node(uuid4())
         assert result is None
+
+    async def test_get_node_reconstructs_engineering_entity(self, engine, mock_session) -> None:
+        """FORGE-68: _props_to_node's NodeType dispatch must know about
+        ENGINEERING_ENTITY, or every intent/need/objective/... (FORGE-44)
+        silently degrades to a generic NodeBase on read-back -- invisible to
+        InMemoryTwinAPI.create()'s pure in-memory engine (stores the real
+        object by reference), only ever caught against a real deployment."""
+        entity = EngineeringEntity(
+            entity_type="intent",
+            statement="Build a desktop quadruped platform for indoor demos.",
+            title="Desktop quadruped intent",
+        )
+        record = _make_mock_record(entity)
+
+        mock_result = AsyncMock()
+        mock_result.single = AsyncMock(return_value=record)
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        result = await engine.get_node(entity.id)
+        assert isinstance(result, EngineeringEntity)
+        assert result.entity_type == "intent"
+        assert result.title == "Desktop quadruped intent"
 
     async def test_update_node(self, engine, mock_session):
         work_product = _make_work_product()
