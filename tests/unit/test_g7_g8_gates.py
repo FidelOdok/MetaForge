@@ -1,0 +1,186 @@
+"""Unit tests for the G7 Verification Readiness Gate and G8 Release Gate
+evaluators (FORGE-63)."""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+import pytest
+
+from twin_core.api import InMemoryTwinAPI
+from twin_core.consistency import (
+    GateCheckStatus,
+    GateStatus,
+    evaluate_g7_verification_readiness,
+    evaluate_g8_release,
+)
+from twin_core.models.baseline import Baseline
+from twin_core.models.constraint import Constraint
+from twin_core.models.engineering_entity import EngineeringEntity
+from twin_core.models.enums import ConstraintSeverity
+
+
+@pytest.fixture
+def twin():
+    return InMemoryTwinAPI.create()
+
+
+@pytest.fixture
+def project_id():
+    return uuid4()
+
+
+def _critical_req(project_id, name="req1", metadata=None, source="") -> Constraint:
+    return Constraint(
+        name=name,
+        expression="True",
+        severity=ConstraintSeverity.ERROR,
+        domain="mech",
+        source=source,
+        project_id=project_id,
+        metadata=metadata or {},
+    )
+
+
+def _evidence(project_id, statement="sim result", metadata=None) -> EngineeringEntity:
+    return EngineeringEntity(
+        entity_type="evidence", statement=statement, project_id=project_id, metadata=metadata or {}
+    )
+
+
+class TestG7NoCriticalRequirements:
+    async def test_no_critical_requirements_is_not_evaluated(self, twin, project_id):
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(c for c in result.checks if c.id == "requirements:none-critical")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+        assert result.status == GateStatus.READY_FOR_REVIEW
+
+    async def test_warning_severity_requirement_does_not_count_as_critical(self, twin, project_id):
+        req = _critical_req(project_id)
+        req = req.model_copy(update={"severity": ConstraintSeverity.WARNING})
+        await twin.create_constraint(req)
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(c for c in result.checks if c.id == "requirements:none-critical")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
+
+class TestG7VerificationMethodCheck:
+    async def test_verification_method_present_passes(self, twin, project_id):
+        req = await twin.create_constraint(
+            _critical_req(project_id, metadata={"verification_method": "FEA"}, source="agent")
+        )
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check_id = f"requirement:{req.id}:verification_method"
+        check = next(c for c in result.checks if c.id == check_id)
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_missing_verification_method_fails(self, twin, project_id):
+        req = await twin.create_constraint(_critical_req(project_id, source="agent"))
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check_id = f"requirement:{req.id}:verification_method"
+        check = next(c for c in result.checks if c.id == check_id)
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+
+class TestG7OwnershipCheck:
+    async def test_source_present_passes(self, twin, project_id):
+        req = await twin.create_constraint(_critical_req(project_id, source="req_handlers"))
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"requirement:{req.id}:ownership")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_missing_source_fails(self, twin, project_id):
+        req = await twin.create_constraint(_critical_req(project_id, source=""))
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"requirement:{req.id}:ownership")
+        assert check.status == GateCheckStatus.FAIL
+
+
+class TestG7NotEvaluatedChecks:
+    async def test_acceptance_measurement_evidence_are_not_evaluated(self, twin, project_id):
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        ids = {c.id for c in result.checks}
+        for expected in (
+            "acceptance_criteria_defined",
+            "measurement_method_defined",
+            "expected_evidence_defined",
+        ):
+            assert expected in ids
+            check = next(c for c in result.checks if c.id == expected)
+            assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_gate_id_is_g7(self, twin, project_id):
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        assert result.gate_id == "G7"
+
+
+class TestG8BaselineCheck:
+    async def test_no_baseline_fails(self, twin, project_id):
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "configuration_baseline_fixed")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_one_baseline_passes(self, twin, project_id):
+        await twin.create_baseline(
+            Baseline(name="v1", includes=[], project_id=project_id, reason="release candidate")
+        )
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "configuration_baseline_fixed")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_other_projects_baseline_does_not_count(self, twin, project_id):
+        other = uuid4()
+        await twin.create_baseline(Baseline(name="v1", includes=[], project_id=other))
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "configuration_baseline_fixed")
+        assert check.status == GateCheckStatus.FAIL
+
+
+class TestG8StaleEvidenceCheck:
+    async def test_no_evidence_is_not_evaluated_not_a_vacuous_pass(self, twin, project_id):
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "stale_evidence_resolved")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_current_evidence_passes(self, twin, project_id):
+        entity = _evidence(project_id, metadata={"staleness": "current"})
+        await twin.create_engineering_entity(entity)
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "stale_evidence_resolved")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_default_unset_staleness_counts_as_current(self, twin, project_id):
+        await twin.create_engineering_entity(_evidence(project_id))
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "stale_evidence_resolved")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_stale_evidence_fails(self, twin, project_id):
+        await twin.create_engineering_entity(_evidence(project_id, metadata={"staleness": "stale"}))
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "stale_evidence_resolved")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_invalid_evidence_fails(self, twin, project_id):
+        entity = _evidence(project_id, metadata={"staleness": "invalid"})
+        await twin.create_engineering_entity(entity)
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "stale_evidence_resolved")
+        assert check.status == GateCheckStatus.FAIL
+
+
+class TestG8NotEvaluatedChecks:
+    async def test_verification_waivers_release_are_not_evaluated(self, twin, project_id):
+        result = await evaluate_g8_release(twin, project_id)
+        ids = {c.id for c in result.checks}
+        for expected in ("required_verification_complete", "waivers_approved", "release_approved"):
+            assert expected in ids
+            check = next(c for c in result.checks if c.id == expected)
+            assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_gate_id_is_g8(self, twin, project_id):
+        result = await evaluate_g8_release(twin, project_id)
+        assert result.gate_id == "G8"
