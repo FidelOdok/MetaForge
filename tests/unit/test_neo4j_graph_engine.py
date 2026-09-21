@@ -618,6 +618,55 @@ class TestTraversalQueries:
         with pytest.raises(KeyError, match="not found"):
             await engine.get_subgraph(uuid4())
 
+    async def test_get_subgraph_defaults_to_outgoing_direction(self, engine):
+        """FORGE-72: get_subgraph's direction param threads through to
+        get_edges unchanged by default, preserving pre-fix behavior."""
+        a = _make_work_product("a")
+        with (
+            patch.object(engine, "get_node", AsyncMock(return_value=a)),
+            patch.object(engine, "get_edges", AsyncMock(return_value=[])) as mock_get_edges,
+        ):
+            await engine.get_subgraph(a.id, depth=2)
+        mock_get_edges.assert_called_once_with(a.id, direction="outgoing")
+
+    async def test_get_subgraph_passes_through_incoming_direction(self, engine):
+        a = _make_work_product("a")
+        with (
+            patch.object(engine, "get_node", AsyncMock(return_value=a)),
+            patch.object(engine, "get_edges", AsyncMock(return_value=[])) as mock_get_edges,
+        ):
+            await engine.get_subgraph(a.id, depth=2, direction="incoming")
+        mock_get_edges.assert_called_once_with(a.id, direction="incoming")
+
+    async def test_get_subgraph_both_direction_finds_incoming_edge_and_dedupes(self, engine):
+        """Ground-truth repro of the FORGE-72 bug: a requirement/constraint
+        node whose only edge has it as the TARGET must be reachable via
+        direction='both', with the edge counted exactly once."""
+        requirement = _make_work_product("requirement")
+        evidence = _make_work_product("evidence")
+        edge = EdgeBase(
+            source_id=evidence.id, target_id=requirement.id, edge_type=EdgeType.SATISFIES
+        )
+
+        async def fake_get_edges(node_id, direction="outgoing", edge_type=None):
+            # Both endpoints report the same edge when asked for 'both',
+            # exactly like the real in-memory/Neo4j backends do.
+            if node_id in (requirement.id, evidence.id):
+                return [edge]
+            return []
+
+        async def fake_get_node(node_id):
+            return {requirement.id: requirement, evidence.id: evidence}.get(node_id)
+
+        with (
+            patch.object(engine, "get_node", side_effect=fake_get_node),
+            patch.object(engine, "get_edges", side_effect=fake_get_edges),
+        ):
+            sg = await engine.get_subgraph(requirement.id, depth=2, direction="both")
+
+        assert {n.id for n in sg.nodes} == {requirement.id, evidence.id}
+        assert len(sg.edges) == 1
+
     async def test_traverse(self, engine, mock_session):
         a = _make_work_product("a")
         b = _make_work_product("b")

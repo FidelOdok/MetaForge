@@ -54,6 +54,7 @@ class _FakeTwin:
     def __init__(self) -> None:
         self.subgraph_calls: list[tuple[UUID, int]] = []
         self.subgraph_edge_types_calls: list[list[str] | None] = []
+        self.subgraph_direction_calls: list[str] = []
         self.cypher_calls: list[tuple[str, dict[str, Any]]] = []
         self.evaluate_calls: list[str] = []
         # Configurable returns.
@@ -63,9 +64,16 @@ class _FakeTwin:
             passed=True, evaluated_count=0
         )
 
-    async def get_subgraph(self, root_id: UUID, depth: int = 2, edge_types=None) -> SubGraph:
+    async def get_subgraph(
+        self,
+        root_id: UUID,
+        depth: int = 2,
+        edge_types=None,
+        direction: str = "outgoing",
+    ) -> SubGraph:
         self.subgraph_calls.append((root_id, depth))
         self.subgraph_edge_types_calls.append(edge_types)
+        self.subgraph_direction_calls.append(direction)
         return self.subgraph_return or SubGraph(nodes=[], edges=[], root_id=root_id, depth=depth)
 
     async def query_cypher(
@@ -258,6 +266,33 @@ class TestThreadFor:
         srv = TwinServer(twin=_FakeTwin())
         raw = await srv.handle_request(
             _request("twin.thread_for", {"node_id": str(uuid4()), "edge_types": [1, 2]})
+        )
+        assert "error" in json.loads(raw)
+
+    async def test_default_direction_is_outgoing(self) -> None:
+        """FORGE-72: omitting direction preserves the pre-fix behavior."""
+        twin = _FakeTwin()
+        node_id = uuid4()
+        twin.subgraph_return = SubGraph(nodes=[], edges=[], root_id=node_id, depth=3)
+        srv = TwinServer(twin=twin)
+        await srv.handle_request(_request("twin.thread_for", {"node_id": str(node_id)}))
+        assert twin.subgraph_direction_calls == ["outgoing"]
+
+    @pytest.mark.parametrize("direction", ["outgoing", "incoming", "both"])
+    async def test_direction_passed_through(self, direction: str) -> None:
+        twin = _FakeTwin()
+        node_id = uuid4()
+        twin.subgraph_return = SubGraph(nodes=[], edges=[], root_id=node_id, depth=3)
+        srv = TwinServer(twin=twin)
+        await srv.handle_request(
+            _request("twin.thread_for", {"node_id": str(node_id), "direction": direction})
+        )
+        assert twin.subgraph_direction_calls == [direction]
+
+    async def test_invalid_direction_rejected(self) -> None:
+        srv = TwinServer(twin=_FakeTwin())
+        raw = await srv.handle_request(
+            _request("twin.thread_for", {"node_id": str(uuid4()), "direction": "sideways"})
         )
         assert "error" in json.loads(raw)
 

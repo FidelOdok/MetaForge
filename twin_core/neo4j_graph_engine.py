@@ -723,8 +723,14 @@ class Neo4jGraphEngine(GraphEngine):
         root_id: UUID,
         depth: int = 2,
         edge_types: list[EdgeType] | None = None,
+        direction: str = "outgoing",
     ) -> SubGraph:
-        """BFS traversal from root, returning all nodes/edges within depth hops."""
+        """BFS traversal from root, returning all nodes/edges within depth hops.
+
+        Direction: 'outgoing', 'incoming', or 'both'. Defaults to 'outgoing'
+        to preserve existing callers' behavior — see the abstract
+        GraphEngine.get_subgraph docstring for why this matters.
+        """
         self._assert_connected()
         with tracer.start_as_current_span("neo4j.get_subgraph") as span:
             span.set_attribute("db.operation", "get_subgraph")
@@ -737,6 +743,7 @@ class Neo4jGraphEngine(GraphEngine):
 
                 visited_nodes: dict[UUID, NodeBase] = {root_id: root}
                 collected_edges: list[EdgeBase] = []
+                seen_edges: set[tuple[UUID, UUID, EdgeType]] = set()
                 queue: deque[tuple[UUID, int]] = deque([(root_id, 0)])
 
                 while queue:
@@ -744,16 +751,20 @@ class Neo4jGraphEngine(GraphEngine):
                     if current_depth >= depth:
                         continue
 
-                    edges = await self.get_edges(current_id, direction="outgoing")
+                    edges = await self.get_edges(current_id, direction=direction)
                     for edge in edges:
                         if edge_types and edge.edge_type not in edge_types:
                             continue
-                        collected_edges.append(edge)
-                        if edge.target_id not in visited_nodes:
-                            target = await self.get_node(edge.target_id)
+                        edge_key = (edge.source_id, edge.target_id, edge.edge_type)
+                        if edge_key not in seen_edges:
+                            seen_edges.add(edge_key)
+                            collected_edges.append(edge)
+                        next_id = edge.target_id if edge.source_id == current_id else edge.source_id
+                        if next_id not in visited_nodes:
+                            target = await self.get_node(next_id)
                             if target is not None:
-                                visited_nodes[edge.target_id] = target
-                                queue.append((edge.target_id, current_depth + 1))
+                                visited_nodes[next_id] = target
+                                queue.append((next_id, current_depth + 1))
 
                 span.set_attribute(
                     "neo4j.result_count",

@@ -407,6 +407,81 @@ class TestGetSubgraph:
         with pytest.raises(KeyError):
             await engine.get_subgraph(uuid4(), depth=2)
 
+    async def test_outgoing_only_misses_incoming_edges(self, engine):
+        """FORGE-72 repro: a node whose only edges point AT it (the common
+        shape for a requirement/constraint that things SATISFIES/IMPLEMENTS)
+        returns zero edges under the default 'outgoing' direction."""
+        requirement = _make_constraint("mass")
+        evidence = _make_work_product("evidence")
+        await engine.add_node(requirement)
+        await engine.add_node(evidence)
+        await engine.add_edge(
+            EdgeBase(source_id=evidence.id, target_id=requirement.id, edge_type=EdgeType.SATISFIES)
+        )
+
+        sg = await engine.get_subgraph(requirement.id, depth=2)
+        assert sg.edges == []
+        assert {n.id for n in sg.nodes} == {requirement.id}
+
+    async def test_incoming_direction_finds_edges_pointing_at_root(self, engine):
+        requirement = _make_constraint("mass")
+        evidence = _make_work_product("evidence")
+        await engine.add_node(requirement)
+        await engine.add_node(evidence)
+        await engine.add_edge(
+            EdgeBase(source_id=evidence.id, target_id=requirement.id, edge_type=EdgeType.SATISFIES)
+        )
+
+        sg = await engine.get_subgraph(requirement.id, depth=2, direction="incoming")
+        assert len(sg.edges) == 1
+        assert {n.id for n in sg.nodes} == {requirement.id, evidence.id}
+
+    async def test_both_direction_finds_edges_either_way_without_duplicates(self, engine):
+        # a -> root (incoming to root), root -> b (outgoing from root)
+        a = _make_work_product("a")
+        root = _make_work_product("root")
+        b = _make_work_product("b")
+        for node in [a, root, b]:
+            await engine.add_node(node)
+        await engine.add_edge(
+            EdgeBase(source_id=a.id, target_id=root.id, edge_type=EdgeType.SATISFIES)
+        )
+        await engine.add_edge(
+            EdgeBase(source_id=root.id, target_id=b.id, edge_type=EdgeType.DEPENDS_ON)
+        )
+
+        sg = await engine.get_subgraph(root.id, depth=2, direction="both")
+        assert {n.id for n in sg.nodes} == {a.id, root.id, b.id}
+        assert len(sg.edges) == 2  # not 4 -- each edge counted once, not per-endpoint
+
+    async def test_both_direction_dedupes_when_both_endpoints_are_visited(self, engine):
+        """A single edge between two nodes that are BOTH already visited must
+        not be double-collected when direction='both' surfaces it from each
+        node's own get_edges() call."""
+        a = _make_work_product("a")
+        c = _make_work_product("c")
+        await engine.add_node(a)
+        await engine.add_node(c)
+        await engine.add_edge(
+            EdgeBase(source_id=a.id, target_id=c.id, edge_type=EdgeType.DEPENDS_ON)
+        )
+
+        sg = await engine.get_subgraph(a.id, depth=3, direction="both")
+        assert len(sg.edges) == 1
+
+    async def test_default_direction_unchanged(self, engine):
+        """No direction argument at all preserves the pre-FORGE-72 default."""
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        await engine.add_node(a)
+        await engine.add_node(b)
+        await engine.add_edge(
+            EdgeBase(source_id=b.id, target_id=a.id, edge_type=EdgeType.SATISFIES)
+        )
+
+        sg = await engine.get_subgraph(a.id, depth=2)
+        assert sg.edges == []
+
 
 class TestTraverse:
     async def test_linear_chain(self, engine):

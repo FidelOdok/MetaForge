@@ -94,8 +94,16 @@ class GraphEngine(ABC):
         root_id: UUID,
         depth: int = 2,
         edge_types: list[EdgeType] | None = None,
+        direction: str = "outgoing",
     ) -> SubGraph:
-        """BFS traversal from root, returning all nodes/edges within depth hops."""
+        """BFS traversal from root, returning all nodes/edges within depth hops.
+
+        Direction: 'outgoing', 'incoming', or 'both'. Defaults to 'outgoing'
+        to preserve existing callers' behavior — most traceability edges
+        point child-to-parent (e.g. evidence SATISFIES a requirement), so a
+        root that is typically an edge *target* (a requirement, constraint)
+        needs 'incoming' or 'both' to see anything.
+        """
         ...
 
     @abstractmethod
@@ -263,12 +271,14 @@ class InMemoryGraphEngine(GraphEngine):
         root_id: UUID,
         depth: int = 2,
         edge_types: list[EdgeType] | None = None,
+        direction: str = "outgoing",
     ) -> SubGraph:
         if root_id not in self._nodes:
             raise KeyError(f"Root node {root_id} not found")
 
         visited_nodes: dict[UUID, NodeBase] = {}
         collected_edges: list[EdgeBase] = []
+        seen_edges: set[tuple[UUID, UUID, EdgeType]] = set()
         queue: deque[tuple[UUID, int]] = deque([(root_id, 0)])
         visited_nodes[root_id] = self._nodes[root_id]
 
@@ -277,13 +287,20 @@ class InMemoryGraphEngine(GraphEngine):
             if current_depth >= depth:
                 continue
 
-            for edge in self._outgoing.get(current_id, []):
+            edges = await self.get_edges(current_id, direction=direction)
+            for edge in edges:
                 if edge_types and edge.edge_type not in edge_types:
                     continue
-                collected_edges.append(edge)
-                if edge.target_id not in visited_nodes:
-                    visited_nodes[edge.target_id] = self._nodes[edge.target_id]
-                    queue.append((edge.target_id, current_depth + 1))
+                # direction="both" surfaces the same edge from both the
+                # source's and target's perspective — dedupe on identity.
+                edge_key = (edge.source_id, edge.target_id, edge.edge_type)
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    collected_edges.append(edge)
+                next_id = edge.target_id if edge.source_id == current_id else edge.source_id
+                if next_id not in visited_nodes:
+                    visited_nodes[next_id] = self._nodes[next_id]
+                    queue.append((next_id, current_depth + 1))
 
         return SubGraph(
             nodes=list(visited_nodes.values()),
