@@ -20,6 +20,7 @@ from twin_core.constraint_engine.models import ConstraintEvaluationResult
 from twin_core.constraint_engine.validator import ConstraintEngine, InMemoryConstraintEngine
 from twin_core.graph_engine import GraphEngine, InMemoryGraphEngine
 from twin_core.models.base import EdgeBase
+from twin_core.models.baseline import Baseline
 from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
@@ -27,6 +28,7 @@ from twin_core.models.datasheet import Datasheet
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.relationship import SubGraph
+from twin_core.models.revision_snapshot import RevisionSnapshot
 from twin_core.models.version import Version, VersionDiff
 from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
@@ -258,6 +260,19 @@ class TwinAPI(ABC):
         ...
 
     @abstractmethod
+    async def get_constraint_revision(
+        self, constraint_id: UUID, revision: int
+    ) -> Constraint | None:
+        """Return the Constraint as it stood at ``revision`` (FORGE-51).
+
+        Returns the live node when ``revision`` matches its current
+        revision, else reconstructs it from the ``RevisionSnapshot``
+        recorded just before the update that moved it past that revision.
+        ``None`` when the entity or that specific revision doesn't exist.
+        """
+        ...
+
+    @abstractmethod
     async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult: ...
 
     @abstractmethod
@@ -296,6 +311,16 @@ class TwinAPI(ABC):
         ...
 
     @abstractmethod
+    async def get_engineering_entity_revision(
+        self, entity_id: UUID, revision: int
+    ) -> EngineeringEntity | None:
+        """Return the EngineeringEntity as it stood at ``revision`` (FORGE-51).
+
+        Same reconstruction contract as ``get_constraint_revision``.
+        """
+        ...
+
+    @abstractmethod
     async def list_engineering_entities(
         self, project_id: UUID | None = None, entity_type: str | None = None
     ) -> list[EngineeringEntity]:
@@ -303,6 +328,25 @@ class TwinAPI(ABC):
         ``entity_type`` (intent | stakeholder_need | objective | assumption |
         question | risk | verification_case | evidence)."""
         ...
+
+    # --- Baselines (FORGE-51) ---
+
+    @abstractmethod
+    async def create_baseline(self, baseline: Baseline) -> Baseline:
+        """Persist an already-built Baseline node.
+
+        Callers should go through
+        ``twin_core.transactions.baseline.create_baseline`` rather than
+        calling this directly -- it's the piece that atomically bumps every
+        included entity's authority to BASELINED alongside this write.
+        """
+        ...
+
+    @abstractmethod
+    async def get_baseline(self, baseline_id: UUID) -> Baseline | None: ...
+
+    @abstractmethod
+    async def list_baselines(self, project_id: UUID | None = None) -> list[Baseline]: ...
 
     # --- Components ---
 
@@ -761,10 +805,33 @@ class InMemoryTwinAPI(TwinAPI):
             raise KeyError(f"Constraint {constraint_id} not found")
         if expected_revision is not None and current.revision != expected_revision:
             raise RevisionConflictError(constraint_id, expected_revision, current.revision)
+        await self._graph.add_node(
+            RevisionSnapshot(
+                entity_id=constraint_id,
+                entity_kind="constraint",
+                revision=current.revision,
+                data=current.model_dump(mode="json"),
+            )
+        )
         applied = dict(updates)
         applied["revision"] = current.revision + 1
         result = await self._graph.update_node(constraint_id, applied)
         return result  # type: ignore[return-value]
+
+    async def get_constraint_revision(
+        self, constraint_id: UUID, revision: int
+    ) -> Constraint | None:
+        current = await self.get_constraint(constraint_id)
+        if current is not None and current.revision == revision:
+            return current
+        snapshots = await self._graph.list_nodes(
+            node_type=NodeType.REVISION_SNAPSHOT,
+            filters={"entity_id": constraint_id, "revision": revision},
+        )
+        if not snapshots:
+            return None
+        snapshot = snapshots[0]
+        return Constraint.model_validate(snapshot.data)  # type: ignore[attr-defined]
 
     async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult:
         return await self._constraints.evaluate_all()
@@ -805,10 +872,33 @@ class InMemoryTwinAPI(TwinAPI):
             raise KeyError(f"EngineeringEntity {entity_id} not found")
         if expected_revision is not None and current.revision != expected_revision:
             raise RevisionConflictError(entity_id, expected_revision, current.revision)
+        await self._graph.add_node(
+            RevisionSnapshot(
+                entity_id=entity_id,
+                entity_kind="engineering_entity",
+                revision=current.revision,
+                data=current.model_dump(mode="json"),
+            )
+        )
         applied = dict(updates)
         applied["revision"] = current.revision + 1
         result = await self._graph.update_node(entity_id, applied)
         return result  # type: ignore[return-value]
+
+    async def get_engineering_entity_revision(
+        self, entity_id: UUID, revision: int
+    ) -> EngineeringEntity | None:
+        current = await self.get_engineering_entity(entity_id)
+        if current is not None and current.revision == revision:
+            return current
+        snapshots = await self._graph.list_nodes(
+            node_type=NodeType.REVISION_SNAPSHOT,
+            filters={"entity_id": entity_id, "revision": revision},
+        )
+        if not snapshots:
+            return None
+        snapshot = snapshots[0]
+        return EngineeringEntity.model_validate(snapshot.data)  # type: ignore[attr-defined]
 
     async def list_engineering_entities(
         self, project_id: UUID | None = None, entity_type: str | None = None
@@ -820,6 +910,30 @@ class InMemoryTwinAPI(TwinAPI):
             filters["entity_type"] = entity_type
         nodes = await self._graph.list_nodes(
             node_type=NodeType.ENGINEERING_ENTITY, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Baselines (FORGE-51) ---
+
+    async def create_baseline(self, baseline: Baseline) -> Baseline:
+        existing = await self._graph.get_node(baseline.id)
+        if existing is not None:
+            raise ValueError(f"Baseline with ID {baseline.id} already exists")
+        result = await self._graph.add_node(baseline)
+        return result  # type: ignore[return-value]
+
+    async def get_baseline(self, baseline_id: UUID) -> Baseline | None:
+        node = await self._graph.get_node(baseline_id)
+        if node is not None and isinstance(node, Baseline):
+            return node
+        return None
+
+    async def list_baselines(self, project_id: UUID | None = None) -> list[Baseline]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.BASELINE, filters=filters if filters else None
         )
         return nodes  # type: ignore[return-value]
 
