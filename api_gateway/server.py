@@ -649,6 +649,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.routes import workflow as approval_workflow
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.blob_stager import make_blob_stager
+    from api_gateway.twin.claim_recorder import make_claim_recorder
     from api_gateway.twin.component_recorder import make_component_recorder
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
@@ -753,6 +754,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # "requirement satisfaction claims" being LLM assertion instead of a
         # real, checkable graph fact.
         evidence_recorder=make_evidence_recorder(twin, project_backend),
+        # FORGE-65: the requirement-satisfaction claim this whole phase is
+        # named for -- an artefact's real edge to the requirement it
+        # satisfies, citing evidence, with status always computed live.
+        claim_recorder=make_claim_recorder(twin),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

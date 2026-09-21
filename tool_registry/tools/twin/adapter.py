@@ -55,6 +55,7 @@ class TwinServer(McpToolServer):
         procurement_record_recorder: Any = None,
         component_recorder: Any = None,
         evidence_recorder: Any = None,
+        claim_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -138,6 +139,13 @@ class TwinServer(McpToolServer):
         # StalenessEngine. Same injection seam as decision_recorder; None
         # keeps tool_registry free of api_gateway imports.
         self._evidence_recorder = evidence_recorder
+        # FORGE-65 (epic FORGE-35, Phase 6): an injected async ``record(...)``
+        # (make_claim_recorder) that persists a requirement-satisfaction
+        # claim -- a real graph edge from an artefact to the requirement it
+        # satisfies, citing evidence ids in its metadata. Same injection
+        # seam as decision_recorder; None keeps tool_registry free of
+        # api_gateway imports.
+        self._claim_recorder = claim_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -169,6 +177,8 @@ class TwinServer(McpToolServer):
             self._register_record_component_selection()
         if evidence_recorder is not None:
             self._register_record_evidence()
+        if claim_recorder is not None:
+            self._register_record_claim()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -2191,6 +2201,13 @@ class TwinServer(McpToolServer):
                                 "against) -- omit 'revision' to pin the current one."
                             ),
                         },
+                        "supersedes": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-65 revalidation: node id of the stale evidence this "
+                                "fresh run replaces -- flips that evidence to SUPERSEDED."
+                            ),
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -2205,6 +2222,7 @@ class TwinServer(McpToolServer):
                         "supports": {"type": "array", "items": {"type": "string"}},
                         "contradicts": {"type": "array", "items": {"type": "string"}},
                         "valid_against_count": {"type": "integer"},
+                        "superseded": {"type": ["string", "null"]},
                         "project_linked": {"type": "boolean"},
                     },
                 },
@@ -2237,6 +2255,7 @@ class TwinServer(McpToolServer):
         valid_against = arguments.get("valid_against")
         if valid_against is not None and not isinstance(valid_against, list):
             raise ValueError("twin.record_evidence: 'valid_against' must be an array")
+        supersedes = arguments.get("supersedes")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
         return await self._evidence_recorder(
@@ -2248,6 +2267,90 @@ class TwinServer(McpToolServer):
             supports=supports,
             contradicts=contradicts,
             valid_against=valid_against,
+            supersedes=supersedes if isinstance(supersedes, str) else None,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
         )
+
+    # ------------------------------------------------------------------
+    # twin.record_claim (FORGE-65, epic FORGE-35)
+    # ------------------------------------------------------------------
+
+    def _register_record_claim(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_claim",
+                adapter_id="twin",
+                name="Record Requirement Satisfaction Claim",
+                description=(
+                    "Persist an explicit claim that a design artefact (CAD model, "
+                    "schematic, ...) satisfies a requirement, citing the evidence "
+                    "that backs it. The claim's status (supported/unsupported) is "
+                    "always computed live from current evidence staleness, never "
+                    "cached -- a claim with no evidence, or whose evidence has all "
+                    "gone stale, reports unsupported."
+                ),
+                capability="twin_evidence",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "requirement_ref": {
+                            "type": "string",
+                            "description": "The requirement (Constraint) by name or UUID.",
+                        },
+                        "artefact_ref": {
+                            "type": "string",
+                            "description": "The artefact (WorkProduct, e.g. a cad_model) by "
+                            "name or UUID.",
+                        },
+                        "evidence_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "twin.record_evidence node ids this claim cites.",
+                        },
+                        "claim_type": {
+                            "type": "string",
+                            "description": "Edge type for the claim relation (default "
+                            "'satisfies').",
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID scope."},
+                    },
+                    "required": ["requirement_ref", "artefact_ref"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "artefact_id": {"type": "string"},
+                        "requirement_id": {"type": "string"},
+                        "claim_type": {"type": "string"},
+                        "evidence": {"type": "array", "items": {"type": "string"}},
+                        "status": {"type": "string", "enum": ["supported", "unsupported"]},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_claim,
+        )
+
+    async def record_claim(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        requirement_ref = arguments.get("requirement_ref")
+        artefact_ref = arguments.get("artefact_ref")
+        if not requirement_ref or not isinstance(requirement_ref, str):
+            raise ValueError("twin.record_claim: 'requirement_ref' is required (non-empty string)")
+        if not artefact_ref or not isinstance(artefact_ref, str):
+            raise ValueError("twin.record_claim: 'artefact_ref' is required (non-empty string)")
+        evidence_refs = arguments.get("evidence_refs")
+        if evidence_refs is not None and not isinstance(evidence_refs, list):
+            raise ValueError("twin.record_claim: 'evidence_refs' must be an array")
+        claim_type = arguments.get("claim_type")
+        project_id = arguments.get("project_id")
+        kwargs: dict[str, Any] = {
+            "requirement_ref": requirement_ref,
+            "artefact_ref": artefact_ref,
+            "evidence_refs": evidence_refs,
+            "project_id": project_id if isinstance(project_id, str) else None,
+        }
+        if isinstance(claim_type, str) and claim_type:
+            kwargs["claim_type"] = claim_type
+        return await self._claim_recorder(**kwargs)

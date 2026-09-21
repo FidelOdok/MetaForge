@@ -273,6 +273,63 @@ class TestValidAgainst:
             )
 
 
+class TestSupersedesRevalidation:
+    """FORGE-65: rerunning a stale evidence's procedure records a NEW
+    evidence entity that supersedes the old, stale one -- never a mutation
+    of the old entity's own result."""
+
+    async def test_supersedes_creates_edge_and_marks_old_superseded(self, twin, project_id):
+        record = make_evidence_recorder(twin)
+        stale = await record(
+            evidence_type="calculation", producer={"tool": "x"}, inputs={}, result={"a": 1}
+        )
+        fresh = await record(
+            evidence_type="calculation",
+            producer={"tool": "x"},
+            inputs={},
+            result={"a": 2},
+            supersedes=stale["node_id"],
+        )
+        assert fresh["superseded"] == stale["node_id"]
+
+        edges = await twin.get_edges(UUID(fresh["node_id"]), edge_type=EdgeType.SUPERSEDES)
+        assert len(edges) == 1
+        assert edges[0].target_id == UUID(stale["node_id"])
+
+        engine = StalenessEngine(twin)
+        old_status = await engine.get_status("engineering_entity", UUID(stale["node_id"]))
+        assert old_status.value == "superseded"
+        new_status = await engine.get_status("engineering_entity", UUID(fresh["node_id"]))
+        assert new_status.value == "current"
+
+    async def test_no_supersedes_leaves_superseded_none(self, twin, project_id):
+        record = make_evidence_recorder(twin)
+        out = await record(
+            evidence_type="calculation", producer={"tool": "x"}, inputs={}, result={"a": 1}
+        )
+        assert out["superseded"] is None
+
+    async def test_supersedes_ref_that_is_not_evidence_raises(self, twin, project_id):
+        req = await twin.create_constraint(
+            Constraint(
+                name="not_evidence",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+            )
+        )
+        record = make_evidence_recorder(twin)
+        with pytest.raises(ValueError, match="not an 'evidence'"):
+            await record(
+                evidence_type="calculation",
+                producer={"tool": "x"},
+                inputs={},
+                result={"a": 1},
+                supersedes=str(req.id),
+            )
+
+
 class TestAdapterHandler:
     async def test_record_evidence_tool_registered_and_calls_recorder(self, twin, project_id):
         server = TwinServer(
@@ -292,6 +349,29 @@ class TestAdapterHandler:
     def test_record_evidence_absent_without_recorder(self):
         server = TwinServer(twin=InMemoryTwinAPI.create())
         assert "twin.record_evidence" not in server.tool_ids
+
+    async def test_handler_passes_through_supersedes(self, twin, project_id):
+        server = TwinServer(
+            twin=twin, allow_mutations=True, evidence_recorder=make_evidence_recorder(twin)
+        )
+        stale = await server.record_evidence(
+            {
+                "evidence_type": "calculation",
+                "producer": {"tool": "x"},
+                "inputs": {},
+                "result": {"a": 1},
+            }
+        )
+        fresh = await server.record_evidence(
+            {
+                "evidence_type": "calculation",
+                "producer": {"tool": "x"},
+                "inputs": {},
+                "result": {"a": 2},
+                "supersedes": stale["node_id"],
+            }
+        )
+        assert fresh["superseded"] == stale["node_id"]
 
     async def test_handler_validates_required_fields(self, twin, project_id):
         server = TwinServer(twin=twin, evidence_recorder=make_evidence_recorder(twin))
