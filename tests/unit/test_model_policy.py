@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from orchestrator.harness import HarnessRuntime
@@ -55,6 +57,43 @@ def test_parse_json_missing_tool_and_final_raises() -> None:
         parse_action('{"thought": "I built the assembly and committed it."}')
 
 
+# --- FORGE-69: bare JSON from a zero-tool (one-shot extraction) turn -------
+def test_parse_bare_json_still_raises_by_default() -> None:
+    """allow_bare_json_as_final defaults to False -- the strict protocol
+    stays enforced unless a caller explicitly opts in."""
+    with pytest.raises(ReActParseError):
+        parse_action('{"intent": "build a robot", "goals": ["walk"]}')
+
+
+def test_parse_bare_json_as_final_when_allowed() -> None:
+    a = parse_action(
+        '{"thought": "extracted", "intent": "build a robot", "goals": ["walk"]}',
+        allow_bare_json_as_final=True,
+    )
+    assert a.is_final
+    assert a.thought == "extracted"
+    # Re-serialized (whole object, "thought" included -- harmless, an
+    # extraction caller only reads the specific keys it cares about) as
+    # valid JSON text, not the dict's Python repr.
+    parsed = json.loads(a.final_output)
+    assert parsed["intent"] == "build a robot"
+    assert parsed["goals"] == ["walk"]
+
+
+def test_parse_bare_json_as_final_still_prefers_a_real_final_key() -> None:
+    """A reply that DOES have "final" uses it normally even when the caller
+    allows the bare-JSON fallback -- the fallback only kicks in when neither
+    protocol key is present."""
+    a = parse_action('{"final": "the answer"}', allow_bare_json_as_final=True)
+    assert a.final_output == "the answer"
+
+
+def test_parse_bare_json_as_final_still_prefers_a_real_tool_call() -> None:
+    a = parse_action('{"tool": "double", "arguments": {"x": 2}}', allow_bare_json_as_final=True)
+    assert not a.is_final
+    assert a.tool_call.name == "double"
+
+
 # --- MET-614: replies that are structurally honest but strictly invalid ----
 def test_parse_tolerates_literal_newlines_in_strings() -> None:
     """Live-caught (kitchen-shelf turn): a multi-line CAD script or rationale
@@ -100,6 +139,38 @@ async def test_next_action_parses_model_reply() -> None:
     policy = ModelPolicy(rt, invoke=_scripted_invoke('{"tool": "double", "arguments": {"x": 2}}'))
     action = await policy.next_action("goal", [])
     assert action.tool_call.name == "double"
+
+
+@pytest.mark.asyncio
+async def test_next_action_with_zero_tools_accepts_bare_json() -> None:
+    """FORGE-69: a one-shot structured-JSON extraction turn (no tools
+    registered, e.g. req_handlers.py's _extract_req_spec or the requirement-
+    intelligence agents) must not reject its own requested reply shape."""
+    rt = HarnessRuntime.build(CONFIG)  # no tools= given -> empty ToolRegistry
+    policy = ModelPolicy(
+        rt, invoke=_scripted_invoke('{"intent": "build a robot", "goals": ["walk"]}')
+    )
+    action = await policy.next_action("extract the intent", [])
+    assert action.is_final
+    assert action.final_output == '{"intent": "build a robot", "goals": ["walk"]}'
+
+
+@pytest.mark.asyncio
+async def test_next_action_with_registered_tools_still_rejects_bare_json() -> None:
+    """The fallback must NOT weaken protocol enforcement for a real,
+    tool-using conversational turn -- only a genuinely tool-less one."""
+    tools = ToolRegistry()
+
+    async def _h(args: dict[str, object]) -> dict[str, object]:
+        return {"result": args.get("x")}
+
+    tools.register_native("double", description="doubles x", input_schema={}, handler=_h)
+    rt = HarnessRuntime.build(CONFIG, tools=tools)
+    policy = ModelPolicy(
+        rt, invoke=_scripted_invoke('{"intent": "build a robot", "goals": ["walk"]}')
+    )
+    with pytest.raises(ReActParseError):
+        await policy.next_action("goal", [])
 
 
 @pytest.mark.asyncio
