@@ -1,4 +1,4 @@
-"""Requirement-intelligence agents (FORGE-54/55, Phase 3 of epic FORGE-35).
+"""Requirement-intelligence agents (FORGE-54/55/56, Phase 3 of epic FORGE-35).
 
 Lives under ``api_gateway`` rather than ``orchestrator`` (where the epic's
 Phase 1/2 primitives sit) because these agents need an LLM completion —
@@ -18,6 +18,12 @@ from api_gateway.requirement_intelligence.quality import (
 )
 from api_gateway.requirement_intelligence.requirement_author import RequirementAuthorAgent
 from api_gateway.requirement_intelligence.requirement_critic import RequirementCriticAgent
+from api_gateway.requirement_intelligence.traceability import (
+    TraceabilityAgent,
+    TraceabilityCategory,
+    TraceabilityCoverage,
+    TraceabilityFinding,
+)
 
 __all__ = [
     "AgentResult",
@@ -29,6 +35,10 @@ __all__ = [
     "RequirementCriticAgent",
     "RequirementLinter",
     "RequirementQualityRecord",
+    "TraceabilityAgent",
+    "TraceabilityCategory",
+    "TraceabilityCoverage",
+    "TraceabilityFinding",
     "Unknown",
     "UnknownSeverity",
     "build_quality_record",
