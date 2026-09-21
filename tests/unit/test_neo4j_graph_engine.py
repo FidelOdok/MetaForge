@@ -8,8 +8,13 @@ from uuid import uuid4
 import pytest
 
 from twin_core.models.base import EdgeBase, NodeBase
+from twin_core.models.engineering_change_transaction import (
+    ChangeTrigger,
+    EngineeringChangeTransaction,
+)
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.patch import Patch, PatchOp, PatchOperation
 from twin_core.models.work_product import WorkProduct
 from twin_core.neo4j_graph_engine import (
     Neo4jConnectionError,
@@ -271,6 +276,45 @@ class TestNodeOperations:
         assert isinstance(result, EngineeringEntity)
         assert result.entity_type == "intent"
         assert result.title == "Desktop quadruped intent"
+
+    async def test_get_node_reconstructs_engineering_change_transaction(
+        self, engine, mock_session
+    ) -> None:
+        """Found via live validation against a real Neo4j deployment
+        (FORGE-66/67): the exact FORGE-68 failure mode recurring for the
+        new ENGINEERING_CHANGE_TRANSACTION node type -- without this
+        branch, get_ect() always returns None (isinstance check against a
+        bare NodeBase fails) even though create_ect() just wrote the node
+        successfully, so every ECT lifecycle call after propose_change()
+        raised KeyError."""
+        req_id = uuid4()
+        patch = Patch(
+            operations=[
+                PatchOperation(
+                    op=PatchOp.REVISE,
+                    entity_kind="constraint",
+                    entity_id=req_id,
+                    fields={"message": "x"},
+                    expected_revision=1,
+                )
+            ],
+            reason="live validation",
+        )
+        ect = EngineeringChangeTransaction(
+            trigger=ChangeTrigger(type="user_request"),
+            observation="raise payload requirement",
+            patch=patch,
+        )
+        record = _make_mock_record(ect)
+
+        mock_result = AsyncMock()
+        mock_result.single = AsyncMock(return_value=record)
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        result = await engine.get_node(ect.id)
+        assert isinstance(result, EngineeringChangeTransaction)
+        assert result.trigger.type == "user_request"
+        assert result.patch.operations[0].entity_id == req_id
 
     async def test_update_node(self, engine, mock_session):
         work_product = _make_work_product()
