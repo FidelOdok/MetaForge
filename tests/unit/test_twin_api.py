@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
+from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError, RevisionConflictError
 from twin_core.constraint_engine.validator import ConstraintEngine
 from twin_core.models import (
     Component,
@@ -12,6 +12,7 @@ from twin_core.models import (
     ConstraintSeverity,
     Datasheet,
     EdgeType,
+    EngineeringEntity,
     WorkProduct,
     WorkProductType,
 )
@@ -814,3 +815,67 @@ class TestVersioningOperations:
         assert diff_result.version_a is not None
         assert diff_result.version_b is not None
         assert len(diff_result.changes) > 0
+
+
+class TestConstraintRevisionUpdates:
+    """FORGE-50: update_constraint's optimistic-concurrency contract."""
+
+    async def test_update_increments_revision(self, api):
+        c = _make_constraint()
+        await api.create_constraint(c)
+        assert c.revision == 1
+
+        updated = await api.update_constraint(c.id, {"message": "tightened"})
+        assert updated.revision == 2
+        assert updated.message == "tightened"
+
+    async def test_matching_expected_revision_succeeds(self, api):
+        c = _make_constraint()
+        await api.create_constraint(c)
+
+        updated = await api.update_constraint(c.id, {"message": "edit"}, expected_revision=1)
+        assert updated.revision == 2
+
+    async def test_stale_expected_revision_raises_and_does_not_write(self, api):
+        c = _make_constraint()
+        await api.create_constraint(c)
+        await api.update_constraint(c.id, {"message": "first"}, expected_revision=1)
+
+        with pytest.raises(RevisionConflictError):
+            await api.update_constraint(c.id, {"message": "second"}, expected_revision=1)
+
+        fetched = await api.get_constraint(c.id)
+        assert fetched.message == "first"
+        assert fetched.revision == 2
+
+    async def test_unknown_constraint_raises_key_error(self, api):
+        with pytest.raises(KeyError):
+            await api.update_constraint(uuid4(), {"message": "x"})
+
+
+class TestEngineeringEntityRevisionUpdates:
+    """FORGE-50: update_engineering_entity mirrors update_constraint's contract."""
+
+    async def test_update_increments_revision(self, api):
+        e = EngineeringEntity(entity_type="intent", statement="original")
+        await api.create_engineering_entity(e)
+        assert e.revision == 1
+
+        updated = await api.update_engineering_entity(e.id, {"statement": "revised"})
+        assert updated.revision == 2
+        assert updated.statement == "revised"
+
+    async def test_stale_expected_revision_raises_and_does_not_write(self, api):
+        e = EngineeringEntity(entity_type="intent", statement="original")
+        await api.create_engineering_entity(e)
+        await api.update_engineering_entity(e.id, {"statement": "first"}, expected_revision=1)
+
+        with pytest.raises(RevisionConflictError):
+            await api.update_engineering_entity(e.id, {"statement": "second"}, expected_revision=1)
+
+        fetched = await api.get_engineering_entity(e.id)
+        assert fetched.statement == "first"
+
+    async def test_unknown_entity_raises_key_error(self, api):
+        with pytest.raises(KeyError):
+            await api.update_engineering_entity(uuid4(), {"statement": "x"})

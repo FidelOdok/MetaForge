@@ -70,3 +70,7 @@ class EngineeringEntity(NodeBase):
     parent_refs: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
+    # FORGE-50 (Phase 2): optimistic-concurrency revision counter. Starts at
+    # 1 on creation; TwinAPI.update_engineering_entity increments it on every
+    # applied write and rejects a stale expected_revision (PatchConflictError).
+    revision: int = 1

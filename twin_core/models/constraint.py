@@ -24,3 +24,8 @@ class Constraint(NodeBase):
     message: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
+    # FORGE-50 (Phase 2, epic FORGE-35): optimistic-concurrency revision
+    # counter. Starts at 1 on creation; TwinAPI.update_constraint increments
+    # it on every applied write and rejects a caller-supplied
+    # expected_revision that no longer matches it (PatchConflictError).
+    revision: int = 1
