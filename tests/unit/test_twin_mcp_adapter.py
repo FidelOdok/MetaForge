@@ -53,6 +53,7 @@ class _FakeTwin:
 
     def __init__(self) -> None:
         self.subgraph_calls: list[tuple[UUID, int]] = []
+        self.subgraph_edge_types_calls: list[list[str] | None] = []
         self.cypher_calls: list[tuple[str, dict[str, Any]]] = []
         self.evaluate_calls: list[str] = []
         # Configurable returns.
@@ -64,6 +65,7 @@ class _FakeTwin:
 
     async def get_subgraph(self, root_id: UUID, depth: int = 2, edge_types=None) -> SubGraph:
         self.subgraph_calls.append((root_id, depth))
+        self.subgraph_edge_types_calls.append(edge_types)
         return self.subgraph_return or SubGraph(nodes=[], edges=[], root_id=root_id, depth=depth)
 
     async def query_cypher(
@@ -217,6 +219,45 @@ class TestThreadFor:
         srv = TwinServer(twin=_FakeTwin())
         raw = await srv.handle_request(
             _request("twin.thread_for", {"node_id": str(uuid4()), "depth": depth})
+        )
+        assert "error" in json.loads(raw)
+
+    async def test_no_edge_types_means_no_filter(self) -> None:
+        """FORGE-47: omitting edge_types keeps thread_for's pre-existing
+        unfiltered behavior exactly -- None reaches get_subgraph, not []."""
+        twin = _FakeTwin()
+        node_id = uuid4()
+        twin.subgraph_return = SubGraph(nodes=[], edges=[], root_id=node_id, depth=3)
+        srv = TwinServer(twin=twin)
+        await srv.handle_request(_request("twin.thread_for", {"node_id": str(node_id)}))
+        assert twin.subgraph_edge_types_calls == [None]
+
+    async def test_edge_types_passed_through_as_plain_strings(self) -> None:
+        """No EdgeType import needed at this layer -- StrEnum equality means
+        the real graph engines filter correctly against plain strings."""
+        twin = _FakeTwin()
+        node_id = uuid4()
+        twin.subgraph_return = SubGraph(nodes=[], edges=[], root_id=node_id, depth=3)
+        srv = TwinServer(twin=twin)
+        await srv.handle_request(
+            _request(
+                "twin.thread_for",
+                {"node_id": str(node_id), "edge_types": ["implements", "derives_from"]},
+            )
+        )
+        assert twin.subgraph_edge_types_calls == [["implements", "derives_from"]]
+
+    async def test_edge_types_must_be_a_list_of_strings(self) -> None:
+        srv = TwinServer(twin=_FakeTwin())
+        raw = await srv.handle_request(
+            _request("twin.thread_for", {"node_id": str(uuid4()), "edge_types": "implements"})
+        )
+        assert "error" in json.loads(raw)
+
+    async def test_edge_types_rejects_non_string_items(self) -> None:
+        srv = TwinServer(twin=_FakeTwin())
+        raw = await srv.handle_request(
+            _request("twin.thread_for", {"node_id": str(uuid4()), "edge_types": [1, 2]})
         )
         assert "error" in json.loads(raw)
 
@@ -417,6 +458,96 @@ class TestQueryCypher:
                 "twin.query_cypher",
                 {"cypher": "RETURN 1", "params": "not-a-dict"},
             )
+        )
+        assert "error" in json.loads(raw)
+
+
+# ---------------------------------------------------------------------------
+# record_engineering_entity (FORGE-47)
+# ---------------------------------------------------------------------------
+
+
+class TestRecordEngineeringEntity:
+    async def test_tool_not_exposed_without_a_recorder(self) -> None:
+        srv = TwinServer(twin=_FakeTwin())
+        assert "twin.record_engineering_entity" not in set(srv.tool_ids)
+
+    async def test_tool_exposed_when_recorder_given(self) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "n1", "entity_type": kwargs["entity_type"], "parent_ids": []}
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_recorder=recorder)
+        assert "twin.record_engineering_entity" in set(srv.tool_ids)
+
+    async def test_calls_recorder_with_defaults(self) -> None:
+        calls: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            calls.update(kwargs)
+            return {"node_id": "n1", "entity_type": "intent", "parent_ids": []}
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_recorder=recorder)
+        raw = await srv.handle_request(
+            _request(
+                "twin.record_engineering_entity",
+                {"entity_type": "intent", "statement": "Build a desktop quadruped."},
+            )
+        )
+        data = json.loads(raw)["result"]["data"]
+        assert data["node_id"] == "n1"
+        assert calls["entity_type"] == "intent"
+        assert calls["statement"] == "Build a desktop quadruped."
+        assert calls["title"] is None
+        assert calls["parent_refs"] is None
+        assert calls["relation"] == "derives_from"
+
+    async def test_passes_through_title_extra_parent_refs_and_relation(self) -> None:
+        calls: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            calls.update(kwargs)
+            return {"node_id": "n2", "entity_type": "stakeholder_need", "parent_ids": ["p1"]}
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.record_engineering_entity",
+                {
+                    "entity_type": "stakeholder_need",
+                    "statement": "The operator needs it to be safe.",
+                    "title": "Operator safety need",
+                    "extra": {"stakeholder": "STK-OPERATOR"},
+                    "parent_refs": ["Desktop quadruped intent"],
+                    "relation": "motivates",
+                    "project_id": "11111111-1111-4111-8111-111111111111",
+                    "session_id": "sess-1",
+                },
+            )
+        )
+        assert calls["title"] == "Operator safety need"
+        assert calls["extra"] == {"stakeholder": "STK-OPERATOR"}
+        assert calls["parent_refs"] == ["Desktop quadruped intent"]
+        assert calls["relation"] == "motivates"
+        assert calls["project_id"] == "11111111-1111-4111-8111-111111111111"
+        assert calls["session_id"] == "sess-1"
+
+    async def test_missing_entity_type_rejected(self) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "n1", "entity_type": "intent", "parent_ids": []}
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_recorder=recorder)
+        raw = await srv.handle_request(
+            _request("twin.record_engineering_entity", {"statement": "x"})
+        )
+        assert "error" in json.loads(raw)
+
+    async def test_missing_statement_rejected(self) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "n1", "entity_type": "intent", "parent_ids": []}
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_recorder=recorder)
+        raw = await srv.handle_request(
+            _request("twin.record_engineering_entity", {"entity_type": "intent"})
         )
         assert "error" in json.loads(raw)
 

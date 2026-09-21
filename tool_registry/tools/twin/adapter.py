@@ -44,6 +44,7 @@ class TwinServer(McpToolServer):
         geometry_recorder: Any = None,
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
+        engineering_entity_recorder: Any = None,
         document_recorder: Any = None,
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
@@ -80,6 +81,13 @@ class TwinServer(McpToolServer):
         # Same injection seam as decision_recorder; None keeps tool_registry
         # free of api_gateway imports.
         self._constraint_recorder = constraint_recorder
+        # FORGE-45 (epic FORGE-35): an injected async ``record(...)`` that
+        # persists one EngineeringEntity node (intent/need/objective/
+        # assumption/question/risk/verification_case/evidence), optionally
+        # linked to parent(s) it derives_from/satisfies/etc. Same injection
+        # seam as constraint_recorder; None keeps tool_registry free of
+        # api_gateway imports.
+        self._engineering_entity_recorder = engineering_entity_recorder
         # MET-588: an injected async ``record(...)`` (make_document_recorder)
         # that persists an arbitrary text/markdown artifact as a PRD/
         # DOCUMENTATION work product — MinIO blob + twin node + project link.
@@ -130,6 +138,8 @@ class TwinServer(McpToolServer):
             self._register_propose_change()
         if constraint_recorder is not None:
             self._register_record_constraint_set()
+        if engineering_entity_recorder is not None:
+            self._register_record_engineering_entity()
         if document_recorder is not None:
             self._register_record_document()
         if design_sketch_recorder is not None:
@@ -213,6 +223,16 @@ class TwinServer(McpToolServer):
                             "minimum": 1,
                             "maximum": 10,
                             "description": "Maximum hop depth from the root node.",
+                        },
+                        "edge_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Restrict the walk to these edge types (e.g. "
+                                "['implements', 'derives_from', 'motivates'] to render "
+                                "just the Engineering Intent & Requirements Harness's "
+                                "decomposition chain). Omit to walk every edge type."
+                            ),
                         },
                     },
                     "required": ["node_id"],
@@ -417,10 +437,27 @@ class TwinServer(McpToolServer):
         if depth < 1 or depth > 10:
             raise ValueError("depth must be between 1 and 10 inclusive")
 
+        # FORGE-47: plain strings, not EdgeType members -- tool_registry (layer
+        # 3) may not import twin_core (layer 4+). EdgeType is a StrEnum, so an
+        # EdgeType instance compares equal to its raw string value; the real
+        # graph engines' `edge.edge_type not in edge_types` filter (in-memory
+        # and Neo4j alike) works correctly against plain strings with no
+        # conversion needed here. An unrecognised string just matches nothing.
+        raw_edge_types = arguments.get("edge_types")
+        edge_types: list[str] | None = None
+        if raw_edge_types is not None:
+            if not isinstance(raw_edge_types, list) or not all(
+                isinstance(t, str) and t.strip() for t in raw_edge_types
+            ):
+                raise ValueError("edge_types must be a list of non-empty strings")
+            edge_types = raw_edge_types
+
         with tracer.start_as_current_span("twin.thread_for") as span:
             span.set_attribute("twin.node_id", str(node_id))
             span.set_attribute("twin.depth", depth)
-            subgraph = await self._twin.get_subgraph(node_id, depth=depth)
+            if edge_types:
+                span.set_attribute("twin.edge_types", ",".join(edge_types))
+            subgraph = await self._twin.get_subgraph(node_id, depth=depth, edge_types=edge_types)
             return serialise_subgraph(subgraph)
 
     async def find_by_property(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -883,6 +920,19 @@ class TwinServer(McpToolServer):
                                         "type": "string",
                                         "description": "Discipline (default: systems).",
                                     },
+                                    "parent_refs": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": (
+                                            "FORGE-46: the high-level requirement(s)/"
+                                            "constraint(s) this one implements/decomposes -- "
+                                            "each an exact Constraint name, EngineeringEntity "
+                                            "title, or node UUID, scoped to project_id. "
+                                            "Linked via an IMPLEMENTS edge. An unresolvable "
+                                            "ref fails the whole call -- record the parent "
+                                            "first."
+                                        ),
+                                    },
                                 },
                                 "required": ["name", "expression"],
                             },
@@ -897,6 +947,13 @@ class TwinServer(McpToolServer):
                     "properties": {
                         "node_id": {"type": "string"},
                         "constraint_ids": {"type": "array", "items": {"type": "string"}},
+                        "constraint_parents": {
+                            "type": "object",
+                            "description": (
+                                "Constraint id -> resolved parent id(s), for entries that "
+                                "carried parent_refs (FORGE-46)."
+                            ),
+                        },
                         "minio_object_key": {"type": ["string", "null"]},
                         "content_hash": {"type": "string"},
                         "project_linked": {"type": "boolean"},
@@ -922,6 +979,130 @@ class TwinServer(McpToolServer):
         return await self._constraint_recorder(
             title=title,
             constraints=constraints,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_engineering_entity (FORGE-45/47, epic FORGE-35)
+    # ------------------------------------------------------------------
+
+    def _register_record_engineering_entity(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_engineering_entity",
+                adapter_id="twin",
+                name="Record Engineering Entity",
+                description=(
+                    "Persist one Engineering Intent & Requirements Harness entity: "
+                    "an intent, stakeholder_need, objective, assumption, question, "
+                    "risk, verification_case, or evidence. Use to capture WHY a "
+                    "product/requirement exists before recording the quantified "
+                    "requirements themselves (twin.record_constraint_set). Link it "
+                    "to the entity it derives_from/satisfies/motivates/etc. via "
+                    "parent_refs so the chain from stated intent to a specific "
+                    "requirement stays traceable."
+                ),
+                capability="twin_engineering_entity",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_type": {
+                            "type": "string",
+                            "enum": [
+                                "intent",
+                                "stakeholder_need",
+                                "objective",
+                                "assumption",
+                                "question",
+                                "risk",
+                                "verification_case",
+                                "evidence",
+                            ],
+                        },
+                        "statement": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The entity's content in plain English.",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": (
+                                "Short, stable name other entries can reference by "
+                                "parent_refs. Give one to any entity you expect to be "
+                                "a future parent."
+                            ),
+                        },
+                        "extra": {
+                            "type": "object",
+                            "description": (
+                                "Type-specific fields (e.g. objective's metric/direction/"
+                                "target, risk's probability/severity/mitigation, "
+                                "evidence's evidence_type/result) -- stored in metadata."
+                            ),
+                        },
+                        "parent_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "The entity/entities this one derives_from/satisfies/"
+                                "motivates/etc. -- each an exact Constraint name, "
+                                "EngineeringEntity title, or node UUID, scoped to "
+                                "project_id. An unresolvable ref fails the whole call."
+                            ),
+                        },
+                        "relation": {
+                            "type": "string",
+                            "default": "derives_from",
+                            "description": (
+                                "The EdgeType linking this entity to each parent_ref "
+                                "(e.g. 'motivates' for intent->need, 'satisfies' for "
+                                "need->requirement). Default: derives_from."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["entity_type", "statement"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "entity_type": {"type": "string"},
+                        "parent_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.record_engineering_entity,
+        )
+
+    async def record_engineering_entity(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        entity_type = arguments.get("entity_type")
+        statement = arguments.get("statement")
+        if not entity_type or not isinstance(entity_type, str):
+            raise ValueError(
+                "twin.record_engineering_entity: 'entity_type' is required (non-empty string)"
+            )
+        if not statement or not isinstance(statement, str):
+            raise ValueError(
+                "twin.record_engineering_entity: 'statement' is required (non-empty string)"
+            )
+        title = arguments.get("title")
+        extra = arguments.get("extra")
+        parent_refs = arguments.get("parent_refs")
+        relation = arguments.get("relation")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._engineering_entity_recorder(
+            entity_type=entity_type,
+            statement=statement,
+            title=title if isinstance(title, str) else None,
+            extra=extra if isinstance(extra, dict) else None,
+            parent_refs=parent_refs if isinstance(parent_refs, list) else None,
+            relation=relation if isinstance(relation, str) else "derives_from",
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
         )

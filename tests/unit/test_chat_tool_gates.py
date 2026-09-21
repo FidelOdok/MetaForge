@@ -29,6 +29,7 @@ def _bridge() -> InMemoryMcpBridge:
         "twin.commit_geometry",
         "twin.record_decision",
         "twin.record_constraint_set",
+        "twin.record_engineering_entity",
         "twin.propose_change",
         "twin.stage_work_product_file",
         "twin.get_node",
@@ -50,6 +51,7 @@ async def test_persistent_twin_and_project_writes_declare_gates():
     assert defs["commit_geometry"].required_gates == (GATE_TWIN_WRITE,)
     assert defs["record_decision"].required_gates == (GATE_TWIN_WRITE,)
     assert defs["record_constraint_set"].required_gates == (GATE_TWIN_WRITE,)
+    assert defs["record_engineering_entity"].required_gates == (GATE_TWIN_WRITE,)
     assert defs["propose_change"].required_gates == (GATE_TWIN_WRITE,)
     assert defs["stage_work_product_file"].required_gates == (GATE_TWIN_WRITE,)
     assert defs["create"].required_gates == (GATE_PROJECT_WRITE,)
