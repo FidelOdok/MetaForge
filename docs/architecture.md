@@ -635,3 +635,43 @@ MetaForge is local-first:
 | **Assistant Mode** | Human-driven design with post-edit validation (default mode) |
 | **Autonomous Mode** | AI-driven design with propose → validate → refine loop |
 | **Propose → Validate → Refine** | Core iteration loop: agent proposes changes, constraints validate, agent refines on failure |
+
+
+## Dashboard engineering workspace
+
+The React dashboard retains the Kinetic Console dark surfaces and orange accent.
+Its entry point is the project library, with labeled navigation to sessions, runs,
+approvals, digital twin, BOM, files, knowledge, compliance, and gateway settings.
+The frontend remains a client of the local-first gateway; hosting the frontend
+separately does not move engineering state or execution into the browser.
+
+The project workspace supports search, status filters, name/update sorting,
+grid/list views, and a native modal for project creation. Its summaries derive
+from project and run responses. Connection errors show unavailable values rather
+than fabricated zero counts or empty workspaces. Recent artifacts use actual
+work-product timestamps and statuses; they are not inferred agent events.
+
+Runs support goal/ID search and status filtering. Approvals distinguish run gates
+(`/v1/runs/{id}/approval`, inspected through the run detail) from work-product
+proposals, retaining the existing proposal decision workflow.
+
+The existing gateway URL settings preserve `/api/v1` through the bundled proxy
+and `/v1` for direct connections. `/health` remains at the gateway root. A health
+probe rejects HTML fallbacks from static hosts and applies the optional defaults
+in the gateway schema. Only a project HTTP 404 becomes “not found”; other request
+failures reach the page's retry state.
+
+The shell adds a skip link, visible keyboard focus, responsive labeled navigation,
+mobile focus containment, route-change focus, and reduced-motion support. Project
+creation uses native dialog semantics and labeled inputs. Existing specialist
+editors are retained; this does not constitute a full WCAG conformance audit.
+Heavy page modules are loaded on demand.
+
+On browsers implementing `document.modelContext`, the project library optionally
+registers `filter_projects`. It validates inputs and updates the same local
+filters as the interface; it cannot mutate gateway data. Unsupported browsers
+continue through the ordinary controls.
+
+A separately hosted dashboard needs a reachable gateway address configured in
+Settings. No gateway, credentials, synthetic projects, or execution service is
+bundled into the frontend deployment.

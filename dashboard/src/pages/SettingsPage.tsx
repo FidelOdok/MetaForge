@@ -33,17 +33,17 @@ const glassPanel: React.CSSProperties = {
   backdropFilter: 'blur(16px)',
   WebkitBackdropFilter: 'blur(16px)',
   border: `1px solid ${KC.border}`,
-  borderRadius: 4,
+  borderRadius: 7,
 };
 
 const inputStyle: React.CSSProperties = {
   background: '#111319',
   border: `1px solid ${KC.border}`,
-  borderRadius: 4,
+  borderRadius: 7,
   color: KC.onSurface,
   fontFamily: "'Roboto Mono', monospace",
-  fontSize: 13,
-  height: 34,
+  fontSize: 14,
+  height: 42,
   padding: '0 10px',
   width: '100%',
 };
@@ -131,10 +131,10 @@ export function SettingsPage() {
   const effective = saved || `${window.location.origin} (same origin, via proxy)`;
 
   return (
-    <div style={{ maxWidth: 760 }}>
+    <div style={{ maxWidth: 880 }}>
       <header className="mb-6">
-        <h1 style={{ fontSize: 20, fontWeight: 600, color: KC.onSurface }}>Settings</h1>
-        <p style={{ fontSize: 13, color: KC.onSurfaceVariant, marginTop: 4 }}>
+        <h1 style={{ fontSize: 30, fontWeight: 600, color: KC.onSurface }}>Settings</h1>
+        <p style={{ fontSize: 14, color: KC.onSurfaceVariant, marginTop: 4 }}>
           Configuration stored in this browser only.
         </p>
       </header>
@@ -146,16 +146,15 @@ export function SettingsPage() {
           </span>
           <h2 style={{ fontSize: 14, fontWeight: 600, color: KC.onSurface }}>Gateway</h2>
         </div>
-        <p style={{ fontSize: 12.5, color: KC.onSurfaceVariant, marginTop: 6, lineHeight: 1.6 }}>
-          Where this dashboard sends its API calls. Leave both fields empty to use the current
-          origin, which is what the bundled Docker image and the Vite dev server expect — they
-          proxy to the gateway themselves. Set an address when the dashboard is hosted separately
-          from the gateway, as it is on Vercel.
+        <p style={{ fontSize: 14, color: KC.onSurfaceVariant, marginTop: 6, lineHeight: 1.6 }}>
+          Connect this workspace to your MetaForge gateway. Enter its reachable HTTPS address, test
+          the connection, then save. Leave both fields empty only when running the dashboard with
+          the bundled local server or Docker proxy.
         </p>
 
-        <div className="mt-5 grid gap-4" style={{ gridTemplateColumns: '1fr 120px' }}>
+        <div className="gateway-fields mt-5 grid gap-4">
           <label>
-            <span style={{ fontSize: 11, color: KC.onSurfaceVariant, letterSpacing: '0.04em' }}>
+            <span style={{ fontSize: 14, color: KC.onSurfaceVariant, letterSpacing: '0.04em' }}>
               ADDRESS
             </span>
             <input
@@ -172,7 +171,7 @@ export function SettingsPage() {
             />
           </label>
           <label>
-            <span style={{ fontSize: 11, color: KC.onSurfaceVariant, letterSpacing: '0.04em' }}>
+            <span style={{ fontSize: 14, color: KC.onSurfaceVariant, letterSpacing: '0.04em' }}>
               PORT
             </span>
             <input
@@ -189,14 +188,14 @@ export function SettingsPage() {
         </div>
 
         {'error' in draft && (
-          <p style={{ marginTop: 10, fontSize: 12.5, color: KC.error }}>{draft.error}</p>
+          <p style={{ marginTop: 10, fontSize: 14, color: KC.error }}>{draft.error}</p>
         )}
 
         {mixedContentWarning && (
           <p
             style={{
               marginTop: 10,
-              fontSize: 12.5,
+              fontSize: 14,
               color: KC.warning,
               lineHeight: 1.6,
               display: 'flex',
@@ -229,27 +228,27 @@ export function SettingsPage() {
         </div>
 
         {probe.kind === 'ok' && (
-          <p style={{ marginTop: 12, fontSize: 12.5, color: KC.success, fontFamily: "'Roboto Mono', monospace" }}>
+          <p role="status" style={{ marginTop: 12, fontSize: 14, color: KC.success, fontFamily: "'Roboto Mono', monospace" }}>
             ✓ {probe.detail} — {probe.latencyMs} ms
           </p>
         )}
         {probe.kind === 'fail' && (
-          <p style={{ marginTop: 12, fontSize: 12.5, color: KC.error, lineHeight: 1.6 }}>
+          <p role="alert" style={{ marginTop: 12, fontSize: 14, color: KC.error, lineHeight: 1.6 }}>
             ✗ {probe.message}
           </p>
         )}
 
         <dl
-          className="mt-5 grid gap-2"
+          className="gateway-details mt-5 grid gap-2"
           style={{
             gridTemplateColumns: 'max-content 1fr',
-            fontSize: 12,
+            fontSize: 14,
             borderTop: `1px solid ${KC.border}`,
             paddingTop: 16,
           }}
         >
           <dt style={{ color: KC.onSurfaceVariant }}>In use</dt>
-          <dd style={{ color: KC.tertiary, fontFamily: "'Roboto Mono', monospace" }}>{effective}</dd>
+          <dd style={{ color: KC.tertiary, fontFamily: "'Roboto Mono', monospace", overflowWrap: 'anywhere' }}>{effective}</dd>
           <dt style={{ color: KC.onSurfaceVariant }}>Source</dt>
           <dd style={{ color: KC.onSurface }}>
             {isGatewayUserConfigured()
@@ -268,7 +267,7 @@ export function SettingsPage() {
           </span>
           <h2 style={{ fontSize: 14, fontWeight: 600, color: KC.onSurface }}>Before you expose a gateway</h2>
         </div>
-        <p style={{ fontSize: 12.5, color: KC.onSurfaceVariant, marginTop: 8, lineHeight: 1.7 }}>
+        <p style={{ fontSize: 14, color: KC.onSurfaceVariant, marginTop: 8, lineHeight: 1.7 }}>
           The MetaForge gateway ships <strong style={{ color: KC.onSurface }}>no authentication</strong> on
           its data routes. Anything that can reach it can read and change your digital twin. Put it
           behind a private network (Tailscale) or an authenticating proxy (Cloudflare Access) rather

@@ -40,41 +40,17 @@ function getStatusDotColor(status: string): string {
   return statusDotColor[status] ?? '#9a9aaa';
 }
 
-// Simulated agent activity feed — derived from work products
-interface ActivityEntry {
-  tag: string;
-  tagColor: string;
-  tagBg: string;
-  message: string;
-  timestamp: string;
-}
-
-function buildActivityFeed(workProducts: { name: string; type: string; status: string; updatedAt: string }[]): ActivityEntry[] {
-  return workProducts.slice(0, 8).map((wp) => {
-    const tagMap: Record<string, { tag: string; color: string; bg: string }> = {
-      schematic: { tag: 'twin.save', color: '#ffb783', bg: 'rgba(230,126,34,0.15)' },
-      pcb: { tag: 'agent.run', color: '#86cfff', bg: 'rgba(134,207,255,0.15)' },
-      cad_model: { tag: 'agent.run', color: '#86cfff', bg: 'rgba(134,207,255,0.15)' },
-      firmware: { tag: 'twin.save', color: '#ffb783', bg: 'rgba(230,126,34,0.15)' },
-      bom: { tag: 'bom.risk', color: '#ffb4ab', bg: 'rgba(255,180,171,0.15)' },
-      gerber: { tag: 'gate.check', color: '#3dd68c', bg: 'rgba(61,214,140,0.15)' },
-    };
-    const style = tagMap[wp.type] ?? { tag: 'agent.run', color: '#86cfff', bg: 'rgba(134,207,255,0.15)' };
-    const statusVerb = wp.status === 'valid' ? 'validated' : wp.status === 'warning' ? 'flagged' : wp.status === 'error' ? 'failed' : 'updated';
-
-    return {
-      tag: style.tag,
-      tagColor: style.color,
-      tagBg: style.bg,
-      message: `${wp.name} ${statusVerb}`,
-      timestamp: formatRelativeTime(wp.updatedAt),
-    };
-  });
+// Actual work-product updates, not inferred agent execution events.
+function buildActivityFeed(workProducts: { name: string; type: string; status: string; updatedAt: string }[]) {
+  return [...workProducts].sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0,8).map(wp => ({
+    tag: wp.type.replace('_', ' '), tagColor: '#86cfff', tagBg: 'rgba(134,207,255,0.1)',
+    message: `${wp.name} · ${wp.status}`, timestamp: formatRelativeTime(wp.updatedAt),
+  }));
 }
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: project, isLoading } = useProject(id);
+  const { data: project, isLoading, isError, refetch } = useProject(id);
   const navigate = useNavigate();
   const toast = useToast();
   const updateProject = useUpdateProject();
@@ -108,6 +84,8 @@ export function ProjectDetailPage() {
       </div>
     );
   }
+
+  if (isError) return <div role="alert" className="workspace-empty"><h1>Project could not be loaded</h1><p>Check your gateway connection, then try again.</p><Button onClick={() => void refetch()}>Try again</Button><Link to="/settings">Connection settings</Link></div>;
 
   if (!project) {
     return (
@@ -332,7 +310,7 @@ export function ProjectDetailPage() {
       </div>
 
       {/* Two-column: work products + activity */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 300px' }}>
+      <div className="project-detail-columns grid gap-3">
 
         {/* Work Products panel */}
         <div className="glass rounded overflow-hidden" style={glassCard}>
@@ -412,7 +390,7 @@ export function ProjectDetailPage() {
           )}
         </div>
 
-        {/* Agent Activity panel */}
+        {/* Work-product updates panel */}
         <div className="glass rounded overflow-hidden" style={glassCard}>
           {/* Panel header */}
           <div
@@ -420,7 +398,7 @@ export function ProjectDetailPage() {
             style={{ borderBottom: '1px solid rgba(65,72,90,0.2)' }}
           >
             <span className="font-mono" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9a9aaa' }}>
-              Activity
+              Artifact updates
             </span>
             <div className="flex items-center gap-1.5">
               <span
@@ -436,7 +414,7 @@ export function ProjectDetailPage() {
           {activity.length === 0 ? (
             <div className="px-4 py-6 text-center">
               <span className="font-mono" style={{ fontSize: '10px', color: '#9a9aaa' }}>
-                No recent activity
+                No work-product updates
               </span>
             </div>
           ) : (

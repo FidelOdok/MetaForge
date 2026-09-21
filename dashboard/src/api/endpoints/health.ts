@@ -2,6 +2,19 @@ import axios from 'axios';
 import type { HealthStatus } from '../../types/health';
 import { gatewayUrl } from '../../lib/gatewayConfig';
 
+
+/** Reject static-host HTML fallbacks instead of reporting a successful connection. */
+function parseHealth(data: unknown): HealthStatus {
+  if (!data || typeof data !== 'object') throw new Error('This address did not return a MetaForge gateway health response.');
+  const value = data as Partial<HealthStatus>;
+  if (!['healthy', 'degraded', 'unhealthy'].includes(value.status ?? '') ||
+      typeof value.uptime_seconds !== 'number' || typeof value.timestamp !== 'string' ||
+      (value.components !== undefined && !Array.isArray(value.components))) {
+    throw new Error('This address did not return a valid MetaForge gateway health response.');
+  }
+  return { ...value, components: value.components ?? [], version: value.version ?? '0.1.0' } as HealthStatus;
+}
+
 /**
  * ``GET /health`` lives at the gateway's bare root (``api_gateway/health.py``'s
  * router has no prefix) — unlike everything else under ``/api/v1`` — so this
@@ -12,7 +25,7 @@ import { gatewayUrl } from '../../lib/gatewayConfig';
  */
 export async function getHealth(): Promise<HealthStatus> {
   const { data } = await axios.get<HealthStatus>(gatewayUrl('/health'), { timeout: 10_000 });
-  return data;
+  return parseHealth(data);
 }
 
 /**
@@ -32,7 +45,7 @@ export async function probeGateway(
   const started = performance.now();
   try {
     const { data } = await axios.get<HealthStatus>(url, { timeout: timeoutMs });
-    return { latencyMs: Math.round(performance.now() - started), status: data };
+    return { latencyMs: Math.round(performance.now() - started), status: parseHealth(data) };
   } catch (err) {
     if (axios.isAxiosError(err)) {
       if (err.code === 'ECONNABORTED') {
