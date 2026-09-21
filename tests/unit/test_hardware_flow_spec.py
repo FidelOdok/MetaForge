@@ -26,6 +26,7 @@ def test_hardware_flow_registered_and_ordered() -> None:
         "intent",
         "needs",
         "requirements",
+        "feasibility",
         "architecture",
         "design",
         "electronics",

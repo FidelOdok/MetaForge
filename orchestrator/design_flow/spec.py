@@ -137,6 +137,47 @@ _NEEDS_PHASE = Phase(
     ),
 )
 
+# G3 -- Preliminary Feasibility Gate (FORGE-35/60), between requirements (G2)
+# and detailed design/architecture. Same shared-constant pattern as
+# _INTENT_PHASE/_NEEDS_PHASE above. Checks that CAN be made real today
+# (budgets, invariants, risk scoring) are computed by
+# twin_core.consistency.gates.evaluate_g3_feasibility rather than left as
+# prose -- that function is not yet called automatically by this executor
+# (no per-project Budget/Invariant declarations exist to feed it yet), so
+# the gate below still carries its own advisory criteria, same as every
+# other gate in this file, until that wiring is real, separate work.
+_FEASIBILITY_PHASE = Phase(
+    id="feasibility",
+    title="Preliminary Feasibility",
+    objective=(
+        "Sanity-check feasibility before committing to detailed design. Check the "
+        "requirement's mass, cost, and power/energy budgets against a first-order "
+        "estimate; assess first-order structural feasibility, actuator sizing, "
+        "thermal plausibility, and geometry feasibility; confirm the key "
+        "technologies involved are actually available; and identify the major "
+        "risks to the project, each with an owner and a mitigation. Record a "
+        "feasibility summary as a decision (record-decision tool), scoped to the "
+        "project -- flag anything infeasible or high-risk explicitly rather than "
+        "silently proceeding."
+    ),
+    expected_artifacts=("design_decision",),
+    required_deliverables=("design_decision",),
+    gate=Gate(
+        name="Preliminary Feasibility Gate (G3)",
+        criteria=(
+            "Mass budget checked",
+            "Cost budget checked",
+            "Power/energy budget checked",
+            "First-order structural feasibility assessed",
+            "Actuator sizing assessed (where applicable)",
+            "Thermal plausibility assessed",
+            "Geometry feasibility assessed",
+            "Key technologies confirmed available",
+            "Major risks identified, each with an owner and mitigation",
+        ),
+    ),
+)
+
 DESIGN_V1 = FlowDefinition(
     id="design_v1",
     name="Design vertical (Requirements -> Design -> Simulation)",
@@ -170,6 +211,7 @@ DESIGN_V1 = FlowDefinition(
                 ),
             ),
         ),
+        _FEASIBILITY_PHASE,
         Phase(
             id="design",
             title="Detailed Design",
@@ -279,6 +321,7 @@ HARDWARE_V1 = FlowDefinition(
                 ),
             ),
         ),
+        _FEASIBILITY_PHASE,
         Phase(
             id="architecture",
             title="System Architecture",
@@ -473,6 +516,7 @@ MECH_V1 = FlowDefinition(
                 ),
             ),
         ),
+        _FEASIBILITY_PHASE,
         Phase(
             id="design",
             title="Mechanical Design",
