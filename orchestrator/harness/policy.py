@@ -9,12 +9,20 @@ protocol:
     {"thought": "...", "final": "the answer"}                                # done
 
 Parsing tolerates fenced JSON or surrounding prose AROUND the JSON object, but
-a reply with no parseable JSON object at all, or a JSON object with neither a
-`tool` nor a `final` key, raises ``ReActParseError`` rather than silently
-treating the stray text as a final answer — a model that ignores the protocol
-must not be able to "succeed" with a narrative substituted for real tool
-calls. ``run_react`` catches this and feeds it back as an observation, giving
-the model a concrete chance to self-correct instead of crashing the loop.
+a reply with no parseable JSON object at all, or (when the turn registered at
+least one tool) a JSON object with neither a `tool` nor a `final` key, raises
+``ReActParseError`` rather than silently treating the stray text as a final
+answer — a model that ignores the protocol must not be able to "succeed" with
+a narrative substituted for real tool calls. ``run_react`` catches this and
+feeds it back as an observation, giving the model a concrete chance to
+self-correct instead of crashing the loop.
+
+FORGE-69: a turn with ZERO registered tools (a one-shot structured-JSON
+extraction call, e.g. ``req_handlers.py``'s ``_extract_req_spec`` or the
+Engineering Intent Harness's requirement-intelligence agents) has no "tool"
+the model could ever have named, so ``ModelPolicy.next_action`` relaxes this
+to accept a bare JSON object as an implicit final answer in that case —
+see ``parse_action``'s ``allow_bare_json_as_final``.
 """
 
 from __future__ import annotations
@@ -80,15 +88,25 @@ _SYSTEM = (
 )
 
 
-def parse_action(text: str) -> ReActAction:
+def parse_action(text: str, *, allow_bare_json_as_final: bool = False) -> ReActAction:
     """Parse a model reply into a ReActAction.
 
     Raises ``ReActParseError`` when the reply has no parseable ``{...}`` JSON
-    object, or a JSON object with neither a ``tool`` nor a ``final`` key — the
-    only two shapes the protocol defines. Tolerates a fenced code block or
-    prose surrounding the JSON object itself (models often wrap it in
-    ```json ... ``` or a short preamble); it does NOT tolerate a reply that
-    never emits the object at all.
+    object, or (with ``allow_bare_json_as_final=False``, the default) a JSON
+    object with neither a ``tool`` nor a ``final`` key. Tolerates a fenced
+    code block or prose surrounding the JSON object itself (models often
+    wrap it in ```json ... ``` or a short preamble); it does NOT tolerate a
+    reply that never emits the object at all.
+
+    FORGE-69: ``allow_bare_json_as_final=True`` (set by ``ModelPolicy.
+    next_action`` when the turn registered zero tools) treats a bare JSON
+    object with neither key as an implicit final answer instead of a parse
+    error. A tool-less one-shot call (structured-JSON extraction prompts
+    like ``req_handlers.py``'s ``_extract_req_spec``) has no "tool" it could
+    have named — rejecting its correctly-shaped reply just because it also
+    omits a "final" wrapper it was never asked for was only ever protecting
+    against a *different* failure mode (a model rambling prose instead of
+    picking an action when tools WERE on offer), not this one.
     """
     raw = text.strip()
     fenced = _FENCE_RE.search(raw)
@@ -129,6 +147,11 @@ def parse_action(text: str) -> ReActAction:
     if tool:
         arguments = obj.get("arguments") or {}
         return ReActAction(thought=thought, tool_call=ToolCall(str(tool), dict(arguments)))
+    if allow_bare_json_as_final:
+        # Re-serialize rather than pass `obj` through as-is: the caller's own
+        # downstream text handling (e.g. `str(result.output)`) must produce
+        # valid JSON text, not a dict's Python repr (single-quoted keys).
+        return ReActAction(thought=thought, final_output=json.dumps(obj))
     raise ReActParseError(
         'the JSON object must have a "tool" or "final" key — got: ' + json.dumps(obj)[:200]
     )
@@ -225,7 +248,12 @@ class ModelPolicy:
         }
         resp = await self.runtime.complete(self.role, request, self.invoke)
         text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
-        action = parse_action(text)
+        # FORGE-69: a turn with zero registered tools (e.g. a one-shot
+        # structured-JSON extraction call) has no "tool" the model could
+        # have named -- a bare JSON reply is the only shape it was ever
+        # going to produce, so don't reject it for lacking a "final" wrapper
+        # it was never asked for either.
+        action = parse_action(text, allow_bare_json_as_final=not self.runtime.tools.all_tools())
         logger.info(
             "model_policy_action",
             role=self.role,
