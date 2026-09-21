@@ -260,6 +260,22 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.baseline import Baseline
 
             return Baseline.model_validate(data)
+        elif node_type == NodeType.ENGINEERING_CHANGE_TRANSACTION:
+            # Same FORGE-68 failure mode, found via live validation against
+            # this exact Neo4j backend (FORGE-66/67): without this branch,
+            # get_ect() always returns None (isinstance(bare NodeBase,
+            # EngineeringChangeTransaction) is False) even though
+            # create_ect() just wrote the node successfully -- every ECT
+            # lifecycle call after propose_change() raised KeyError.
+            # InMemoryTwinAPI's own unit tests never caught this because
+            # the in-memory graph stores the real Pydantic object by
+            # reference, with no serialize/deserialize round trip to lose
+            # the type through.
+            from twin_core.models.engineering_change_transaction import (
+                EngineeringChangeTransaction,
+            )
+
+            return EngineeringChangeTransaction.model_validate(data)
         elif node_type == NodeType.REVISION_SNAPSHOT:
             from twin_core.models.revision_snapshot import RevisionSnapshot
 
