@@ -17,6 +17,12 @@ class NodeType(StrEnum):
     DESIGN_ELEMENT = "design_element"
     # MET-430: structured manufacturer datasheet (PDF + extracted rows)
     DATASHEET = "datasheet"
+    # FORGE-43: a generic node for the Engineering Intent & Requirements
+    # Harness's ontology (intent/need/objective/assumption/question/risk/
+    # verification_case/evidence -- see EngineeringEntity.entity_type).
+    # Requirement/Constraint keep using CONSTRAINT (already real, evaluable,
+    # gate-integrated); Decision keeps using WorkProductType.DESIGN_DECISION.
+    ENGINEERING_ENTITY = "engineering_entity"
 
 
 class WorkProductType(StrEnum):
@@ -126,3 +132,23 @@ class EdgeType(StrEnum):
     # MET-430: a Datasheet describes a Component by MPN. Edges are
     # Datasheet --DESCRIBES--> Component.
     DESCRIBES = "describes"
+    # FORGE-43: Engineering Intent & Requirements Harness relation vocabulary
+    # not already covered by the edge types above. Already-covered relations
+    # reuse the existing members rather than duplicating them: IMPLEMENTS
+    # (spec's "implemented_by" / requirement-decomposition -- see FORGE-46),
+    # VALIDATES ("validated_by"), CONFLICTS_WITH, SUPERSEDES, DEPENDS_ON,
+    # CONSTRAINED_BY ("constrains").
+    DERIVES_FROM = "derives_from"
+    SATISFIES = "satisfies"
+    MOTIVATES = "motivates"
+    REFINES = "refines"
+    DECOMPOSES_INTO = "decomposes_into"
+    ALLOCATED_TO = "allocated_to"
+    VERIFIED_BY = "verified_by"
+    SUPPORTED_BY = "supported_by"
+    ASSUMES = "assumes"
+    RISKS = "risks"
+    INVALIDATES = "invalidates"
+    GENERATED_FROM = "generated_from"
+    AFFECTED_BY = "affected_by"
+    OWNED_BY = "owned_by"
