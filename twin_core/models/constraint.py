@@ -6,7 +6,8 @@ from uuid import UUID, uuid4
 from pydantic import Field
 
 from twin_core.models.base import NodeBase
-from twin_core.models.enums import ConstraintSeverity, ConstraintStatus, NodeType
+from twin_core.models.confidence import Confidence
+from twin_core.models.enums import AuthorityState, ConstraintSeverity, ConstraintStatus, NodeType
 
 
 class Constraint(NodeBase):
@@ -29,3 +30,8 @@ class Constraint(NodeBase):
     # it on every applied write and rejects a caller-supplied
     # expected_revision that no longer matches it (PatchConflictError).
     revision: int = 1
+    # FORGE-51: authority lifecycle (spec section 25). Only
+    # twin_core.transactions.baseline.create_baseline ever advances this to
+    # BASELINED -- never derived from `confidence`.
+    authority: AuthorityState = AuthorityState.PROPOSED
+    confidence: Confidence | None = None

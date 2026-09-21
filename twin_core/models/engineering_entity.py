@@ -25,7 +25,8 @@ from uuid import UUID, uuid4
 from pydantic import Field
 
 from twin_core.models.base import NodeBase
-from twin_core.models.enums import NodeType
+from twin_core.models.confidence import Confidence
+from twin_core.models.enums import AuthorityState, NodeType
 
 EngineeringEntityType = Literal[
     "intent",
@@ -56,14 +57,16 @@ class EngineeringEntity(NodeBase):
     title: str | None = None
     statement: str | None = None
     # Lifecycle state (spec section 10: DISCOVERED -> ... -> VALIDATED, plus
-    # side states REJECTED/SUPERSEDED/DEFERRED/WAIVED/OBSOLETE) and authority
-    # (spec section 25: proposed | reviewed | approved | baselined | verified)
-    # are kept as plain strings for now -- the harness/policy engine that
-    # actually enforces transitions between them is FORGE-37 (Phase 2), not
-    # this sub-task; formalizing them into a StrEnum belongs there, once
-    # there's real transition logic to validate against.
+    # side states REJECTED/SUPERSEDED/DEFERRED/WAIVED/OBSOLETE) is kept as a
+    # plain string for now -- driving it needs the requirement-intelligence
+    # agents (Phase 3), not this sub-task.
     status: str = "proposed"
-    authority: str = "proposed"
+    # FORGE-51: authority lifecycle (spec section 25), formalized into a real
+    # StrEnum now that Baseline (FORGE-51) gives it real transition logic --
+    # only twin_core.transactions.baseline.create_baseline ever advances this
+    # to BASELINED. Never derived from `confidence`.
+    authority: AuthorityState = AuthorityState.PROPOSED
+    confidence: Confidence | None = None
     created_by: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source_refs: list[str] = Field(default_factory=list)

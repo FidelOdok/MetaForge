@@ -253,6 +253,17 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.engineering_entity import EngineeringEntity
 
             return EngineeringEntity.model_validate(data)
+        elif node_type == NodeType.BASELINE:
+            # FORGE-51: same FORGE-68 failure mode -- without this branch a
+            # Baseline read back from Neo4j degrades to a bare NodeBase,
+            # losing `includes` entirely.
+            from twin_core.models.baseline import Baseline
+
+            return Baseline.model_validate(data)
+        elif node_type == NodeType.REVISION_SNAPSHOT:
+            from twin_core.models.revision_snapshot import RevisionSnapshot
+
+            return RevisionSnapshot.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 

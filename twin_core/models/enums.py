@@ -23,6 +23,19 @@ class NodeType(StrEnum):
     # Requirement/Constraint keep using CONSTRAINT (already real, evaluable,
     # gate-integrated); Decision keeps using WorkProductType.DESIGN_DECISION.
     ENGINEERING_ENTITY = "engineering_entity"
+    # FORGE-51: a named, approved snapshot of specific (entity, revision)
+    # pairs (see twin_core/models/baseline.py). Distinct from a WorkProduct
+    # -- a baseline references controlled entities by revision, it doesn't
+    # hold content of its own.
+    BASELINE = "baseline"
+    # FORGE-51: the prior field values of a Constraint/EngineeringEntity
+    # captured just before an update overwrites it, so
+    # TwinAPI.get_constraint_revision/get_engineering_entity_revision can
+    # answer "what was REQ-012@3" after the entity has moved on to @4 --
+    # required for a Baseline's ``includes`` references to mean anything.
+    # Never listed alongside real CONSTRAINT/ENGINEERING_ENTITY nodes;
+    # list_constraints/list_engineering_entities filter it out by node_type.
+    REVISION_SNAPSHOT = "revision_snapshot"
 
 
 class WorkProductType(StrEnum):
@@ -115,6 +128,25 @@ class ComponentLifecycle(StrEnum):
     UNKNOWN = "unknown"
 
 
+class AuthorityState(StrEnum):
+    """Where a controlled object (Constraint/EngineeringEntity) stands in
+    the harness's authority lifecycle (FORGE-51, spec section 25).
+
+    Never conflated with ``confidence`` (twin_core.models.confidence) -- a
+    high-confidence model prediction does not imply approval. Nothing in
+    this codebase derives ``authority`` from ``confidence``; the only code
+    path that advances authority to BASELINED is
+    ``twin_core.transactions.baseline.create_baseline``, when an entity's
+    current revision is actually included in an approved Baseline.
+    """
+
+    PROPOSED = "proposed"
+    REVIEWED = "reviewed"
+    APPROVED = "approved"
+    BASELINED = "baselined"
+    VERIFIED = "verified"
+
+
 class EdgeType(StrEnum):
     """Types of directed relationships between graph nodes."""
 
@@ -152,3 +184,9 @@ class EdgeType(StrEnum):
     GENERATED_FROM = "generated_from"
     AFFECTED_BY = "affected_by"
     OWNED_BY = "owned_by"
+    # FORGE-51: entity --INCLUDED_IN_BASELINE--> Baseline, one edge per
+    # Baseline.includes member, for real graph traversal ("which baselines
+    # does this requirement belong to") on top of the denormalized
+    # Baseline.includes list (same non-source-of-truth relationship
+    # parent_refs already has to its own DERIVES_FROM/... edges).
+    INCLUDED_IN_BASELINE = "included_in_baseline"
