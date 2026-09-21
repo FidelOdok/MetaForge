@@ -8,6 +8,7 @@ from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
 from twin_core.models.design_element import DesignElement
 from twin_core.models.device_instance import DeviceInstance
+from twin_core.models.engineering_entity import EngineeringEntity, EngineeringEntityType
 from twin_core.models.enums import (
     ComponentLifecycle,
     ConstraintSeverity,
@@ -48,6 +49,8 @@ __all__ = [
     "TwinModel",
     "DesignElement",
     "Datasheet",
+    "EngineeringEntity",
+    "EngineeringEntityType",
     # Typed edges
     "DependsOnEdge",
     "UsesComponentEdge",
