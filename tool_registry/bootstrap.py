@@ -263,6 +263,7 @@ async def bootstrap_tool_registry(
     procurement_record_recorder: Any = None,
     component_recorder: Any = None,
     evidence_recorder: Any = None,
+    claim_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -327,6 +328,13 @@ async def bootstrap_tool_registry(
             (hashed), supports/contradicts edges, and revision-pinned
             valid_against dependencies via FORGE-59's StalenessEngine.
             ``None`` skips registration (same pattern as ``document_recorder``).
+        claim_recorder: Optional async ``record(...)`` (make_claim_recorder,
+            FORGE-65, epic FORGE-35). When supplied, registers
+            ``twin.record_claim``, which persists a real graph edge asserting
+            an artefact satisfies a requirement, citing evidence ids; its
+            supported/unsupported status is always computed live, never
+            stored. ``None`` skips registration (same pattern as
+            ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -494,6 +502,7 @@ async def bootstrap_tool_registry(
                     procurement_record_recorder=procurement_record_recorder,
                     component_recorder=component_recorder,
                     evidence_recorder=evidence_recorder,
+                    claim_recorder=claim_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

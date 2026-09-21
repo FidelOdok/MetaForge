@@ -35,6 +35,16 @@ fact rather than "an agent said so":
   finding REAL staleness instead of an always-empty evidence set: this
   recorder is the first thing in the whole epic that actually creates
   evidence with a real, propagatable ``staleness`` status.
+
+FORGE-65 (revalidation, spec section 54: "Revalidation may: rerun identical
+procedure; rerun simulation; rerun calculation..."): an optional
+``supersedes`` -- the id of the stale evidence this fresh run replaces --
+creates an ``EdgeType.SUPERSEDES`` edge (new -> old, the first real use of
+that previously-declared-but-unused edge type) and flips the old entity's
+``staleness`` to ``SUPERSEDED`` via ``StalenessEngine``. This is the whole
+revalidation flow: record a brand-new Evidence entity from the rerun (never
+mutate the old one's ``result`` in place -- a rerun is a new fact, not an
+edit to the old one), pointed at what it replaces.
 """
 
 from __future__ import annotations
@@ -71,6 +81,7 @@ _VALID_ENTITY_KINDS = frozenset({"constraint", "engineering_entity"})
 
 _SUPPORTS_EDGE = EdgeType.SATISFIES
 _CONTRADICTS_EDGE = EdgeType.CONFLICTS_WITH
+_SUPERSEDES_EDGE = EdgeType.SUPERSEDES
 
 
 def _result_hash(result: dict[str, Any]) -> str:
@@ -124,6 +135,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
         supports: list[str] | None = None,
         contradicts: list[str] | None = None,
         valid_against: list[dict[str, Any]] | None = None,
+        supersedes: str | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
@@ -160,6 +172,15 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
             dependencies = await _resolve_valid_against(
                 twin, valid_against or [], project_id=project_id
             )
+            superseded_id: UUID | None = None
+            if supersedes:
+                superseded_id = await resolve_ref(twin, supersedes, project_id=project_id)
+                superseded_entity = await twin.get_engineering_entity(superseded_id)
+                if superseded_entity is None or superseded_entity.entity_type != "evidence":
+                    raise ValueError(
+                        f"evidence recorder: 'supersedes' resolved to {superseded_id}, which is "
+                        "not an 'evidence' EngineeringEntity"
+                    )
 
             now = datetime.now(UTC)
             metadata: dict[str, Any] = {
@@ -202,6 +223,17 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                     "engineering_entity", created.id, dependencies
                 )
 
+            if superseded_id is not None:
+                await twin.add_edge(
+                    created.id,
+                    superseded_id,
+                    _SUPERSEDES_EDGE,
+                    metadata={"kind": "evidence_revalidation"},
+                )
+                await StalenessEngine(twin).set_status(
+                    "engineering_entity", superseded_id, StalenessStatus.SUPERSEDED
+                )
+
             linked = False
             if project_id and project_backend is not None:
                 try:
@@ -221,6 +253,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                 supports_count=len(resolved_supports),
                 contradicts_count=len(resolved_contradicts),
                 valid_against_count=len(dependencies),
+                superseded_id=str(superseded_id) if superseded_id else None,
                 linked=linked,
             )
             return {
@@ -230,6 +263,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "supports": [str(t) for t in resolved_supports],
                 "contradicts": [str(t) for t in resolved_contradicts],
                 "valid_against_count": len(dependencies),
+                "superseded": str(superseded_id) if superseded_id else None,
                 "project_linked": linked,
             }
 
