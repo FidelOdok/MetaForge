@@ -15,12 +15,20 @@ digital thread.
 A flow is an ordered list of phases; each phase has an objective (handed to the
 brain) and an optional gate. Two flows ship today.
 
+Every flow is also preceded by two shared phases from the Engineering Intent &
+Requirements Harness (epic FORGE-35): **Intent** (G0, "Intent sign-off") and
+**Stakeholder Needs** (G1, "Needs sign-off") — see
+[`engineering-intent-requirements-harness.md`](https://github.com/FidelOdok/MetaForge-Planner/blob/main/docs/architecture/engineering-intent-requirements-harness.md)
+for the full 9-gate model (G0–G8). The tables below start at Requirements (G2)
+onward for brevity; `intent` and `needs` always run first.
+
 **`design_v1`** — the thin mechanical vertical (deterministic handlers drive the
 mechanical phases for reliable geometry):
 
 | Phase | Objective (summarised) | Gate |
 |-------|------------------------|------|
 | **Requirements** | Functional requirements, constraints, primary load/use case → twin | Requirements sign-off |
+| **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
 | **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review |
 | **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off |
 
@@ -31,12 +39,20 @@ lands its real, typed deliverable in the twin:
 | Phase | Objective (summarised) | Gate |
 |-------|------------------------|------|
 | **Requirements** | Functional reqs, environment, quantified constraints (mass/power/DOF/cost), motion/use cases → twin | Requirements sign-off |
+| **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
 | **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture review |
 | **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review |
 | **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
 | **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
 | **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off |
 | **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness |
+
+The Preliminary Feasibility gate's mass/cost/power and risk criteria are
+computed for real (not just shown as prose) by
+`twin_core.consistency.gates.evaluate_g3_feasibility` when a caller supplies
+the project's `Budget`/`Invariant` declarations — see that module's docstring
+for exactly which G3 checks are evaluated today vs. still advisory pending
+Phase 6 (Evidence Integration, FORGE-41).
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
 A full `hardware_v1` run now commits **nine real, typed work products** —

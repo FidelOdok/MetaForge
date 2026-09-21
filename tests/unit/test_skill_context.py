@@ -59,14 +59,15 @@ def test_phases_declare_disciplines() -> None:
     assert by_id["firmware"].disciplines == ("firmware",)
     assert by_id["simulation"].disciplines == ("simulation",)
 
-    # The goal-driven mechanical vertical: 5 phases (FORGE-48 prepends G0
-    # intent/G1 needs), native brain, mechanical + simulation procedures
-    # injected.
+    # The goal-driven mechanical vertical: 6 phases (FORGE-48 prepends G0
+    # intent/G1 needs, FORGE-60 inserts G3 feasibility after requirements),
+    # native brain, mechanical + simulation procedures injected.
     mech = get_flow("mech_v1")
     assert [p.id for p in mech.phases] == [
         "intent",
         "needs",
         "requirements",
+        "feasibility",
         "design",
         "simulation",
     ]
