@@ -341,11 +341,19 @@ HARDWARE_V1 = FlowDefinition(
             expected_artifacts=("design_decision",),
             required_deliverables=("design_decision",),
             gate=Gate(
-                name="Architecture review",
+                name="Architecture Gate (G4)",
                 criteria=(
+                    "Critical requirements allocated to subsystems",
                     "Subsystems and interfaces defined",
                     "Mass / power / compute / cost budgets allocated",
                     "Actuation, sensing, compute, power selected with rationale",
+                    # FORGE-61: G4's own criterion per the spec (section 23) --
+                    # advisory for now, same posture as FORGE-48's G2 addition;
+                    # real automated enforcement needs a safety-critical/owner
+                    # metadata convention that doesn't exist yet (see the
+                    # twin_core.consistency.gates module docstring).
+                    "No unowned safety-critical requirement",
+                    "Architecture satisfies major constraints",
                 ),
             ),
         ),

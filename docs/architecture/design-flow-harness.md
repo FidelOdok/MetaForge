@@ -40,7 +40,7 @@ lands its real, typed deliverable in the twin:
 |-------|------------------------|------|
 | **Requirements** | Functional reqs, environment, quantified constraints (mass/power/DOF/cost), motion/use cases → twin | Requirements sign-off |
 | **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
-| **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture review |
+| **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture Gate (G4) |
 | **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review |
 | **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
 | **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
@@ -50,9 +50,15 @@ lands its real, typed deliverable in the twin:
 The Preliminary Feasibility gate's mass/cost/power and risk criteria are
 computed for real (not just shown as prose) by
 `twin_core.consistency.gates.evaluate_g3_feasibility` when a caller supplies
-the project's `Budget`/`Invariant` declarations — see that module's docstring
-for exactly which G3 checks are evaluated today vs. still advisory pending
-Phase 6 (Evidence Integration, FORGE-41).
+the project's `Budget`/`Invariant` declarations. The Architecture gate's
+"architecture satisfies major constraints" criterion is likewise real, via
+`evaluate_g4_architecture` (reusing the same constraint-evaluation engine the
+V&V gate already enforces with); a G5 Concept Selection Gate evaluator
+(`evaluate_g5_concept_selection`, reading `twin.record_decision`'s
+`alternatives`/`rationale`/`parent_refs`) also exists but has no phase of its
+own in any flow yet — see that module's docstring for exactly which checks
+are evaluated today vs. still advisory pending Phase 6 (Evidence Integration,
+FORGE-41) or a not-yet-built concept-selection phase.
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
 A full `hardware_v1` run now commits **nine real, typed work products** —
