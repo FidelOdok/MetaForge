@@ -752,6 +752,23 @@ class TestQueryOperations:
         assert len(sg.nodes) == 2
         assert len(sg.edges) == 1
 
+    async def test_get_subgraph_direction_forwarded(self, api):
+        """FORGE-72: TwinAPI.get_subgraph forwards direction to the backend."""
+        a = _make_work_product("a")
+        b = _make_work_product("b")
+        await api.create_work_product(a)
+        await api.create_work_product(b)
+
+        # b -> a, so 'a' only sees this edge with direction='incoming'/'both'.
+        await api.add_edge(b.id, a.id, EdgeType.DEPENDS_ON)
+
+        default_sg = await api.get_subgraph(a.id, depth=2)
+        assert default_sg.edges == []
+
+        incoming_sg = await api.get_subgraph(a.id, depth=2, direction="incoming")
+        assert len(incoming_sg.edges) == 1
+        assert {n.id for n in incoming_sg.nodes} == {a.id, b.id}
+
     async def test_query_cypher_raises_not_implemented(self, api):
         with pytest.raises(NotImplementedError, match="Neo4j"):
             await api.query_cypher("MATCH (n) RETURN n")

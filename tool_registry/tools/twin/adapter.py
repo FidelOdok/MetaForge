@@ -255,6 +255,19 @@ class TwinServer(McpToolServer):
                                 "decomposition chain). Omit to walk every edge type."
                             ),
                         },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["outgoing", "incoming", "both"],
+                            "default": "outgoing",
+                            "description": (
+                                "Edge direction to traverse from the root. Most "
+                                "traceability edges point child-to-parent (e.g. "
+                                "evidence SATISFIES a requirement), so a root "
+                                "that is usually an edge *target* -- a "
+                                "requirement or constraint -- needs 'incoming' "
+                                "or 'both' to see anything connected to it."
+                            ),
+                        },
                     },
                     "required": ["node_id"],
                 },
@@ -473,12 +486,25 @@ class TwinServer(McpToolServer):
                 raise ValueError("edge_types must be a list of non-empty strings")
             edge_types = raw_edge_types
 
+        # FORGE-72: most traceability edges point child-to-parent (evidence
+        # SATISFIES a requirement, a low-level constraint IMPLEMENTS a
+        # high-level one) -- a root that is usually an edge *target*, like a
+        # requirement or constraint, sees nothing with outgoing-only
+        # traversal. direction lets a caller opt into 'incoming' or 'both';
+        # default stays 'outgoing' so existing callers see no behavior change.
+        direction = arguments.get("direction", "outgoing")
+        if direction not in ("outgoing", "incoming", "both"):
+            raise ValueError("direction must be one of: outgoing, incoming, both")
+
         with tracer.start_as_current_span("twin.thread_for") as span:
             span.set_attribute("twin.node_id", str(node_id))
             span.set_attribute("twin.depth", depth)
+            span.set_attribute("twin.direction", direction)
             if edge_types:
                 span.set_attribute("twin.edge_types", ",".join(edge_types))
-            subgraph = await self._twin.get_subgraph(node_id, depth=depth, edge_types=edge_types)
+            subgraph = await self._twin.get_subgraph(
+                node_id, depth=depth, edge_types=edge_types, direction=direction
+            )
             return serialise_subgraph(subgraph)
 
     async def find_by_property(self, arguments: dict[str, Any]) -> dict[str, Any]:

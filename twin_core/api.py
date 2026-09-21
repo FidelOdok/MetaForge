@@ -496,6 +496,7 @@ class TwinAPI(ABC):
         root_id: UUID,
         depth: int = 2,
         edge_types: list[EdgeType] | None = None,
+        direction: str = "outgoing",
     ) -> SubGraph: ...
 
     @abstractmethod
@@ -1157,8 +1158,11 @@ class InMemoryTwinAPI(TwinAPI):
         root_id: UUID,
         depth: int = 2,
         edge_types: list[EdgeType] | None = None,
+        direction: str = "outgoing",
     ) -> SubGraph:
-        return await self._graph.get_subgraph(root_id, depth=depth, edge_types=edge_types)
+        return await self._graph.get_subgraph(
+            root_id, depth=depth, edge_types=edge_types, direction=direction
+        )
 
     async def query_cypher(
         self, query: str, params: dict[str, Any] | None = None

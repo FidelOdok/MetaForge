@@ -98,7 +98,13 @@ class _FakeTwin:
         self.observed_contexts: list[McpCallContext] = []
         self.subgraph_calls: list[tuple[UUID, int]] = []
 
-    async def get_subgraph(self, root_id: UUID, depth: int = 2, edge_types: Any = None) -> SubGraph:
+    async def get_subgraph(
+        self,
+        root_id: UUID,
+        depth: int = 2,
+        edge_types: Any = None,
+        direction: str = "outgoing",
+    ) -> SubGraph:
         # MET-387: every backend call sees the active context.
         self.observed_contexts.append(current_context())
         self.subgraph_calls.append((root_id, depth))
