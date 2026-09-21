@@ -25,6 +25,7 @@ from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
+from twin_core.models.engineering_change_transaction import EngineeringChangeTransaction
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.relationship import SubGraph
@@ -347,6 +348,40 @@ class TwinAPI(ABC):
 
     @abstractmethod
     async def list_baselines(self, project_id: UUID | None = None) -> list[Baseline]: ...
+
+    # --- Engineering Change Transactions (FORGE-66) ---
+
+    @abstractmethod
+    async def create_ect(self, ect: EngineeringChangeTransaction) -> EngineeringChangeTransaction:
+        """Persist a newly-proposed ECT.
+
+        Callers should go through
+        ``twin_core.transactions.ect.propose_change`` rather than calling
+        this directly -- same "compositional wrapper, not a bare CRUD call"
+        precedent as ``create_baseline``.
+        """
+        ...
+
+    @abstractmethod
+    async def get_ect(self, ect_id: UUID) -> EngineeringChangeTransaction | None: ...
+
+    @abstractmethod
+    async def update_ect(
+        self, ect_id: UUID, updates: dict[str, Any]
+    ) -> EngineeringChangeTransaction:
+        """Apply ``updates`` to an ECT's mutable lifecycle fields (status,
+        affected_objects, impact, approval_required, decided_by,
+        decision_reason, committed_patch_result). Unlike ``update_constraint``/
+        ``update_engineering_entity`` this does NOT bump a revision counter
+        -- an ECT isn't a FORGE-50 controlled entity, it's the container
+        that proposes changes TO them.
+        """
+        ...
+
+    @abstractmethod
+    async def list_ects(
+        self, project_id: UUID | None = None, status: str | None = None
+    ) -> list[EngineeringChangeTransaction]: ...
 
     # --- Components ---
 
@@ -934,6 +969,41 @@ class InMemoryTwinAPI(TwinAPI):
             filters["project_id"] = project_id
         nodes = await self._graph.list_nodes(
             node_type=NodeType.BASELINE, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Engineering Change Transactions (FORGE-66) ---
+
+    async def create_ect(self, ect: EngineeringChangeTransaction) -> EngineeringChangeTransaction:
+        existing = await self._graph.get_node(ect.id)
+        if existing is not None:
+            raise ValueError(f"EngineeringChangeTransaction with ID {ect.id} already exists")
+        result = await self._graph.add_node(ect)
+        return result  # type: ignore[return-value]
+
+    async def get_ect(self, ect_id: UUID) -> EngineeringChangeTransaction | None:
+        node = await self._graph.get_node(ect_id)
+        if node is not None and isinstance(node, EngineeringChangeTransaction):
+            return node
+        return None
+
+    async def update_ect(
+        self, ect_id: UUID, updates: dict[str, Any]
+    ) -> EngineeringChangeTransaction:
+        result = await self._graph.update_node(ect_id, updates)
+        return result  # type: ignore[return-value]
+
+    async def list_ects(
+        self, project_id: UUID | None = None, status: str | None = None
+    ) -> list[EngineeringChangeTransaction]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if status is not None:
+            filters["status"] = status
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.ENGINEERING_CHANGE_TRANSACTION,
+            filters=filters if filters else None,
         )
         return nodes  # type: ignore[return-value]
 
