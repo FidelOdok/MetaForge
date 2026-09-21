@@ -18,6 +18,7 @@ from api_gateway.runs.gate_eval import TwinConstraintChecker
 from api_gateway.twin.constraint_recorder import make_constraint_recorder
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
+from twin_core.models.enums import EdgeType
 
 PROJECT_ID = "11111111-1111-4111-8111-111111111111"
 OTHER_PROJECT_ID = "22222222-2222-4222-8222-222222222222"
@@ -165,3 +166,119 @@ async def test_end_to_end_violation_scopes_to_project(monkeypatch: pytest.Monkey
 
     other = await TwinConstraintChecker(twin, _OtherBackend()).check(OTHER_PROJECT_ID)
     assert other.passed
+
+
+# --- FORGE-46: parent_refs hierarchy (high-level -> low-level requirements) ---
+
+
+@pytest.mark.asyncio
+async def test_parent_refs_link_via_implements_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    backend = _FakeProjectBackend()
+    record = make_constraint_recorder(twin, backend)
+
+    parent_out = await record(
+        title="System budget",
+        constraints=[{"name": "system_mass_budget", "expression": "True", "severity": "info"}],
+        project_id=PROJECT_ID,
+    )
+    parent_id = parent_out["constraint_ids"][0]
+
+    child_out = await record(
+        title="Leg actuator spec",
+        constraints=[
+            {
+                "name": "leg_actuator_torque",
+                "expression": "True",
+                "severity": "info",
+                "parent_refs": ["system_mass_budget"],
+            }
+        ],
+        project_id=PROJECT_ID,
+    )
+    child_id = child_out["constraint_ids"][0]
+    assert child_out["constraint_parents"] == {child_id: [parent_id]}
+
+    from uuid import UUID
+
+    edges = await twin.get_edges(UUID(child_id), edge_type=EdgeType.IMPLEMENTS)
+    assert len(edges) == 1
+    assert str(edges[0].target_id) == parent_id
+
+    child = await twin.constraints.get_constraint(UUID(child_id))
+    assert child is not None and child.metadata["parent_refs"] == [parent_id]
+
+
+@pytest.mark.asyncio
+async def test_parent_refs_can_resolve_within_the_same_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later entry in the same call can reference an earlier one by name --
+    the earlier one isn't created yet at resolve time for THIS batch, but a
+    prior *separate* record() call's constraint already is (this test covers
+    the cross-call case; same-batch self-reference is out of scope since
+    entries in one call aren't sequentially visible to each other's resolve
+    pass -- only previously committed nodes resolve)."""
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    backend = _FakeProjectBackend()
+    record = make_constraint_recorder(twin, backend)
+
+    await record(
+        title="System",
+        constraints=[{"name": "payload_capacity", "expression": "True", "severity": "info"}],
+        project_id=PROJECT_ID,
+    )
+    out = await record(
+        title="Battery",
+        constraints=[
+            {
+                "name": "battery_capacity",
+                "expression": "True",
+                "severity": "info",
+                "parent_refs": ["payload_capacity"],
+            }
+        ],
+        project_id=PROJECT_ID,
+    )
+    assert len(out["constraint_parents"][out["constraint_ids"][0]]) == 1
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_parent_ref_fails_with_zero_partial_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    backend = _FakeProjectBackend()
+    record = make_constraint_recorder(twin, backend)
+
+    with pytest.raises(ValueError, match="did not resolve"):
+        await record(
+            title="Leg actuator spec",
+            constraints=[
+                {
+                    "name": "leg_actuator_torque",
+                    "expression": "True",
+                    "severity": "info",
+                    "parent_refs": ["nonexistent_system_requirement"],
+                }
+            ],
+            project_id=PROJECT_ID,
+        )
+    # No constraint_set work product and no Constraint node from this call.
+    assert await twin.list_constraints(project_id=None) == []
+
+
+@pytest.mark.asyncio
+async def test_parent_refs_must_be_a_list_of_strings(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    record = make_constraint_recorder(InMemoryTwinAPI.create(), None)
+    with pytest.raises(ValueError, match="parent_refs"):
+        await record(
+            title="t",
+            constraints=[
+                {"name": "x", "expression": "True", "parent_refs": "not_a_list"},
+            ],
+        )
