@@ -98,6 +98,17 @@ class ReActPhaseBrain:
                 "record it with the record-decision tool (title, rationale, alternatives), "
                 f"project_id={pid}"
             ),
+            "intent": (
+                "record ONE with the record-engineering-entity tool "
+                "(entity_type='intent', statement=why this product exists, "
+                f"give it a short title so later phases can reference it), project_id={pid}"
+            ),
+            "stakeholder_need": (
+                "record at least one with the record-engineering-entity tool "
+                "(entity_type='stakeholder_need', statement=what the stakeholder needs, "
+                "parent_refs=[the intent's title], relation='motivates'), "
+                f"project_id={pid}"
+            ),
             "cad_model": (
                 "author the geometry with the FreeCAD authoring tools, then PERSIST it "
                 f"with the commit-geometry tool (project_id={pid}) so it becomes a "

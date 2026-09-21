@@ -7,6 +7,16 @@ one call persists one :class:`~twin_core.models.engineering_entity.EngineeringEn
 node, optionally linked to one or more parents it derives_from / satisfies /
 motivates / etc. via a real graph edge (``EdgeType(relation)``), resolved
 through the shared exact-name-or-UUID resolver (``_ref_resolver.py``).
+
+FORGE-48 fix: also links the created entity into the project via
+``ProjectBackend.link_work_product`` (same call every other recorder in this
+package makes -- ``wp_type`` there is a plain string, not a real
+``WorkProductType``, so lending it ``entity_type`` is exactly the mechanism's
+existing generic contract, not a workaround). Without this, a design-flow
+gate's ``required_deliverables`` check -- which reads ``project.work_products``
+via ``ProjectGateEvaluator`` -- could never see a recorded ``intent``/
+``stakeholder_need`` entity, so G0/G1 (``orchestrator/design_flow/spec.py``)
+could never pass no matter how many were recorded.
 """
 
 from __future__ import annotations
@@ -44,7 +54,7 @@ _ENTITY_TYPES = frozenset(
 _DEFAULT_RELATION = "derives_from"
 
 
-def make_engineering_entity_recorder(twin: Any) -> Any:
+def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> Any:
     """Return an async ``record(...)`` that persists one EngineeringEntity."""
 
     async def record(
@@ -108,6 +118,13 @@ def make_engineering_entity_recorder(twin: Any) -> Any:
                     metadata={"kind": "engineering_trace"},
                 )
 
+            project_linked = False
+            if project_backend is not None and project_id:
+                await project_backend.link_work_product(
+                    project_id, str(created.id), title or statement[:60], entity_type
+                )
+                project_linked = True
+
             logger.info(
                 "engineering_entity_recorded",
                 entity_type=entity_type,
@@ -120,6 +137,7 @@ def make_engineering_entity_recorder(twin: Any) -> Any:
                 "node_id": str(created.id),
                 "entity_type": entity_type,
                 "parent_ids": [str(p) for p in resolved_parent_ids],
+                "project_linked": project_linked,
             }
 
     return record

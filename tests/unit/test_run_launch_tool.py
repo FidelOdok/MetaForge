@@ -34,7 +34,10 @@ async def test_launcher_creates_and_launches_flow(monkeypatch: pytest.MonkeyPatc
         "project_id": "p-1",
         "session_id": "s-1",
     }
-    assert out["phases"][0] == "requirements" and len(out["phases"]) == 7
+    # FORGE-48: G0 (intent)/G1 (needs) now precede every flow's requirements
+    # phase (G2), so hardware_v1 is 9 phases starting intent -> needs.
+    assert out["phases"][0] == "intent" and out["phases"][1] == "needs"
+    assert out["phases"][2] == "requirements" and len(out["phases"]) == 9
     assert "approval" in out["note"]
 
 

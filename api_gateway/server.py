@@ -705,7 +705,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # entities (intent/need/objective/assumption/question/risk/
         # verification_case/evidence) -- the "why" a requirement exists,
         # recorded before/alongside the quantified requirements themselves.
-        engineering_entity_recorder=make_engineering_entity_recorder(twin),
+        engineering_entity_recorder=make_engineering_entity_recorder(twin, project_backend),
         # MET-587: chat-triggered design flows (run.start_design_flow) — the
         # flow's own phase gates are the HITL approval mechanism.
         run_launcher=make_run_launcher(),
