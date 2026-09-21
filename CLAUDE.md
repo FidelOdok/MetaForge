@@ -46,31 +46,29 @@ The **MetaForge-Planner** repo (`FidelOdok/MetaForge-Planner`) is the source of 
 
 When **planning new features or making architectural decisions**, fetch the relevant docs from `FidelOdok/MetaForge-Planner` using GitHub tools before implementing. Do not invent architecture — follow what's specified there. Once a plan is built, reflect the implemented reality in this repo's `docs/`.
 
-## Project & Task Management (Linear)
+## Project & Task Management (Jira)
 
-All project tracking lives in **Linear** under the **MetaForge** team:
+All project tracking lives in **Jira** (migrated from Linear — `MET-*` references in older commit messages/comments predate the move and are historical only, not resolvable in Jira):
 
-- **Project**: "MetaForge Platform v1.0" (ID: `9ae4e6e0-3f38-4fea-be87-0876f87a83fd`)
-- **Team**: MetaForge (ID: `e30e7c0e-d9a5-44af-9cb0-5745aa3dc78a`)
+- **Site**: `https://metaforge-team.atlassian.net`
+- **Project**: `FORGE` ("Team Metaforge") — the only project on this site; use it for all MetaForge work
+- **Issue keys**: `FORGE-<n>` (e.g. `FORGE-36`)
+
+### Access
+
+- **CLI** (preferred): [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), already configured at `~/.config/.jira/.config.yml` (site/project/login). It needs an API token the config doesn't store — export `JIRA_API_TOKEN` before use (the repo's `.env` carries it under `JIRA_API`: `export JIRA_API_TOKEN=$(grep '^JIRA_API=' .env | cut -d= -f2-)`). Verify with `jira me`.
+- **Cloud MCP** (Atlassian tools): only use this if it resolves to the `metaforge-team.atlassian.net` site specifically — `getAccessibleAtlassianResources` may instead surface an unrelated org's Jira (e.g. `idroneinnovations.atlassian.net`), which has no `FORGE`/MetaForge project at all. Confirm the `cloudId` before creating or citing an issue through it.
 
 ### Workflow
 
-1. **Before starting work**: Check Linear for the relevant issue/epic using `list_issues` or `get_issue`
-2. **When starting an issue**: Update its status from Backlog to In Progress
-3. **When done**: Update status to Done and add a comment with what was implemented
-4. **New work discovered**: Create a Linear issue under the appropriate epic before implementing
+1. **Before starting work**: Check Jira for the relevant issue/epic — `jira issue list -pFORGE` / `jira epic list -pFORGE` / `jira issue view FORGE-<n>`
+2. **When starting an issue**: `jira issue move FORGE-<n> "In Progress"`
+3. **When done**: move to Done and add a comment with what was implemented (`jira issue comment add FORGE-<n> "..."`)
+4. **New work discovered**: `jira issue create -pFORGE -tTask -s"..." -b"..."` (add `-PFORGE-<epic>` to attach under an epic) before implementing
 
-### Epic Structure (MET-5 through MET-10, MET-40)
+### Epic Structure
 
-| Epic | Scope | Phase |
-|------|-------|-------|
-| MET-40: Phase 0 Specs | Finalize all specification documents before dev | Phase 0 |
-| MET-5: Digital Twin Core | Graph engine, versioning, constraints, Twin API | Phase 1 |
-| MET-6: Skill System | Registry, loader, schema validator, MCP bridge | Phase 1 |
-| MET-7: MCP Infrastructure | Client, wire protocol, tool registry, adapters | Phase 1-2 |
-| MET-8: Mechanical Agent | Stress validation, meshing, tolerances (first vertical) | Phase 1 |
-| MET-9: Electronics Agent | ERC, DRC, power budget, KiCad adapter | Phase 2 |
-| MET-10: Assistant Layer | IDE extensions, approval workflow, CLI | Phase 2-3 |
+No fixed epic enumeration — epics are created as real initiatives start (unlike Linear's old fixed `MET-5..MET-10` list, which no longer applies). Check `jira epic list -pFORGE` for the current set before assuming one exists; create a new epic rather than overloading an unrelated one.
 
 ## Technology Stack
 
@@ -387,7 +385,7 @@ Everything else (`severity_text`, `detected_level`, `trace_id`, `span_id`, `scop
 | Agent / Command | File | Purpose |
 |----------------|------|---------|
 | `dashboard-tester` | `.claude/agents/dashboard-tester.agent.md` | E2E dashboard testing via Playwright + Grafana observability validation |
-| `bug-hunter` | `.claude/agents/bug-hunter.agent.md` | Scans Grafana for errors/anomalies, triages, deduplicates against Linear, files bugs |
+| `bug-hunter` | `.claude/agents/bug-hunter.agent.md` | Scans Grafana for errors/anomalies, triages, deduplicates against Jira, files bugs |
 | `/test-dashboard` | `.claude/commands/test-dashboard.md` | Launch dashboard-tester agent with scenario or natural language |
 | `/bug-hunt` | `.claude/commands/bug-hunt.md` | Launch bug-hunter agent — scan last 1h (default), custom window, or focused search |
 
@@ -397,9 +395,9 @@ Everything else (`severity_text`, `detected_level`, `trace_id`, `span_id`, `scop
 
 1. **Pre-flight** — verify Grafana datasources are reachable
 2. **Scan** — Loki error logs, error patterns, Prometheus error rates, latency anomalies, firing alerts
-3. **Triage** — classify severity, enrich with trace context + source code, generate Grafana deeplinks, deduplicate against Linear
+3. **Triage** — classify severity, enrich with trace context + source code, generate Grafana deeplinks, deduplicate against Jira
 4. **Report** — structured findings with code context and Grafana links
-5. **File** — create Linear issues (only after user approval)
+5. **File** — create Jira issues (only after user approval)
 
 Scoped to **gateway** and **dashboard** services only. Never auto-files bugs without user confirmation.
 
