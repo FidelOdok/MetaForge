@@ -36,6 +36,11 @@ class NodeType(StrEnum):
     # Never listed alongside real CONSTRAINT/ENGINEERING_ENTITY nodes;
     # list_constraints/list_engineering_entities filter it out by node_type.
     REVISION_SNAPSHOT = "revision_snapshot"
+    # FORGE-66 (Phase 7): the mandatory container for a non-trivial change --
+    # a proposed Patch plus its trigger/observation/impact/approval state,
+    # carried through PROPOSED -> ... -> COMMITTED | ROLLED_BACK (see
+    # twin_core/models/engineering_change_transaction.py).
+    ENGINEERING_CHANGE_TRANSACTION = "engineering_change_transaction"
 
 
 class WorkProductType(StrEnum):
