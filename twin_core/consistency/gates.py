@@ -1,6 +1,7 @@
-"""G3-G6 gate evaluation (FORGE-60/61/62, spec sections 22-23, Phase 5 of
+"""G3-G8 gate evaluation (FORGE-60/61/62/63, spec sections 22-23, Phase 5 of
 epic FORGE-35): Preliminary Feasibility (G3), Architecture (G4), Concept
-Selection (G5), Preliminary Design / Design Sketch (G6).
+Selection (G5), Preliminary Design / Design Sketch (G6), Verification
+Readiness (G7), Release (G8).
 
 The design-flow ``Gate`` (``orchestrator/design_flow/spec.py``) is a
 declarative checkpoint -- a name plus advisory criteria the human reviewer
@@ -97,6 +98,50 @@ persists it to the Twin, so nothing survives for a gate to query afterward.
 but only returns it stringified inside ``AgentResult.evidence`` -- exposing
 it as a reusable accessor is a real, small, separate refactor of tested
 Phase-3 code, deliberately not risked in this pass.
+
+**G7 (Verification Readiness)**: per critical (``ConstraintSeverity.ERROR``)
+requirement in the project, two real per-requirement checks reusing
+``TraceabilityAgent``'s own established conventions rather than inventing
+new ones -- "verification method defined" (``Constraint.metadata
+["verification_method"]``, the exact field ``RequirementAuthorAgent``
+(FORGE-55) already writes and ``TraceabilityAgent`` already reads) and
+"ownership defined" (``Constraint.source`` -- confirmed the closest real
+owner field this codebase has; ``TraceabilityAgent``'s own docstring says
+so explicitly). Both are a real FAIL when missing on a critical requirement,
+not a hedge -- unlike G5's alternatives, there's no legitimate "not
+applicable" case for a critical requirement lacking a verification method or
+an owner. "Acceptance criteria defined", "measurement method defined", and
+"expected evidence defined" come back ``NOT_EVALUATED``: grepped the whole
+repo for ``acceptance_criteria``/``expected_evidence``/``measurement_method``
+as metadata keys -- zero hits anywhere. ``entity_type="verification_case"``
+is a real, usable ``EngineeringEntity`` literal with a fully generic
+recorder (``engineering_entity_recorder.py``) but no dedicated field
+convention of its own, same situation G4 found for "subsystem"/"interface".
+
+**G8 (Release)**: "configuration baseline fixed" is real --
+``TwinAPI.list_baselines(project_id=...)`` (FORGE-51) already exists and is
+project-scoped; FAIL when the project has none (a release without any
+baseline is a real, actionable gap, not a vacuous pass -- unlike G4's
+"no constraints recorded" case, a baseline is an unconditionally required
+release step, so its absence isn't hedged as NOT_EVALUATED). "Stale evidence
+resolved" is real -- reads ``"evidence"`` ``EngineeringEntity`` nodes'
+``metadata["staleness"]`` (FORGE-59's ``StalenessEngine`` convention,
+default ``current`` when unset) directly, no ``propagate()`` call needed;
+FAIL if any is ``stale``/``invalid``. When the project has recorded NO
+evidence at all, this comes back ``NOT_EVALUATED`` rather than a vacuous
+PASS -- a release gate silently reporting "no stale evidence" when nothing
+was ever verified would be actively misleading, the exact vacuous-pass
+failure mode this codebase already guards against elsewhere (MET-582/583's
+constraint-as-gate-criteria rules). "Required verification complete" comes
+back ``NOT_EVALUATED`` for the same reason as G6's "requirement coverage" --
+``TraceabilityCoverage.verification_to_evidence`` is computed internally by
+``TraceabilityAgent`` but not exposed as a reusable accessor, and
+``EdgeType.VALIDATES`` has zero real creators anywhere in production code.
+"Waivers approved" and "build/manufacturing release approved" come back
+``NOT_EVALUATED``: grepped for "waiver" -- the only real hit is a transient
+classification string ``HITLEngine`` accepts as an approval-request
+category (never persisted to the graph, no ``list_waivers``/project scoping
+possible), confirmed pure white space.
 """
 
 from __future__ import annotations
@@ -110,7 +155,7 @@ from twin_core.api import TwinAPI
 from twin_core.consistency.budgets import BudgetEngine
 from twin_core.consistency.invariants import InvariantEngine
 from twin_core.consistency.models import Budget, Invariant
-from twin_core.models.enums import WorkProductType
+from twin_core.models.enums import ConstraintSeverity, WorkProductType
 
 
 class GateCheckStatus(StrEnum):
@@ -495,3 +540,137 @@ async def evaluate_g6_design_sketch(twin: TwinAPI, project_id: UUID) -> GateEval
             )
         )
     return GateEvaluation(gate_id="G6", status=_status_from_checks(checks), checks=checks)
+
+
+_G7_NOT_EVALUATED_CHECKS = (
+    ("acceptance_criteria_defined", "Acceptance criteria defined"),
+    ("measurement_method_defined", "Measurement method defined"),
+    ("expected_evidence_defined", "Expected evidence defined"),
+)
+
+
+async def _evaluate_critical_requirement_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
+    constraints = await twin.list_constraints(project_id=project_id)
+    critical = [c for c in constraints if c.severity == ConstraintSeverity.ERROR]
+    if not critical:
+        return [
+            GateCheck(
+                id="requirements:none-critical",
+                label="Critical requirements have verification method + ownership",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no ERROR-severity (critical) requirements recorded for this project yet",
+            )
+        ]
+
+    checks: list[GateCheck] = []
+    for req in critical:
+        has_verification = bool(req.metadata.get("verification_method"))
+        checks.append(
+            GateCheck(
+                id=f"requirement:{req.id}:verification_method",
+                label=f"Verification method defined: {req.name}",
+                status=GateCheckStatus.PASS if has_verification else GateCheckStatus.FAIL,
+                detail=(
+                    str(req.metadata.get("verification_method"))
+                    if has_verification
+                    else "no verification_method recorded on this critical requirement"
+                ),
+            )
+        )
+        has_owner = bool(req.source)
+        checks.append(
+            GateCheck(
+                id=f"requirement:{req.id}:ownership",
+                label=f"Verification ownership defined: {req.name}",
+                status=GateCheckStatus.PASS if has_owner else GateCheckStatus.FAIL,
+                detail=(
+                    f"source={req.source}"
+                    if has_owner
+                    else "no source recorded on this critical requirement"
+                ),
+            )
+        )
+    return checks
+
+
+async def evaluate_g7_verification_readiness(twin: TwinAPI, project_id: UUID) -> GateEvaluation:
+    """Evaluate the G7 Verification Readiness Gate (spec section 23) for
+    `project_id`. See this module's docstring for exactly which checks are
+    real today.
+    """
+    checks = await _evaluate_critical_requirement_checks(twin, project_id)
+    for check_id, label in _G7_NOT_EVALUATED_CHECKS:
+        checks.append(
+            GateCheck(
+                id=check_id,
+                label=label,
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no verification_case metadata convention exists yet -- see this "
+                "module's docstring",
+            )
+        )
+    return GateEvaluation(gate_id="G7", status=_status_from_checks(checks), checks=checks)
+
+
+_G8_NOT_EVALUATED_CHECKS = (
+    ("required_verification_complete", "Required verification complete"),
+    ("waivers_approved", "Waivers approved"),
+    ("release_approved", "Build/manufacturing release approved"),
+)
+
+
+async def _evaluate_baseline_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    baselines = await twin.list_baselines(project_id=project_id)
+    return GateCheck(
+        id="configuration_baseline_fixed",
+        label="Configuration baseline fixed",
+        status=GateCheckStatus.PASS if baselines else GateCheckStatus.FAIL,
+        detail=(
+            f"{len(baselines)} baseline(s) recorded"
+            if baselines
+            else "no baseline recorded for this project -- release requires one"
+        ),
+    )
+
+
+async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    entities = await twin.list_engineering_entities(project_id=project_id)
+    evidence = [e for e in entities if e.entity_type == "evidence"]
+    if not evidence:
+        return GateCheck(
+            id="stale_evidence_resolved",
+            label="Stale evidence resolved",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no 'evidence' entities recorded for this project yet",
+        )
+    stale = [e for e in evidence if e.metadata.get("staleness", "current") in ("stale", "invalid")]
+    return GateCheck(
+        id="stale_evidence_resolved",
+        label="Stale evidence resolved",
+        status=GateCheckStatus.FAIL if stale else GateCheckStatus.PASS,
+        detail=(
+            f"{len(stale)} of {len(evidence)} evidence entit(ies) stale/invalid"
+            if stale
+            else f"all {len(evidence)} evidence entit(ies) current"
+        ),
+    )
+
+
+async def evaluate_g8_release(twin: TwinAPI, project_id: UUID) -> GateEvaluation:
+    """Evaluate the G8 Release Gate (spec section 23) for `project_id`. See
+    this module's docstring for exactly which checks are real today.
+    """
+    checks: list[GateCheck] = [
+        await _evaluate_baseline_check(twin, project_id),
+        await _evaluate_stale_evidence_check(twin, project_id),
+    ]
+    for check_id, label in _G8_NOT_EVALUATED_CHECKS:
+        checks.append(
+            GateCheck(
+                id=check_id,
+                label=label,
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no data source exists yet -- see this module's docstring",
+            )
+        )
+    return GateEvaluation(gate_id="G8", status=_status_from_checks(checks), checks=checks)
