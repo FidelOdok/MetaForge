@@ -75,7 +75,7 @@ interface R3FViewerProps {
 // of colors the ViewCube needs are declared locally rather than reaching
 // into TwinViewerPage's private KC object.
 const VIEWCUBE_COLOR = '#282a30'; // surface-high
-const VIEWCUBE_HOVER_COLOR = '#e67e22'; // primary-container (brand orange)
+const VIEWCUBE_HOVER_COLOR = '#ff5a0a'; // primary-container (brand orange)
 const VIEWCUBE_TEXT_COLOR = '#e2e2eb'; // on-surface
 const VIEWCUBE_STROKE_COLOR = 'rgba(65,72,90,0.4)';
 

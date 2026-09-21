@@ -18,7 +18,7 @@ const KC = {
   onSurface:        '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
   primary:          '#ffb783',
-  primaryContainer: '#e67e22',
+  primaryContainer: '#ff5a0a',
   error:            '#ffb4ab',
   success:          '#3dd68c',
   border:           'rgba(65,72,90,0.2)',

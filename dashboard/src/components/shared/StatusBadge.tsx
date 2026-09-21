@@ -30,8 +30,8 @@ const STATUS_MAP: Record<string, { variant: 'success' | 'warning' | 'error' | 'i
 
 // Status dot colors for use in tables/lists
 const DOT_COLORS: Record<string, string> = {
-  running:   '#e67e22',
-  active:    '#e67e22',
+  running:   '#ff5a0a',
+  active:    '#ff5a0a',
   completed: '#3dd68c',
   approved:  '#3dd68c',
   valid:     '#3dd68c',

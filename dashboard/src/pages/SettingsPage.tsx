@@ -22,7 +22,7 @@ const KC = {
   warning: '#f59e0b',
   error: '#ffb4ab',
   tertiary: '#86cfff',
-  primary: '#e67e22',
+  primary: '#ff5a0a',
   border: 'rgba(65,72,90,0.2)',
   glass: 'rgba(30,31,38,0.85)',
   surfaceHigh: '#282a30',

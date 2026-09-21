@@ -13,7 +13,7 @@ const STATUS_DOT_COLOR: Record<FileLinkStatus, string> = {
 // ── Tool chip colours ─────────────────────────────────────────────────────────
 const TOOL_CHIP: Record<string, { color: string; bg: string }> = {
   kicad:  { color: '#86cfff', bg: 'rgba(134,207,255,0.1)' },
-  freecad:{ color: '#e67e22', bg: 'rgba(230,126,34,0.1)'  },
+  freecad:{ color: '#ff5a0a', bg: 'rgba(255,90,10,0.1)'  },
   spice:  { color: '#3dd68c', bg: 'rgba(61,214,140,0.1)'  },
   other:  { color: '#9a9aaa', bg: 'rgba(154,154,170,0.1)' },
 };
@@ -354,7 +354,7 @@ export function FilesPage() {
                   borderRadius: 4,
                   border: 'none',
                   cursor: 'pointer',
-                  background: active ? '#e67e22' : 'rgba(30,31,38,0.85)',
+                  background: active ? '#ff5a0a' : 'rgba(30,31,38,0.85)',
                   color: active ? '#000' : '#9a9aaa',
                   transition: 'background 0.15s, color 0.15s',
                 }}

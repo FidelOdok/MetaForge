@@ -16,7 +16,7 @@ const KC_SURFACE = 'rgba(30,31,38,0.92)';
 const KC_BORDER = 'rgba(65,72,90,0.3)';
 const KC_ON_SURFACE = '#e2e2eb';
 const KC_ON_SURFACE_VARIANT = '#9a9aaa';
-const KC_ORANGE = '#e67e22';
+const KC_ORANGE = '#ff5a0a';
 
 interface BooleanCutPanelProps {
   /** Called after a successful cut with the new node's id, so the host page

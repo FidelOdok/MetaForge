@@ -675,3 +675,12 @@ continue through the ordinary controls.
 A separately hosted dashboard needs a reachable gateway address configured in
 Settings. No gateway, credentials, synthetic projects, or execution service is
 bundled into the frontend deployment.
+
+### Brand source
+
+Dashboard branding follows MetaForge Navrik's `design.md`: layered Kinetic
+Console surfaces with the official `#FF5A0A` accent. The supplied Navrik SVG
+wordmark is stored in `dashboard/public/metaforge-logo.svg`; the favicon uses
+the same mark as the MetaForge marketing site. DM Sans body text and Space
+Grotesk headings connect the app to that site's typography. Lighter orange
+text tokens remain where needed for readable contrast on elevated surfaces.
