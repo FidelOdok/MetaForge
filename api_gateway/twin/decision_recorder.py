@@ -14,6 +14,15 @@ Lives in the api_gateway layer because it composes twin_core (the model), the
 ``digital_twin.storage`` blob store, and the project backend. It's injected as
 an opaque callable into the twin MCP adapter so ``tool_registry`` never imports
 any of those layers.
+
+FORGE-61 (epic FORGE-35, Concept Selection Gate / G5): a decision may also
+carry ``parent_refs`` — the requirement(s)/objective(s) the selected concept
+satisfies — resolved via the same exact-name-or-UUID resolver FORGE-45 built
+(``_ref_resolver.py``) and linked with ``EdgeType(relation)`` (default
+``satisfies``, the first real use of that previously-declared-but-unused edge
+type). Without this a G5 "selected concept linked to requirements/objectives"
+check has nothing to evaluate against; see
+``twin_core.consistency.gates.evaluate_g5_concept_selection``.
 """
 
 from __future__ import annotations
@@ -26,11 +35,15 @@ from uuid import UUID, uuid4
 
 import structlog
 
+from api_gateway.twin._ref_resolver import resolve_refs
 from api_gateway.twin.work_product_events import publish_work_product_created
 from observability.tracing import get_tracer
+from twin_core.models.enums import EdgeType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.decision_recorder")
+
+_DEFAULT_RELATION = "satisfies"
 
 
 def _slug(title: str) -> str:
@@ -73,6 +86,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         title: str,
         rationale: str,
         alternatives: list[dict[str, Any]] | None = None,
+        parent_refs: list[str] | None = None,
+        relation: str = _DEFAULT_RELATION,
         project_id: str | None = None,
         session_id: str | None = None,
         supersedes: str | None = None,
@@ -80,6 +95,13 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
     ) -> dict[str, Any]:
         from twin_core.models.enums import WorkProductType
         from twin_core.models.work_product import WorkProduct
+
+        try:
+            relation_edge = EdgeType(relation)
+        except ValueError as exc:
+            raise ValueError(
+                f"twin.record_decision: 'relation' must be a valid EdgeType, got {relation!r}"
+            ) from exc
 
         with tracer.start_as_current_span("twin.record_decision") as span:
             wp_id = uuid4()
@@ -127,6 +149,14 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             except Exception as exc:  # noqa: BLE001 — dedup never blocks recording
                 logger.warning("decision_dedup_check_failed", error=str(exc))
 
+            # FORGE-61: resolve parent_refs BEFORE the work product exists, so
+            # an unresolvable ref fails the call with zero partial writes --
+            # same discipline as constraint_recorder.py/engineering_entity_
+            # recorder.py.
+            resolved_parent_ids: list[UUID] = []
+            if parent_refs:
+                resolved_parent_ids = await resolve_refs(twin, parent_refs, project_id=project_id)
+
             # 1. blob → MinIO (graceful: keep the node even if storage is down).
             minio_object_key: str | None = None
             try:
@@ -151,6 +181,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["supersedes"] = supersedes
             if session_id:
                 metadata["session_id"] = session_id
+            if resolved_parent_ids:
+                metadata["parent_refs"] = [str(p) for p in resolved_parent_ids]
 
             now = datetime.now(UTC)
             wp = WorkProduct(
@@ -169,6 +201,17 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             )
             created = await twin.create_work_product(wp)
             node_id = str(getattr(created, "id", wp_id))
+
+            # FORGE-61: the literal G5 check -- "selected concept linked to
+            # requirements/objectives" -- a real graph edge, not just a
+            # metadata list.
+            for parent_id in resolved_parent_ids:
+                await twin.add_edge(
+                    created.id,
+                    parent_id,
+                    relation_edge,
+                    metadata={"kind": "decision_trace"},
+                )
 
             # 2. project junction link (MET-489 facet 3) so it shows on the
             #    Projects page, not just the scoped twin view.
@@ -205,12 +248,14 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 linked=linked,
                 indexed=indexed,
                 minio_object_key=minio_object_key,
+                parent_count=len(resolved_parent_ids),
             )
             return {
                 "node_id": node_id,
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
                 "project_linked": linked,
+                "parent_refs": [str(p) for p in resolved_parent_ids],
                 "knowledge_indexed": indexed,
                 "deduplicated": False,
             }

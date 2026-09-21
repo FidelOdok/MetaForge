@@ -623,6 +623,21 @@ class TwinServer(McpToolServer):
                                 },
                             },
                         },
+                        "parent_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-61: requirement(s)/objective(s) this decision's "
+                                "selected concept satisfies -- by name/title or node id."
+                            ),
+                        },
+                        "relation": {
+                            "type": "string",
+                            "description": (
+                                "Edge type linking this decision to each parent_ref "
+                                "(default 'satisfies')."
+                            ),
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                         "supersedes": {
@@ -639,6 +654,7 @@ class TwinServer(McpToolServer):
                         "minio_object_key": {"type": ["string", "null"]},
                         "content_hash": {"type": "string"},
                         "project_linked": {"type": "boolean"},
+                        "parent_refs": {"type": "array", "items": {"type": "string"}},
                     },
                 },
                 phase=1,
@@ -657,17 +673,25 @@ class TwinServer(McpToolServer):
         alternatives = arguments.get("alternatives")
         if alternatives is not None and not isinstance(alternatives, list):
             raise ValueError("twin.record_decision: 'alternatives' must be an array")
+        parent_refs = arguments.get("parent_refs")
+        if parent_refs is not None and not isinstance(parent_refs, list):
+            raise ValueError("twin.record_decision: 'parent_refs' must be an array")
+        relation = arguments.get("relation")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
         supersedes = arguments.get("supersedes")
-        return await self._decision_recorder(
-            title=title,
-            rationale=rationale,
-            alternatives=alternatives,
-            project_id=project_id if isinstance(project_id, str) else None,
-            session_id=session_id if isinstance(session_id, str) else None,
-            supersedes=supersedes if isinstance(supersedes, str) else None,
-        )
+        kwargs: dict[str, Any] = {
+            "title": title,
+            "rationale": rationale,
+            "alternatives": alternatives,
+            "parent_refs": parent_refs,
+            "project_id": project_id if isinstance(project_id, str) else None,
+            "session_id": session_id if isinstance(session_id, str) else None,
+            "supersedes": supersedes if isinstance(supersedes, str) else None,
+        }
+        if isinstance(relation, str) and relation:
+            kwargs["relation"] = relation
+        return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------
     # twin.record_component_selection (MET-436 follow-up)

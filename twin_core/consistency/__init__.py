@@ -1,6 +1,6 @@
 """Engineering consistency: runtime invariants, budget allocation, objective
-ranking, dependency-directed staleness, and gate evaluation (FORGE-57/58/59/60,
-Phases 4-5 of epic FORGE-35).
+ranking, dependency-directed staleness, and gate evaluation
+(FORGE-57/58/59/60/61, Phases 4-5 of epic FORGE-35).
 """
 
 from twin_core.consistency.budgets import BudgetEngine
@@ -10,6 +10,8 @@ from twin_core.consistency.gates import (
     GateEvaluation,
     GateStatus,
     evaluate_g3_feasibility,
+    evaluate_g4_architecture,
+    evaluate_g5_concept_selection,
 )
 from twin_core.consistency.invariants import InvariantEngine
 from twin_core.consistency.models import (
@@ -60,5 +62,7 @@ __all__ = [
     "StalenessEngine",
     "StalenessStatus",
     "evaluate_g3_feasibility",
+    "evaluate_g4_architecture",
+    "evaluate_g5_concept_selection",
     "objective_from_entity",
 ]

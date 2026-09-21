@@ -16,7 +16,8 @@ from api_gateway.twin import decision_recorder as dr
 from api_gateway.twin.decision_recorder import make_decision_recorder, render_decision_markdown
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import WorkProductType
+from twin_core.models.constraint import Constraint
+from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
 
 
 class _FakeProjectBackend:
@@ -176,6 +177,93 @@ class TestRecorder:
         assert "minio_object_key" not in wp.metadata
 
 
+class TestForge61ParentRefs:
+    """FORGE-61: a decision may link to the requirement(s)/objective(s) its
+    selected concept satisfies -- G5's own "selected concept linked to
+    requirements/objectives" check made real."""
+
+    async def test_parent_refs_link_via_satisfies_edge_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        req = await twin.create_constraint(
+            Constraint(
+                name="leg_actuator_torque",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+                project_id=UUID(pid),
+            )
+        )
+        record = make_decision_recorder(twin, None)
+
+        result = await record(
+            title="Leg actuator architecture",
+            rationale="Dynamixel selected after trade study",
+            alternatives=[{"option": "hobby servo", "reason_rejected": "insufficient torque"}],
+            parent_refs=["leg_actuator_torque"],
+            project_id=pid,
+        )
+
+        assert result["parent_refs"] == [str(req.id)]
+        wp = await twin.get_work_product(UUID(result["node_id"]))
+        assert wp is not None
+        assert wp.metadata["parent_refs"] == [str(req.id)]
+        edges = await twin.get_edges(UUID(result["node_id"]), edge_type=EdgeType.SATISFIES)
+        assert len(edges) == 1
+        assert edges[0].target_id == req.id
+
+    async def test_relation_can_be_overridden(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        req = await twin.create_constraint(
+            Constraint(
+                name="mass_budget",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+                project_id=UUID(pid),
+            )
+        )
+        record = make_decision_recorder(twin, None)
+        result = await record(
+            title="D",
+            rationale="r",
+            parent_refs=["mass_budget"],
+            relation="derives_from",
+            project_id=pid,
+        )
+        edges = await twin.get_edges(UUID(result["node_id"]), edge_type=EdgeType.DERIVES_FROM)
+        assert len(edges) == 1
+        assert edges[0].target_id == req.id
+
+    async def test_no_parent_refs_means_no_edges(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+        result = await record(title="D", rationale="r")
+        assert result["parent_refs"] == []
+
+    async def test_unresolvable_parent_ref_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+        with pytest.raises(ValueError, match="did not resolve"):
+            await record(title="D", rationale="r", parent_refs=["nonexistent"])
+
+    async def test_invalid_relation_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+        with pytest.raises(ValueError, match="relation"):
+            await record(title="D", rationale="r", relation="not_a_real_edge_type")
+
+
 class TestAdapterHandler:
     async def test_record_decision_tool_registered_and_calls_recorder(
         self, monkeypatch: pytest.MonkeyPatch
@@ -192,6 +280,36 @@ class TestAdapterHandler:
     def test_record_decision_absent_without_recorder(self) -> None:
         server = TwinServer(twin=InMemoryTwinAPI.create())
         assert "twin.record_decision" not in server.tool_ids
+
+    async def test_handler_passes_through_parent_refs_and_relation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        req = await twin.create_constraint(
+            Constraint(
+                name="req1",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+                project_id=UUID(pid),
+            )
+        )
+        server = TwinServer(
+            twin=twin, allow_mutations=True, decision_recorder=make_decision_recorder(twin, None)
+        )
+        out = await server.record_decision(
+            {
+                "title": "T",
+                "rationale": "because",
+                "parent_refs": ["req1"],
+                "relation": "satisfies",
+                "project_id": pid,
+            }
+        )
+        assert out["parent_refs"] == [str(req.id)]
 
     async def test_handler_validates_required_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_blob(monkeypatch)
