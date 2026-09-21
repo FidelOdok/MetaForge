@@ -657,6 +657,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_design_sketch_recorder,
     )
     from api_gateway.twin.document_recorder import make_document_recorder
+    from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
     from api_gateway.twin.robot_description_recorder import (
@@ -700,6 +701,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).
         constraint_recorder=make_constraint_recorder(twin, project_backend),
+        # FORGE-45 (epic FORGE-35): Engineering Intent & Requirements Harness
+        # entities (intent/need/objective/assumption/question/risk/
+        # verification_case/evidence) -- the "why" a requirement exists,
+        # recorded before/alongside the quantified requirements themselves.
+        engineering_entity_recorder=make_engineering_entity_recorder(twin),
         # MET-587: chat-triggered design flows (run.start_design_flow) — the
         # flow's own phase gates are the HITL approval mechanism.
         run_launcher=make_run_launcher(),
