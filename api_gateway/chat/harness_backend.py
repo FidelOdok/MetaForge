@@ -185,6 +185,7 @@ _GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
     "twin.record_decision": (GATE_TWIN_WRITE,),
     "twin.record_constraint_set": (GATE_TWIN_WRITE,),
     "twin.record_engineering_entity": (GATE_TWIN_WRITE,),
+    "twin.record_evidence": (GATE_TWIN_WRITE,),
     "twin.record_document": (GATE_TWIN_WRITE,),
     "twin.propose_change": (GATE_TWIN_WRITE,),
     "twin.stage_work_product_file": (GATE_TWIN_WRITE,),

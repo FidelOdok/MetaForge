@@ -262,6 +262,7 @@ async def bootstrap_tool_registry(
     compliance_checklist_recorder: Any = None,
     procurement_record_recorder: Any = None,
     component_recorder: Any = None,
+    evidence_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -319,6 +320,13 @@ async def bootstrap_tool_registry(
             ``component.search_*`` result as a BOMItem work product + project
             link. ``None`` skips registration (same pattern as
             ``document_recorder``).
+        evidence_recorder: Optional async ``record(...)`` (make_evidence_
+            recorder, FORGE-64, epic FORGE-35). When supplied, registers
+            ``twin.record_evidence``, which persists a tool-generated
+            Evidence EngineeringEntity -- real producer/inputs/result
+            (hashed), supports/contradicts edges, and revision-pinned
+            valid_against dependencies via FORGE-59's StalenessEngine.
+            ``None`` skips registration (same pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -485,6 +493,7 @@ async def bootstrap_tool_registry(
                     compliance_checklist_recorder=compliance_checklist_recorder,
                     procurement_record_recorder=procurement_record_recorder,
                     component_recorder=component_recorder,
+                    evidence_recorder=evidence_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

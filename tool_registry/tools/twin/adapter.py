@@ -54,6 +54,7 @@ class TwinServer(McpToolServer):
         compliance_checklist_recorder: Any = None,
         procurement_record_recorder: Any = None,
         component_recorder: Any = None,
+        evidence_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -129,6 +130,14 @@ class TwinServer(McpToolServer):
         # all. Same injection seam as decision_recorder; None keeps
         # tool_registry free of api_gateway imports.
         self._component_recorder = component_recorder
+        # FORGE-64 (epic FORGE-35, Phase 6: Evidence Integration): an
+        # injected async ``record(...)`` (make_evidence_recorder) that
+        # persists a tool-generated Evidence EngineeringEntity -- real
+        # producer/inputs/result (hashed), supports/contradicts edges, and
+        # revision-pinned valid_against dependencies via FORGE-59's
+        # StalenessEngine. Same injection seam as decision_recorder; None
+        # keeps tool_registry free of api_gateway imports.
+        self._evidence_recorder = evidence_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -158,6 +167,8 @@ class TwinServer(McpToolServer):
             self._register_stage_work_product_file()
         if component_recorder is not None:
             self._register_record_component_selection()
+        if evidence_recorder is not None:
+            self._register_record_evidence()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -2093,3 +2104,150 @@ class TwinServer(McpToolServer):
                 "twin.stage_work_product_file: 'node_id' is required (non-empty string)"
             )
         return await self._blob_stager(node_id)
+
+    # ------------------------------------------------------------------
+    # twin.record_evidence (FORGE-64, epic FORGE-35)
+    # ------------------------------------------------------------------
+
+    def _register_record_evidence(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_evidence",
+                adapter_id="twin",
+                name="Record Evidence",
+                description=(
+                    "Persist a tool-generated evidence entity: the REAL structured "
+                    "result of a calculix/simulation/CAD/test tool call (never a "
+                    "restated or summarized assertion), with producer, inputs, a "
+                    "content hash, and optional links to the requirement(s) it "
+                    "supports/contradicts, and the revision(s) of other entities it "
+                    "is only valid against. Call this immediately after the tool "
+                    "call it evidences, passing that tool's own output as 'result'."
+                ),
+                capability="twin_evidence",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "evidence_type": {
+                            "type": "string",
+                            "enum": [
+                                "calculation",
+                                "simulation",
+                                "test",
+                                "inspection",
+                                "demonstration",
+                                "datasheet",
+                                "external_reference",
+                            ],
+                        },
+                        "producer": {
+                            "type": "object",
+                            "description": "e.g. {'tool': 'calculix.run_fea', 'version': '2.20'}.",
+                            "properties": {
+                                "tool": {"type": "string"},
+                                "version": {"type": "string"},
+                            },
+                            "required": ["tool"],
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": "The parameters/state the tool was run against.",
+                        },
+                        "result": {
+                            "type": "object",
+                            "description": "The tool's own real structured output.",
+                        },
+                        "statement": {
+                            "type": "string",
+                            "description": "Optional human-readable summary.",
+                        },
+                        "supports": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Requirement/objective refs this evidence supports.",
+                        },
+                        "contradicts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Requirement/objective refs this evidence contradicts.",
+                        },
+                        "valid_against": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "ref": {"type": "string"},
+                                    "entity_kind": {
+                                        "type": "string",
+                                        "enum": ["constraint", "engineering_entity"],
+                                    },
+                                    "revision": {"type": "integer"},
+                                },
+                                "required": ["ref", "entity_kind"],
+                            },
+                            "description": (
+                                "Revision-pinned dependencies (e.g. the requirement "
+                                "whose current revision this evidence was computed "
+                                "against) -- omit 'revision' to pin the current one."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "session_id": {"type": "string", "description": "Originating session id."},
+                    },
+                    "required": ["evidence_type", "producer", "inputs", "result"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "result_hash": {"type": "string"},
+                        "execution_timestamp": {"type": "string"},
+                        "supports": {"type": "array", "items": {"type": "string"}},
+                        "contradicts": {"type": "array", "items": {"type": "string"}},
+                        "valid_against_count": {"type": "integer"},
+                        "project_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.record_evidence,
+        )
+
+    async def record_evidence(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        evidence_type = arguments.get("evidence_type")
+        producer = arguments.get("producer")
+        inputs = arguments.get("inputs")
+        result = arguments.get("result")
+        if not evidence_type or not isinstance(evidence_type, str):
+            raise ValueError("twin.record_evidence: 'evidence_type' is required (non-empty string)")
+        if not isinstance(producer, dict):
+            raise ValueError("twin.record_evidence: 'producer' is required (object)")
+        if not isinstance(inputs, dict):
+            raise ValueError("twin.record_evidence: 'inputs' is required (object)")
+        if not isinstance(result, dict):
+            raise ValueError("twin.record_evidence: 'result' is required (object)")
+        statement = arguments.get("statement")
+        supports = arguments.get("supports")
+        if supports is not None and not isinstance(supports, list):
+            raise ValueError("twin.record_evidence: 'supports' must be an array")
+        contradicts = arguments.get("contradicts")
+        if contradicts is not None and not isinstance(contradicts, list):
+            raise ValueError("twin.record_evidence: 'contradicts' must be an array")
+        valid_against = arguments.get("valid_against")
+        if valid_against is not None and not isinstance(valid_against, list):
+            raise ValueError("twin.record_evidence: 'valid_against' must be an array")
+        project_id = arguments.get("project_id")
+        session_id = arguments.get("session_id")
+        return await self._evidence_recorder(
+            evidence_type=evidence_type,
+            producer=producer,
+            inputs=inputs,
+            result=result,
+            statement=statement if isinstance(statement, str) else None,
+            supports=supports,
+            contradicts=contradicts,
+            valid_against=valid_against,
+            project_id=project_id if isinstance(project_id, str) else None,
+            session_id=session_id if isinstance(session_id, str) else None,
+        )
