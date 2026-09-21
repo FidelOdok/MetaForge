@@ -1,5 +1,6 @@
-"""Engineering consistency: runtime invariants, budget allocation, and
-objective ranking (FORGE-57/58, Phase 4 of epic FORGE-35).
+"""Engineering consistency: runtime invariants, budget allocation, objective
+ranking, and dependency-directed staleness (FORGE-57/58/59, Phase 4 of
+epic FORGE-35).
 """
 
 from twin_core.consistency.budgets import BudgetEngine
@@ -21,6 +22,12 @@ from twin_core.consistency.objectives import (
     ScoredCandidate,
     objective_from_entity,
 )
+from twin_core.consistency.staleness import (
+    Dependency,
+    StaleMarking,
+    StalenessEngine,
+    StalenessStatus,
+)
 
 __all__ = [
     "Budget",
@@ -28,6 +35,7 @@ __all__ = [
     "BudgetEngine",
     "BudgetStatus",
     "Candidate",
+    "Dependency",
     "Invariant",
     "InvariantComparison",
     "InvariantEngine",
@@ -37,5 +45,8 @@ __all__ = [
     "ObjectiveEngine",
     "OptimizationResult",
     "ScoredCandidate",
+    "StaleMarking",
+    "StalenessEngine",
+    "StalenessStatus",
     "objective_from_entity",
 ]
