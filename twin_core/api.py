@@ -155,6 +155,29 @@ class OrphanWouldBeCreatedError(ValueError):
         )
 
 
+class RevisionConflictError(ValueError):
+    """Raised by ``update_constraint``/``update_engineering_entity`` (FORGE-50,
+    Phase 2 epic FORGE-35) when a caller-supplied ``expected_revision`` no
+    longer matches the node's current ``revision``.
+
+    Optimistic concurrency, not locking: the caller read the node at some
+    revision, computed a change, and is now asserting nothing else committed
+    in between. A mismatch means it did -- the caller (typically
+    ``TransactionEngine.commit``) must re-read the current state and decide
+    whether to recompute or surface a conflict, never blindly retry with the
+    same payload.
+    """
+
+    def __init__(self, node_id: UUID, expected: int, actual: int) -> None:
+        self.node_id = node_id
+        self.expected_revision = expected
+        self.actual_revision = actual
+        super().__init__(
+            f"Revision conflict on {node_id}: expected revision {expected}, "
+            f"found {actual}. The node changed since it was last read."
+        )
+
+
 class TwinAPI(ABC):
     """Abstract facade for all Digital Twin operations.
 
@@ -218,6 +241,23 @@ class TwinAPI(ABC):
     async def get_constraint(self, constraint_id: UUID) -> Constraint | None: ...
 
     @abstractmethod
+    async def update_constraint(
+        self,
+        constraint_id: UUID,
+        updates: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> Constraint:
+        """Apply ``updates`` and increment ``revision`` by 1 (FORGE-50).
+
+        When ``expected_revision`` is given, raises
+        :class:`RevisionConflictError` (no write applied) if the
+        constraint's current revision doesn't match -- the optimistic-
+        concurrency primitive ``TransactionEngine.commit`` builds on.
+        """
+        ...
+
+    @abstractmethod
     async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult: ...
 
     @abstractmethod
@@ -240,6 +280,20 @@ class TwinAPI(ABC):
 
     @abstractmethod
     async def get_engineering_entity(self, entity_id: UUID) -> EngineeringEntity | None: ...
+
+    @abstractmethod
+    async def update_engineering_entity(
+        self,
+        entity_id: UUID,
+        updates: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> EngineeringEntity:
+        """Apply ``updates`` and increment ``revision`` by 1 (FORGE-50).
+
+        Same optimistic-concurrency contract as ``update_constraint``.
+        """
+        ...
 
     @abstractmethod
     async def list_engineering_entities(
@@ -695,6 +749,23 @@ class InMemoryTwinAPI(TwinAPI):
     async def get_constraint(self, constraint_id: UUID) -> Constraint | None:
         return await self._constraints.get_constraint(constraint_id)
 
+    async def update_constraint(
+        self,
+        constraint_id: UUID,
+        updates: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> Constraint:
+        current = await self._graph.get_node(constraint_id)
+        if current is None or not isinstance(current, Constraint):
+            raise KeyError(f"Constraint {constraint_id} not found")
+        if expected_revision is not None and current.revision != expected_revision:
+            raise RevisionConflictError(constraint_id, expected_revision, current.revision)
+        applied = dict(updates)
+        applied["revision"] = current.revision + 1
+        result = await self._graph.update_node(constraint_id, applied)
+        return result  # type: ignore[return-value]
+
     async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult:
         return await self._constraints.evaluate_all()
 
@@ -721,6 +792,23 @@ class InMemoryTwinAPI(TwinAPI):
         if node is not None and isinstance(node, EngineeringEntity):
             return node
         return None
+
+    async def update_engineering_entity(
+        self,
+        entity_id: UUID,
+        updates: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> EngineeringEntity:
+        current = await self._graph.get_node(entity_id)
+        if current is None or not isinstance(current, EngineeringEntity):
+            raise KeyError(f"EngineeringEntity {entity_id} not found")
+        if expected_revision is not None and current.revision != expected_revision:
+            raise RevisionConflictError(entity_id, expected_revision, current.revision)
+        applied = dict(updates)
+        applied["revision"] = current.revision + 1
+        result = await self._graph.update_node(entity_id, applied)
+        return result  # type: ignore[return-value]
 
     async def list_engineering_entities(
         self, project_id: UUID | None = None, entity_type: str | None = None

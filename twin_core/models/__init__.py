@@ -17,6 +17,13 @@ from twin_core.models.enums import (
     NodeType,
     WorkProductType,
 )
+from twin_core.models.patch import (
+    Patch,
+    PatchOp,
+    PatchOperation,
+    PatchOperationResult,
+    PatchResult,
+)
 from twin_core.models.relationship import (
     ConstrainedByEdge,
     DependsOnEdge,
@@ -51,6 +58,12 @@ __all__ = [
     "Datasheet",
     "EngineeringEntity",
     "EngineeringEntityType",
+    # Patch/transaction (FORGE-50)
+    "Patch",
+    "PatchOp",
+    "PatchOperation",
+    "PatchOperationResult",
+    "PatchResult",
     # Typed edges
     "DependsOnEdge",
     "UsesComponentEdge",
