@@ -122,18 +122,12 @@ class StalenessEngine:
             raise KeyError(f"{kind} {entity_id} not found")
         return _get_staleness(current.metadata)
 
-    async def propagate(
-        self, project_id: UUID, changed_kind: ControlledEntityKind, changed_id: UUID
-    ) -> list[StaleMarking]:
-        """`changed_id` just moved to a new revision (REVISE/SUPERSEDE). Find
-        every entity in `project_id` whose recorded `depends_on` pin for
-        `changed_id` is now behind its current revision, mark it STALE, and
-        do the same for whatever just went stale -- transitively, so a
-        downstream artefact of a downstream artefact is reached too (spec
-        section 21's own motor-swap example: mount CAD -> simulation ->
-        BOM). "The dependency graph shall determine impact" -- this is
-        that walk, not a blanket re-run or a blind no-op.
-        """
+    async def _load_graph_state(
+        self, project_id: UUID
+    ) -> tuple[
+        list[tuple[ControlledEntityKind, UUID, dict]],
+        dict[tuple[ControlledEntityKind, UUID], int],
+    ]:
         constraints = await self._twin.list_constraints(project_id=project_id)
         entities = await self._twin.list_engineering_entities(project_id=project_id)
         all_nodes: list[tuple[ControlledEntityKind, UUID, dict]] = [
@@ -144,7 +138,22 @@ class StalenessEngine:
             ("constraint", c.id): c.revision for c in constraints
         }
         current_revisions.update({("engineering_entity", e.id): e.revision for e in entities})
+        return all_nodes, current_revisions
 
+    @staticmethod
+    def _walk(
+        all_nodes: list[tuple[ControlledEntityKind, UUID, dict]],
+        current_revisions: dict[tuple[ControlledEntityKind, UUID], int],
+        changed_kind: ControlledEntityKind,
+        changed_id: UUID,
+    ) -> list[StaleMarking]:
+        """Pure BFS over `depends_on` pins -- no reads, no writes. Shared by
+        `propagate` (real current revisions, writes STALE as it walks) and
+        FORGE-67's `ImpactEngine` (a PROJECTED revision substituted for the
+        entity a not-yet-committed Patch would revise, no writes at all --
+        `propagate` itself can't answer "what would this affect" before a
+        commit, since marking STALE as it goes IS its whole point).
+        """
         markings: list[StaleMarking] = []
         visited: set[tuple[ControlledEntityKind, UUID]] = set()
         frontier: list[tuple[ControlledEntityKind, UUID]] = [(changed_kind, changed_id)]
@@ -169,8 +178,42 @@ class StalenessEngine:
                         markings.append(
                             StaleMarking(entity_kind=node_kind, entity_id=node_id, reason=reason)
                         )
-                        await self.set_status(node_kind, node_id, StalenessStatus.STALE)
                         frontier.append(key)
                         break
 
         return markings
+
+    async def propagate(
+        self, project_id: UUID, changed_kind: ControlledEntityKind, changed_id: UUID
+    ) -> list[StaleMarking]:
+        """`changed_id` just moved to a new revision (REVISE/SUPERSEDE). Find
+        every entity in `project_id` whose recorded `depends_on` pin for
+        `changed_id` is now behind its current revision, mark it STALE, and
+        do the same for whatever just went stale -- transitively, so a
+        downstream artefact of a downstream artefact is reached too (spec
+        section 21's own motor-swap example: mount CAD -> simulation ->
+        BOM). "The dependency graph shall determine impact" -- this is
+        that walk, not a blanket re-run or a blind no-op.
+        """
+        all_nodes, current_revisions = await self._load_graph_state(project_id)
+        markings = self._walk(all_nodes, current_revisions, changed_kind, changed_id)
+        for marking in markings:
+            await self.set_status(marking.entity_kind, marking.entity_id, StalenessStatus.STALE)
+        return markings
+
+    async def preview_impact(
+        self,
+        project_id: UUID,
+        changed_kind: ControlledEntityKind,
+        changed_id: UUID,
+        *,
+        projected_revision: int,
+    ) -> list[StaleMarking]:
+        """Pure, NO-WRITE preview of what `propagate` would mark stale if
+        `changed_id` moved to `projected_revision` -- for a Patch that
+        hasn't committed yet (FORGE-67's `ImpactEngine.analyse`). Never
+        calls `set_status`; the graph is left exactly as it was found.
+        """
+        all_nodes, current_revisions = await self._load_graph_state(project_id)
+        current_revisions[(changed_kind, changed_id)] = projected_revision
+        return self._walk(all_nodes, current_revisions, changed_kind, changed_id)

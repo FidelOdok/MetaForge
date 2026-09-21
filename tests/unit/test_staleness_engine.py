@@ -174,3 +174,79 @@ class TestPropagate:
         markings = await engine.propagate(project_id, "constraint", req.id)
         assert f"{req.id}@1" in markings[0].reason
         assert "now at revision 2" in markings[0].reason
+
+
+class TestPreviewImpact:
+    """FORGE-67: a pure, no-write preview of what `propagate` would find --
+    for a Patch that hasn't committed yet."""
+
+    async def test_finds_the_same_dependent_propagate_would_find(self, engine, twin, project_id):
+        req = await _seed_constraint(twin, project_id)
+        evidence = await _seed_evidence(twin, project_id)
+        await engine.declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="constraint", entity_id=req.id, revision=1)],
+        )
+        # req is still at revision 1 in the graph -- we ask "what if it
+        # became revision 2" without writing that.
+        markings = await engine.preview_impact(
+            project_id, "constraint", req.id, projected_revision=2
+        )
+        assert len(markings) == 1
+        assert markings[0].entity_id == evidence.id
+
+    async def test_does_not_write_anything(self, engine, twin, project_id):
+        req = await _seed_constraint(twin, project_id)
+        evidence = await _seed_evidence(twin, project_id)
+        await engine.declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="constraint", entity_id=req.id, revision=1)],
+        )
+        await engine.preview_impact(project_id, "constraint", req.id, projected_revision=2)
+
+        unchanged_req = await twin.get_constraint(req.id)
+        assert unchanged_req.revision == 1
+        assert await engine.get_status("engineering_entity", evidence.id) == StalenessStatus.CURRENT
+
+    async def test_projected_revision_still_current_finds_nothing(self, engine, twin, project_id):
+        req = await _seed_constraint(twin, project_id)
+        evidence = await _seed_evidence(twin, project_id)
+        await engine.declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="constraint", entity_id=req.id, revision=1)],
+        )
+        # Projecting the SAME revision the dependency is pinned at is not a
+        # change -- nothing should be found stale.
+        markings = await engine.preview_impact(
+            project_id, "constraint", req.id, projected_revision=1
+        )
+        assert markings == []
+
+    async def test_transitive_preview_matches_propagate(self, engine, twin, project_id):
+        """Mirrors the motor-swap propagate() test, but as a dry run."""
+        motor = await _seed_constraint(twin, project_id, name="motor_spec")
+        mount = await _seed_evidence(twin, project_id, statement="mount design rationale")
+        simulation = await _seed_evidence(twin, project_id, statement="thermal simulation")
+
+        await engine.declare_dependencies(
+            "engineering_entity",
+            mount.id,
+            [Dependency(entity_kind="constraint", entity_id=motor.id, revision=1)],
+        )
+        await engine.declare_dependencies(
+            "engineering_entity",
+            simulation.id,
+            [Dependency(entity_kind="engineering_entity", entity_id=mount.id, revision=1)],
+        )
+
+        markings = await engine.preview_impact(
+            project_id, "constraint", motor.id, projected_revision=2
+        )
+        marked_ids = {m.entity_id for m in markings}
+        assert mount.id in marked_ids
+        assert simulation.id in marked_ids
+        # still current -- preview never writes.
+        assert await engine.get_status("engineering_entity", mount.id) == StalenessStatus.CURRENT
