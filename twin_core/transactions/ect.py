@@ -7,19 +7,18 @@ Composes three already-real engines rather than reinventing any of them:
 - ``HITLEngine`` (FORGE-53) classifies the underlying Patch into an
   approval level -- ``required_approval``'s own ``impact`` parameter,
   accepted since FORGE-53 "for interface compatibility... not yet acted
-  on", is exactly where this module's ``analyze()`` output plugs in.
-- FORGE-67 (next sub-task) will supply a REAL transitive impact graph.
-  Until it exists, ``analyze()`` here reports the patch's own DIRECTLY
-  targeted entities as ``affected_objects`` -- real, not guessed, but
-  deliberately not the full "servo -> gearbox -> frame -> battery -> ..."
-  blast radius the spec's own worked example describes (that needs a
-  pre-commit dependency-graph walk `StalenessEngine.propagate` doesn't do
-  today -- it's strictly post-commit, confirmed by reading it: it compares
-  a dependent's pinned revision against the CURRENT revision of an
-  already-changed entity). ``impact`` severity is derived honestly from the
-  real ``HITLLevel`` classification (AUTONOMOUS/NOTIFY -> low, REVIEW ->
-  medium, EXPLICIT_APPROVAL/MANDATORY_AUTHORITY -> high) rather than
-  invented as a second, competing scoring system.
+  on", is where ``ImpactEngine``'s output is threaded through (still
+  inert on the ``HITLEngine`` side today -- see its own module docstring
+  -- but no longer always ``None``).
+- ``ImpactEngine`` (FORGE-67) supplies the REAL transitive impact graph:
+  ``analyze()`` calls it to compute ``affected_objects`` as a genuine
+  pre-commit dependency-graph walk (the spec's own "servo -> gearbox ->
+  frame -> battery -> ..." example), not just the patch's direct targets.
+  ``impact`` severity is still derived from the real ``HITLLevel``
+  classification (AUTONOMOUS/NOTIFY -> low, REVIEW -> medium,
+  EXPLICIT_APPROVAL/MANDATORY_AUTHORITY -> high) rather than a second,
+  competing scoring system -- ``ImpactEngine`` doesn't invent its own
+  severity scale for this field, it feeds the walk HITLEngine classifies.
 
 State machine (spec section 13): PROPOSED -> ANALYZING -> READY_FOR_REVIEW
 -> APPROVED | REJECTED -> COMMITTED | ROLLED_BACK. Every transition here
@@ -42,6 +41,7 @@ from typing import Any
 from uuid import UUID
 
 from twin_core.api import TwinAPI
+from twin_core.consistency.impact import ImpactEngine
 from twin_core.hitl.engine import HITLEngine
 from twin_core.hitl.models import HITLLevel
 from twin_core.models.engineering_change_transaction import (
@@ -110,27 +110,35 @@ async def propose_change(
     return await twin.create_ect(ect)
 
 
+async def _analyse_impact(
+    twin: TwinAPI, patch: Patch, *, impact_engine: ImpactEngine | None = None
+) -> dict[str, Any]:
+    engine = impact_engine or ImpactEngine(twin)
+    report = await engine.analyse(patch, {})
+    return report.model_dump(mode="json")
+
+
 async def analyze(
     twin: TwinAPI,
     ect_id: UUID,
     *,
     hitl: HITLEngine | None = None,
+    impact_engine: ImpactEngine | None = None,
     state: dict[str, Any] | None = None,
 ) -> EngineeringChangeTransaction:
     """PROPOSED -> ANALYZING -> READY_FOR_REVIEW. Computes ``affected_objects``
-    (direct patch targets -- see module docstring), ``impact``, and
-    ``approval_required`` via the real ``HITLEngine`` classification.
+    as a real pre-commit dependency-graph walk (``ImpactEngine``, FORGE-67),
+    ``impact``, and ``approval_required`` via the real ``HITLEngine``
+    classification.
     """
     ect = await _get(twin, ect_id)
     _require_status(ect, ECTStatus.PROPOSED)
     await twin.update_ect(ect_id, {"status": ECTStatus.ANALYZING})
 
     engine = hitl or HITLEngine()
-    affected = sorted(
-        {str(op.entity_id) for op in ect.patch.operations if op.entity_id is not None}
-        | {str(op.target_id) for op in ect.patch.operations if op.target_id is not None}
-    )
-    approval = await engine.required_approval(ect.patch, None, state or {})
+    impact_dict = await _analyse_impact(twin, ect.patch, impact_engine=impact_engine)
+    affected = sorted(set(impact_dict["directly_changed"]) | set(impact_dict["affected_objects"]))
+    approval = await engine.required_approval(ect.patch, impact_dict, state or {})
 
     return await twin.update_ect(
         ect_id,
@@ -149,18 +157,22 @@ async def approve(
     *,
     approver: str,
     hitl: HITLEngine | None = None,
+    impact_engine: ImpactEngine | None = None,
     state: dict[str, Any] | None = None,
 ) -> EngineeringChangeTransaction:
     """READY_FOR_REVIEW -> APPROVED. Re-derives the same approval
-    classification ``analyze`` computed (never trusts a possibly-stale
-    stored ``approval_required`` for the independence check) and raises
-    ``IndependenceViolation`` if this ECT's category requires an approver
-    other than whoever authored the patch.
+    classification ``analyze`` computed -- including the same
+    ``ImpactEngine`` report, so a future ``HITLEngine`` that starts
+    consuming ``impact`` can never see ``analyze`` and ``approve`` disagree
+    -- (never trusts a possibly-stale stored ``approval_required`` for the
+    independence check) and raises ``IndependenceViolation`` if this ECT's
+    category requires an approver other than whoever authored the patch.
     """
     ect = await _get(twin, ect_id)
     _require_status(ect, ECTStatus.READY_FOR_REVIEW)
     engine = hitl or HITLEngine()
-    approval = await engine.required_approval(ect.patch, None, state or {})
+    impact_dict = await _analyse_impact(twin, ect.patch, impact_engine=impact_engine)
+    approval = await engine.required_approval(ect.patch, impact_dict, state or {})
     engine.validate_approver(approval, ect.patch, approver)
     return await twin.update_ect(ect_id, {"status": ECTStatus.APPROVED, "decided_by": approver})
 

@@ -133,6 +133,37 @@ class TestAnalyze:
         assert analyzed.impact == "high"
         assert analyzed.approval_required is True
 
+    async def test_affected_objects_includes_the_real_transitive_impact(self, twin, project_id):
+        """FORGE-67 integration: analyze() must report an entity that
+        DEPENDS ON the patch's direct target too, not just the target
+        itself -- the whole point of wiring ImpactEngine in."""
+        from twin_core.consistency.staleness import Dependency, StalenessEngine
+        from twin_core.models.engineering_entity import EngineeringEntity
+
+        req = await _seed_requirement(twin, project_id)
+        evidence = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="evidence", statement="sim result", project_id=project_id)
+        )
+        await StalenessEngine(twin).declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="constraint", entity_id=req.id, revision=1)],
+        )
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=project_id),
+            project_id=project_id,
+        )
+        analyzed = await analyze(twin, ect.id)
+        assert str(req.id) in analyzed.affected_objects
+        assert str(evidence.id) in analyzed.affected_objects
+
+        # And the dry-run guarantee holds even through the ECT wrapper.
+        unchanged_req = await twin.get_constraint(req.id)
+        assert unchanged_req.revision == 1
+
 
 class TestApproveReject:
     async def test_approve_transitions_to_approved(self, twin, project_id):
