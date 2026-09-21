@@ -24,6 +24,7 @@ from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
+from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.relationship import SubGraph
 from twin_core.models.version import Version, VersionDiff
@@ -218,6 +219,36 @@ class TwinAPI(ABC):
 
     @abstractmethod
     async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult: ...
+
+    @abstractmethod
+    async def list_constraints(self, project_id: UUID | None = None) -> list[Constraint]:
+        """List Constraint nodes, optionally scoped to a project.
+
+        FORGE-45: the resolution side of the Engineering Intent & Requirements
+        Harness's parent_refs hierarchy -- a caller names a parent by exact
+        ``name``, matched client-side against this list (see
+        ``api_gateway/twin/_ref_resolver.py``), the same way
+        ``list_work_products`` already backs the SUPERSEDES exact-name-match
+        precedent.
+        """
+        ...
+
+    # --- Engineering Entities (FORGE-44/45) ---
+
+    @abstractmethod
+    async def create_engineering_entity(self, entity: EngineeringEntity) -> EngineeringEntity: ...
+
+    @abstractmethod
+    async def get_engineering_entity(self, entity_id: UUID) -> EngineeringEntity | None: ...
+
+    @abstractmethod
+    async def list_engineering_entities(
+        self, project_id: UUID | None = None, entity_type: str | None = None
+    ) -> list[EngineeringEntity]:
+        """List EngineeringEntity nodes, optionally scoped to a project and/or
+        ``entity_type`` (intent | stakeholder_need | objective | assumption |
+        question | risk | verification_case | evidence)."""
+        ...
 
     # --- Components ---
 
@@ -666,6 +697,43 @@ class InMemoryTwinAPI(TwinAPI):
 
     async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult:
         return await self._constraints.evaluate_all()
+
+    async def list_constraints(self, project_id: UUID | None = None) -> list[Constraint]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.CONSTRAINT, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Engineering Entities (FORGE-44/45) ---
+
+    async def create_engineering_entity(self, entity: EngineeringEntity) -> EngineeringEntity:
+        existing = await self._graph.get_node(entity.id)
+        if existing is not None:
+            raise ValueError(f"EngineeringEntity with ID {entity.id} already exists")
+        result = await self._graph.add_node(entity)
+        return result  # type: ignore[return-value]
+
+    async def get_engineering_entity(self, entity_id: UUID) -> EngineeringEntity | None:
+        node = await self._graph.get_node(entity_id)
+        if node is not None and isinstance(node, EngineeringEntity):
+            return node
+        return None
+
+    async def list_engineering_entities(
+        self, project_id: UUID | None = None, entity_type: str | None = None
+    ) -> list[EngineeringEntity]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if entity_type is not None:
+            filters["entity_type"] = entity_type
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.ENGINEERING_ENTITY, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
 
     # --- Components ---
 
