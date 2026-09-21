@@ -103,12 +103,22 @@ class TestIntentInterpreterAgent:
         assert result.proposed_patch is not None
         ops_by_kind = [(op.op, op.entity_kind) for op in result.proposed_patch.operations]
         assert (PatchOp.ADD, "engineering_entity") in ops_by_kind  # intent
-        # intent (1) + goals (2) + assumptions (1) = 4 engineering_entity ADDs
-        assert ops_by_kind.count((PatchOp.ADD, "engineering_entity")) == 4
+        # intent (1) + goals (2) + preferences (1) + assumptions (1) = 5 ADDs
+        assert ops_by_kind.count((PatchOp.ADD, "engineering_entity")) == 5
         assert (PatchOp.ADD, "constraint") in ops_by_kind
 
         assert "Build a desktop quadruped for demos" in result.conclusions
         assert "indoor use only" in result.assumptions
+        assert "Preference: quiet operation" in result.conclusions
+        pref_ops = [
+            op
+            for op in result.proposed_patch.operations
+            if op.entity_kind == "engineering_entity"
+            and (op.entity or {}).get("metadata", {}).get("preference")
+        ]
+        assert len(pref_ops) == 1
+        assert pref_ops[0].entity["statement"] == "quiet operation"
+        assert pref_ops[0].entity["entity_type"] == "objective"
         assert len(result.unresolved) == 1
         assert result.unresolved[0].id == "TBD-001"
         assert result.unresolved[0].question.startswith("What is the max")

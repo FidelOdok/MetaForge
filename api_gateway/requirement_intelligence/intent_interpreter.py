@@ -134,6 +134,31 @@ class IntentInterpreterAgent:
                 )
             )
 
+        for pref_text in spec.get("preferences") or []:
+            text = _str(pref_text)
+            if not text:
+                continue
+            conclusions.append(f"Preference: {text}")
+            operations.append(
+                PatchOperation(
+                    op=PatchOp.ADD,
+                    entity_kind="engineering_entity",
+                    entity={
+                        # EngineeringEntityType has no dedicated "preference"
+                        # kind (spec section 46's common base doesn't define
+                        # one either) -- a preference is soft, non-binding
+                        # guidance, closest in spirit to an objective, tagged
+                        # via metadata rather than inventing a new top-level
+                        # entity_type inside a bug-fix pass. Same pattern
+                        # subtype-specific fields already use everywhere in
+                        # this codebase (WorkProduct.metadata, ...).
+                        "entity_type": "objective",
+                        "statement": text,
+                        "metadata": {"source": "intent_interpreter_agent", "preference": True},
+                    },
+                )
+            )
+
         for item in spec.get("assumptions") or []:
             if not isinstance(item, dict):
                 continue
