@@ -658,6 +658,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
+    from api_gateway.twin.evidence_recorder import make_evidence_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
     from api_gateway.twin.robot_description_recorder import (
@@ -747,6 +748,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
             project_backend,
             catalog_store=getattr(app.state, "component_catalog_store", None),
         ),
+        # FORGE-64 (epic FORGE-35, Phase 6: Evidence Integration): persists
+        # tool-generated Evidence entities -- the constructive fix for
+        # "requirement satisfaction claims" being LLM assertion instead of a
+        # real, checkable graph fact.
+        evidence_recorder=make_evidence_recorder(twin, project_backend),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
