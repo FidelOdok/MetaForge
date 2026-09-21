@@ -1,6 +1,6 @@
-"""G3-G5 gate evaluation (FORGE-60/61, spec sections 22-23, Phase 5 of epic
-FORGE-35): Preliminary Feasibility (G3), Architecture (G4), Concept Selection
-(G5).
+"""G3-G6 gate evaluation (FORGE-60/61/62, spec sections 22-23, Phase 5 of
+epic FORGE-35): Preliminary Feasibility (G3), Architecture (G4), Concept
+Selection (G5), Preliminary Design / Design Sketch (G6).
 
 The design-flow ``Gate`` (``orchestrator/design_flow/spec.py``) is a
 declarative checkpoint -- a name plus advisory criteria the human reviewer
@@ -65,6 +65,38 @@ Deliberately NOT built in this pass: the "Decision Agent" (spec section
 26.12) that would generate alternatives/run a trade study/select one
 automatically -- this module only evaluates decisions a caller already
 recorded, same posture as G3 evaluating budgets a caller already declared.
+
+**G6 (Preliminary Design / Design Sketch)**: FORGE-62's own ticket asked to
+formalize the EXISTING ``design_sketch``/approve-sketch mechanism
+(``api_gateway/twin/design_sketch_recorder.py``, the
+``decide_sketch_needed``/``author_design_sketch`` mechanical skills, the
+``POST /v1/twin/nodes/{id}/approve-sketch`` route) rather than build a
+parallel one -- there is no ``orchestrator/design_flow`` phase for it in any
+flow today (a sketch is a "cheap reference checkpoint before CAD" the
+existing skills decide is or isn't needed; none of the three built-in flows
+gates on it), so this evaluator, like G5, has no phase to attach to yet.
+"Geometry/layout" reads whether a ``design_sketch`` work product exists and
+its real ``metadata["approved"]`` flag -- PASS when approved, FAIL when one
+exists but hasn't been approved (a real, actionable gap), NOT_EVALUATED when
+none exists at all (``decide_sketch_needed``'s own rules mean a sketch is
+sometimes legitimately not needed -- e.g. a single-part, non-novel,
+non-revision design -- so absence isn't automatically a failure). "Components"
+and "major interfaces" reuse ``SYSTEM_ARCHITECTURE`` work product metadata
+(``component_count``/``interface_count``/``dangling_interfaces``, written by
+``make_system_architecture_recorder``) when one has been recorded for the
+project. "Unresolved risks" reuses ``_evaluate_risk_checks`` verbatim (same
+convention as G3). "Mass estimate", "power estimate", and "manufacturability
+concerns" come back ``NOT_EVALUATED``: grepped the codebase and confirmed no
+``design_sketch``/``cad_model`` creation path ever writes a mass or power
+field (``cross_domain_rules.py`` reads ``weight_grams``/
+``power_dissipation_w`` but nothing writes them), and the tolerance/DFM skill
+(``check_tolerance``) computes manufacturability in-session but never
+persists it to the Twin, so nothing survives for a gate to query afterward.
+"Requirement coverage" also comes back ``NOT_EVALUATED``: ``TraceabilityAgent``
+(FORGE-56) computes a real, structured ``TraceabilityCoverage`` internally
+but only returns it stringified inside ``AgentResult.evidence`` -- exposing
+it as a reusable accessor is a real, small, separate refactor of tested
+Phase-3 code, deliberately not risked in this pass.
 """
 
 from __future__ import annotations
@@ -364,3 +396,102 @@ async def evaluate_g5_concept_selection(twin: TwinAPI, project_id: UUID) -> Gate
     """
     checks = await _evaluate_decision_checks(twin, project_id)
     return GateEvaluation(gate_id="G5", status=_status_from_checks(checks), checks=checks)
+
+
+async def _evaluate_design_sketch_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    sketches = await twin.list_work_products(
+        work_product_type=WorkProductType.DESIGN_SKETCH, project_id=project_id
+    )
+    if not sketches:
+        return GateCheck(
+            id="geometry_layout",
+            label="Geometry/layout sketch approved",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no design_sketch recorded -- may not be needed per decide_sketch_needed",
+        )
+    unapproved = [s for s in sketches if not s.metadata.get("approved")]
+    return GateCheck(
+        id="geometry_layout",
+        label="Geometry/layout sketch approved",
+        status=GateCheckStatus.FAIL if unapproved else GateCheckStatus.PASS,
+        detail=(
+            f"{len(unapproved)} of {len(sketches)} sketch(es) awaiting approval"
+            if unapproved
+            else f"all {len(sketches)} sketch(es) approved"
+        ),
+    )
+
+
+async def _evaluate_architecture_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
+    architectures = await twin.list_work_products(
+        work_product_type=WorkProductType.SYSTEM_ARCHITECTURE, project_id=project_id
+    )
+    if not architectures:
+        return [
+            GateCheck(
+                id="components",
+                label="Components identified",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no system_architecture recorded for this project yet",
+            ),
+            GateCheck(
+                id="major_interfaces",
+                label="Major interfaces identified",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no system_architecture recorded for this project yet",
+            ),
+        ]
+
+    component_count = sum(int(a.metadata.get("component_count") or 0) for a in architectures)
+    interface_count = sum(int(a.metadata.get("interface_count") or 0) for a in architectures)
+    dangling: list[str] = []
+    for a in architectures:
+        dangling.extend(a.metadata.get("dangling_interfaces") or [])
+
+    return [
+        GateCheck(
+            id="components",
+            label="Components identified",
+            status=GateCheckStatus.PASS if component_count > 0 else GateCheckStatus.FAIL,
+            detail=f"{component_count} component(s) across {len(architectures)} architecture(s)",
+        ),
+        GateCheck(
+            id="major_interfaces",
+            label="Major interfaces identified",
+            status=GateCheckStatus.FAIL if dangling else GateCheckStatus.PASS,
+            detail=(
+                f"{interface_count} interface(s), {len(dangling)} dangling"
+                if dangling
+                else f"{interface_count} interface(s), none dangling"
+            ),
+        ),
+    ]
+
+
+_G6_NOT_EVALUATED_CHECKS = (
+    ("mass_estimate", "Mass estimate"),
+    ("power_estimate", "Power estimate"),
+    ("requirement_coverage", "Requirement coverage"),
+    ("manufacturability_concerns", "Manufacturability concerns"),
+)
+
+
+async def evaluate_g6_design_sketch(twin: TwinAPI, project_id: UUID) -> GateEvaluation:
+    """Evaluate the G6 Preliminary Design / Design Sketch Gate (spec section
+    23) for `project_id`. See this module's docstring for exactly which
+    checks are real today, and how this formalizes the existing
+    design_sketch/approve-sketch mechanism rather than replacing it.
+    """
+    checks: list[GateCheck] = [await _evaluate_design_sketch_check(twin, project_id)]
+    checks.extend(await _evaluate_architecture_checks(twin, project_id))
+    checks.extend(await _evaluate_risk_checks(twin, project_id))
+    for check_id, label in _G6_NOT_EVALUATED_CHECKS:
+        checks.append(
+            GateCheck(
+                id=check_id,
+                label=label,
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no data source exists yet -- see this module's docstring",
+            )
+        )
+    return GateEvaluation(gate_id="G6", status=_status_from_checks(checks), checks=checks)

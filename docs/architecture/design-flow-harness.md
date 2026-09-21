@@ -53,12 +53,16 @@ computed for real (not just shown as prose) by
 the project's `Budget`/`Invariant` declarations. The Architecture gate's
 "architecture satisfies major constraints" criterion is likewise real, via
 `evaluate_g4_architecture` (reusing the same constraint-evaluation engine the
-V&V gate already enforces with); a G5 Concept Selection Gate evaluator
-(`evaluate_g5_concept_selection`, reading `twin.record_decision`'s
-`alternatives`/`rationale`/`parent_refs`) also exists but has no phase of its
-own in any flow yet — see that module's docstring for exactly which checks
-are evaluated today vs. still advisory pending Phase 6 (Evidence Integration,
-FORGE-41) or a not-yet-built concept-selection phase.
+V&V gate already enforces with). Two more gate evaluators exist but have no
+phase of their own in any flow yet: `evaluate_g5_concept_selection` (reads
+`twin.record_decision`'s `alternatives`/`rationale`/`parent_refs`) and
+`evaluate_g6_design_sketch` (G6, Preliminary Design / Design Sketch — reads
+the existing `design_sketch` work product + its `approve-sketch` REST
+endpoint, and the `system_architecture` work product's
+component/interface counts, rather than inventing a parallel checkpoint).
+See `twin_core/consistency/gates.py`'s module docstring for exactly which
+checks each evaluates today vs. still advisory pending Phase 6 (Evidence
+Integration, FORGE-41) or a not-yet-built phase for that gate.
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
 A full `hardware_v1` run now commits **nine real, typed work products** —
