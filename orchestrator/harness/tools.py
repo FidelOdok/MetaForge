@@ -28,6 +28,7 @@ from typing import Any
 import structlog
 
 from orchestrator.harness.validation import validate_arguments
+from twin_core.policy.engine import PolicyEngine
 
 logger = structlog.get_logger(__name__)
 
@@ -194,6 +195,9 @@ class ToolRegistry:
         arguments: dict[str, Any],
         *,
         gate_check: GateCheck | None = None,
+        policy_engine: PolicyEngine | None = None,
+        actor: dict[str, Any] | None = None,
+        state: dict[str, Any] | None = None,
     ) -> Any:
         spec = self.get(name)
         # MET-569: check the declared schema before the handler runs. A bad
@@ -210,5 +214,15 @@ class ToolRegistry:
                 if not gate_check(gate):
                     logger.warning("tool_gate_blocked", tool=name, gate=gate)
                     raise GateBlockedError(name, gate)
+        # FORGE-71: the Harness Execution Contract's own step 4 (spec section
+        # 14) -- optional and additive. None (every caller before this, and
+        # every test) keeps this a pure no-op; PolicyEngine itself is
+        # default-allow (an action with no registered Policy proceeds
+        # untouched), so even a caller that opts in sees no behavior change
+        # until policies are actually registered on the engine it passes.
+        # Raises EngineeringPolicyViolation, not returned -- same
+        # raised-not-returned discipline as GateBlockedError above.
+        if policy_engine is not None:
+            await policy_engine.evaluate_preconditions(name, actor or {}, state or {})
         logger.info("tool_invoke", tool=name, origin=spec.origin)
         return await spec.handler(arguments)

@@ -67,6 +67,99 @@ async def test_call_tool_allows_when_gate_satisfied() -> None:
     assert await rt.call_tool("cut", {"x": 1}) == {"echo": {"x": 1}}
 
 
+@pytest.mark.asyncio
+async def test_call_tool_no_policy_engine_is_a_noop() -> None:
+    """FORGE-71: the default -- every caller before this, and every other
+    test in this file -- sees no behavior change."""
+    tools = ToolRegistry()
+    tools.register_native(
+        "cad.create_detailed_model", description="d", input_schema={}, handler=_echo
+    )
+    rt = HarnessRuntime.build(tools=tools)
+    assert await rt.call_tool("cad.create_detailed_model", {"x": 1}) == {"echo": {"x": 1}}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_empty_policy_engine_is_also_a_noop() -> None:
+    """PolicyEngine's own default-allow: opting in with zero registered
+    policies changes nothing, same as not opting in at all."""
+    from twin_core.policy.engine import PolicyEngine
+
+    tools = ToolRegistry()
+    tools.register_native(
+        "cad.create_detailed_model", description="d", input_schema={}, handler=_echo
+    )
+    rt = HarnessRuntime.build(tools=tools, policy_engine=PolicyEngine())
+    assert await rt.call_tool("cad.create_detailed_model", {"x": 1}) == {"echo": {"x": 1}}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_blocked_by_registered_policy() -> None:
+    from twin_core.policy import EngineeringPolicyViolation, Policy
+    from twin_core.policy.engine import PolicyEngine
+
+    engine = PolicyEngine()
+    engine.register(
+        Policy(
+            id="POL-REQUIRE-GATE",
+            action="cad.create_detailed_model",
+            require={"gate.G2": "passed"},
+        )
+    )
+    tools = ToolRegistry()
+    tools.register_native(
+        "cad.create_detailed_model", description="d", input_schema={}, handler=_echo
+    )
+    rt = HarnessRuntime.build(tools=tools, policy_engine=engine)
+    # call_tool's own state is always {} -- a generic dispatch layer has no
+    # domain-specific engineering state to offer -- so a Policy requiring
+    # any state key always blocks until something more specific calls
+    # PolicyEngine.evaluate_preconditions itself with richer state.
+    with pytest.raises(EngineeringPolicyViolation):
+        await rt.call_tool("cad.create_detailed_model", {})
+
+
+@pytest.mark.asyncio
+async def test_call_tool_allowed_by_policy_matching_actor() -> None:
+    """The actor dict IS populated for real (session_id-derived) -- a
+    Policy that only needs to know which session is calling, not
+    domain-specific engineering state, can actually be satisfied."""
+    from twin_core.policy import Policy
+    from twin_core.policy.engine import PolicyEngine
+
+    engine = PolicyEngine()
+    engine.register(
+        Policy(
+            id="POL-KNOWN-SESSION",
+            action="cad.create_detailed_model",
+            require={"actor.actor_id": "session:my-session"},
+        )
+    )
+    tools = ToolRegistry()
+    tools.register_native(
+        "cad.create_detailed_model", description="d", input_schema={}, handler=_echo
+    )
+    rt = HarnessRuntime.build(tools=tools, policy_engine=engine, session_id="my-session")
+    assert await rt.call_tool("cad.create_detailed_model", {}) == {"echo": {}}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_unrelated_action_ignores_policy() -> None:
+    """default-allow: a Policy registered for a DIFFERENT action never
+    applies to this one."""
+    from twin_core.policy import Policy
+    from twin_core.policy.engine import PolicyEngine
+
+    engine = PolicyEngine()
+    engine.register(Policy(id="POL-OTHER", action="some.other.action", require={"x": True}))
+    tools = ToolRegistry()
+    tools.register_native(
+        "cad.create_detailed_model", description="d", input_schema={}, handler=_echo
+    )
+    rt = HarnessRuntime.build(tools=tools, policy_engine=engine)
+    assert await rt.call_tool("cad.create_detailed_model", {}) == {"echo": {}}
+
+
 def test_runs_store_is_wired() -> None:
     ticks = iter(range(1, 100))
     rt = HarnessRuntime.build(clock=lambda: float(next(ticks)))

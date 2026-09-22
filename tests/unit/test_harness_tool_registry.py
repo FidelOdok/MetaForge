@@ -127,6 +127,53 @@ async def test_gated_tool_fails_safe_without_evaluator() -> None:
         await reg.invoke("cut", {})
 
 
+@pytest.mark.asyncio
+async def test_invoke_without_policy_engine_is_a_noop() -> None:
+    """FORGE-71: no policy_engine passed -- every caller before this --
+    behaves exactly as it always has."""
+    reg = ToolRegistry()
+    reg.register_native("t", description="d", input_schema=SCHEMA, handler=_echo)
+    assert await reg.invoke("t", {"a": 1}) == {"echo": {"a": 1}}
+
+
+@pytest.mark.asyncio
+async def test_invoke_blocked_by_policy_engine() -> None:
+    from twin_core.policy import EngineeringPolicyViolation, Policy
+    from twin_core.policy.engine import PolicyEngine
+
+    engine = PolicyEngine()
+    engine.register(Policy(id="POL-1", action="t", require={"ready": True}))
+    reg = ToolRegistry()
+    reg.register_native("t", description="d", input_schema=SCHEMA, handler=_echo)
+    with pytest.raises(EngineeringPolicyViolation):
+        await reg.invoke("t", {}, policy_engine=engine, actor={}, state={})
+
+
+@pytest.mark.asyncio
+async def test_invoke_allowed_by_policy_engine_when_satisfied() -> None:
+    from twin_core.policy import Policy
+    from twin_core.policy.engine import PolicyEngine
+
+    engine = PolicyEngine()
+    engine.register(Policy(id="POL-1", action="t", require={"ready": True}))
+    reg = ToolRegistry()
+    reg.register_native("t", description="d", input_schema=SCHEMA, handler=_echo)
+    result = await reg.invoke("t", {}, policy_engine=engine, actor={}, state={"ready": True})
+    assert result == {"echo": {}}
+
+
+@pytest.mark.asyncio
+async def test_invoke_default_allow_with_no_registered_policy() -> None:
+    """PolicyEngine's own default-allow -- an action with no matching
+    Policy proceeds untouched even when an engine is passed."""
+    from twin_core.policy.engine import PolicyEngine
+
+    reg = ToolRegistry()
+    reg.register_native("t", description="d", input_schema=SCHEMA, handler=_echo)
+    result = await reg.invoke("t", {}, policy_engine=PolicyEngine())
+    assert result == {"echo": {}}
+
+
 def test_visible_filters_by_gate() -> None:
     reg = ToolRegistry()
     reg.register_native("safe", description="d", input_schema=SCHEMA, handler=_echo)
