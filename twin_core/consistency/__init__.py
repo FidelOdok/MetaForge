@@ -4,7 +4,7 @@ satisfaction claims, and pre-commit impact analysis
 (FORGE-57/58/59/60/61/62/63/65/67, Phases 4-7 of epic FORGE-35).
 """
 
-from twin_core.consistency.budgets import BudgetEngine
+from twin_core.consistency.budgets import BudgetEngine, budget_from_entity
 from twin_core.consistency.claims import Claim, ClaimStatus, evaluate_claim
 from twin_core.consistency.gates import (
     GateCheck,
@@ -24,7 +24,7 @@ from twin_core.consistency.impact import (
     ImpactReport,
     RevalidationStep,
 )
-from twin_core.consistency.invariants import InvariantEngine
+from twin_core.consistency.invariants import InvariantEngine, invariant_from_entity
 from twin_core.consistency.models import (
     Budget,
     BudgetAllocation,
@@ -78,6 +78,7 @@ __all__ = [
     "StaleMarking",
     "StalenessEngine",
     "StalenessStatus",
+    "budget_from_entity",
     "evaluate_claim",
     "evaluate_g3_feasibility",
     "evaluate_g4_architecture",
@@ -85,5 +86,6 @@ __all__ = [
     "evaluate_g6_design_sketch",
     "evaluate_g7_verification_readiness",
     "evaluate_g8_release",
+    "invariant_from_entity",
     "objective_from_entity",
 ]

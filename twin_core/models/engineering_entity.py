@@ -37,6 +37,14 @@ EngineeringEntityType = Literal[
     "risk",
     "verification_case",
     "evidence",
+    # FORGE-73 (budget/invariant persistence): metric/unit/system_total/
+    # allocations (budget) and metric/unit/limit/comparison/
+    # source_constraint_id (invariant) live in metadata, same convention as
+    # "objective"'s metric/direction/target -- see
+    # twin_core.consistency.budgets.budget_from_entity /
+    # twin_core.consistency.invariants.invariant_from_entity.
+    "budget",
+    "invariant",
 ]
 
 

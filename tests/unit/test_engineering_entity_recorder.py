@@ -109,6 +109,47 @@ async def test_default_relation_is_derives_from() -> None:
 
 
 @pytest.mark.asyncio
+async def test_records_a_budget_entity() -> None:
+    """FORGE-73: 'budget'/'invariant' are real entity_types now, recorded
+    through this same generic recorder -- twin_core.consistency.gates
+    loads them back out via budget_from_entity/invariant_from_entity."""
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)
+
+    out = await record(
+        entity_type="budget",
+        statement="System mass budget: 5kg total.",
+        title="mass_budget",
+        extra={"metric": "mass", "unit": "kg", "system_total": 5.0},
+        project_id=PROJECT_ID,
+    )
+    assert out["entity_type"] == "budget"
+
+    stored = await twin.get_engineering_entity(UUID(out["node_id"]))
+    assert stored is not None
+    assert stored.metadata["system_total"] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_records_an_invariant_entity() -> None:
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)
+
+    out = await record(
+        entity_type="invariant",
+        statement="Total mass must not exceed 5kg.",
+        title="INV-MASS",
+        extra={"metric": "mass", "unit": "kg", "limit": 5.0, "comparison": "<="},
+        project_id=PROJECT_ID,
+    )
+    assert out["entity_type"] == "invariant"
+
+    stored = await twin.get_engineering_entity(UUID(out["node_id"]))
+    assert stored is not None
+    assert stored.metadata["limit"] == 5.0
+
+
+@pytest.mark.asyncio
 async def test_invalid_entity_type_rejected() -> None:
     twin = InMemoryTwinAPI.create()
     record = make_engineering_entity_recorder(twin)

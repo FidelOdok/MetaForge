@@ -1119,12 +1119,19 @@ class TwinServer(McpToolServer):
                 description=(
                     "Persist one Engineering Intent & Requirements Harness entity: "
                     "an intent, stakeholder_need, objective, assumption, question, "
-                    "risk, verification_case, or evidence. Use to capture WHY a "
-                    "product/requirement exists before recording the quantified "
-                    "requirements themselves (twin.record_constraint_set). Link it "
-                    "to the entity it derives_from/satisfies/motivates/etc. via "
-                    "parent_refs so the chain from stated intent to a specific "
-                    "requirement stays traceable."
+                    "risk, verification_case, evidence, budget, or invariant. Use "
+                    "to capture WHY a product/requirement exists before recording "
+                    "the quantified requirements themselves "
+                    "(twin.record_constraint_set). Link it to the entity it "
+                    "derives_from/satisfies/motivates/etc. via parent_refs so the "
+                    "chain from stated intent to a specific requirement stays "
+                    "traceable. A 'budget' (extra: metric, unit, system_total, "
+                    "optional allocations=[{target, amount}]) or 'invariant' "
+                    "(extra: metric, unit, limit, optional comparison='<='/'>='/"
+                    "'==') persists as a numeric limit the G3 Preliminary "
+                    "Feasibility gate reads automatically -- give it a `title` "
+                    "(e.g. 'mass_budget', 'INV-MASS') so the gate's check labels "
+                    "stay readable."
                 ),
                 capability="twin_engineering_entity",
                 input_schema={
@@ -1141,6 +1148,8 @@ class TwinServer(McpToolServer):
                                 "risk",
                                 "verification_case",
                                 "evidence",
+                                "budget",
+                                "invariant",
                             ],
                         },
                         "statement": {

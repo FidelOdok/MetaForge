@@ -48,6 +48,8 @@ _ENTITY_TYPES = frozenset(
         "risk",
         "verification_case",
         "evidence",
+        "budget",
+        "invariant",
     }
 )
 

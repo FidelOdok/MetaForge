@@ -23,6 +23,39 @@ from uuid import UUID
 from twin_core.consistency.metrics import compute_metric_total
 from twin_core.consistency.models import Invariant, InvariantComparison, InvariantResult
 from twin_core.graph_engine import GraphEngine
+from twin_core.models.engineering_entity import EngineeringEntity
+
+
+def invariant_from_entity(entity: EngineeringEntity) -> Invariant:
+    """Read an Invariant's fields back out of an EngineeringEntity's
+    metadata (spec section 17's schema, stored per Phase 1's convention;
+    same ``objective_from_entity``-style conversion FORGE-73 adds for
+    "budget" too). ``id`` comes from the entity's ``title`` (falling back
+    to its node id) so a gate's ``invariant:<id>`` check label stays
+    human-readable -- give a declared invariant a stable title like
+    ``"INV-MASS"``.
+    """
+    if entity.entity_type != "invariant":
+        raise ValueError(f"entity {entity.id} is not an invariant (got {entity.entity_type!r})")
+    md = entity.metadata
+    missing = [k for k in ("metric", "unit", "limit") if k not in md]
+    if missing:
+        raise ValueError(f"invariant entity {entity.id} metadata missing {missing}")
+    try:
+        limit = float(md["limit"])
+        comparison = InvariantComparison(md.get("comparison", InvariantComparison.LTE.value))
+        source_raw = md.get("source_constraint_id")
+        source_constraint_id = UUID(str(source_raw)) if source_raw else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invariant entity {entity.id} has malformed metadata: {exc}") from exc
+    return Invariant(
+        id=entity.title or str(entity.id),
+        metric=str(md["metric"]),
+        unit=str(md["unit"]),
+        limit=limit,
+        comparison=comparison,
+        source_constraint_id=source_constraint_id,
+    )
 
 
 def _violates(comparison: InvariantComparison, value: float, limit: float) -> bool:
