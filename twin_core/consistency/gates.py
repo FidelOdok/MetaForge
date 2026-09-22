@@ -93,11 +93,19 @@ field (``cross_domain_rules.py`` reads ``weight_grams``/
 ``power_dissipation_w`` but nothing writes them), and the tolerance/DFM skill
 (``check_tolerance``) computes manufacturability in-session but never
 persists it to the Twin, so nothing survives for a gate to query afterward.
-"Requirement coverage" also comes back ``NOT_EVALUATED``: ``TraceabilityAgent``
-(FORGE-56) computes a real, structured ``TraceabilityCoverage`` internally
-but only returns it stringified inside ``AgentResult.evidence`` -- exposing
-it as a reusable accessor is a real, small, separate refactor of tested
-Phase-3 code, deliberately not risked in this pass.
+"Requirement coverage" is real when a caller injects one -- FORGE-73 gave
+``TraceabilityAgent`` (FORGE-56) a real ``coverage(project_id)`` accessor
+instead of only stringifying ``TraceabilityCoverage`` inside
+``AgentResult.evidence``, but ``twin_core`` may not import ``api_gateway``
+(where ``TraceabilityAgent`` lives -- it needs ``AgentResult`` and friends),
+so ``evaluate_g6_design_sketch`` takes an optional
+``traceability_coverage: Callable[[UUID], Awaitable[Any]] | None`` instead
+of importing the agent directly -- the same injection seam every ``twin.*``
+MCP tool recorder already uses. ``None`` (the default, and every caller
+before FORGE-73) keeps this check ``NOT_EVALUATED`` exactly as before;
+reads ``.requirements_to_architecture`` (does the requirement bind to a
+``system_architecture`` work product) off whatever the injected callable
+returns.
 
 **G7 (Verification Readiness)**: per critical (``ConstraintSeverity.ERROR``)
 requirement in the project, two real per-requirement checks reusing
@@ -132,11 +140,13 @@ evidence at all, this comes back ``NOT_EVALUATED`` rather than a vacuous
 PASS -- a release gate silently reporting "no stale evidence" when nothing
 was ever verified would be actively misleading, the exact vacuous-pass
 failure mode this codebase already guards against elsewhere (MET-582/583's
-constraint-as-gate-criteria rules). "Required verification complete" comes
-back ``NOT_EVALUATED`` for the same reason as G6's "requirement coverage" --
-``TraceabilityCoverage.verification_to_evidence`` is computed internally by
-``TraceabilityAgent`` but not exposed as a reusable accessor, and
-``EdgeType.VALIDATES`` has zero real creators anywhere in production code.
+constraint-as-gate-criteria rules). "Required verification complete" is
+real when a caller injects one -- the same ``traceability_coverage``
+callable G6 takes, reading ``.verification_to_evidence`` off it instead
+(has each verification case actually been executed/evidenced, not just
+assigned a method -- ``EdgeType.VALIDATES`` has zero real creators
+anywhere in production code, so that edge type itself still isn't a
+usable signal). ``None`` keeps this ``NOT_EVALUATED`` exactly as before.
 "Waivers approved" and "build/manufacturing release approved" come back
 ``NOT_EVALUATED``: grepped for "waiver" -- the only real hit is a transient
 classification string ``HITLEngine`` accepts as an approval-request
@@ -146,7 +156,9 @@ possible), confirmed pure white space.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -516,12 +528,55 @@ async def _evaluate_architecture_checks(twin: TwinAPI, project_id: UUID) -> list
 _G6_NOT_EVALUATED_CHECKS = (
     ("mass_estimate", "Mass estimate"),
     ("power_estimate", "Power estimate"),
-    ("requirement_coverage", "Requirement coverage"),
     ("manufacturability_concerns", "Manufacturability concerns"),
 )
 
+# FORGE-73: TraceabilityAgent.coverage() lives in api_gateway (it needs
+# AgentResult and friends), which twin_core may not import -- injected as a
+# plain async callable instead, same seam as every twin.* MCP tool recorder
+# already uses. `None` (every caller before this PR) keeps the check
+# NOT_EVALUATED exactly as before; only a caller that constructs a real
+# TraceabilityAgent and injects `lambda pid: agent.coverage(str(pid))` gets
+# a real PASS/FAIL. The callable takes project_id and returns an object
+# with .requirements_to_architecture / .verification_to_evidence attributes
+# (structurally TraceabilityCoverage, never imported by name here).
+TraceabilityCoverageAccessor = Callable[[UUID], Awaitable[Any]]
 
-async def evaluate_g6_design_sketch(twin: TwinAPI, project_id: UUID) -> GateEvaluation:
+
+async def _evaluate_requirement_coverage_check(
+    project_id: UUID,
+    traceability_coverage: TraceabilityCoverageAccessor | None,
+) -> GateCheck:
+    if traceability_coverage is None:
+        return GateCheck(
+            id="requirement_coverage",
+            label="Requirement coverage",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no TraceabilityAgent accessor was injected -- see this module's docstring",
+        )
+    coverage = await traceability_coverage(project_id)
+    pct = coverage.requirements_to_architecture
+    if pct is None:
+        return GateCheck(
+            id="requirement_coverage",
+            label="Requirement coverage",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no requirements recorded for this project yet",
+        )
+    return GateCheck(
+        id="requirement_coverage",
+        label="Requirement coverage",
+        status=GateCheckStatus.PASS if pct >= 100.0 else GateCheckStatus.FAIL,
+        detail=f"{pct}% of requirements have an architecture binding",
+    )
+
+
+async def evaluate_g6_design_sketch(
+    twin: TwinAPI,
+    project_id: UUID,
+    *,
+    traceability_coverage: TraceabilityCoverageAccessor | None = None,
+) -> GateEvaluation:
     """Evaluate the G6 Preliminary Design / Design Sketch Gate (spec section
     23) for `project_id`. See this module's docstring for exactly which
     checks are real today, and how this formalizes the existing
@@ -530,6 +585,7 @@ async def evaluate_g6_design_sketch(twin: TwinAPI, project_id: UUID) -> GateEval
     checks: list[GateCheck] = [await _evaluate_design_sketch_check(twin, project_id)]
     checks.extend(await _evaluate_architecture_checks(twin, project_id))
     checks.extend(await _evaluate_risk_checks(twin, project_id))
+    checks.append(await _evaluate_requirement_coverage_check(project_id, traceability_coverage))
     for check_id, label in _G6_NOT_EVALUATED_CHECKS:
         checks.append(
             GateCheck(
@@ -613,10 +669,37 @@ async def evaluate_g7_verification_readiness(twin: TwinAPI, project_id: UUID) ->
 
 
 _G8_NOT_EVALUATED_CHECKS = (
-    ("required_verification_complete", "Required verification complete"),
     ("waivers_approved", "Waivers approved"),
     ("release_approved", "Build/manufacturing release approved"),
 )
+
+
+async def _evaluate_verification_complete_check(
+    project_id: UUID,
+    traceability_coverage: TraceabilityCoverageAccessor | None,
+) -> GateCheck:
+    if traceability_coverage is None:
+        return GateCheck(
+            id="required_verification_complete",
+            label="Required verification complete",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no TraceabilityAgent accessor was injected -- see this module's docstring",
+        )
+    coverage = await traceability_coverage(project_id)
+    pct = coverage.verification_to_evidence
+    if pct is None:
+        return GateCheck(
+            id="required_verification_complete",
+            label="Required verification complete",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no verification_case entities recorded for this project yet",
+        )
+    return GateCheck(
+        id="required_verification_complete",
+        label="Required verification complete",
+        status=GateCheckStatus.PASS if pct >= 100.0 else GateCheckStatus.FAIL,
+        detail=f"{pct}% of verification cases have evidence attached",
+    )
 
 
 async def _evaluate_baseline_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
@@ -656,13 +739,19 @@ async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> Gat
     )
 
 
-async def evaluate_g8_release(twin: TwinAPI, project_id: UUID) -> GateEvaluation:
+async def evaluate_g8_release(
+    twin: TwinAPI,
+    project_id: UUID,
+    *,
+    traceability_coverage: TraceabilityCoverageAccessor | None = None,
+) -> GateEvaluation:
     """Evaluate the G8 Release Gate (spec section 23) for `project_id`. See
     this module's docstring for exactly which checks are real today.
     """
     checks: list[GateCheck] = [
         await _evaluate_baseline_check(twin, project_id),
         await _evaluate_stale_evidence_check(twin, project_id),
+        await _evaluate_verification_complete_check(project_id, traceability_coverage),
     ]
     for check_id, label in _G8_NOT_EVALUATED_CHECKS:
         checks.append(

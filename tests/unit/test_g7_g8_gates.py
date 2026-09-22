@@ -184,3 +184,40 @@ class TestG8NotEvaluatedChecks:
     async def test_gate_id_is_g8(self, twin, project_id):
         result = await evaluate_g8_release(twin, project_id)
         assert result.gate_id == "G8"
+
+
+class TestVerificationCompleteWithInjectedAccessor:
+    """FORGE-73: required_verification_complete becomes real once a caller
+    injects a traceability_coverage accessor -- same seam as G6's
+    requirement_coverage, reading a different field off the same object."""
+
+    async def test_full_coverage_passes(self, twin, project_id):
+        from types import SimpleNamespace
+
+        async def accessor(pid):
+            assert pid == project_id
+            return SimpleNamespace(verification_to_evidence=100.0)
+
+        result = await evaluate_g8_release(twin, project_id, traceability_coverage=accessor)
+        check = next(c for c in result.checks if c.id == "required_verification_complete")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_partial_coverage_fails(self, twin, project_id):
+        from types import SimpleNamespace
+
+        async def accessor(pid):
+            return SimpleNamespace(verification_to_evidence=40.0)
+
+        result = await evaluate_g8_release(twin, project_id, traceability_coverage=accessor)
+        check = next(c for c in result.checks if c.id == "required_verification_complete")
+        assert check.status == GateCheckStatus.FAIL
+
+    async def test_no_verification_cases_is_not_evaluated(self, twin, project_id):
+        from types import SimpleNamespace
+
+        async def accessor(pid):
+            return SimpleNamespace(verification_to_evidence=None)
+
+        result = await evaluate_g8_release(twin, project_id, traceability_coverage=accessor)
+        check = next(c for c in result.checks if c.id == "required_verification_complete")
+        assert check.status == GateCheckStatus.NOT_EVALUATED

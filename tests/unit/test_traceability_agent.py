@@ -252,3 +252,69 @@ class TestNeverProposesAPatch:
         await _seed_requirement(twin, project_id)
         result = await agent.check(str(project_id))
         assert result.proposed_patch is None
+
+
+class TestCoverageAccessor:
+    """FORGE-73: the structured accessor twin_core.consistency.gates's G6
+    and G8 checks need -- same computation check() already ran, exposed
+    directly instead of only reachable by parsing a debug string."""
+
+    async def test_empty_project_is_all_none(self, twin, project_id, agent):
+        coverage = await agent.coverage(str(project_id))
+        assert coverage.needs_to_requirements is None
+        assert coverage.requirements_to_architecture is None
+        assert coverage.requirements_to_verification is None
+        assert coverage.verification_to_evidence is None
+        assert coverage.critical_requirements_to_evidence is None
+
+    async def test_matches_check_s_own_computation(self, twin, project_id, agent):
+        """Not just structurally similar -- the exact same numbers check()
+        embeds in its evidence string, computed via the same shared
+        _compute() so there is no way for the two to drift apart."""
+        need = await _seed_need(twin, project_id)
+        req = await _seed_requirement(twin, project_id)
+        await twin.add_edge(req.id, need.id, EdgeType.DERIVES_FROM)
+
+        coverage = await agent.coverage(str(project_id))
+        result = await agent.check(str(project_id))
+
+        assert coverage.needs_to_requirements == 100.0
+        assert f"'needs_to_requirements': {coverage.needs_to_requirements}" in result.evidence[0]
+
+    async def test_requirements_to_architecture_reflects_binding(self, twin, project_id, agent):
+        req = await _seed_requirement(twin, project_id)
+        arch = WorkProduct(
+            name="system_arch",
+            type=WorkProductType.SYSTEM_ARCHITECTURE,
+            domain="systems",
+            file_path="arch.md",
+            content_hash="h",
+            format="md",
+            created_by="user",
+            project_id=project_id,
+        )
+        created_arch = await twin.create_work_product(arch)
+        await twin.add_edge(req.id, created_arch.id, EdgeType.CONSTRAINED_BY)
+        coverage = await agent.coverage(str(project_id))
+        assert coverage.requirements_to_architecture == 100.0
+
+    async def test_verification_to_evidence_reflects_direct_edge(self, twin, project_id, agent):
+        from twin_core.models.engineering_entity import EngineeringEntity
+
+        verification = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="verification_case", statement="v", project_id=project_id)
+        )
+        ev = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="evidence", statement="proof", project_id=project_id)
+        )
+        await twin.add_edge(verification.id, ev.id, EdgeType.VERIFIED_BY)
+        coverage = await agent.coverage(str(project_id))
+        assert coverage.verification_to_evidence == 100.0
+
+    async def test_does_not_mutate_the_graph(self, twin, project_id, agent):
+        """coverage() is read-only, same as check() -- computing it must
+        never write anything."""
+        await _seed_requirement(twin, project_id)
+        await agent.coverage(str(project_id))
+        constraints = await twin.list_constraints(project_id=project_id)
+        assert len(constraints) == 1

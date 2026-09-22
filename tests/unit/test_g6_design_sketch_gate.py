@@ -138,6 +138,46 @@ class TestNotEvaluatedChecks:
         result = await evaluate_g6_design_sketch(twin, project_id)
         assert result.gate_id == "G6"
 
+
+class TestRequirementCoverageWithInjectedAccessor:
+    """FORGE-73: requirement_coverage becomes real once a caller injects a
+    traceability_coverage accessor -- twin_core can't import
+    TraceabilityAgent directly (layering), so these tests use a bare
+    duck-typed stand-in, exactly what a real injected callable returns."""
+
+    async def test_full_coverage_passes(self, twin, project_id):
+        from types import SimpleNamespace
+
+        async def accessor(pid):
+            assert pid == project_id
+            return SimpleNamespace(requirements_to_architecture=100.0)
+
+        result = await evaluate_g6_design_sketch(twin, project_id, traceability_coverage=accessor)
+        check = next(c for c in result.checks if c.id == "requirement_coverage")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_partial_coverage_fails(self, twin, project_id):
+        from types import SimpleNamespace
+
+        async def accessor(pid):
+            return SimpleNamespace(requirements_to_architecture=50.0)
+
+        result = await evaluate_g6_design_sketch(twin, project_id, traceability_coverage=accessor)
+        check = next(c for c in result.checks if c.id == "requirement_coverage")
+        assert check.status == GateCheckStatus.FAIL
+
+    async def test_no_requirements_recorded_is_not_evaluated(self, twin, project_id):
+        """None denominator (no requirements yet) -- not a vacuous PASS,
+        same discipline as every other check in this module."""
+        from types import SimpleNamespace
+
+        async def accessor(pid):
+            return SimpleNamespace(requirements_to_architecture=None)
+
+        result = await evaluate_g6_design_sketch(twin, project_id, traceability_coverage=accessor)
+        check = next(c for c in result.checks if c.id == "requirement_coverage")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
     async def test_nothing_recorded_is_ready_for_review(self, twin, project_id):
         result = await evaluate_g6_design_sketch(twin, project_id)
         assert result.status == GateStatus.READY_FOR_REVIEW
