@@ -41,6 +41,7 @@ lands its real, typed deliverable in the twin:
 | **Requirements** | Functional reqs, environment, quantified constraints (mass/power/DOF/cost), motion/use cases → twin | Requirements sign-off |
 | **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
 | **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture Gate (G4) |
+| **Concept Selection** | Trade study: propose 2-3 concepts satisfying the architecture, select one with alternatives + rationale → twin | Concept Selection Gate (G5) |
 | **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review |
 | **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
 | **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
@@ -49,14 +50,21 @@ lands its real, typed deliverable in the twin:
 
 The Preliminary Feasibility gate's mass/cost/power and risk criteria are
 computed for real (not just shown as prose) by
-`twin_core.consistency.gates.evaluate_g3_feasibility` when a caller supplies
-the project's `Budget`/`Invariant` declarations. The Architecture gate's
+`twin_core.consistency.gates.evaluate_g3_feasibility`, auto-loading the
+project's persisted `budget`/`invariant` `EngineeringEntity` declarations
+(FORGE-73, `twin.record_engineering_entity`). The Architecture gate's
 "architecture satisfies major constraints" criterion is likewise real, via
 `evaluate_g4_architecture` (reusing the same constraint-evaluation engine the
-V&V gate already enforces with). Four more gate evaluators exist but have no
-phase of their own in any flow yet: `evaluate_g5_concept_selection` (reads
-`twin.record_decision`'s `alternatives`/`rationale`/`parent_refs`),
-`evaluate_g6_design_sketch` (G6, Preliminary Design / Design Sketch — reads
+V&V gate already enforces with). The Concept Selection gate's checks are
+real too, via `evaluate_g5_concept_selection`, reading
+`twin.record_decision`'s `alternatives`/`rationale`/`parent_refs` --
+`GoalDrivenConceptSelectionHandler` (the "Decision Agent", spec section
+26.12) is what populates them: it proposes 2-3 candidate concepts, picks
+one, and records the decision linked back to the architecture decision (see
+[Concept selection / Decision Agent](#concept-selection-decision-agent-forge-73)
+below). Three more gate evaluators exist but have no phase of their own in
+any flow yet: `evaluate_g6_design_sketch` (G6, Preliminary Design / Design
+Sketch — reads
 the existing `design_sketch` work product + its `approve-sketch` REST
 endpoint, and the `system_architecture` work product's
 component/interface counts, rather than inventing a parallel checkpoint;
@@ -97,6 +105,7 @@ pattern:
 |-------|---------|----------|
 | Requirements | `GoalDrivenRequirementsHandler` | `prd` + verifiable constraints (each with an acceptance method) |
 | Architecture | `GoalDrivenArchitectureHandler` | `documentation` (per-subsystem numeric mass/power/cost budgets) |
+| Concept Selection | `GoalDrivenConceptSelectionHandler` | `design_decision` (trade study: alternatives + rationale + link to the architecture decision) |
 | Mechanical Design | `GoalDrivenMechanicalHandler` | loadable `cad_model` (FreeCAD → STEP → MinIO) |
 | Electronics | `GoalDrivenElectronicsHandler` | `bom` + closed numeric power budget |
 | Firmware & Control | `GoalDrivenFirmwareHandler` | `pinmap` + `firmware_source` scaffold |
@@ -272,12 +281,12 @@ this checker's result — even a `failed` G-number status still just pauses for
 ordinary human review, same as before this existed. Every other gate has no
 `gate_id` at all, so the checker is never even consulted for them.
 
-The remaining G-numbers (G5 Concept Selection, G6 Design Sketch, G7
-Verification Readiness, G8 Release) don't yet correspond to any Phase's gate
-— G5 has no Phase at all in any flow, G6 deliberately formalizes the separate
-`design_sketch`/`approve-sketch` mechanism instead of a Phase gate, and G7/G8
-have no mapping decided. Wiring them in (and deciding whether any of G3-G8
-should ever gain real enforcement) is separate, later work.
+The remaining G-numbers (G6 Design Sketch, G7 Verification Readiness, G8
+Release) don't yet correspond to any Phase's gate — G6 deliberately
+formalizes the separate `design_sketch`/`approve-sketch` mechanism instead
+of a Phase gate, and G7/G8 have no mapping decided. Wiring them in (and
+deciding whether any of G3-G8 should ever gain real enforcement) is
+separate, later work.
 
 ### Budget/invariant persistence (FORGE-73)
 
@@ -298,6 +307,39 @@ doesn't parse becomes its own `NOT_EVALUATED` check naming the entity,
 never a silently dropped budget. Passing an explicit `budgets=[]`/
 `invariants=[]` still bypasses the Twin lookup, unchanged, for a caller
 evaluating a hypothetical declaration that was never persisted.
+
+### Concept selection / Decision Agent (FORGE-73)
+
+`evaluate_g5_concept_selection`'s checks (viable concept(s), trade study
+performed, rationale captured, selected concept linked to
+requirements/objectives) already read a project's recorded `design_decision`
+work products, but `hardware_v1` had no phase that ever reached G5, and
+nothing generated a real trade study — a decision an agent recorded manually
+either had no `alternatives` at all, or invented some without genuinely
+weighing them. **Concept Selection** is now a real phase in `hardware_v1`
+(`orchestrator/design_flow/spec.py`, between Architecture and Mechanical
+Design), gated `Gate(gate_id="G5")`, driven by
+`GoalDrivenConceptSelectionHandler` (`api_gateway/runs/concept_handlers.py`)
+— the spec's "Decision Agent" (section 26.12): it prompts the LLM for 2-3
+distinct concepts/approaches that could satisfy the just-decided
+architecture, picks one, and records it through `twin.record_decision` with
+real `alternatives` (`{option, reason_rejected}` pairs — the trade study),
+`rationale`, and `parent_refs` pointing back at the architecture decision
+(resolved from `PhaseOutcome.artifacts`, which `GoalDrivenArchitectureHandler`
+now reports as a real node id rather than a placeholder string). Same
+never-fail-the-phase discipline as every other goal-driven handler: an
+extraction failure falls back to a generic two-concept default rather than
+blocking the run.
+
+Deliberately not built in this pass: scoring candidate concepts against
+recorded `objective` `EngineeringEntity` nodes via `ObjectiveEngine`/
+`objective_from_entity` (FORGE-58) — there is no MCP *read* tool for
+engineering entities today (only `twin.record_engineering_entity`, the write
+side), and `IntentInterpreterAgent` (Phase 3), the only code that ever
+produces `entity_type="objective"` records, isn't wired into any live
+execution path yet — so this handler's selection is the LLM's own reasoning,
+not an objective-weighted ranking. Wiring a real read path for engineering
+entities is separate, later work.
 
 ## What's built vs. planned
 

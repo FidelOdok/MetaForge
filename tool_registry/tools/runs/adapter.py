@@ -46,7 +46,7 @@ class RunsServer(McpToolServer):
                     "start the full design process for something. The run pauses "
                     "at every phase gate for HUMAN approval — starting it queues "
                     "reviewable work, it does not build anything unattended. "
-                    "Flows: 'hardware_v1' (full 7-phase hardware/robotics "
+                    "Flows: 'hardware_v1' (full 8-phase hardware/robotics "
                     "lifecycle — the usual choice), 'mech_v1' (mechanical "
                     "vertical: requirements/CAD/FEA), 'design_v1' (thin demo "
                     "vertical). Always pass the project_id when working inside "
