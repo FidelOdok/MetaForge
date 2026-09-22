@@ -469,6 +469,42 @@ class TestConstraintViolations:
 
         assert twin.evaluate_project_id_calls == [proj]
 
+    async def test_explicit_project_id_argument_scopes(self) -> None:
+        """FORGE-75: an explicit project_id argument works with no ambient
+        context at all -- the actually-reachable path from a real chat turn,
+        since the project brief tells the agent to pass this directly."""
+        twin = _FakeTwin()
+        srv = TwinServer(twin=twin)
+        proj = uuid4()
+
+        await srv.handle_request(_request("twin.constraint_violations", {"project_id": str(proj)}))
+
+        assert twin.evaluate_project_id_calls == [proj]
+
+    async def test_explicit_project_id_argument_wins_over_ctx(self) -> None:
+        """FORGE-75: an explicit argument takes precedence over whatever the
+        ambient context (if any) is set to."""
+        from mcp_core.context import McpCallContext, with_context
+
+        twin = _FakeTwin()
+        srv = TwinServer(twin=twin)
+        ctx_proj = uuid4()
+        explicit_proj = uuid4()
+
+        with with_context(McpCallContext(project_id=ctx_proj)):
+            await srv.handle_request(
+                _request("twin.constraint_violations", {"project_id": str(explicit_proj)})
+            )
+
+        assert twin.evaluate_project_id_calls == [explicit_proj]
+
+    async def test_invalid_project_id_argument_rejected(self) -> None:
+        srv = TwinServer(twin=_FakeTwin())
+        raw = await srv.handle_request(
+            _request("twin.constraint_violations", {"project_id": "not-a-uuid"})
+        )
+        assert "error" in json.loads(raw)
+
 
 # ---------------------------------------------------------------------------
 # query_cypher (audit + mutation gate)

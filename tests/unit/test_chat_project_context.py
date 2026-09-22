@@ -125,6 +125,22 @@ async def test_project_brief_lists_work_products_and_commit_instruction(
 
 
 @pytest.mark.asyncio
+async def test_project_brief_carries_constraint_violations_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FORGE-75: the brief tells the agent to pass project_id explicitly on
+    twin.constraint_violations, the same convention as commit_geometry --
+    the ambient mcp_core.context binding FORGE-74 added is not reachable
+    from a real chat turn."""
+    project = _project([_wp("Gimbal Base", "cad_model")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+
+    assert brief is not None
+    assert "twin.constraint_violations" in brief
+    assert brief.count("p-123") >= 2  # named on both commit_geometry and this instruction
+
+
+@pytest.mark.asyncio
 async def test_project_brief_caps_work_product_list(monkeypatch: pytest.MonkeyPatch) -> None:
     import api_gateway.chat.routes as routes
 

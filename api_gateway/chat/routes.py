@@ -326,6 +326,11 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
         f'design decisions the same way with `twin.record_decision` (`project_id="{project.id}"`). '
         f"Ground your answers in the work products above."
     )
+    lines.append(
+        f"\nWhen checking what's currently broken, call `twin.constraint_violations` "
+        f'with `project_id="{project.id}"` — without it, the result may include '
+        f"other projects' violations (FORGE-75)."
+    )
     return "\n".join(lines)
 
 
