@@ -130,15 +130,30 @@ async def analyze(
     as a real pre-commit dependency-graph walk (``ImpactEngine``, FORGE-67),
     ``impact``, and ``approval_required`` via the real ``HITLEngine``
     classification.
+
+    FORGE-77: if the impact/HITL computation below raises (e.g.
+    ``ImpactEngine`` requiring ``patch.project_id``, which a caller can
+    genuinely omit), the ANALYZING write already happened but
+    READY_FOR_REVIEW never will -- and ``_require_status(ect, PROPOSED)``
+    is the only valid entry to this function, so a plain re-raise would
+    leave the ECT permanently stuck in ANALYZING with no way to ever
+    retry. Revert to PROPOSED on any failure so the caller can fix the
+    input and call ``analyze`` again.
     """
     ect = await _get(twin, ect_id)
     _require_status(ect, ECTStatus.PROPOSED)
     await twin.update_ect(ect_id, {"status": ECTStatus.ANALYZING})
 
     engine = hitl or HITLEngine()
-    impact_dict = await _analyse_impact(twin, ect.patch, impact_engine=impact_engine)
-    affected = sorted(set(impact_dict["directly_changed"]) | set(impact_dict["affected_objects"]))
-    approval = await engine.required_approval(ect.patch, impact_dict, state or {})
+    try:
+        impact_dict = await _analyse_impact(twin, ect.patch, impact_engine=impact_engine)
+        affected = sorted(
+            set(impact_dict["directly_changed"]) | set(impact_dict["affected_objects"])
+        )
+        approval = await engine.required_approval(ect.patch, impact_dict, state or {})
+    except Exception:
+        await twin.update_ect(ect_id, {"status": ECTStatus.PROPOSED})
+        raise
 
     return await twin.update_ect(
         ect_id,
