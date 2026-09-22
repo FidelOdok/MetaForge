@@ -30,6 +30,7 @@ from orchestrator.harness.runs import (
     InvalidTransition,
     RunStatus,
 )
+from twin_core.consistency import GateEvaluation
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.design_flow.executor")
@@ -124,6 +125,34 @@ class ConstraintChecker(Protocol):
     async def check(self, project_id: str | None) -> ConstraintReport: ...
 
 
+@dataclass
+class ConsistencyGateReport:
+    """A gate's real ``twin_core.consistency.gates`` evaluation (FORGE-73).
+
+    ``checked`` is False when the gate has no ``gate_id`` (most gates today
+    -- see :class:`~orchestrator.design_flow.spec.Gate`'s own docstring for
+    why), no checker was wired, or ``project_id`` is missing/unparseable --
+    same fail-open contract as :class:`ConstraintReport`. Purely
+    informational: surfaced in the gate reason, never blocks a transition.
+    """
+
+    checked: bool = False
+    evaluation: GateEvaluation | None = None
+
+
+@runtime_checkable
+class ConsistencyGateChecker(Protocol):
+    """Evaluates a gate's real G-number status (FORGE-73), when it has one.
+
+    Backed in production by ``twin_core.consistency.gates.evaluate_gN_*``,
+    dispatched on ``gate.gate_id``. Unlike :class:`ConstraintChecker`, this
+    never fails a gate automatically -- there is no ``enforce_*`` flag for
+    it (yet); see :class:`~orchestrator.design_flow.spec.Gate`'s docstring.
+    """
+
+    async def check(self, gate_id: str, project_id: str | None) -> ConsistencyGateReport: ...
+
+
 class GateCoordinator:
     """Bridges async gate waits to synchronous run-store transitions.
 
@@ -170,11 +199,20 @@ class GateCoordinator:
             fut.set_exception(FlowCanceled(run_id))
 
 
+def _consistency_summary(evaluation: GateEvaluation) -> str:
+    passed = sum(1 for c in evaluation.checks if c.status.value == "pass")
+    failed = sum(1 for c in evaluation.checks if c.status.value == "fail")
+    not_evaluated = sum(1 for c in evaluation.checks if c.status.value == "not_evaluated")
+    parts = f"{passed} pass, {failed} fail, {not_evaluated} not evaluated"
+    return f"{evaluation.gate_id}: {evaluation.status.value} ({parts})"
+
+
 def _gate_reason(
     phase: Phase,
     outcome: PhaseOutcome,
     readiness: ReadinessReport,
     constraints: ConstraintReport | None = None,
+    consistency: ConsistencyGateReport | None = None,
 ) -> str:
     """Human-facing reason shown while a run waits at a gate."""
     gate = phase.gate
@@ -202,6 +240,10 @@ def _gate_reason(
             head += " | Constraints: " + " — ".join(parts)
         else:
             head += f" | Constraints: OK ({constraints.evaluated_count} evaluated)"
+    # FORGE-73: real G-number status, purely informational -- never changes
+    # whether this gate blocks (see Gate.gate_id's own docstring).
+    if consistency is not None and consistency.checked and consistency.evaluation is not None:
+        head += " | " + _consistency_summary(consistency.evaluation)
     return head[:2000]
 
 
@@ -221,12 +263,14 @@ class DesignFlowExecutor:
         coordinator: GateCoordinator,
         gate_evaluator: GateEvaluator | None = None,
         constraint_checker: ConstraintChecker | None = None,
+        consistency_gate_checker: ConsistencyGateChecker | None = None,
     ) -> None:
         self._store = store
         self._brain = brain
         self._coordinator = coordinator
         self._evaluator = gate_evaluator
         self._constraint_checker = constraint_checker
+        self._consistency_gate_checker = consistency_gate_checker
 
     async def run(self, run_id: str) -> None:
         """Drive ``run_id`` through its flow to a terminal state.
@@ -315,11 +359,15 @@ class DesignFlowExecutor:
                 self._store.fail(run_id, msg)
                 return
 
+            # FORGE-73: real G3/G4 status, purely informational (see
+            # Gate.gate_id's docstring for why this never fails a gate).
+            consistency = await self._consistency(gate.gate_id, ctx)
+
             # Register the waiter BEFORE moving to awaiting_approval so a fast
             # approval can't race ahead of the future.
             self._coordinator.register(run_id)
             self._store.request_approval(
-                run_id, reason=_gate_reason(phase, outcome, readiness, constraints)
+                run_id, reason=_gate_reason(phase, outcome, readiness, constraints, consistency)
             )
             logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name)
             decision = await self._coordinator.wait(run_id)
@@ -362,6 +410,17 @@ class DesignFlowExecutor:
         except Exception as exc:  # noqa: BLE001 - constraint state must not crash the run
             logger.warning("design_flow_constraint_check_error", error=str(exc))
             return ConstraintReport(checked=False)
+
+    async def _consistency(self, gate_id: str | None, ctx: FlowContext) -> ConsistencyGateReport:
+        """Evaluate the gate's real G-number status, when it has one
+        (FORGE-73, best-effort -- same fail-open contract as _constraints)."""
+        if gate_id is None or self._consistency_gate_checker is None:
+            return ConsistencyGateReport(checked=False)
+        try:
+            return await self._consistency_gate_checker.check(gate_id, ctx.project_id)
+        except Exception as exc:  # noqa: BLE001 - consistency state must not crash the run
+            logger.warning("design_flow_consistency_check_error", gate_id=gate_id, error=str(exc))
+            return ConsistencyGateReport(checked=False)
 
     @staticmethod
     def _summarize(flow: FlowDefinition, ctx: FlowContext) -> dict[str, object]:

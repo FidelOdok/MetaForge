@@ -11,12 +11,14 @@ native brain sometimes records a cad_model node with no blob).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 import structlog
 
 from api_gateway.projects.backend import ProjectBackend
-from orchestrator.design_flow.executor import ConstraintReport
+from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
+from twin_core.consistency import evaluate_g3_feasibility, evaluate_g4_architecture
 
 logger = structlog.get_logger(__name__)
 
@@ -191,3 +193,38 @@ class TwinConstraintChecker:
             evaluated=report.evaluated_count,
         )
         return report
+
+
+class TwinConsistencyGateChecker:
+    """`ConsistencyGateChecker` backed by `twin_core.consistency.gates`
+    (FORGE-73). Only two ``gate_id``s are mapped today -- see
+    :class:`~orchestrator.design_flow.spec.Gate`'s own docstring for why
+    G5-G8 aren't (yet). Purely informational: the executor never fails a
+    gate on this checker's result (no ``enforce_*`` flag exists for it).
+    """
+
+    def __init__(self, twin: Any) -> None:
+        self._twin = twin
+
+    async def check(self, gate_id: str, project_id: str | None) -> ConsistencyGateReport:
+        if not project_id:
+            return ConsistencyGateReport(checked=False)
+        try:
+            pid = UUID(project_id)
+        except ValueError:
+            return ConsistencyGateReport(checked=False)
+
+        if gate_id == "G3":
+            evaluation = await evaluate_g3_feasibility(self._twin, pid)
+        elif gate_id == "G4":
+            evaluation = await evaluate_g4_architecture(self._twin, pid)
+        else:
+            return ConsistencyGateReport(checked=False)
+
+        logger.info(
+            "gate_eval_consistency",
+            project_id=project_id,
+            gate_id=gate_id,
+            status=evaluation.status.value,
+        )
+        return ConsistencyGateReport(checked=True, evaluation=evaluation)

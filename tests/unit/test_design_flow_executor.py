@@ -380,3 +380,196 @@ async def test_constraint_checker_failure_is_best_effort() -> None:
     store.submit_approval(run.id, ApprovalDecision.APPROVE)
     await asyncio.wait_for(task, timeout=2.0)
     assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+# --------------------------------------------------------------------------
+# Consistency gate status (FORGE-73) -- G3/G4, informational only
+# --------------------------------------------------------------------------
+
+from orchestrator.design_flow.executor import ConsistencyGateReport  # noqa: E402
+from twin_core.consistency import (  # noqa: E402
+    GateCheck,
+    GateCheckStatus,
+    GateEvaluation,
+    GateStatus,
+)
+
+
+class FakeConsistencyGateChecker:
+    """A `ConsistencyGateChecker` double returning a fixed report (or raising)."""
+
+    def __init__(self, report: ConsistencyGateReport | None = None, boom: bool = False) -> None:
+        self._report = report or ConsistencyGateReport(checked=False)
+        self._boom = boom
+        self.calls: list[tuple[str, str | None]] = []
+
+    async def check(self, gate_id: str, project_id: str | None) -> ConsistencyGateReport:
+        self.calls.append((gate_id, project_id))
+        if self._boom:
+            raise RuntimeError("gate evaluator down")
+        return self._report
+
+
+def _g3_evaluation(status: GateStatus = GateStatus.READY_FOR_REVIEW) -> GateEvaluation:
+    return GateEvaluation(
+        gate_id="G3",
+        status=status,
+        checks=[
+            GateCheck(
+                id="mass_budget", label="Mass budget", status=GateCheckStatus.PASS, detail="ok"
+            ),
+            GateCheck(
+                id="cost_budget",
+                label="Cost budget",
+                status=GateCheckStatus.FAIL,
+                detail="over budget",
+            ),
+            GateCheck(
+                id="thermal",
+                label="Thermal plausibility",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no data source yet",
+            ),
+        ],
+    )
+
+
+def _register_g3_flow(flow_id: str) -> str:
+    FLOWS[flow_id] = FlowDefinition(
+        id=flow_id,
+        name=flow_id,
+        phases=(
+            Phase(
+                id="feasibility",
+                title="Preliminary Feasibility",
+                objective="x",
+                gate=Gate(name="Preliminary Feasibility Gate (G3)", gate_id="G3"),
+            ),
+        ),
+    )
+    return flow_id
+
+
+def _register_ungated_g3_flow(flow_id: str) -> str:
+    """A gate with no gate_id -- the vast majority of gates today."""
+    FLOWS[flow_id] = FlowDefinition(
+        id=flow_id,
+        name=flow_id,
+        phases=(
+            Phase(id="requirements", title="Requirements", objective="x", gate=Gate(name="g1")),
+        ),
+    )
+    return flow_id
+
+
+@pytest.mark.asyncio
+async def test_consistency_status_surfaces_in_gate_reason() -> None:
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_g3_flow("test_consistency_surface")
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    checker = FakeConsistencyGateChecker(
+        ConsistencyGateReport(checked=True, evaluation=_g3_evaluation())
+    )
+    executor = DesignFlowExecutor(
+        store=store, brain=ScriptedBrain(), coordinator=coord, consistency_gate_checker=checker
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    reason = store.get(run.id).approval_reason or ""
+    assert "G3: ready_for_review (1 pass, 1 fail, 1 not evaluated)" in reason
+    assert checker.calls == [("G3", "p1")]
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_failed_consistency_gate_never_blocks_the_run() -> None:
+    """The whole point of 'informational only': even a FAILED G-number
+    status doesn't stop the run from waiting for ordinary human approval,
+    same as it always did before this checker existed."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_g3_flow("test_consistency_no_block")
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    checker = FakeConsistencyGateChecker(
+        ConsistencyGateReport(checked=True, evaluation=_g3_evaluation(status=GateStatus.FAILED))
+    )
+    executor = DesignFlowExecutor(
+        store=store, brain=ScriptedBrain(), coordinator=coord, consistency_gate_checker=checker
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "G3: failed" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_gate_with_no_gate_id_never_calls_the_checker() -> None:
+    """The overwhelming majority of gates today have no G-number mapping --
+    confirms the checker is only consulted when a gate actually opts in."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_ungated_g3_flow("test_consistency_unmapped")
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    checker = FakeConsistencyGateChecker()
+    executor = DesignFlowExecutor(
+        store=store, brain=ScriptedBrain(), coordinator=coord, consistency_gate_checker=checker
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert checker.calls == []
+    assert "G3:" not in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_no_checker_wired_is_a_noop() -> None:
+    """Default -- every caller before this PR -- behaves exactly as before."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_g3_flow("test_consistency_none")
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    executor = DesignFlowExecutor(store=store, brain=ScriptedBrain(), coordinator=coord)
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "G3:" not in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_consistency_checker_failure_is_best_effort() -> None:
+    """A broken gate evaluator must not fail or block the run."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    flow_id = _register_g3_flow("test_consistency_boom")
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=ScriptedBrain(),
+        coordinator=coord,
+        consistency_gate_checker=FakeConsistencyGateChecker(boom=True),
+    )
+    task = asyncio.create_task(executor.run(run.id))
+
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "G3:" not in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.APPROVE)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.COMPLETED
