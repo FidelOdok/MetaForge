@@ -44,6 +44,7 @@ from orchestrator.harness.runs import (
     RunStatus,
 )
 from orchestrator.harness.tools import ApprovalDeniedError, GateCheck, ToolRegistry, ToolSpec
+from twin_core.policy.engine import PolicyEngine
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.runtime")
@@ -61,6 +62,13 @@ class HarnessRuntime:
     tools: ToolRegistry
     runs: InMemoryRunStore
     gate_check: GateCheck | None = None
+    # FORGE-71: optional declarative-precondition check threaded into every
+    # tool call, same centralization as gate_check above. None (the default,
+    # and every caller before this) keeps this a pure no-op -- PolicyEngine
+    # is itself default-allow with no policies registered, so even an opted-
+    # in runtime with an empty PolicyEngine() sees no behavior change until
+    # policies actually get registered on it.
+    policy_engine: PolicyEngine | None = None
     # Optional multi-credential store: when set, model calls rotate a provider's
     # stored credentials per session and blacklist any that fail terminally.
     credentials: CredentialStore | None = None
@@ -90,6 +98,7 @@ class HarnessRuntime:
         *,
         tools: ToolRegistry | None = None,
         gate_check: GateCheck | None = None,
+        policy_engine: PolicyEngine | None = None,
         credentials: CredentialStore | None = None,
         session_id: str = "default",
         clock: Callable[[], float] = time.time,
@@ -119,6 +128,7 @@ class HarnessRuntime:
             tools=tools or ToolRegistry(),
             runs=runs if runs is not None else InMemoryRunStore(clock=clock),
             gate_check=gate_check,
+            policy_engine=policy_engine,
             credentials=credentials,
             session_id=session_id,
             clock=clock,
@@ -231,7 +241,24 @@ class HarnessRuntime:
                 spec = self.tools.get(name)
                 if spec.requires_approval:
                     await self._await_approval(spec, arguments)
-                result = await self.tools.invoke(name, arguments, gate_check=self.gate_check)
+                # FORGE-71: actor/state are deliberately minimal here -- a
+                # generic tool-dispatch layer has no domain-specific
+                # engineering state (gate status, blocking counts) to offer
+                # a Policy's `require` conditions; a caller with richer state
+                # to check calls PolicyEngine.evaluate_preconditions itself
+                # at a more specific point instead (e.g. twin_core.
+                # transactions.ect already does the equivalent for
+                # HITLEngine). This wiring's job is just making the call
+                # site real for whatever *does* only need to know which
+                # session invoked which tool.
+                result = await self.tools.invoke(
+                    name,
+                    arguments,
+                    gate_check=self.gate_check,
+                    policy_engine=self.policy_engine,
+                    actor={"actor_id": f"session:{self.session_id}"},
+                    state={},
+                )
             except Exception as exc:
                 status = "error"
                 span.record_exception(exc)
