@@ -211,6 +211,79 @@ class TestHttpTransportHeader:
         await transport.send('{"x":1}')
         assert "Authorization" not in (captured["headers"] or {})
 
+    @pytest.mark.asyncio
+    async def test_no_context_headers_when_ambient_default(self) -> None:
+        """FORGE-76: a call nobody ever scoped sends no X-MetaForge-*
+        headers -- same as before context propagation existed."""
+        from mcp_core.transports import HttpTransport
+
+        transport = HttpTransport("http://example.invalid")
+        captured: dict[str, Any] = {}
+
+        class _FakeResp:
+            async def __aenter__(self) -> _FakeResp:
+                return self
+
+            async def __aexit__(self, *args: Any) -> None:
+                pass
+
+            async def text(self) -> str:
+                return '{"ok":true}'
+
+        class _FakeSession:
+            def post(self, url: str, **kwargs: Any) -> _FakeResp:
+                captured["headers"] = kwargs.get("headers")
+                return _FakeResp()
+
+            async def close(self) -> None:
+                pass
+
+        transport._session = _FakeSession()  # type: ignore[assignment]
+        await transport.send('{"x":1}')
+        headers = captured["headers"] or {}
+        assert not any(k.lower().startswith("x-metaforge-") for k in headers)
+
+    @pytest.mark.asyncio
+    async def test_attaches_context_headers_when_scoped(self) -> None:
+        """FORGE-76: the active McpCallContext reaches the wire as
+        X-MetaForge-* headers -- the missing link that made project scoping
+        (FORGE-74's constraint_violations, MET-441's find_by_property)
+        unreachable from a real chat session."""
+        from uuid import UUID
+
+        from mcp_core.context import HEADER_PROJECT, HEADER_SESSION, McpCallContext, with_context
+        from mcp_core.transports import HttpTransport
+
+        transport = HttpTransport("http://example.invalid")
+        captured: dict[str, Any] = {}
+
+        class _FakeResp:
+            async def __aenter__(self) -> _FakeResp:
+                return self
+
+            async def __aexit__(self, *args: Any) -> None:
+                pass
+
+            async def text(self) -> str:
+                return '{"ok":true}'
+
+        class _FakeSession:
+            def post(self, url: str, **kwargs: Any) -> _FakeResp:
+                captured["headers"] = kwargs.get("headers")
+                return _FakeResp()
+
+            async def close(self) -> None:
+                pass
+
+        transport._session = _FakeSession()  # type: ignore[assignment]
+        proj = UUID("11111111-1111-1111-1111-111111111111")
+        with with_context(McpCallContext(project_id=proj, actor_id="agent:claude_code")):
+            await transport.send('{"x":1}')
+
+        headers = captured["headers"]
+        assert headers[HEADER_PROJECT] == str(proj)
+        assert HEADER_SESSION in headers
+
 
 class TestStdioTransportEnv:
     def test_api_key_added_to_subprocess_env(self, monkeypatch: pytest.MonkeyPatch) -> None:

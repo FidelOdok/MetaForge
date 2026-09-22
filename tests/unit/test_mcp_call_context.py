@@ -19,6 +19,7 @@ from mcp_core.context import (
     McpCallContext,
     context_from_env,
     context_from_headers,
+    context_to_headers,
     current_context,
     reset_context,
     set_context,
@@ -99,6 +100,59 @@ class TestHeaderParsing:
         """An unparseable project header doesn't raise — drops to None."""
         ctx = context_from_headers({HEADER_PROJECT: "not-a-uuid"})
         assert ctx.project_id is None
+
+
+# ---------------------------------------------------------------------------
+# Header serialization (FORGE-76)
+# ---------------------------------------------------------------------------
+
+
+class TestHeaderSerialization:
+    def test_ambient_sentinel_produces_no_headers(self) -> None:
+        """current_context() with nothing ever installed is the exact
+        _DEFAULT_CONTEXT singleton -- that sends nothing, so a truly
+        unscoped call (nobody ever called set_context/with_context)
+        behaves exactly as before this existed: no headers at all."""
+        assert context_to_headers(current_context()) == {}
+
+    def test_freshly_constructed_context_is_not_the_sentinel(self) -> None:
+        """A bare McpCallContext() is a deliberately-installed context (its
+        session_id/correlation_id are freshly generated, unlike the
+        sentinel's fixed all-zero ids) -- it DOES produce headers, just
+        without a project one."""
+        headers = context_to_headers(McpCallContext())
+        assert headers[HEADER_ACTOR] == "system:unattributed"
+        assert HEADER_PROJECT not in headers
+
+    def test_real_context_produces_all_headers_when_project_set(self) -> None:
+        ctx = McpCallContext(
+            project_id=UUID("11111111-1111-1111-1111-111111111111"),
+            actor_id="agent:claude_code",
+        )
+        headers = context_to_headers(ctx)
+        assert headers[HEADER_PROJECT] == str(ctx.project_id)
+        assert headers[HEADER_SESSION] == str(ctx.session_id)
+        assert headers[HEADER_ACTOR] == "agent:claude_code"
+        assert headers[HEADER_CORRELATION] == str(ctx.correlation_id)
+
+    def test_no_project_omits_project_header_only(self) -> None:
+        """project_id=None is a real, meaningful 'no scope' signal (admin
+        path) -- distinct from the sentinel case, which sends nothing."""
+        ctx = McpCallContext(actor_id="agent:claude_code")
+        headers = context_to_headers(ctx)
+        assert HEADER_PROJECT not in headers
+        assert headers[HEADER_ACTOR] == "agent:claude_code"
+
+    def test_round_trip_through_from_headers(self) -> None:
+        original = McpCallContext(
+            project_id=UUID("11111111-1111-1111-1111-111111111111"),
+            actor_id="user:fidel",
+        )
+        reconstructed = context_from_headers(context_to_headers(original))
+        assert reconstructed.project_id == original.project_id
+        assert reconstructed.session_id == original.session_id
+        assert reconstructed.actor_id == original.actor_id
+        assert reconstructed.correlation_id == original.correlation_id
 
 
 # ---------------------------------------------------------------------------

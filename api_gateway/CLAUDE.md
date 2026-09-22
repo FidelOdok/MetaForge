@@ -5,8 +5,10 @@ HTTP/WebSocket API server -- the "front door" for MetaForge. Built with FastAPI 
 ## Layer & Dependencies
 
 - **Layer**: 4
-- **May import from**: `orchestrator`, `domain_agents`, `twin_core`, `digital_twin`, `skill_registry`, `observability`, `pydantic`, standard library
+- **May import from**: `orchestrator`, `domain_agents`, `twin_core`, `digital_twin`, `skill_registry`, `mcp_core`, `observability`, `pydantic`, standard library
 - **Do NOT import from**: `cli`, `dashboard` (those are consumers, not dependencies)
+
+`mcp_core` (FORGE-76) is a layer-1 module (stdlib + pydantic only, per its own module docstring) already imported by `tool_registry` — the gateway establishing an `McpCallContext` via `with_context()` around a chat turn is how project/session scope actually reaches the MCP wire protocol; see `mcp_core/context.py` and `api_gateway/chat/routes.py`'s `_invoke_agent`.
 
 ## Key Files
 

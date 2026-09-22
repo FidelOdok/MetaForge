@@ -7,6 +7,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from mcp_core.client import Transport
+from mcp_core.context import context_to_headers, current_context
 
 if TYPE_CHECKING:
     from tool_registry.mcp_server.server import McpToolServer
@@ -88,6 +89,12 @@ class HttpTransport(Transport):
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        # FORGE-76: forward the active McpCallContext (project/session/actor/
+        # correlation) as X-MetaForge-* headers so the receiving server's own
+        # context_from_headers() (already wired, MET-387) reconstructs it.
+        # Empty for the untouched sentinel context -- a call nobody ever
+        # scoped sends no headers, same as before this existed.
+        headers.update(context_to_headers(current_context()))
         async with self._session.post(
             f"{self._base_url}/mcp",
             data=message,
