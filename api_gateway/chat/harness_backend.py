@@ -190,6 +190,15 @@ _GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
     "twin.record_document": (GATE_TWIN_WRITE,),
     "twin.propose_change": (GATE_TWIN_WRITE,),
     "twin.stage_work_product_file": (GATE_TWIN_WRITE,),
+    # FORGE-70 (epic FORGE-35): the ECT lifecycle -- same gate tier as every
+    # other twin-writing tool above, no new stricter tier invented (see
+    # api_gateway/twin/ect_tools.py's module docstring for why).
+    "twin.propose_engineering_change": (GATE_TWIN_WRITE,),
+    "twin.analyze_engineering_change": (GATE_TWIN_WRITE,),
+    "twin.approve_engineering_change": (GATE_TWIN_WRITE,),
+    "twin.reject_engineering_change": (GATE_TWIN_WRITE,),
+    "twin.commit_engineering_change": (GATE_TWIN_WRITE,),
+    "twin.mark_engineering_change_rolled_back": (GATE_TWIN_WRITE,),
     "project.create": (GATE_PROJECT_WRITE,),
     "project.update": (GATE_PROJECT_WRITE,),
     "project.delete": (GATE_PROJECT_WRITE,),
