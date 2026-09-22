@@ -59,14 +59,17 @@ phase of their own in any flow yet: `evaluate_g5_concept_selection` (reads
 `evaluate_g6_design_sketch` (G6, Preliminary Design / Design Sketch — reads
 the existing `design_sketch` work product + its `approve-sketch` REST
 endpoint, and the `system_architecture` work product's
-component/interface counts, rather than inventing a parallel checkpoint),
+component/interface counts, rather than inventing a parallel checkpoint;
+its "requirement coverage" criterion is likewise real when a caller
+supplies a `traceability_coverage` accessor, FORGE-73),
 `evaluate_g7_verification_readiness` (G7 — per-critical-requirement
 verification-method/ownership checks, reusing the same `metadata
 ["verification_method"]`/`Constraint.source` conventions
 `TraceabilityAgent` already established), and `evaluate_g8_release` (G8 —
 real checks against `TwinAPI.list_baselines()` and `"evidence"` entities'
-staleness status, FORGE-51/59). See `twin_core/consistency/gates.py`'s
-module docstring for exactly which
+staleness status, FORGE-51/59, plus "required verification complete" via
+the same injected `traceability_coverage` accessor G6 uses). See
+`twin_core/consistency/gates.py`'s module docstring for exactly which
 checks each evaluates today vs. still advisory pending Phase 6 (Evidence
 Integration, FORGE-41) or a not-yet-built phase for that gate.
 

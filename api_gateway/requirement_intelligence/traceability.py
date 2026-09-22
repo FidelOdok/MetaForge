@@ -100,7 +100,39 @@ class TraceabilityAgent:
     def __init__(self, twin: TwinAPI) -> None:
         self._twin = twin
 
+    async def coverage(self, project_id: str) -> TraceabilityCoverage:
+        """The reusable accessor FORGE-73 adds: the same structured
+        ``TraceabilityCoverage`` ``check()`` already computed internally,
+        exposed directly instead of only stringified inside
+        ``AgentResult.evidence``. This is what ``twin_core.consistency.
+        gates``'s G6 "requirement coverage" and G8 "required verification
+        complete" checks needed -- see gates.py's module docstring for the
+        exact field each one reads.
+        """
+        _, coverage = await self._compute(project_id)
+        return coverage
+
     async def check(self, project_id: str) -> AgentResult:
+        findings, coverage = await self._compute(project_id)
+        conclusions = [f"{f.category.value}: {f.subject_label}" for f in findings]
+        if not findings:
+            conclusions.append("no traceability gaps found")
+
+        return AgentResult(
+            conclusions=conclusions,
+            assumptions=[],
+            evidence=[f"traceability_coverage={coverage.model_dump()}"],
+            proposed_patch=None,
+            unresolved=[],
+            confidence=1.0,
+        )
+
+    async def _compute(
+        self, project_id: str
+    ) -> tuple[list[TraceabilityFinding], TraceabilityCoverage]:
+        """The full pass over the graph -- shared by ``check()`` and
+        ``coverage()`` so neither duplicates the per-requirement/need/
+        verification/artefact/evidence edge-walking below."""
         pid = UUID(project_id)
         constraints = await self._twin.list_constraints(project_id=pid)
         entities = await self._twin.list_engineering_entities(project_id=pid)
@@ -225,18 +257,7 @@ class TraceabilityAgent:
             critical_requirements_to_evidence=_pct(critical_has_evidence, critical_reqs),
         )
 
-        conclusions = [f"{f.category.value}: {f.subject_label}" for f in findings]
-        if not findings:
-            conclusions.append("no traceability gaps found")
-
-        return AgentResult(
-            conclusions=conclusions,
-            assumptions=[],
-            evidence=[f"traceability_coverage={coverage.model_dump()}"],
-            proposed_patch=None,
-            unresolved=[],
-            confidence=1.0,
-        )
+        return findings, coverage
 
     async def _has_architecture_binding(self, requirement_id: UUID) -> bool:
         edges = await self._twin.get_edges(
