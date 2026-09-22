@@ -349,9 +349,11 @@ class TwinServer(McpToolServer):
                     "Return current constraint violations for the project, "
                     "severity-ordered (error > warning > info). Use to ask "
                     "'what's currently broken?' before proposing changes. "
-                    "Scoped to the calling session's active project when one "
-                    "is set (FORGE-74); with no active project, evaluates "
-                    "every constraint across every project (admin path)."
+                    "Pass project_id (FORGE-75) to scope to one project -- "
+                    "without it, falls back to the calling session's active "
+                    "project if one is set (FORGE-74), and otherwise "
+                    "evaluates every constraint across every project (admin "
+                    "path)."
                 ),
                 capability="twin_constraints",
                 input_schema={
@@ -361,6 +363,15 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "default": "main",
                             "description": "Branch to evaluate against. Default: main.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": (
+                                "Project to scope violations to. Takes "
+                                "precedence over the calling session's ambient "
+                                "project context, if any."
+                            ),
                         },
                     },
                 },
@@ -575,16 +586,34 @@ class TwinServer(McpToolServer):
         if not isinstance(branch, str):
             raise ValueError("branch must be a string")
 
+        # FORGE-75: an explicit project_id argument always wins -- the chat
+        # harness's own project brief tells the agent its project_id directly
+        # (the same convention twin.commit_geometry/twin.record_decision
+        # already use) and that reaches this tool as a real call argument,
+        # unlike the ambient mcp_core.context binding FORGE-74 also added,
+        # which nothing in the live chat path currently populates.
+        raw_project_id = arguments.get("project_id")
+        explicit_project_id: UUID | None = None
+        if raw_project_id is not None:
+            if not isinstance(raw_project_id, str):
+                raise ValueError("project_id must be a string")
+            try:
+                explicit_project_id = UUID(raw_project_id)
+            except ValueError as exc:
+                raise ValueError(f"project_id must be a valid UUID: {exc}") from exc
+
         with tracer.start_as_current_span("twin.constraint_violations") as span:
             span.set_attribute("twin.branch", branch)
             # FORGE-74: same MET-441 pattern as find_by_property -- when the
             # call context names a project, scope to it so one project's
             # violations can't be reported against another's. Without a
             # context, no filter is added (admin path) -- same as before.
-            ctx_project_id = current_context().project_id
-            if ctx_project_id is not None:
-                span.set_attribute("mcp.project_id", str(ctx_project_id))
-            result = await self._twin.evaluate_constraints(branch=branch, project_id=ctx_project_id)
+            scope_project_id = explicit_project_id or current_context().project_id
+            if scope_project_id is not None:
+                span.set_attribute("mcp.project_id", str(scope_project_id))
+            result = await self._twin.evaluate_constraints(
+                branch=branch, project_id=scope_project_id
+            )
             span.set_attribute("twin.passed", result.passed)
             span.set_attribute("twin.violation_count", len(result.violations))
             span.set_attribute("twin.warning_count", len(result.warnings))
