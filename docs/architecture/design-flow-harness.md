@@ -256,6 +256,29 @@ the project's own constraint data. The structured constraint-creation tool
 (MET-582) is what fills that data from the Requirements phase; decision-derived
 phase applicability (MET-585) is the planned complement.
 
+## Consistency-gate status (FORGE-73)
+
+Two gates carry a real spec G-number in `Gate.gate_id` — the Preliminary
+Feasibility Gate (`"G3"`, `design_v1`/`mech_v1`'s `feasibility` phase) and the
+Architecture Gate (`"G4"`, `hardware_v1`'s `architecture` phase). At those
+two gates, `TwinConsistencyGateChecker` (`api_gateway/runs/gate_eval.py`)
+calls the matching `twin_core.consistency.gates.evaluate_gN_*` evaluator and
+appends its real status to the approval reason — e.g. `G3:
+ready_for_review (2 pass, 1 fail, 6 not evaluated)`.
+
+This is **purely informational**, unlike `enforce_constraints` above: there is
+no `enforce_consistency_gate` flag, so a gate never fails automatically on
+this checker's result — even a `failed` G-number status still just pauses for
+ordinary human review, same as before this existed. Every other gate has no
+`gate_id` at all, so the checker is never even consulted for them.
+
+The remaining G-numbers (G5 Concept Selection, G6 Design Sketch, G7
+Verification Readiness, G8 Release) don't yet correspond to any Phase's gate
+— G5 has no Phase at all in any flow, G6 deliberately formalizes the separate
+`design_sketch`/`approve-sketch` mechanism instead of a Phase gate, and G7/G8
+have no mapping decided. Wiring them in (and deciding whether any of G3-G8
+should ever gain real enforcement) is separate, later work.
+
 ## What's built vs. planned
 
 **Built (Phase 1):** the `design_v1`, `mech_v1`, and full 7-phase `hardware_v1`

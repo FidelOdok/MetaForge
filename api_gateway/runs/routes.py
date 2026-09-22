@@ -155,7 +155,11 @@ def _launch_flow(run_id: str) -> None:
     from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
-    from api_gateway.runs.gate_eval import ProjectGateEvaluator, TwinConstraintChecker
+    from api_gateway.runs.gate_eval import (
+        ProjectGateEvaluator,
+        TwinConsistencyGateChecker,
+        TwinConstraintChecker,
+    )
     from api_gateway.runs.mech_handlers import (
         GoalDrivenMechanicalHandler,
         HybridBrain,
@@ -220,6 +224,10 @@ def _launch_flow(run_id: str) -> None:
         # MET-583: constraint state surfaces at every gate; enforce_constraints
         # gates fail-fast on ERROR-severity violations.
         constraint_checker=TwinConstraintChecker(get_twin(), project_backend),
+        # FORGE-73: real G3/G4 status surfaces at the two gates that carry a
+        # gate_id -- informational only, never fails a gate (no enforce_*
+        # flag exists for it; see Gate.gate_id's own docstring for why).
+        consistency_gate_checker=TwinConsistencyGateChecker(get_twin()),
     )
     task = asyncio.create_task(executor.run(run_id))
     _flow_tasks.add(task)

@@ -34,12 +34,22 @@ class Gate:
     without the flag still *surface* the constraint state in the gate reason
     so the human reviewer sees real data, not just prose. This keeps the gate
     skeleton hardcoded while the criteria come from the project itself.
+
+    ``gate_id`` (FORGE-73): the spec's own G-number ("G3", "G4", ...) when
+    this gate corresponds to a real ``twin_core.consistency.gates`` evaluator
+    -- ``None`` for gates that don't (most of them; G5-G8 have no Phase
+    mapping decided yet, see ``executor.py``'s ``ConsistencyGateChecker``).
+    Purely informational today: a mapped gate's real evaluation status is
+    surfaced in the human-facing gate reason, same as ``enforce_constraints``
+    already does for constraint state, but nothing here makes it block a
+    transition -- that's a deliberate, separate decision, not made here.
     """
 
     name: str
     auto_approve: bool = False
     criteria: tuple[str, ...] = ()
     enforce_constraints: bool = False
+    gate_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +174,7 @@ _FEASIBILITY_PHASE = Phase(
     required_deliverables=("design_decision",),
     gate=Gate(
         name="Preliminary Feasibility Gate (G3)",
+        gate_id="G3",
         criteria=(
             "Mass budget checked",
             "Cost budget checked",
@@ -342,6 +353,7 @@ HARDWARE_V1 = FlowDefinition(
             required_deliverables=("design_decision",),
             gate=Gate(
                 name="Architecture Gate (G4)",
+                gate_id="G4",
                 criteria=(
                     "Critical requirements allocated to subsystems",
                     "Subsystems and interfaces defined",
