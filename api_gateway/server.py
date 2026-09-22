@@ -658,6 +658,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_design_sketch_recorder,
     )
     from api_gateway.twin.document_recorder import make_document_recorder
+    from api_gateway.twin.ect_tools import make_ect_bridge
     from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
     from api_gateway.twin.evidence_recorder import make_evidence_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
@@ -758,6 +759,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # named for -- an artefact's real edge to the requirement it
         # satisfies, citing evidence, with status always computed live.
         claim_recorder=make_claim_recorder(twin),
+        # FORGE-70 (epic FORGE-35, Phase 7): the ECT lifecycle
+        # (propose/analyze/approve/reject/commit/mark_rolled_back) was real
+        # and tested since FORGE-66/67 but unreachable from any agent --
+        # nothing wired it to an MCP tool until this.
+        ect_bridge=make_ect_bridge(twin),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

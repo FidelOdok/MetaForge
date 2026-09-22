@@ -264,6 +264,7 @@ async def bootstrap_tool_registry(
     component_recorder: Any = None,
     evidence_recorder: Any = None,
     claim_recorder: Any = None,
+    ect_bridge: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -335,6 +336,13 @@ async def bootstrap_tool_registry(
             supported/unsupported status is always computed live, never
             stored. ``None`` skips registration (same pattern as
             ``document_recorder``).
+        ect_bridge: Optional ``ECTBridge`` (make_ect_bridge, FORGE-70, epic
+            FORGE-35). When supplied, registers all six
+            ``twin.{propose,analyze,approve,reject,commit,
+            mark_rolled_back}_engineering_change`` tools together -- one
+            inseparable state machine, so it's all-or-none, unlike the
+            independent single-tool recorders above. ``None`` skips
+            registration (same pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -503,6 +511,7 @@ async def bootstrap_tool_registry(
                     component_recorder=component_recorder,
                     evidence_recorder=evidence_recorder,
                     claim_recorder=claim_recorder,
+                    ect_bridge=ect_bridge,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

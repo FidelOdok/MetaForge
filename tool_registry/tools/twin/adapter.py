@@ -56,6 +56,7 @@ class TwinServer(McpToolServer):
         component_recorder: Any = None,
         evidence_recorder: Any = None,
         claim_recorder: Any = None,
+        ect_bridge: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -146,6 +147,16 @@ class TwinServer(McpToolServer):
         # seam as decision_recorder; None keeps tool_registry free of
         # api_gateway imports.
         self._claim_recorder = claim_recorder
+        # FORGE-70 (epic FORGE-35, Phase 7): an injected ECTBridge
+        # (make_ect_bridge) wrapping the six twin_core.transactions.ect
+        # lifecycle functions (propose/analyze/approve/reject/commit/
+        # mark_rolled_back) -- real and tested since FORGE-66/67 but
+        # unreachable from any agent until this. Registered all six tools
+        # together (one inseparable state machine), same injection seam as
+        # every recorder above; None keeps tool_registry free of twin_core
+        # imports (see twin_core.transactions.ect's own callers -- this
+        # bridge is built in api_gateway, which may import twin_core).
+        self._ect_bridge = ect_bridge
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -179,6 +190,8 @@ class TwinServer(McpToolServer):
             self._register_record_evidence()
         if claim_recorder is not None:
             self._register_record_claim()
+        if ect_bridge is not None:
+            self._register_ect_tools()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -2419,3 +2432,269 @@ class TwinServer(McpToolServer):
         if isinstance(claim_type, str) and claim_type:
             kwargs["claim_type"] = claim_type
         return await self._claim_recorder(**kwargs)
+
+    # ------------------------------------------------------------------
+    # twin.{propose,analyze,approve,reject,commit,mark_rolled_back}_engineering_change
+    # (FORGE-70, epic FORGE-35)
+    # ------------------------------------------------------------------
+
+    _ECT_OUTPUT_SCHEMA: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "status": {
+                "type": "string",
+                "enum": [
+                    "proposed",
+                    "analyzing",
+                    "ready_for_review",
+                    "approved",
+                    "rejected",
+                    "committed",
+                    "rolled_back",
+                ],
+            },
+            "trigger": {"type": "object"},
+            "observation": {"type": "string"},
+            "patch": {"type": "object"},
+            "affected_objects": {"type": "array", "items": {"type": "string"}},
+            "impact": {"type": ["string", "null"]},
+            "approval_required": {"type": ["boolean", "null"]},
+            "created_by": {"type": "string"},
+            "decided_by": {"type": ["string", "null"]},
+            "decision_reason": {"type": ["string", "null"]},
+            "committed_patch_result": {"type": ["object", "null"]},
+        },
+    }
+
+    def _register_ect_tools(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.propose_engineering_change",
+                adapter_id="twin",
+                name="Propose Engineering Change",
+                description=(
+                    "Open a new Engineering Change Transaction (ECT) in "
+                    "PROPOSED status -- the mandatory container for a "
+                    "non-trivial change (spec section 13). Nothing is "
+                    "analyzed or written to the graph beyond the ECT's own "
+                    "bookkeeping node yet; call twin.analyze_engineering_change "
+                    "next. 'patch' is the real, typed Patch (spec section 39) "
+                    "this change would commit if approved -- operations must "
+                    "reference already-resolved entity ids (find them first "
+                    "via twin.find_by_property/twin.thread_for), not names. "
+                    "Not the same as the older twin.propose_change tool "
+                    "(an opaque free-form diff) -- use this one for changes "
+                    "that touch Constraint/EngineeringEntity graph state."
+                ),
+                capability="twin_ect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "trigger": {
+                            "type": "object",
+                            "description": (
+                                "What set this change off, e.g. "
+                                "{'type': 'simulation_result', 'ref': 'SIM-091'} "
+                                "or {'type': 'user_request'}."
+                            ),
+                            "properties": {
+                                "type": {"type": "string"},
+                                "ref": {"type": "string"},
+                            },
+                            "required": ["type"],
+                        },
+                        "observation": {
+                            "type": "string",
+                            "description": "What was observed that motivates this change.",
+                        },
+                        "patch": {
+                            "type": "object",
+                            "description": (
+                                "A real Patch: {operations: [...], reason, "
+                                "created_by?, project_id?}. Each operation is "
+                                "{op: add|revise|link|unlink|supersede|"
+                                "deprecate|invalidate, ...op-specific fields}."
+                            ),
+                            "properties": {
+                                "operations": {"type": "array", "items": {"type": "object"}},
+                                "reason": {"type": "string"},
+                                "created_by": {"type": "string"},
+                                "project_id": {"type": "string"},
+                            },
+                            "required": ["operations", "reason"],
+                        },
+                        "created_by": {
+                            "type": "string",
+                            "description": "Who's proposing this ECT (agent-asserted).",
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                    },
+                    "required": ["trigger", "observation", "patch"],
+                },
+                output_schema=self._ECT_OUTPUT_SCHEMA,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.propose_engineering_change,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.analyze_engineering_change",
+                adapter_id="twin",
+                name="Analyze Engineering Change",
+                description=(
+                    "PROPOSED -> ANALYZING -> READY_FOR_REVIEW. Computes the "
+                    "real transitive impact (ImpactEngine, which entities go "
+                    "stale) and the required approval level (HITLEngine) for "
+                    "a proposed ECT. Call after "
+                    "twin.propose_engineering_change, before "
+                    "twin.approve_engineering_change."
+                ),
+                capability="twin_ect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {"type": "string", "format": "uuid"},
+                    },
+                    "required": ["ect_id"],
+                },
+                output_schema=self._ECT_OUTPUT_SCHEMA,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.analyze_engineering_change,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.approve_engineering_change",
+                adapter_id="twin",
+                name="Approve Engineering Change",
+                description=(
+                    "READY_FOR_REVIEW -> APPROVED. 'approver' is an "
+                    "agent-asserted identity string (same trust level as "
+                    "every created_by field in this API, not a verified "
+                    "login) -- but the independence check IS real: this "
+                    "raises if approver equals the patch's own created_by "
+                    "(spec section 63, an author can't approve their own "
+                    "change when independence is required). Call "
+                    "twin.commit_engineering_change next to actually apply it."
+                ),
+                capability="twin_ect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {"type": "string", "format": "uuid"},
+                        "approver": {
+                            "type": "string",
+                            "description": "Who is approving this change.",
+                        },
+                    },
+                    "required": ["ect_id", "approver"],
+                },
+                output_schema=self._ECT_OUTPUT_SCHEMA,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.approve_engineering_change,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.reject_engineering_change",
+                adapter_id="twin",
+                name="Reject Engineering Change",
+                description=(
+                    "READY_FOR_REVIEW -> REJECTED (terminal; never "
+                    "committed). 'reason' is required."
+                ),
+                capability="twin_ect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {"type": "string", "format": "uuid"},
+                        "reason": {"type": "string"},
+                        "decided_by": {"type": "string"},
+                    },
+                    "required": ["ect_id", "reason"],
+                },
+                output_schema=self._ECT_OUTPUT_SCHEMA,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.reject_engineering_change,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.commit_engineering_change",
+                adapter_id="twin",
+                name="Commit Engineering Change",
+                description=(
+                    "APPROVED -> COMMITTED. Actually applies the ECT's patch "
+                    "via TransactionEngine. On a conflict (another change "
+                    "landed on the same entities since this ECT was "
+                    "analyzed), the ECT stays APPROVED with the conflict "
+                    "recorded in committed_patch_result rather than being "
+                    "silently marked COMMITTED -- check the returned status."
+                ),
+                capability="twin_ect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {"type": "string", "format": "uuid"},
+                    },
+                    "required": ["ect_id"],
+                },
+                output_schema=self._ECT_OUTPUT_SCHEMA,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.commit_engineering_change,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.mark_engineering_change_rolled_back",
+                adapter_id="twin",
+                name="Mark Engineering Change Rolled Back",
+                description=(
+                    "COMMITTED -> ROLLED_BACK. A bookkeeping label only, "
+                    "NOT an automatic undo -- no transactional rollback "
+                    "capability exists anywhere in this system. Use this to "
+                    "record that a committed change was later reverted by "
+                    "some other, compensating action; it does not itself "
+                    "revert anything. 'reason' is required."
+                ),
+                capability="twin_ect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {"type": "string", "format": "uuid"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["ect_id", "reason"],
+                },
+                output_schema=self._ECT_OUTPUT_SCHEMA,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.mark_engineering_change_rolled_back,
+        )
+
+    async def propose_engineering_change(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._ect_bridge.propose(arguments)
+
+    async def analyze_engineering_change(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._ect_bridge.analyze(arguments)
+
+    async def approve_engineering_change(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._ect_bridge.approve(arguments)
+
+    async def reject_engineering_change(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._ect_bridge.reject(arguments)
+
+    async def commit_engineering_change(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._ect_bridge.commit(arguments)
+
+    async def mark_engineering_change_rolled_back(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._ect_bridge.mark_rolled_back(arguments)
