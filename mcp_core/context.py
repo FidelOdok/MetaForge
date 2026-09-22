@@ -207,6 +207,32 @@ def _apply_session_binding(fields: dict[str, object], session: UUID | None) -> N
         fields["project_id"] = bound
 
 
+def context_to_headers(ctx: McpCallContext) -> dict[str, str]:
+    """Build outgoing HTTP headers from a call context (FORGE-76).
+
+    The inverse of ``context_from_headers`` — used by transports sending
+    a request so the receiving side's own ``context_from_headers`` call
+    reconstructs the same context.
+
+    Returns an empty dict for the untouched sentinel context, so a truly
+    unscoped call (nothing ever called ``set_context``/``with_context``)
+    sends no headers at all — same as before this existed. Sending the
+    sentinel's own all-zero session_id as a real header would make the
+    receiver treat every such call as one shared session, which is worse
+    than the receiver falling back to its own fresh default per call.
+    """
+    if ctx == _DEFAULT_CONTEXT:
+        return {}
+    headers: dict[str, str] = {
+        HEADER_SESSION: str(ctx.session_id),
+        HEADER_ACTOR: ctx.actor_id,
+        HEADER_CORRELATION: str(ctx.correlation_id),
+    }
+    if ctx.project_id is not None:
+        headers[HEADER_PROJECT] = str(ctx.project_id)
+    return headers
+
+
 def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
     """Build a context from HTTP request headers.
 
@@ -264,6 +290,7 @@ __all__ = [
     "clear_session_project",
     "context_from_env",
     "context_from_headers",
+    "context_to_headers",
     "current_context",
     "reset_context",
     "set_context",

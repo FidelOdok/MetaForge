@@ -18,8 +18,8 @@ import contextlib
 import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TypeVar
-from uuid import uuid4
+from typing import Any, TypeVar
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -79,6 +79,7 @@ from domain_agents.mechanical.pydantic_ai_agent import (
     MechanicalAgentDeps,
     run_agent,
 )
+from mcp_core.context import McpCallContext, with_context
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 from orchestrator.harness.compression import budget_history, summarize_turns
@@ -334,6 +335,40 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     return "\n".join(lines)
 
 
+def _try_uuid(value: str | None) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+def _mcp_call_context_for_thread(thread: ChatThreadRecord) -> McpCallContext:
+    """Build the McpCallContext for one chat turn (FORGE-76).
+
+    Established once per turn and held via ``with_context()`` around the
+    whole tool-calling loop — every MCP call this turn makes (however many
+    tools it invokes) shares the same session_id/correlation_id, and
+    HttpTransport.send() forwards it as X-MetaForge-* headers so the
+    receiving server's own context_from_headers() (MET-387, already wired)
+    reconstructs it. project_id is None for a non-project-scoped thread —
+    that's the correct "no scope" signal, not a bug: tools relying on this
+    context fall back to their own admin-path behavior.
+
+    thread.id isn't guaranteed to be a UUID (test/dev threads can use
+    arbitrary strings) — when it isn't, session_id just gets a fresh
+    auto-generated one via McpCallContext's own default_factory rather
+    than failing the turn.
+    """
+    project_id = _try_uuid(thread.scope_entity_id) if thread.scope_kind == "project" else None
+    session_id = _try_uuid(thread.id)
+    kwargs: dict[str, Any] = {"project_id": project_id, "actor_id": "agent:harness-agent"}
+    if session_id is not None:
+        kwargs["session_id"] = session_id
+    return McpCallContext(**kwargs)
+
+
 async def _context_availability(thread: ChatThreadRecord) -> dict[str, int]:
     """Totals for the context meter: what *exists* vs. what the brief/history show.
 
@@ -465,30 +500,36 @@ async def _invoke_agent(
                 context_block = (
                     render_context_block(ctx_response) if ctx_response is not None else None
                 )
-                text = await run_chat_turn_streaming(
-                    user_content,
-                    on_delta=_on_delta,
-                    on_step=_on_step,
-                    on_thinking=_on_thinking,
-                    on_action_started=_on_action_started,
-                    on_context=_on_context,
-                    on_approval_request=_on_approval_request,
-                    session_id=thread.id,
-                    mcp_bridge=_mcp_bridge,
-                    provider=provider,
-                    model=model,
-                    enabled_tools=tools,
-                    history=history,
-                    availability=availability,
-                    project_brief=brief,
-                    context_block=context_block,
-                    chat_backend=_backend,
-                    twin=_twin,
-                    metrics=_metrics,
-                    # MET-567: scope this turn's experience deposit to the
-                    # thread's project (None on an unscoped assistant thread).
-                    project_id=capture_project,
-                )
+                # FORGE-76: every MCP tool call this turn makes needs to carry
+                # project/session scope over the wire (HttpTransport reads this
+                # ContextVar and attaches it as X-MetaForge-* headers) — without
+                # this, tools like twin.find_by_property that rely on ambient
+                # context ran completely unscoped in every real chat session.
+                with with_context(_mcp_call_context_for_thread(thread)):
+                    text = await run_chat_turn_streaming(
+                        user_content,
+                        on_delta=_on_delta,
+                        on_step=_on_step,
+                        on_thinking=_on_thinking,
+                        on_action_started=_on_action_started,
+                        on_context=_on_context,
+                        on_approval_request=_on_approval_request,
+                        session_id=thread.id,
+                        mcp_bridge=_mcp_bridge,
+                        provider=provider,
+                        model=model,
+                        enabled_tools=tools,
+                        history=history,
+                        availability=availability,
+                        project_brief=brief,
+                        context_block=context_block,
+                        chat_backend=_backend,
+                        twin=_twin,
+                        metrics=_metrics,
+                        # MET-567: scope this turn's experience deposit to the
+                        # thread's project (None on an unscoped assistant thread).
+                        project_id=capture_project,
+                    )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(
                     thread.id, capture_project, status="completed", steps=step_count["n"]
