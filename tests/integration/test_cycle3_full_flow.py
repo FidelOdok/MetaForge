@@ -116,7 +116,9 @@ class _FakeTwin:
         self.observed_contexts.append(current_context())
         return []
 
-    async def evaluate_constraints(self, branch: str = "main") -> Any:
+    async def evaluate_constraints(
+        self, branch: str = "main", project_id: UUID | None = None
+    ) -> Any:
         from twin_core.constraint_engine.validator import ConstraintEvaluationResult
 
         self.observed_contexts.append(current_context())

@@ -348,7 +348,10 @@ class TwinServer(McpToolServer):
                 description=(
                     "Return current constraint violations for the project, "
                     "severity-ordered (error > warning > info). Use to ask "
-                    "'what's currently broken?' before proposing changes."
+                    "'what's currently broken?' before proposing changes. "
+                    "Scoped to the calling session's active project when one "
+                    "is set (FORGE-74); with no active project, evaluates "
+                    "every constraint across every project (admin path)."
                 ),
                 capability="twin_constraints",
                 input_schema={
@@ -574,7 +577,14 @@ class TwinServer(McpToolServer):
 
         with tracer.start_as_current_span("twin.constraint_violations") as span:
             span.set_attribute("twin.branch", branch)
-            result = await self._twin.evaluate_constraints(branch=branch)
+            # FORGE-74: same MET-441 pattern as find_by_property -- when the
+            # call context names a project, scope to it so one project's
+            # violations can't be reported against another's. Without a
+            # context, no filter is added (admin path) -- same as before.
+            ctx_project_id = current_context().project_id
+            if ctx_project_id is not None:
+                span.set_attribute("mcp.project_id", str(ctx_project_id))
+            result = await self._twin.evaluate_constraints(branch=branch, project_id=ctx_project_id)
             span.set_attribute("twin.passed", result.passed)
             span.set_attribute("twin.violation_count", len(result.violations))
             span.set_attribute("twin.warning_count", len(result.warnings))

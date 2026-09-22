@@ -57,6 +57,7 @@ class _FakeTwin:
         self.subgraph_direction_calls: list[str] = []
         self.cypher_calls: list[tuple[str, dict[str, Any]]] = []
         self.evaluate_calls: list[str] = []
+        self.evaluate_project_id_calls: list[UUID | None] = []
         # Configurable returns.
         self.subgraph_return: SubGraph | None = None
         self.cypher_rows: list[dict[str, Any]] = []
@@ -82,8 +83,11 @@ class _FakeTwin:
         self.cypher_calls.append((query, params or {}))
         return list(self.cypher_rows)
 
-    async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult:
+    async def evaluate_constraints(
+        self, branch: str = "main", project_id: UUID | None = None
+    ) -> ConstraintEvaluationResult:
         self.evaluate_calls.append(branch)
+        self.evaluate_project_id_calls.append(project_id)
         return self.evaluate_return
 
 
@@ -441,6 +445,29 @@ class TestConstraintViolations:
         srv = TwinServer(twin=twin)
         await srv.handle_request(_request("twin.constraint_violations", {"branch": "feature/x"}))
         assert twin.evaluate_calls == ["feature/x"]
+
+    async def test_unscoped_when_ctx_has_no_project_id(self) -> None:
+        """FORGE-74: default ctx (no project_id) -> no scoping applied,
+        same admin-path behavior as before this fix."""
+        twin = _FakeTwin()
+        srv = TwinServer(twin=twin)
+        await srv.handle_request(_request("twin.constraint_violations", {}))
+        assert twin.evaluate_project_id_calls == [None]
+
+    async def test_scoped_to_ctx_project_id(self) -> None:
+        """FORGE-74: when ctx.project_id is set, it's forwarded to
+        evaluate_constraints so one project's violations can't be reported
+        against another's (the bug this fix closes)."""
+        from mcp_core.context import McpCallContext, with_context
+
+        twin = _FakeTwin()
+        srv = TwinServer(twin=twin)
+        proj = uuid4()
+
+        with with_context(McpCallContext(project_id=proj)):
+            await srv.handle_request(_request("twin.constraint_violations", {}))
+
+        assert twin.evaluate_project_id_calls == [proj]
 
 
 # ---------------------------------------------------------------------------
