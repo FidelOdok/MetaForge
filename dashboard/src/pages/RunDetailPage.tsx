@@ -10,7 +10,7 @@ const KC = {
   surfaceBorder: 'rgba(65,72,90,0.2)',
   onSurface: '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
-  running: '#e67e22',
+  running: '#ff5a0a',
   done: '#3dd68c',
   error: '#ffb4ab',
   logBg: '#0a0b10',

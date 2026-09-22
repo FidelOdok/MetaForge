@@ -16,7 +16,7 @@ const TYPE_CHIP: Record<KnowledgeType, { color: string; bg: string }> = {
   component:       { color: '#3dd68c', bg: 'rgba(61,214,140,0.1)'  },
   failure:         { color: '#ffb4ab', bg: 'rgba(255,180,171,0.1)' },
   constraint:      { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  session:         { color: '#ffb783', bg: 'rgba(230,126,34,0.12)' },
+  session:         { color: '#ffb783', bg: 'rgba(255,90,10,0.12)' },
   other:           { color: '#9a9aaa', bg: 'rgba(154,154,170,0.1)' },
 };
 
@@ -273,7 +273,7 @@ export function KnowledgePage() {
               borderRadius: 4,
               border: 'none',
               cursor: 'pointer',
-              background: filterType === 'all' ? '#e67e22' : 'rgba(30,31,38,0.85)',
+              background: filterType === 'all' ? '#ff5a0a' : 'rgba(30,31,38,0.85)',
               color: filterType === 'all' ? '#000' : '#9a9aaa',
               transition: 'background 0.15s, color 0.15s',
             }}
@@ -297,7 +297,7 @@ export function KnowledgePage() {
                   borderRadius: 4,
                   border: 'none',
                   cursor: 'pointer',
-                  background: active ? '#e67e22' : 'rgba(30,31,38,0.85)',
+                  background: active ? '#ff5a0a' : 'rgba(30,31,38,0.85)',
                   color: active ? '#000' : '#9a9aaa',
                   transition: 'background 0.15s, color 0.15s',
                 }}

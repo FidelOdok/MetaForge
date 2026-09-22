@@ -1,88 +1,51 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test/test-utils';
-
-vi.mock('../../hooks/use-projects', () => ({
-  useProjects: vi.fn(),
-  useCreateProject: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-}));
-
-const mockUseHealth = vi.fn();
-vi.mock('../../hooks/use-health', () => ({
-  useHealth: () => mockUseHealth(),
-}));
-
+vi.mock('../../hooks/use-projects', () => ({ useProjects: vi.fn(), useCreateProject: vi.fn() }));
+vi.mock('../../hooks/use-health', () => ({ useHealth: vi.fn(() => ({ data: undefined, isLoading: false })) }));
+vi.mock('../../hooks/use-runs', () => ({ useRuns: vi.fn(() => ({ data: [], isLoading: false })) }));
 import { ProjectsPage } from '../ProjectsPage';
-import { useProjects } from '../../hooks/use-projects';
-
-const mockUseProjects = vi.mocked(useProjects);
-
-describe('ProjectsPage', () => {
-  beforeEach(() => {
-    mockUseHealth.mockReturnValue({ data: undefined, isLoading: true });
+import { useProjects, useCreateProject } from '../../hooks/use-projects';
+const project = { id:'p1', name:'Inspection rover', description:'Mobile platform', status:'active', work_products:[], agentCount:2, lastUpdated:'2026-09-21T10:00:00Z', createdAt:'2026-09-21T10:00:00Z' };
+const mockProjects = vi.mocked(useProjects);
+const mutate = vi.fn();
+beforeEach(()=>{
+  vi.mocked(useCreateProject).mockReturnValue({ mutate, reset:vi.fn(), isPending:false } as unknown as ReturnType<typeof useCreateProject>);
+  mockProjects.mockReturnValue({data:[],isLoading:false,isError:false} as unknown as ReturnType<typeof useProjects>);
+  HTMLDialogElement.prototype.showModal = function(){this.setAttribute('open','');};
+  HTMLDialogElement.prototype.close = function(){this.removeAttribute('open');};
+});
+describe('Projects workspace',()=>{
+  it('distinguishes unavailable data from an empty workspace',()=>{
+    mockProjects.mockReturnValue({data:undefined,isLoading:false,isError:true} as ReturnType<typeof useProjects>);
+    render(<ProjectsPage/>);
+    expect(screen.getByText('Connect your engineering gateway')).toBeInTheDocument();
+    expect(screen.queryByText('Start with an engineering intent')).not.toBeInTheDocument();
+    expect(screen.getByText('Project data unavailable')).toBeInTheDocument();
   });
-
-  it('shows loading state', () => {
-    mockUseProjects.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useProjects>);
-    const { container } = render(<ProjectsPage />);
-    // KC renders SkeletonCard components with animate-pulse (no data-testid)
-    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+  it('announces loading',()=>{
+    mockProjects.mockReturnValue({data:undefined,isLoading:true} as ReturnType<typeof useProjects>);
+    render(<ProjectsPage/>); expect(screen.getByRole('status')).toHaveTextContent('Loading your workspace');
   });
-
-  it('shows empty state', () => {
-    mockUseProjects.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useProjects>);
-    render(<ProjectsPage />);
-    expect(screen.getByText('No projects yet')).toBeInTheDocument();
+  it('shows a useful empty state',()=>{render(<ProjectsPage/>);expect(screen.getByText('Start with an engineering intent')).toBeInTheDocument();});
+  it('filters projects and restores them with Clear filters',async()=>{
+    mockProjects.mockReturnValue({data:[project],isLoading:false} as unknown as ReturnType<typeof useProjects>);
+    render(<ProjectsPage/>);const user=userEvent.setup();
+    expect(screen.getByRole('link',{name:/Inspection rover/})).toHaveAttribute('href','/projects/p1');
+    await user.type(screen.getByRole('textbox',{name:'Search projects'}),'unmatched');
+    expect(screen.getByText('No matching projects')).toBeInTheDocument();
+    await user.click(screen.getByRole('button',{name:'Clear filters'}));
+    expect(screen.getByRole('link',{name:/Inspection rover/})).toBeInTheDocument();
+    await user.click(screen.getByRole('button',{name:'Draft'}));
+    expect(screen.getByText('No matching projects')).toBeInTheDocument();
   });
-
-  it('renders project list', () => {
-    mockUseProjects.mockReturnValue({
-      data: [
-        { id: '1', name: 'Test Project', description: 'Desc', status: 'active', work_products: [], agentCount: 2, lastUpdated: new Date().toISOString(), createdAt: new Date().toISOString() },
-      ],
-      isLoading: false,
-    } as unknown as ReturnType<typeof useProjects>);
-    render(<ProjectsPage />);
-    expect(screen.getByText('Test Project')).toBeInTheDocument();
-  });
-
-  it('does not render fabricated Data Flows / Activity content', () => {
-    mockUseProjects.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useProjects>);
-    render(<ProjectsPage />);
-    // These used to be hardcoded regardless of any real system state.
-    expect(screen.queryByText('Data Flows')).not.toBeInTheDocument();
-    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
-    expect(screen.queryByText('File Save → Twin')).not.toBeInTheDocument();
-    expect(screen.queryByText('Node updated: MCU_STM32H7')).not.toBeInTheDocument();
-    expect(screen.queryByText(/last sync/)).not.toBeInTheDocument();
-  });
-
-  it('renders real per-dependency health from GET /health', () => {
-    mockUseProjects.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useProjects>);
-    mockUseHealth.mockReturnValue({
-      isLoading: false,
-      data: {
-        status: 'degraded',
-        timestamp: new Date().toISOString(),
-        uptime_seconds: 123,
-        version: '0.1.0',
-        components: [
-          { name: 'neo4j', status: 'healthy', latency_ms: 4.2, message: null },
-          { name: 'pgvector', status: 'degraded', latency_ms: null, message: 'slow' },
-        ],
-      },
-    });
-    render(<ProjectsPage />);
-    expect(screen.getByText('neo4j')).toBeInTheDocument();
-    expect(screen.getByText('4ms')).toBeInTheDocument();
-    expect(screen.getByText('pgvector')).toBeInTheDocument();
-    expect(screen.getByText('degraded')).toBeInTheDocument();
-    expect(screen.getByText(/gateway degraded/)).toBeInTheDocument();
-  });
-
-  it('renders nothing for System Health when there is no real health data', () => {
-    mockUseProjects.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useProjects>);
-    mockUseHealth.mockReturnValue({ data: undefined, isLoading: false });
-    render(<ProjectsPage />);
-    expect(screen.queryByText(/gateway/)).not.toBeInTheDocument();
+  it('submits the gateway contract from a labeled dialog',async()=>{
+    render(<ProjectsPage/>); const user=userEvent.setup();
+    await user.click(screen.getByRole('button',{name:'New project'}));
+    expect(screen.getByRole('dialog',{name:'Create a project'})).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Project name'),'  Rover  ');
+    await user.type(screen.getByLabelText(/Description/),'Field inspection');
+    await user.click(screen.getByRole('button',{name:'Create project'}));
+    expect(mutate).toHaveBeenCalledWith({name:'Rover',description:'Field inspection'},expect.any(Object));
   });
 });

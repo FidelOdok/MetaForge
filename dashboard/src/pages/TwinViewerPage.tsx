@@ -53,9 +53,9 @@ const KC = {
   borderMid: 'rgba(65,72,90,0.3)',
   onSurface: '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
-  orange: '#e67e22',
-  orangeFaint: 'rgba(230,126,34,0.15)',
-  orangeBorder: 'rgba(230,126,34,0.45)',
+  orange: '#ff5a0a',
+  orangeFaint: 'rgba(255,90,10,0.15)',
+  orangeBorder: 'rgba(255,90,10,0.45)',
   teal: '#86cfff',
   green: '#3dd68c',
   statusBar: 'rgba(12,14,20,0.95)',
@@ -175,7 +175,7 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
       <div className="flex items-center gap-2 mb-1" style={{ flexWrap: 'wrap' }}>
         <span
           className="font-mono"
-          style={{ fontSize: 10, color: KC.orange, background: 'rgba(230,126,34,0.1)', padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          style={{ fontSize: 10, color: KC.orange, background: 'rgba(255,90,10,0.1)', padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}
         >
           {wpType ?? 'unknown'}
         </span>
@@ -1525,8 +1525,8 @@ export function TwinViewerPage() {
                 textAlign: 'center',
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(230,126,34,0.4)';
-                (e.currentTarget as HTMLDivElement).style.background = 'rgba(230,126,34,0.04)';
+                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(255,90,10,0.4)';
+                (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,90,10,0.04)';
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(65,72,90,0.4)';

@@ -1,4 +1,5 @@
 import apiClient from '../client';
+import axios from 'axios';
 import type { Project, ProjectWorkProduct } from '../../types/project';
 
 interface ProjectWorkProductRaw {
@@ -41,8 +42,8 @@ function mapProject(raw: ProjectResponseRaw): Project {
     name: raw.name,
     description: raw.description,
     status: raw.status as Project['status'],
-    work_products: raw.work_products.map(mapWorkProduct),
-    agentCount: raw.agent_count,
+    work_products: (raw.work_products ?? []).map(mapWorkProduct),
+    agentCount: raw.agent_count ?? 0,
     lastUpdated: raw.last_updated,
     createdAt: raw.created_at,
   };
@@ -57,8 +58,9 @@ export async function getProject(id: string): Promise<Project | undefined> {
   try {
     const { data } = await apiClient.get<ProjectResponseRaw>(`/projects/${id}`);
     return mapProject(data);
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) return undefined;
+    throw error;
   }
 }
 

@@ -36,8 +36,8 @@ describe('getProjects', () => {
 });
 
 describe('getProject', () => {
-  it('returns undefined on error', async () => {
-    mockGet.mockRejectedValueOnce(new Error('not found'));
+  it('returns undefined only for an HTTP 404', async () => {
+    mockGet.mockRejectedValueOnce({ isAxiosError: true, response: { status: 404 } });
     const result = await getProject('unknown');
     expect(result).toBeUndefined();
   });
@@ -65,4 +65,15 @@ describe('deleteProject', () => {
     await deleteProject('1');
     expect(mockDelete).toHaveBeenCalledWith('/projects/1');
   });
+});
+
+it('preserves connection errors for the UI', async () => {
+  mockGet.mockRejectedValueOnce(new Error('Network error'));
+  await expect(getProject('p1')).rejects.toThrow('Network error');
+});
+it('accepts omitted fields that have OpenAPI defaults', async () => {
+  mockGet.mockResolvedValueOnce({data:{projects:[{id:'p1',name:'Rover',description:'',status:'draft',created_at:'2026-09-21',last_updated:'2026-09-21'}],total:1}});
+  const [project] = await getProjects();
+  expect(project?.work_products).toEqual([]);
+  expect(project?.agentCount).toBe(0);
 });

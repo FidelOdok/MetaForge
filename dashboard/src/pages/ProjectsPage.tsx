@@ -1,371 +1,57 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { flushSync } from 'react-dom';
+import { registerProjectSearch } from '../lib/workspace-tools';
+import { ArrowRight, ArrowUpRight, Box, Boxes, CheckCheck, CircleAlert, FileBox, LayoutGrid, List, Plus, RefreshCw, Search, ShieldCheck, Workflow, X } from 'lucide-react';
 import { useProjects, useCreateProject } from '../hooks/use-projects';
+import { useRuns } from '../hooks/use-runs';
 import { useHealth } from '../hooks/use-health';
-import { StatusBadge } from '../components/shared/StatusBadge';
-import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
-import type { DependencyStatus } from '../types/health';
-
-// Glass card style matching Kinetic Console spec
-const glassCard = {
-  background: 'rgba(30,31,38,0.85)',
-} as const;
-
-const statusDotColor: Record<string, string> = {
-  active: '#3dd68c',
-  running: '#3dd68c',
-  draft: '#f59e0b',
-  archived: '#9a9aaa',
-  completed: '#86cfff',
-  failed: '#ffb4ab',
-};
-
-function getStatusDotColor(status: string): string {
-  return statusDotColor[status] ?? '#9a9aaa';
-}
-
-function isLiveStatus(status: string): boolean {
-  return status === 'active' || status === 'running';
-}
-
-function SkeletonCard() {
-  return (
-    <div
-      className="rounded p-4 animate-pulse"
-      style={glassCard}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="h-3 rounded w-1/2" style={{ background: 'rgba(65,72,90,0.4)' }} />
-        <div className="h-4 rounded w-14" style={{ background: 'rgba(65,72,90,0.4)' }} />
-      </div>
-      <div className="h-2 rounded w-3/4 mb-2" style={{ background: 'rgba(65,72,90,0.3)' }} />
-      <div className="h-2 rounded w-1/2 mb-4" style={{ background: 'rgba(65,72,90,0.3)' }} />
-      <div className="flex items-center justify-between">
-        <div className="h-2 rounded w-16" style={{ background: 'rgba(65,72,90,0.3)' }} />
-        <div className="h-2 rounded w-16" style={{ background: 'rgba(65,72,90,0.3)' }} />
-        <div className="h-2 rounded w-16" style={{ background: 'rgba(65,72,90,0.3)' }} />
-      </div>
-    </div>
-  );
-}
-
-// ── System Health row ─────────────────────────────────────────────────────────
-// Backed by GET /health (api_gateway/health.py) — replaces a previous version
-// that hardcoded Neo4j/Kafka/pgvector/Temporal/MinIO with fake latencies
-// regardless of real status.
-
-const DEPENDENCY_DOT_COLOR: Record<DependencyStatus, string> = {
-  healthy: '#3dd68c',
-  degraded: '#f59e0b',
-  unhealthy: '#ffb4ab',
-};
-
-function SystemHealthRow() {
-  const { data: health, isLoading } = useHealth();
-
-  if (isLoading || !health || health.components.length === 0) return null;
-
-  return (
-    <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: `repeat(${health.components.length}, 1fr)` }}>
-      {health.components.map((component) => (
-        <div
-          key={component.name}
-          title={component.message ?? undefined}
-          style={{
-            background: 'rgba(30,31,38,0.85)',
-            padding: '10px 12px',
-            borderRadius: 4,
-            border: '1px solid rgba(65,72,90,0.2)',
-          }}
-        >
-          <div style={{ fontSize: '12px', color: '#9a9aaa', marginBottom: 4 }}>
-            {component.name}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: DEPENDENCY_DOT_COLOR[component.status],
-                display: 'inline-block',
-                flexShrink: 0,
-              }}
-            />
-            <span className="font-mono" style={{ fontSize: '11px', color: DEPENDENCY_DOT_COLOR[component.status] }}>
-              {component.latency_ms != null ? `${Math.round(component.latency_ms)}ms` : component.status}
-            </span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Page component ────────────────────────────────────────────────────────────
+import type { Project } from '../types/project';
 
 export function ProjectsPage() {
-  const { data: projects, isLoading } = useProjects();
-  const { data: health } = useHealth();
-  const createProject = useCreateProject();
-  const [showForm, setShowForm] = useState(false);
+  const projectsQuery = useProjects();
+  const runsQuery = useRuns();
+  const healthQuery = useHealth();
+  const projects = projectsQuery.data ?? [];
+  const runs = runsQuery.data ?? [];
+  const create = useCreateProject();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const newButton = useRef<HTMLButtonElement>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [filter, setFilter] = useState('');
-
-  const q = filter.trim().toLowerCase();
-  const filteredProjects = q
-    ? (projects ?? []).filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.description ?? '').toLowerCase().includes(q),
-      )
-    : (projects ?? []);
-
-  const activeCount = projects?.filter((p) => p.status === 'active').length ?? 0;
-
-  function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    createProject.mutate(
-      { name: name.trim(), description: description.trim() },
-      {
-        onSuccess: () => {
-          setName('');
-          setDescription('');
-          setShowForm(false);
-        },
-      },
-    );
-  }
-
-  return (
-    <div>
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-baseline gap-2">
-          <span style={{ fontSize: '18px', fontWeight: 500, color: '#e2e2eb', letterSpacing: '-0.02em' }}>
-            Projects
-          </span>
-          <span style={{ fontSize: '12px', color: '#9a9aaa' }}>
-            overview · {activeCount} active
-          </span>
-        </div>
-        {health && (
-          <span className="font-mono flex items-center gap-1.5" style={{ fontSize: '11px', color: '#9a9aaa' }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                display: 'inline-block',
-                background: DEPENDENCY_DOT_COLOR[health.status],
-              }}
-            />
-            gateway {health.status} · checked {formatRelativeTime(health.timestamp)}
-          </span>
-        )}
-      </div>
-
-      {/* Metrics row */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        {/* Total Projects */}
-        <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div style={{ fontSize: '28px', fontWeight: 300, color: '#e2e2eb', lineHeight: 1, letterSpacing: '-0.02em' }}>
-            {isLoading ? '—' : (projects?.length ?? 0)}
-          </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
-            Total Projects
-          </div>
-        </div>
-
-        {/* Active */}
-        <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div style={{ fontSize: '28px', fontWeight: 300, color: '#3dd68c', lineHeight: 1, letterSpacing: '-0.02em' }}>
-            {isLoading ? '—' : activeCount}
-          </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
-            Active
-          </div>
-        </div>
-
-        {/* Work Products */}
-        <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div className="font-mono" style={{ fontSize: '28px', fontWeight: 300, color: '#86cfff', lineHeight: 1, letterSpacing: '-0.02em' }}>
-            {isLoading ? '—' : (projects?.reduce((sum, p) => sum + p.work_products.length, 0) ?? 0)}
-          </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
-            Work Products
-          </div>
-        </div>
-
-        {/* Agents */}
-        <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div style={{ fontSize: '28px', fontWeight: 300, color: '#ffb783', lineHeight: 1, letterSpacing: '-0.02em' }}>
-            {isLoading ? '—' : (projects?.reduce((sum, p) => sum + p.agentCount, 0) ?? 0)}
-          </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
-            Agent Tasks
-          </div>
-        </div>
-      </div>
-
-      {/* System Health row */}
-      <SystemHealthRow />
-
-      {/* Toolbar: search + new project */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined" style={{ fontSize: '16px', color: '#9a9aaa' }}>search</span>
-          <input
-            type="text"
-            placeholder="Filter projects..."
-            className="bg-surface-high border border-[rgba(65,72,90,0.3)] text-on-surface text-xs rounded px-3 py-1.5 placeholder:text-on-surface-variant outline-none focus:border-[rgba(65,72,90,0.6)]"
-            style={{ width: '220px' }}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-90"
-          style={{ background: '#e67e22', color: '#fff' }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
-          {showForm ? 'Cancel' : 'New Project'}
-        </button>
-      </div>
-
-      {/* New project form */}
-      {showForm && (
-        <div className="glass rounded p-4 mb-4" style={glassCard}>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <div>
-              <label
-                htmlFor="project-name"
-                className="block mb-1 font-mono"
-                style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}
-              >
-                Project name
-              </label>
-              <input
-                id="project-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Drone Flight Controller"
-                className="w-full rounded px-3 py-1.5 text-xs outline-none focus:border-[rgba(65,72,90,0.6)]"
-                style={{
-                  background: '#1e1f26',
-                  border: '1px solid rgba(65,72,90,0.3)',
-                  color: '#e2e2eb',
-                }}
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="project-desc"
-                className="block mb-1 font-mono"
-                style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}
-              >
-                Description
-              </label>
-              <textarea
-                id="project-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-                placeholder="Brief project description"
-                className="w-full rounded px-3 py-1.5 text-xs outline-none resize-none focus:border-[rgba(65,72,90,0.6)]"
-                style={{
-                  background: '#1e1f26',
-                  border: '1px solid rgba(65,72,90,0.3)',
-                  color: '#e2e2eb',
-                }}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!name.trim() || createProject.isPending}
-              className="rounded px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
-              style={{ background: '#e67e22', color: '#fff' }}
-            >
-              {createProject.isPending ? 'Creating...' : 'Create Project'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Project cards */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
-      ) : !projects?.length ? (
-        <EmptyState
-          title="No projects yet"
-          description="Create a project with the button above or run 'forge setup' to get started."
-        />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filteredProjects.map((project) => (
-            <Link key={project.id} to={`/projects/${project.id}`}>
-              <div
-                className="glass rounded p-4 cursor-pointer transition-colors hover:bg-[rgba(40,42,48,0.85)]"
-                style={glassCard}
-              >
-                {/* Card header */}
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={isLiveStatus(project.status) ? 'live-dot' : undefined}
-                      style={{
-                        width: '6px',
-                        height: '6px',
-                        borderRadius: '50%',
-                        background: getStatusDotColor(project.status),
-                        flexShrink: 0,
-                        display: 'inline-block',
-                      }}
-                    />
-                    <span className="text-sm font-medium" style={{ color: '#e2e2eb' }}>
-                      {project.name}
-                    </span>
-                  </div>
-                  <StatusBadge status={project.status} />
-                </div>
-
-                {/* Description */}
-                {project.description && (
-                  <p
-                    className="font-mono mb-3 line-clamp-2"
-                    style={{ fontSize: '11px', color: '#9a9aaa', lineHeight: '1.5' }}
-                  >
-                    {project.description}
-                  </p>
-                )}
-
-                {/* Footer metadata */}
-                <div className="flex items-center justify-between">
-                  <span className="font-mono" style={{ fontSize: '10px', color: '#9a9aaa' }}>
-                    {project.work_products.length} work products
-                  </span>
-                  <span className="font-mono" style={{ fontSize: '10px', color: '#9a9aaa' }}>
-                    {project.agentCount} agents
-                  </span>
-                  <span className="font-mono" style={{ fontSize: '10px', color: '#9a9aaa' }}>
-                    {formatRelativeTime(project.lastUpdated)}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const [status, setStatus] = useState('all');
+  const [view, setView] = useState<'grid'|'list'>('grid');
+  const [sort, setSort] = useState('updated');
+  useEffect(() => registerProjectSearch(projectsQuery.data, (query, nextStatus) => { flushSync(() => { setFilter(query); setStatus(nextStatus); }); }), [projectsQuery.data]);
+  const active = projects.filter(p=>p.status==='active').length;
+  const workProducts = projects.flatMap(p=>p.work_products.map(w=>({...w,project:p})));
+  const approvals = runs.filter(r=>r.status==='awaiting_approval');
+  const filtered = projects.filter(p=>(status==='all'||p.status===status)&&`${p.name} ${p.description}`.toLowerCase().includes(filter.toLowerCase())).sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):Date.parse(b.lastUpdated)-Date.parse(a.lastUpdated));
+  const unavailable = projectsQuery.isError;
+  const metric = (value:number, failed:boolean, loading:boolean) => failed||loading?'—':value.toString().padStart(2,'0');
+  const openCreate = () => { create.reset(); dialog.current?.showModal(); };
+  const closeCreate = () => { dialog.current?.close(); newButton.current?.focus(); };
+  const reload = () => { void projectsQuery.refetch(); void runsQuery.refetch(); void healthQuery.refetch(); };
+  const card = (project:Project) => <Link className="project-card" to={`/projects/${project.id}`} key={project.id}><div className="project-card-top"><span className="project-symbol"><Box size={23}/></span><span className={`status-tag status-${project.status}`}>{project.status}</span></div><div className="project-card-copy"><h3>{project.name}</h3><p>{project.description || 'No description added.'}</p></div><div className="project-card-meta"><span><FileBox size={14}/>{project.work_products.length} artifacts</span><span><Workflow size={14}/>{project.agentCount} agent tasks</span></div><div className="project-card-bottom"><span>Updated {formatRelativeTime(project.lastUpdated)}</span><ArrowUpRight size={17} aria-hidden="true"/></div></Link>;
+  return <div className="projects-workspace">
+    <div className="page-heading"><div><p className="eyebrow">YOUR ENGINEERING WORKSPACE</p><h1>Projects<span className="heading-period">.</span></h1><p className="page-description">From intent to evidence. Keep every iteration in view.</p></div><button ref={newButton} className="action-primary" onClick={openCreate}><Plus size={18}/>New project</button></div>
+    <section className="workspace-metrics" aria-label="Workspace summary">{[
+      {label:'Active projects',value:metric(active,unavailable,projectsQuery.isLoading),detail:unavailable?'Project data unavailable':`${projects.length} projects in workspace`,icon:Boxes,to:'#project-library'},
+      {label:'Runs in progress',value:metric(runs.filter(r=>r.status==='running'||r.status==='queued').length,runsQuery.isError,runsQuery.isLoading),detail:'Queued and running',icon:Workflow,to:'/runs'},
+      {label:'Awaiting review',value:metric(approvals.length,runsQuery.isError,runsQuery.isLoading),detail:'Human approval required',icon:ShieldCheck,to:'/approvals'},
+      {label:'Work products',value:metric(workProducts.length,unavailable,projectsQuery.isLoading),detail:'Across all projects',icon:FileBox,to:'/files'},
+    ].map(({label,value,detail,icon:Icon,to})=><a href={to} className="metric-card" key={label}><div className="metric-label">{label}<Icon size={18} aria-hidden="true"/></div><strong>{value}</strong><span>{detail}</span></a>)}</section>
+    {unavailable && <section className="connection-notice" aria-label="Gateway connection"><div className="connection-icon"><CircleAlert size={22}/></div><div><h2>Connect your engineering gateway</h2><p>Project data couldn’t be loaded. Connect your MetaForge gateway to work with your projects, agents, and artifacts.</p></div><div className="connection-actions"><button className="action-secondary" onClick={reload}><RefreshCw size={16}/>Retry</button><Link className="action-primary" to="/settings">Set up connection<ArrowRight size={16}/></Link></div></section>}
+    <div className="workspace-columns"><section id="project-library" className="project-library" aria-labelledby="project-library-title"><div className="section-heading"><h2 id="project-library-title">Project library <span className="count-badge">{unavailable?'—':projects.length}</span></h2><div className="view-switch" role="group" aria-label="Project view"><button aria-label="Grid view" aria-pressed={view==='grid'} onClick={()=>setView('grid')}><LayoutGrid size={17}/></button><button aria-label="List view" aria-pressed={view==='list'} onClick={()=>setView('list')}><List size={18}/></button></div></div><div className="project-toolbar"><label className="project-search"><Search size={17} aria-hidden="true"/><input aria-label="Search projects" value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Search projects…"/>{filter&&<button aria-label="Clear search" onClick={()=>setFilter('')}><X size={15}/></button>}</label><select aria-label="Sort projects" value={sort} onChange={e=>setSort(e.target.value)}><option value="updated">Recently updated</option><option value="name">Name A–Z</option></select></div><div className="project-filters" role="group" aria-label="Filter by status">{['all','active','draft','archived'].map(s=><button key={s} aria-pressed={status===s} onClick={()=>setStatus(s)}>{s==='all'?'All projects':s.charAt(0).toUpperCase()+s.slice(1)}{s==='all'&&<span>{projects.length}</span>}</button>)}</div>
+    {projectsQuery.isLoading ? <div className="workspace-empty" role="status"><RefreshCw size={28}/><h3>Loading your workspace</h3><p>Retrieving projects from the gateway.</p></div> : unavailable ? <div className="workspace-empty"><Boxes size={38}/><h3>Your workspace, connected.</h3><p>Projects and their engineering evidence will appear here once your gateway is available.</p><Link to="/settings" className="text-action">Configure gateway<ArrowRight size={16}/></Link></div> : filtered.length===0 ? <div className="workspace-empty"><Boxes size={34}/><h3>{projects.length?'No matching projects':'Start with an engineering intent'}</h3><p>{projects.length?'Try a different search or status filter.':'Create your first project to bring requirements, work products, and agent tasks together.'}</p><button className="action-secondary" onClick={projects.length?()=>{setFilter('');setStatus('all');}:openCreate}>{projects.length?'Clear filters':'Create a project'}</button></div>:<div className={`project-collection ${view}`}>{filtered.map(card)}</div>}
+    <div className="library-footer"><span>{unavailable?'Waiting for gateway':`${filtered.length} of ${projects.length} projects`}</span><span>Versioned. Reviewable. Buildable.</span></div></section>
+    <aside className="workspace-context"><section className="context-panel"><div className="section-heading"><h2>Review queue</h2><ShieldCheck size={18}/></div>{runsQuery.isError?<div className="context-empty"><CircleAlert size={25}/><h3>Review data unavailable</h3><p>Reconnect to see runs waiting for your decision.</p></div>:approvals.length?<div className="review-list">{approvals.slice(0,4).map(run=><Link to={`/runs/${run.id}`} key={run.id}><span className="status-tag status-draft">Needs approval</span><strong>{String(run.request.goal??run.id)}</strong><span>{run.approvalReason||'Review the evidence before continuing.'}</span><span className="text-action">Review run<ArrowUpRight size={15}/></span></Link>)}</div>:<div className="context-empty"><CheckCheck size={28}/><h3>{runsQuery.isLoading?'Checking review queue':'No pending reviews'}</h3><p>Runs paused at approval gates appear here.</p></div>}<Link to="/approvals" className="context-footer">Open approvals<ArrowRight size={16}/></Link></section>
+    <section className="context-panel"><div className="section-heading"><h2>Recent artifacts</h2><FileBox size={18}/></div>{workProducts.length?<div className="artifact-list">{[...workProducts].sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0,4).map(w=><Link to={`/projects/${w.project.id}`} key={`${w.project.id}-${w.id}`}><FileBox size={18}/><span><strong>{w.name}</strong><small>{w.project.name} · {w.status}</small></span></Link>)}</div>:<div className="context-empty compact"><p>{unavailable?'Connect your gateway to view artifacts.':'Your latest work products will appear here.'}</p></div>}<Link to="/files" className="context-footer">Browse files<ArrowRight size={16}/></Link></section>
+    {healthQuery.data && <section className="context-panel"><div className="section-heading"><h2>System health</h2><span className="status-tag">{healthQuery.data.status}</span></div><ul className="health-components">{healthQuery.data.components.map(component=><li key={component.name}><span>{component.name}</span><span title={component.message ?? undefined}>{component.status}{component.latency_ms != null ? ` · ${Math.round(component.latency_ms)}ms` : ''}</span></li>)}</ul></section>}
+    <section className="engineering-note"><span className="eyebrow">THE ENGINEERING LOOP</span><h2>Evidence before execution.</h2><p>Define the intent, inspect the design, test the assumptions, and review the result.</p><div className="loop-labels"><span>Define</span><span>Design</span><span>Validate</span><span>Review</span></div></section></aside></div>
+    <footer className="workspace-footer"><span>METAFORGE / KINETIC CONSOLE</span><span>Local-first engineering. Human-led decisions.</span></footer>
+    <dialog ref={dialog} className="project-dialog" aria-labelledby="create-title" onClose={()=>newButton.current?.focus()}><form onSubmit={e=>{e.preventDefault();if(!name.trim()||create.isPending)return;create.mutate({name:name.trim(),description:description.trim()},{onSuccess:()=>{setName('');setDescription('');closeCreate();}});}}><div className="section-heading"><h2 id="create-title">Create a project</h2><button type="button" className="icon-control" aria-label="Close create project" onClick={closeCreate}><X size={20}/></button></div><p>Give your next engineering effort a home.</p><label htmlFor="project-name">Project name</label><input autoFocus required maxLength={200} id="project-name" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Autonomous inspection rover"/><label htmlFor="project-description">Description <span>(optional)</span></label><textarea id="project-description" rows={4} value={description} onChange={e=>setDescription(e.target.value)} placeholder="What are you building, and what should it achieve?"/>{create.isError&&<p role="alert" className="form-error">Project could not be created. Check your gateway connection and try again.</p>}<div className="dialog-actions"><button type="button" className="action-secondary" onClick={closeCreate}>Cancel</button><button className="action-primary" type="submit" disabled={!name.trim()||create.isPending}>{create.isPending?'Creating…':'Create project'}<ArrowRight size={16}/></button></div></form></dialog>
+  </div>;
 }

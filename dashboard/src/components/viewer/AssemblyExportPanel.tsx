@@ -30,9 +30,9 @@ const KC_BORDER = 'rgba(65,72,90,0.3)';
 const KC_BORDER_MID = 'rgba(65,72,90,0.45)';
 const KC_ON_SURFACE = '#e2e2eb';
 const KC_ON_SURFACE_VARIANT = '#9a9aaa';
-const KC_ORANGE = '#e67e22';
-const KC_ORANGE_FAINT = 'rgba(230,126,34,0.15)';
-const KC_ORANGE_BORDER = 'rgba(230,126,34,0.45)';
+const KC_ORANGE = '#ff5a0a';
+const KC_ORANGE_FAINT = 'rgba(255,90,10,0.15)';
+const KC_ORANGE_BORDER = 'rgba(255,90,10,0.45)';
 
 const inputStyle: React.CSSProperties = {
   fontSize: 11,

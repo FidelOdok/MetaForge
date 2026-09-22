@@ -31,7 +31,7 @@ const KC = {
   border: 'rgba(65,72,90,0.35)',
   onSurface: '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
-  orange: '#e67e22',
+  orange: '#ff5a0a',
   green: '#3dd68c',
   teal: '#86cfff',
   amber: '#f5a623',

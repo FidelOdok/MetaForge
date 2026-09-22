@@ -12,7 +12,7 @@ const KC = {
   surfaceBorder: 'rgba(65,72,90,0.2)',
   onSurface: '#e2e2eb',
   onSurfaceVariant: '#9a9aaa',
-  running: '#e67e22',
+  running: '#ff5a0a',
   done: '#3dd68c',
   pending: '#9a9aaa',
   error: '#ffb4ab',
@@ -67,9 +67,9 @@ function dagNodeStyle(status: DagNodeStatus): React.CSSProperties {
       };
     case 'RUNNING':
       return {
-        background: 'rgba(230,126,34,0.12)',
-        border: '1px solid rgba(230,126,34,0.55)',
-        color: '#e67e22',
+        background: 'rgba(255,90,10,0.12)',
+        border: '1px solid rgba(255,90,10,0.55)',
+        color: '#ff5a0a',
       };
     case 'QUEUED':
     default:
@@ -98,7 +98,7 @@ function DagNodeIcon({ status }: { status: DagNodeStatus }) {
         className="material-symbols-outlined"
         style={{
           fontSize: 14,
-          color: '#e67e22',
+          color: '#ff5a0a',
           lineHeight: 1,
           display: 'inline-block',
           animation: 'spin 1s linear infinite',
@@ -157,7 +157,7 @@ function DagNodePill({ node }: { node: DagNode }) {
 function DagConnector({ from, to }: { from: DagNodeStatus; to: DagNodeStatus }) {
   const isDoneToRunning = from === 'DONE' && to === 'RUNNING';
   const isDoneToDone = from === 'DONE' && to === 'DONE';
-  const color = isDoneToDone ? '#3dd68c' : isDoneToRunning ? '#e67e22' : 'rgba(65,72,90,0.4)';
+  const color = isDoneToDone ? '#3dd68c' : isDoneToRunning ? '#ff5a0a' : 'rgba(65,72,90,0.4)';
   const dashed = !isDoneToDone && !isDoneToRunning;
 
   return (

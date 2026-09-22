@@ -11,16 +11,16 @@ const VARIANT_STYLES: Record<Variant, string> = {
 };
 
 const VARIANT_INLINE: Record<Variant, React.CSSProperties> = {
-  primary:   { background: '#e67e22', border: 'none' },
+  primary:   { background: '#ff5a0a', border: 'none' },
   secondary: { background: 'transparent', border: '1px solid rgba(65,72,90,0.3)' },
   ghost:     { background: 'transparent', border: 'none' },
   danger:    { background: 'rgba(255,180,171,0.1)', border: '1px solid rgba(255,180,171,0.2)' },
 };
 
 const SIZE_STYLES: Record<Size, string> = {
-  sm: 'h-7 px-2.5 text-xs',
-  md: 'h-8 px-3 text-xs',
-  lg: 'h-9 px-4 text-sm',
+  sm: 'min-h-9 px-2.5 text-sm',
+  md: 'min-h-10 px-3 text-sm',
+  lg: 'min-h-11 px-4 text-base',
 };
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -33,7 +33,7 @@ export function Button({ className, variant = 'primary', size = 'md', style, ...
     <button
       className={clsx(
         'inline-flex items-center justify-center rounded font-medium tracking-wide transition-all',
-        'focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40',
+        'focus-visible:outline-2 focus-visible:outline-primary disabled:pointer-events-none disabled:opacity-40',
         VARIANT_STYLES[variant],
         SIZE_STYLES[size],
         className
