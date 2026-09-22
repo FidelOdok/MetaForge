@@ -279,6 +279,26 @@ Verification Readiness, G8 Release) don't yet correspond to any Phase's gate
 have no mapping decided. Wiring them in (and deciding whether any of G3-G8
 should ever gain real enforcement) is separate, later work.
 
+### Budget/invariant persistence (FORGE-73)
+
+G3's mass/cost/power budget and runtime-invariant checks
+(`twin_core.consistency.gates.evaluate_g3_feasibility`) used to require a
+caller to pass `Budget`/`Invariant` objects it already knew about — there
+was no per-project "the mass budget for this quadruped is 5kg" persistence
+anywhere. An agent now declares one via `twin.record_engineering_entity`
+(`entity_type="budget"` or `"invariant"`, with `metric`/`unit`/
+`system_total` or `limit` in `extra`, and a stable `title` like
+`"mass_budget"`/`"INV-MASS"` for readable check labels) and it is loaded
+automatically on every future G3 evaluation — including the real one
+`TwinConsistencyGateChecker` runs from the executor. A project with none
+declared gets a `NOT_EVALUATED` placeholder (`budgets:none-declared`/
+`invariants:none-declared`), same never-silently-absent convention as G3's
+existing `risks:none-recorded` check; a declared entity whose metadata
+doesn't parse becomes its own `NOT_EVALUATED` check naming the entity,
+never a silently dropped budget. Passing an explicit `budgets=[]`/
+`invariants=[]` still bypasses the Twin lookup, unchanged, for a caller
+evaluating a hypothetical declaration that was never persisted.
+
 ## What's built vs. planned
 
 **Built (Phase 1):** the `design_v1`, `mech_v1`, and full 7-phase `hardware_v1`

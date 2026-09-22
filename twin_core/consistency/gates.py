@@ -15,19 +15,17 @@ this epic has landed. This evaluates checks a caller can already express
 with ``Budget``/``Invariant`` objects and risk metadata that exist TODAY. It
 deliberately does NOT:
 
-- auto-derive a project's mass/cost/power ``Budget``/``Invariant``
-  declarations -- there is still no per-project "the mass budget for this
-  quadruped is 5kg, allocated legs=2kg/body=2kg/head=1kg" persistence
-  anywhere in the codebase. A caller (an agent, a future MCP tool) supplies
-  the ``Budget``/``Invariant`` objects it already knows about, same as
-  ``InvariantEngine``/``BudgetEngine``'s own callers do.
 - evaluate structural feasibility, actuator sizing, thermal plausibility,
   geometry feasibility, or technology availability -- those need real
   simulation/CAD outputs (Phase 6, FORGE-41, Evidence Integration, not yet
   built). They come back as ``NOT_EVALUATED``, never a faked PASS.
-- wire itself into ``orchestrator/design_flow/executor.py``'s automatic
-  gate-blocking -- the executor's ``Gate``/``Phase`` model has no evaluator
-  hook yet; adding one is real, separate integration work.
+- ever BLOCK a gate transition on this module's result -- FORGE-73's
+  ``TwinConsistencyGateChecker`` (``api_gateway/runs/gate_eval.py``) calls
+  ``evaluate_g3_feasibility``/``evaluate_g4_architecture`` from
+  ``orchestrator/design_flow/executor.py``'s real ``_walk()``, but only to
+  fold the status into a gate's human-readable approval reason -- there is
+  still no ``enforce_consistency_gate`` flag, so a FAILED status only
+  informs the human reviewer, never auto-fails the transition.
 
 Risk scoring reuses the ONE existing severity/likelihood/mitigation
 convention in the codebase (``api_gateway/twin/structured_document_recorder.
@@ -36,6 +34,24 @@ py``'s hazard-analysis document, ``severity * likelihood`` against the same
 than inventing a second, competing one -- even though that convention lives
 on a different node type (a hazard-analysis work product, not a ``"risk"``
 ``EngineeringEntity``).
+
+**G3 budget/invariant persistence (FORGE-73)**: ``evaluate_g3_feasibility``'s
+``budgets``/``invariants`` params default to ``None``, which now means
+"auto-load this project's persisted 'budget'/'invariant' ``EngineeringEntity``
+nodes" (``budget_from_entity``/``invariant_from_entity``, same
+metadata-holds-the-type-specific-fields convention as ``objective_from_entity``)
+rather than "evaluate zero budgets" -- an agent declares one via
+``twin.record_engineering_entity`` (``entity_type="budget"``/``"invariant"``)
+and it is read automatically on every future G3 evaluation, closing the gap
+this docstring used to name ("there is still no per-project ... persistence
+anywhere in the codebase"). Passing an explicit list (including ``[]``)
+still bypasses the Twin lookup entirely, unchanged -- a caller evaluating a
+hypothetical budget that was never persisted still can. A project with zero
+persisted budgets/invariants gets one ``NOT_EVALUATED`` placeholder check
+each (``budgets:none-declared``/``invariants:none-declared``, same
+never-silently-absent convention as ``risks:none-recorded`` below); a
+persisted entity whose metadata doesn't parse becomes its own
+``NOT_EVALUATED`` check naming the entity, never a silently dropped budget.
 
 **G4 (Architecture)**: "architecture satisfies major constraints" is real --
 ``TwinAPI.evaluate_constraints()`` (the same engine
@@ -164,8 +180,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from twin_core.api import TwinAPI
-from twin_core.consistency.budgets import BudgetEngine
-from twin_core.consistency.invariants import InvariantEngine
+from twin_core.consistency.budgets import BudgetEngine, budget_from_entity
+from twin_core.consistency.invariants import InvariantEngine, invariant_from_entity
 from twin_core.consistency.models import Budget, Invariant
 from twin_core.models.enums import ConstraintSeverity, WorkProductType
 
@@ -305,6 +321,72 @@ async def _evaluate_risk_checks(twin: TwinAPI, project_id: UUID) -> list[GateChe
     return checks
 
 
+async def _load_budgets(twin: TwinAPI, project_id: UUID) -> tuple[list[Budget], list[GateCheck]]:
+    """Persisted 'budget' EngineeringEntity nodes for `project_id` (FORGE-73),
+    same never-silently-absent/never-silently-dropped convention as
+    `_evaluate_risk_checks`: zero declared -> one NOT_EVALUATED placeholder;
+    a declared one whose metadata doesn't parse -> its own NOT_EVALUATED
+    check naming the entity, not a swallowed budget.
+    """
+    entities = await twin.list_engineering_entities(project_id=project_id, entity_type="budget")
+    if not entities:
+        return [], [
+            GateCheck(
+                id="budgets:none-declared",
+                label="Mass/cost/power budgets declared",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no 'budget' entities recorded for this project yet",
+            )
+        ]
+    budgets: list[Budget] = []
+    checks: list[GateCheck] = []
+    for entity in entities:
+        try:
+            budgets.append(budget_from_entity(entity, project_id))
+        except ValueError as exc:
+            checks.append(
+                GateCheck(
+                    id=f"budget:{entity.id}",
+                    label=f"Budget declared: {entity.title or entity.id}",
+                    status=GateCheckStatus.NOT_EVALUATED,
+                    detail=str(exc),
+                )
+            )
+    return budgets, checks
+
+
+async def _load_invariants(
+    twin: TwinAPI, project_id: UUID
+) -> tuple[list[Invariant], list[GateCheck]]:
+    """Persisted 'invariant' EngineeringEntity nodes for `project_id`
+    (FORGE-73) -- same convention as `_load_budgets`."""
+    entities = await twin.list_engineering_entities(project_id=project_id, entity_type="invariant")
+    if not entities:
+        return [], [
+            GateCheck(
+                id="invariants:none-declared",
+                label="Runtime invariants declared",
+                status=GateCheckStatus.NOT_EVALUATED,
+                detail="no 'invariant' entities recorded for this project yet",
+            )
+        ]
+    invariants: list[Invariant] = []
+    checks: list[GateCheck] = []
+    for entity in entities:
+        try:
+            invariants.append(invariant_from_entity(entity))
+        except ValueError as exc:
+            checks.append(
+                GateCheck(
+                    id=f"invariant:{entity.id}",
+                    label=f"Invariant declared: {entity.title or entity.id}",
+                    status=GateCheckStatus.NOT_EVALUATED,
+                    detail=str(exc),
+                )
+            )
+    return invariants, checks
+
+
 _G3_NOT_EVALUATED_CHECKS = (
     ("structural_feasibility", "First-order structural feasibility"),
     ("actuator_sizing", "Actuator sizing"),
@@ -322,18 +404,28 @@ async def evaluate_g3_feasibility(
     invariants: list[Invariant] | None = None,
 ) -> GateEvaluation:
     """Evaluate the G3 Preliminary Feasibility Gate (spec section 23) for
-    `project_id`. `budgets`/`invariants` are the caller-supplied
-    declarations for this project (mass/cost/power/... whichever apply) --
-    see this module's docstring for why there's no auto-derivation yet.
+    `project_id`. `budgets`/`invariants` default to auto-loading this
+    project's persisted 'budget'/'invariant' EngineeringEntity nodes
+    (FORGE-73) -- pass an explicit list (including `[]`) to bypass that
+    lookup and evaluate specific declarations instead, same as before.
     """
     budget_engine = BudgetEngine(twin.graph)
     invariant_engine = InvariantEngine(twin.graph)
 
+    extra_checks: list[GateCheck] = []
+    if budgets is None:
+        budgets, budget_checks = await _load_budgets(twin, project_id)
+        extra_checks.extend(budget_checks)
+    if invariants is None:
+        invariants, invariant_checks = await _load_invariants(twin, project_id)
+        extra_checks.extend(invariant_checks)
+
     checks: list[GateCheck] = []
-    for budget in budgets or []:
+    for budget in budgets:
         checks.append(await _evaluate_budget_check(budget_engine, budget))
-    for invariant in invariants or []:
+    for invariant in invariants:
         checks.append(await _evaluate_invariant_check(invariant_engine, project_id, invariant))
+    checks.extend(extra_checks)
     checks.extend(await _evaluate_risk_checks(twin, project_id))
     for check_id, label in _G3_NOT_EVALUATED_CHECKS:
         checks.append(

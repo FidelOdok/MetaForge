@@ -45,6 +45,8 @@ class TestEngineeringEntity:
             "risk",
             "verification_case",
             "evidence",
+            "budget",
+            "invariant",
         ],
     )
     def test_every_spec_entity_type_is_accepted(self, entity_type: str) -> None:
