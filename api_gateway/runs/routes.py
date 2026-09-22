@@ -152,6 +152,7 @@ def _launch_flow(run_id: str) -> None:
     from api_gateway.chat.routes import get_mcp_bridge
     from api_gateway.projects.routes import get_project_backend
     from api_gateway.runs.arch_handlers import GoalDrivenArchitectureHandler
+    from api_gateway.runs.concept_handlers import GoalDrivenConceptSelectionHandler
     from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
@@ -201,11 +202,14 @@ def _launch_flow(run_id: str) -> None:
         # Deterministic handlers where the native brain is flaky or dishonest:
         # mechanical design (loadable cad_model), electronics (BOM + closed power
         # budget), firmware (pinmap + firmware_source scaffold), and V&V (honest
-        # verdict + test_plan, no false compliance). Remaining phases stay native
-        # (backstop covers their decisions).
+        # verdict + test_plan, no false compliance). concept_selection is the
+        # Decision Agent (FORGE-73, G5): a real trade study (alternatives +
+        # rationale) instead of a one-line native-brain decision. Remaining
+        # phases stay native (backstop covers their decisions).
         handlers = {
             "requirements": GoalDrivenRequirementsHandler(bridge, doc_recorder),
             "architecture": GoalDrivenArchitectureHandler(bridge, doc_recorder),
+            "concept_selection": GoalDrivenConceptSelectionHandler(bridge),
             "design": GoalDrivenMechanicalHandler(bridge, recorder),
             "electronics": GoalDrivenElectronicsHandler(bridge, bom_recorder),
             "firmware": GoalDrivenFirmwareHandler(bridge, doc_recorder),

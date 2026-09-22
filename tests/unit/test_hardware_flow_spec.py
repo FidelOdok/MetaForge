@@ -28,6 +28,7 @@ def test_hardware_flow_registered_and_ordered() -> None:
         "requirements",
         "feasibility",
         "architecture",
+        "concept_selection",
         "design",
         "electronics",
         "firmware",

@@ -1,9 +1,10 @@
-"""TwinConsistencyGateChecker: real G3/G4 status for design-flow gates
+"""TwinConsistencyGateChecker: real G3/G4/G5 status for design-flow gates
 (FORGE-73).
 
-Only two gate_ids are mapped -- see Gate.gate_id's own docstring for why
-G5-G8 aren't (yet). InMemoryTwinAPI throughout since evaluate_g3_feasibility/
-evaluate_g4_architecture do real graph reads, not something worth faking.
+Only three gate_ids are mapped -- see Gate.gate_id's own docstring for why
+G6-G8 aren't (yet). InMemoryTwinAPI throughout since evaluate_g3_feasibility/
+evaluate_g4_architecture/evaluate_g5_concept_selection do real graph reads,
+not something worth faking.
 """
 
 from __future__ import annotations
@@ -33,8 +34,8 @@ def checker(twin):
 
 
 class TestUnmappedGateIds:
-    async def test_g5_is_unmapped(self, checker, project_id):
-        report = await checker.check("G5", str(project_id))
+    async def test_g6_is_unmapped(self, checker, project_id):
+        report = await checker.check("G6", str(project_id))
         assert report == ConsistencyGateReport(checked=False)
 
     async def test_unknown_gate_id_is_unmapped(self, checker, project_id):
@@ -106,3 +107,46 @@ class TestG4Architecture:
             if c.id == "architecture_satisfies_major_constraints"
         )
         assert architecture_check.status.value == "pass"
+
+
+class TestG5ConceptSelection:
+    async def test_real_evaluation_comes_back(self, checker, project_id):
+        report = await checker.check("G5", str(project_id))
+        assert report.checked is True
+        assert report.evaluation is not None
+        assert report.evaluation.gate_id == "G5"
+
+    async def test_no_decisions_recorded_is_not_evaluated_not_a_silent_pass(
+        self, checker, project_id
+    ):
+        report = await checker.check("G5", str(project_id))
+        check = next(c for c in report.evaluation.checks if c.id == "decisions:none-recorded")
+        assert check.status.value == "not_evaluated"
+
+    async def test_a_recorded_decision_with_alternatives_and_rationale_passes(
+        self, checker, project_id, twin
+    ):
+        from twin_core.models.enums import WorkProductType
+        from twin_core.models.work_product import WorkProduct
+
+        await twin.create_work_product(
+            WorkProduct(
+                name="Concept selection: Direct-drive leg",
+                type=WorkProductType.DESIGN_DECISION,
+                domain="systems",
+                file_path="",
+                content_hash="h",
+                format="md",
+                created_by="test",
+                project_id=project_id,
+                metadata={
+                    "rationale": "fewest failure points",
+                    "alternatives": [
+                        {"option": "4-bar linkage", "reason_rejected": "more complex"}
+                    ],
+                    "parent_refs": [str(uuid4())],
+                },
+            )
+        )
+        report = await checker.check("G5", str(project_id))
+        assert report.evaluation.status.value != "failed"

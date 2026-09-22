@@ -190,11 +190,15 @@ class GoalDrivenArchitectureHandler:
         self._model = model
         self._extract = extract
 
-    async def _record_decision(self, *, title: str, rationale: str, project_id: str | None) -> None:
+    async def _record_decision(
+        self, *, title: str, rationale: str, project_id: str | None
+    ) -> dict[str, Any]:
         args: dict[str, Any] = {"title": title, "rationale": rationale}
         if project_id:
             args["project_id"] = project_id
-        _data(await self._bridge.invoke("twin.record_decision", args), "twin.record_decision")
+        return _data(
+            await self._bridge.invoke("twin.record_decision", args), "twin.record_decision"
+        )
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
         from twin_core.models.enums import WorkProductType
@@ -230,17 +234,23 @@ class GoalDrivenArchitectureHandler:
             f"${t['cost_usd']:g}, sized to stay within the requirement budgets. Interfaces: "
             f"{ifaces}. The allocation traces to the requirements' mass, power, and cost limits."
         )
-        await self._record_decision(
+        decision = await self._record_decision(
             title=f"{spec['name']} (quantified subsystem budgets)",
             rationale=rationale,
             project_id=context.project_id,
         )
+        # FORGE-73 (concept-selection phase): a real node id here, not a
+        # literal placeholder, lets a later phase (GoalDrivenConceptSelection
+        # Handler) link its own decision back to this one via parent_refs --
+        # PhaseOutcome.artifacts is documented as "work-product ids/names",
+        # so a real id is exactly what the field is for.
+        decision_node_id = decision.get("node_id") or "architecture"
         return PhaseOutcome(
             summary=(
                 f"Architecture: {len(spec['subsystems'])} subsystems with numeric mass/power/cost "
                 f"budgets (total {t['mass_g']:g} g / {t['power_mw']:g} mW); committed an "
                 f"architecture budget doc (node {doc_node})."
             ),
-            artifacts=[f"documentation:{doc_node}", "design_decision:architecture"],
+            artifacts=[f"documentation:{doc_node}", f"design_decision:{decision_node_id}"],
             status="completed",
         )

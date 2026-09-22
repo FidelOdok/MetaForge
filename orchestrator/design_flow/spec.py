@@ -35,10 +35,10 @@ class Gate:
     so the human reviewer sees real data, not just prose. This keeps the gate
     skeleton hardcoded while the criteria come from the project itself.
 
-    ``gate_id`` (FORGE-73): the spec's own G-number ("G3", "G4", ...) when
-    this gate corresponds to a real ``twin_core.consistency.gates`` evaluator
-    -- ``None`` for gates that don't (most of them; G5-G8 have no Phase
-    mapping decided yet, see ``executor.py``'s ``ConsistencyGateChecker``).
+    ``gate_id`` (FORGE-73): the spec's own G-number ("G3", "G4", "G5", ...)
+    when this gate corresponds to a real ``twin_core.consistency.gates``
+    evaluator -- ``None`` for gates that don't (most of them; G6-G8 have no
+    Phase mapping decided yet, see ``executor.py``'s ``ConsistencyGateChecker``).
     Purely informational today: a mapped gate's real evaluation status is
     surfaced in the human-facing gate reason, same as ``enforce_constraints``
     already does for constraint state, but nothing here makes it block a
@@ -299,8 +299,8 @@ DESIGN_V1 = FlowDefinition(
 
 HARDWARE_V1 = FlowDefinition(
     id="hardware_v1",
-    name="Hardware & robotics lifecycle (Requirements → Architecture → Mechanical → "
-    "Electronics → Firmware → V&V → Manufacturing)",
+    name="Hardware & robotics lifecycle (Requirements → Architecture → Concept "
+    "Selection → Mechanical → Electronics → Firmware → V&V → Manufacturing)",
     phases=(
         _INTENT_PHASE,
         _NEEDS_PHASE,
@@ -366,6 +366,33 @@ HARDWARE_V1 = FlowDefinition(
                     # twin_core.consistency.gates module docstring).
                     "No unowned safety-critical requirement",
                     "Architecture satisfies major constraints",
+                ),
+            ),
+        ),
+        Phase(
+            id="concept_selection",
+            title="Concept Selection",
+            objective=(
+                "Run a trade study for the product concept, now that its system "
+                "architecture is decided. Propose 2-3 distinct concepts/approaches that "
+                "could satisfy that architecture (different actuation mechanisms, "
+                "structural topologies, or component-level approaches -- whichever "
+                "varies meaningfully for this product), select the one that best "
+                "satisfies the requirements, and record the decision with the "
+                "alternatives considered and why each was rejected (the record-decision "
+                "tool's `alternatives` field), linked back to the architecture decision "
+                "via `parent_refs`."
+            ),
+            expected_artifacts=("design_decision",),
+            required_deliverables=("design_decision",),
+            gate=Gate(
+                name="Concept Selection Gate (G5)",
+                gate_id="G5",
+                criteria=(
+                    "Viable concept(s) proposed",
+                    "Trade study performed (alternatives considered and recorded)",
+                    "Rationale captured",
+                    "Selected concept linked to requirements/objectives",
                 ),
             ),
         ),
