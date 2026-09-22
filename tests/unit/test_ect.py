@@ -115,6 +115,29 @@ class TestAnalyze:
         with pytest.raises(ECTStateError):
             await analyze(twin, ect.id)
 
+    async def test_failed_analysis_reverts_to_proposed_not_stuck(self, twin, project_id):
+        """FORGE-77: a patch missing project_id makes ImpactEngine raise
+        mid-analysis -- the ECT must land back in PROPOSED (retryable),
+        never stuck in ANALYZING forever (_require_status's only valid
+        entry to analyze() is PROPOSED)."""
+        req = await _seed_requirement(twin, project_id)
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=None),  # no project_id -> ImpactEngine raises
+        )
+        with pytest.raises(ValueError, match="project_id"):
+            await analyze(twin, ect.id)
+
+        reverted = await twin.get_ect(ect.id)
+        assert reverted.status == ECTStatus.PROPOSED
+
+        # Genuinely retryable: the SAME real error surfaces again, not
+        # ECTStateError -- proving _require_status accepted the retry.
+        with pytest.raises(ValueError, match="project_id"):
+            await analyze(twin, ect.id)
+
     async def test_impact_reflects_baselined_entity_via_hitl_state(self, twin, project_id):
         """A REVISE against an already-baselined entity floors at
         EXPLICIT_APPROVAL in HITLEngine -- this should surface as impact
