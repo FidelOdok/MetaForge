@@ -674,6 +674,73 @@ class TestConstraintOperations:
         assert len(result.violations) == 1
         assert result.violations[0].constraint_id == c.id
 
+    async def test_evaluate_constraints_unscoped_sees_every_project(self, api):
+        """FORGE-74 repro: with no project_id, a violation from ANY project
+        is reported -- the exact cross-project leak found live."""
+        proj_a, proj_b = uuid4(), uuid4()
+        wp_a = _make_work_product("wp-a")
+        wp_a.project_id = proj_a
+        await api.create_work_product(wp_a)
+
+        c_a = _make_constraint(name="constraint-a", expression="False")
+        c_a.project_id = proj_a
+        await api.constraints.add_constraint(c_a, [wp_a.id])
+
+        wp_b = _make_work_product("wp-b")
+        wp_b.project_id = proj_b
+        await api.create_work_product(wp_b)
+
+        c_b = _make_constraint(name="constraint-b", expression="False")
+        c_b.project_id = proj_b
+        await api.constraints.add_constraint(c_b, [wp_b.id])
+
+        result = await api.evaluate_constraints()
+        assert {v.constraint_id for v in result.violations} == {c_a.id, c_b.id}
+
+    async def test_evaluate_constraints_scoped_to_project_id(self, api):
+        """FORGE-74 fix: passing project_id filters out other projects'
+        violations entirely -- not just relabels them."""
+        proj_a, proj_b = uuid4(), uuid4()
+        wp_a = _make_work_product("wp-a")
+        wp_a.project_id = proj_a
+        await api.create_work_product(wp_a)
+
+        c_a = _make_constraint(name="constraint-a", expression="False")
+        c_a.project_id = proj_a
+        await api.constraints.add_constraint(c_a, [wp_a.id])
+
+        wp_b = _make_work_product("wp-b")
+        wp_b.project_id = proj_b
+        await api.create_work_product(wp_b)
+
+        c_b = _make_constraint(name="constraint-b", expression="False")
+        c_b.project_id = proj_b
+        await api.constraints.add_constraint(c_b, [wp_b.id])
+
+        result = await api.evaluate_constraints(project_id=proj_a)
+        assert {v.constraint_id for v in result.violations} == {c_a.id}
+        assert result.evaluated_count == 1
+
+    async def test_evaluate_constraints_scoped_project_with_no_violations_passes(self, api):
+        proj_a, proj_b = uuid4(), uuid4()
+        wp_a = _make_work_product("wp-a")
+        wp_a.project_id = proj_a
+        await api.create_work_product(wp_a)
+        c_a = _make_constraint(name="constraint-a", expression="True")
+        c_a.project_id = proj_a
+        await api.constraints.add_constraint(c_a, [wp_a.id])
+
+        wp_b = _make_work_product("wp-b")
+        wp_b.project_id = proj_b
+        await api.create_work_product(wp_b)
+        c_b = _make_constraint(name="constraint-b", expression="False")
+        c_b.project_id = proj_b
+        await api.constraints.add_constraint(c_b, [wp_b.id])
+
+        result = await api.evaluate_constraints(project_id=proj_a)
+        assert result.passed is True
+        assert result.violations == []
+
 
 # --- Component operations ---
 

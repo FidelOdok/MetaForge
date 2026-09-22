@@ -274,7 +274,18 @@ class TwinAPI(ABC):
         ...
 
     @abstractmethod
-    async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult: ...
+    async def evaluate_constraints(
+        self, branch: str = "main", project_id: UUID | None = None
+    ) -> ConstraintEvaluationResult:
+        """Evaluate every constraint in the graph.
+
+        FORGE-74: with no project_id, this is genuinely global -- every
+        constraint in every project, indistinguishable in the result. Pass
+        project_id to filter the result down to that project's own
+        constraints only (same defensive filtering
+        ``evaluate_g4_architecture`` already does inline).
+        """
+        ...
 
     @abstractmethod
     async def list_constraints(self, project_id: UUID | None = None) -> list[Constraint]:
@@ -869,8 +880,23 @@ class InMemoryTwinAPI(TwinAPI):
         snapshot = snapshots[0]
         return Constraint.model_validate(snapshot.data)  # type: ignore[attr-defined]
 
-    async def evaluate_constraints(self, branch: str = "main") -> ConstraintEvaluationResult:
-        return await self._constraints.evaluate_all()
+    async def evaluate_constraints(
+        self, branch: str = "main", project_id: UUID | None = None
+    ) -> ConstraintEvaluationResult:
+        result = await self._constraints.evaluate_all()
+        if project_id is None:
+            return result
+
+        project_constraint_ids = {c.id for c in await self.list_constraints(project_id=project_id)}
+        violations = [v for v in result.violations if v.constraint_id in project_constraint_ids]
+        warnings = [w for w in result.warnings if w.constraint_id in project_constraint_ids]
+        return ConstraintEvaluationResult(
+            passed=len(violations) == 0,
+            violations=violations,
+            warnings=warnings,
+            evaluated_count=len(project_constraint_ids),
+            duration_ms=result.duration_ms,
+        )
 
     async def list_constraints(self, project_id: UUID | None = None) -> list[Constraint]:
         filters: dict[str, Any] = {}
