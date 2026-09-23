@@ -196,21 +196,24 @@ def _requires_approval(runtime: HarnessRuntime, name: str) -> bool:
         return False
 
 
-#: Tools that take a ``project_id`` and persist into the Twin. When a chat
-#: thread is scoped to a project, calls to these tools get ``project_id``
-#: force-set to the thread's project server-side (FORGE-81) rather than
-#: relying on the model to remember to include it — the prompt-only reminder
-#: (``api_gateway/chat/routes.py::_project_brief``) was found to be
-#: unreliable with weaker models (FORGE-78 fixed one instance of this for
-#: ``record_engineering_entity``; the same gap persisted for the rest).
-_PROJECT_SCOPED_TOOLS = frozenset(
-    {
-        "mcp_twin_commit_geometry",
-        "mcp_twin_record_decision",
-        "mcp_twin_record_constraint_set",
-        "mcp_twin_record_engineering_entity",
-    }
-)
+def _declares_project_id(runtime: HarnessRuntime, name: str) -> bool:
+    """Whether tool ``name``'s own input schema declares a ``project_id`` field.
+
+    Schema-driven rather than a hardcoded tool-name allowlist (FORGE-81
+    follow-up): a raw ``mcp_twin_commit_geometry``/``record_decision`` call
+    and a higher-level ``skill_mechanical_generate_cad`` call both declare
+    ``project_id`` as a top-level JSON-schema property — the latter directly
+    from its skill's Pydantic model via ``.model_json_schema()``
+    (``api_gateway/chat/skill_tools.py``) — so this one check covers every
+    project-scoped Twin-writing tool today, mechanical or otherwise (10
+    skills across 5 domains take ``project_id`` this same way), and any
+    future one automatically, with nothing to keep in sync.
+    """
+    try:
+        spec = runtime.tools.get(name)
+    except Exception:  # noqa: BLE001 — an unknown tool fails in call_tool, not here
+        return False
+    return "project_id" in spec.input_schema.get("properties", {})
 
 
 async def _execute_calls(
@@ -232,15 +235,21 @@ async def _execute_calls(
     call: one failing tool never cancels its siblings.
 
     ``project_id``, when given (the thread's scoped project), is force-set on
-    any call to a tool in ``_PROJECT_SCOPED_TOOLS`` — overriding whatever the
-    model passed or omitted — so a project-scoped thread can never persist an
-    orphaned node (FORGE-81).
+    any call to a tool whose own schema declares a ``project_id`` field (see
+    ``_declares_project_id``) — overriding whatever the model passed or
+    omitted — so a project-scoped thread can never persist an orphaned node
+    (FORGE-81). The prompt-only reminder this replaces
+    (``api_gateway/chat/routes.py::_project_brief``) was found to be
+    unreliable with weaker models (FORGE-78 fixed one instance of this for
+    ``record_engineering_entity`` alone; the same gap persisted everywhere
+    else, including through skill wrappers like ``skill_mechanical_generate_cad``
+    that FORGE-81's first cut — a hardcoded ``mcp_twin_*`` allowlist — missed).
     """
     entries: list[tuple[str, str, dict[str, Any], str]] = []
     for c in calls:
         name = str(c["name"])
         args = c.get("arguments") or {}
-        if project_id and name in _PROJECT_SCOPED_TOOLS:
+        if project_id and _declares_project_id(runtime, name):
             args = {**args, "project_id": project_id}
         entries.append((str(c["id"]), name, args, dedup_key(name, args)))
 
