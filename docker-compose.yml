@@ -91,6 +91,14 @@ services:
       # METAFORGE_CHAT_MAX_STEPS above.
       - METAFORGE_HARNESS_ADMIN_TOKEN=${METAFORGE_HARNESS_ADMIN_TOKEN:-}
       - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
+      # This deployment's externally-reachable base URL (read by
+      # api_gateway/chat/harness_backend.py::_public_url_notice). Tool
+      # results like twin.commit_geometry's model_url come back as a bare
+      # relative path; unset, the chat model has no host to anchor a
+      # markdown link to and fabricates a placeholder domain instead
+      # (FORGE-79 follow-up — observed https://example.com/...). Set this
+      # on any shared box to the URL clients actually use to reach it.
+      - METAFORGE_PUBLIC_URL=${METAFORGE_PUBLIC_URL:-}
       # OpenRouter — read by digital_twin/knowledge/openrouter_lightrag.py
       # and openrouter_property_llm.py. Tunables fall back to in-code defaults.
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}

@@ -159,6 +159,23 @@ def test_layered_prompt_without_brief_has_no_project_section() -> None:
     assert "[project context]" not in prompt
 
 
+def test_layered_prompt_public_url_notice_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without METAFORGE_PUBLIC_URL, the model is told to present relative links
+    as-is rather than invent a placeholder host (FORGE-79 follow-up)."""
+    monkeypatch.delenv("METAFORGE_PUBLIC_URL", raising=False)
+    prompt = build_system_prompt(_runtime())
+    assert "never invent or guess a placeholder domain such as example.com" in prompt
+
+
+def test_layered_prompt_public_url_notice_with_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With METAFORGE_PUBLIC_URL set, the model is told the real host to prefix
+    a relative link with."""
+    monkeypatch.setenv("METAFORGE_PUBLIC_URL", "http://fidel-dev:8000")
+    prompt = build_system_prompt(_runtime())
+    assert "http://fidel-dev:8000" in prompt
+    assert "never invent or guess a different domain such as example.com" in prompt
+
+
 # --- path-dependent placement --------------------------------------------------------
 def test_native_path_puts_brief_in_system_not_history() -> None:
     system, history = _apply_turn_context(
