@@ -1049,6 +1049,9 @@ async def run_chat_turn(
             # budget above. Exceeding it 400s the turn before the model reads
             # anything, so it must be enforced request-side.
             max_tools=max_tools_for(provider or os.environ.get("METAFORGE_LLM_PROVIDER")),
+            # FORGE-81: force project_id on project-scoped Twin writes rather
+            # than relying on the model to include it every time.
+            project_id=project_id,
         )
     else:
         policy = ModelPolicy(
@@ -1505,6 +1508,9 @@ async def run_chat_turn_streaming(
             # budget above. Exceeding it 400s the turn before the model reads
             # anything, so it must be enforced request-side.
             max_tools=max_tools_for(provider or os.environ.get("METAFORGE_LLM_PROVIDER")),
+            # FORGE-81: force project_id on project-scoped Twin writes rather
+            # than relying on the model to include it every time.
+            project_id=project_id,
         )
     else:
         policy = ModelPolicy(
