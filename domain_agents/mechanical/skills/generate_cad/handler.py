@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -26,7 +28,9 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
     This skill invokes ``cadquery.create_parametric`` (default) or
     ``freecad.create_parametric`` MCP tool to produce a STEP file from
     shape parameters (type + dimensions). If the preferred backend is
-    unavailable, it falls back to the other with a warning.
+    unavailable, it falls back to the other with a warning. Both backends
+    run as separate adapter containers; see ``_commit_geometry`` for how
+    the resulting file path is resolved against the shared workspace.
     """
 
     input_type = GenerateCadInput
@@ -37,11 +41,15 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
     ) -> tuple[bool, str | None, str | None, str | None]:
         """Best-effort persist the exported STEP file via twin.commit_geometry.
 
-        Reading *cad_file* directly only works when the CAD backend runs
-        in-process with this skill (true for cadquery today); a containerized
-        backend whose filesystem isn't shared with this process reports a
-        commit_error instead of raising, so a caller that asked to persist
-        can see why it didn't happen without the whole skill failing.
+        ``cadquery.create_parametric``/``freecad.create_parametric`` write the
+        STEP file inside their own adapter container and echo back the same
+        path they were given (e.g. ``output/plate_None.step``) rather than an
+        absolute one. That path is only valid relative to the adapter's own
+        CWD, but it lands on the ``adapter-workspace`` volume the adapter and
+        this gateway process both mount (the adapter at its CWD, this process
+        at ``ADAPTER_WORKSPACE_DIR``, default ``/workspace``) -- so a relative
+        *cad_file* is resolved against that shared root, mirroring
+        ``api_gateway.twin.regenerate_geometry._regenerate_via_cadquery``.
 
         Returns:
             (committed, twin_node_id, model_url, commit_error).
@@ -49,16 +57,21 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
         if not await self.context.mcp.is_available("twin.commit_geometry"):
             return False, None, None, "twin.commit_geometry tool is not available"
 
+        resolved_path = Path(cad_file)
+        if not resolved_path.is_absolute():
+            workspace_root = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+            resolved_path = workspace_root / cad_file
+
         try:
-            with open(cad_file, "rb") as fh:
-                step_base64 = base64.b64encode(fh.read()).decode("ascii")
+            step_base64 = base64.b64encode(resolved_path.read_bytes()).decode("ascii")
         except OSError as exc:
             self.logger.warning(
                 "Could not read generated CAD file to commit it",
                 cad_file=cad_file,
+                resolved_path=str(resolved_path),
                 error=str(exc),
             )
-            return False, None, None, f"could not read {cad_file}: {exc}"
+            return False, None, None, f"could not read {resolved_path}: {exc}"
 
         arguments: dict[str, Any] = {
             "name": f"{shape_type} ({material})",
