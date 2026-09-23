@@ -765,48 +765,93 @@ class _FakeExportShape:
             f.write(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
 
 
-class _FakeExportObject:
-    def __init__(self) -> None:
-        self.Shape = _FakeExportShape()
-
-
-class _FakeExportDoc:
-    def __init__(self) -> None:
-        self.Name = "doc1"
-        self.Objects = [_FakeExportObject()]
-
-
-class _FakeFreeCADForExport:
-    def __init__(self) -> None:
-        self.closed: list[str] = []
-
-    def openDocument(self, _path: str) -> _FakeExportDoc:  # noqa: N802
-        return _FakeExportDoc()
-
-    def closeDocument(self, name: str) -> None:  # noqa: N802
-        self.closed.append(name)
-
-
 class TestExportStepStepBase64:
     """MET-489: freecad.export_geometry (-> export_step) had no path into
     twin.commit_geometry -- unlike freecad.export_model, which already
     returns step_base64 -- so its output was lost when the adapter
-    container recreated."""
+    container recreated.
+
+    FORGE-83: export_step's input_file is always a STEP file in practice
+    (the exchange format this whole system standardizes on), never a native
+    .FCStd project -- openDocument() only understands the latter and fails
+    the former with a generic iostream error. It must load via
+    Import.insert() into a fresh document, exactly like describe_step_file()
+    (see TestDescribeStepFile above, whose fakes this test reuses)."""
 
     def test_export_step_includes_step_base64(self, tmp_path) -> None:
         import base64
 
         ops = FreecadOperations()
         output_path = str(tmp_path / "out.step")
-        freecad = _FakeFreeCADForExport()
+        part = _FakeDocObject("Part", _FakeExportShape())
+        freecad = _FakeFreeCADMulti()
+        fake_import = _FakeImport(freecad, [part])
         with (
             patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
             patch("tool_registry.tools.freecad.operations.FreeCAD", freecad),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
         ):
-            result = ops.export_step("/workspace/part.fcstd", output_path)
+            result = ops.export_step("/workspace/part.step", output_path)
 
         assert result["format"] == "step"
         assert "step_base64" in result
         decoded = base64.b64decode(result["step_base64"])
         assert decoded == Path(output_path).read_bytes()
+        assert freecad.closed == ["doc1"]
+
+
+# ---------------------------------------------------------------------------
+# 12. generate_mesh loads STEP input the same way export_step does (FORGE-83)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMeshShape:
+    """Fakes the .tessellate() entry point generate_mesh needs."""
+
+    def tessellate(self, element_size: float):
+        return ([object()], [object(), object()])  # (vertices, facets)
+
+
+class _FakeMeshObj:
+    def __init__(self) -> None:
+        self.CountPoints = 0
+        self.CountFacets = 0
+        self._facets: list = []
+
+    def addFacets(self, facets: list) -> None:  # noqa: N802
+        self._facets = facets
+        self.CountFacets = len(facets)
+        self.CountPoints = len(facets) + 1
+
+    def write(self, output_path: str) -> None:
+        with open(output_path, "wb") as f:  # noqa: PTH123
+            f.write(b"fake mesh data")
+
+
+class _FakeMeshModule:
+    def Mesh(self) -> _FakeMeshObj:  # noqa: N802
+        return _FakeMeshObj()
+
+
+class TestGenerateMeshLoadsStepInput:
+    """FORGE-83: generate_mesh shared export_step's openDocument() bug --
+    input_file is a STEP file in practice, not a native .FCStd project, so
+    it must load via Import.insert() into a fresh document."""
+
+    def test_generate_mesh_from_step_file(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        part = _FakeDocObject("Part", _FakeMeshShape())
+        freecad = _FakeFreeCADMulti()
+        fake_import = _FakeImport(freecad, [part])
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.HAS_MESH", True),
+            patch("tool_registry.tools.freecad.operations.FreeCAD", freecad),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+            patch("tool_registry.tools.freecad.operations.Mesh", _FakeMeshModule()),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh("/workspace/part.step")
+
+        assert result["num_elements"] == 2
         assert freecad.closed == ["doc1"]

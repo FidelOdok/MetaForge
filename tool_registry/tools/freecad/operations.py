@@ -524,7 +524,16 @@ class FreecadOperations:
             self._ensure_output_dir(output_path)
 
             try:
-                doc = FreeCAD.openDocument(input_file)
+                # FreeCAD.openDocument() only loads its own native .FCStd
+                # project format -- every input this adapter actually
+                # receives is a STEP file (the exchange format this whole
+                # system standardizes on), which it fails to parse with a
+                # generic "basic_ios::clear: iostream error" (FORGE-83).
+                # Import.insert() into a fresh document is the general-
+                # purpose CAD-exchange loader (STEP/IGES/BREP), already the
+                # correct pattern in describe_step_file() below.
+                doc = FreeCAD.newDocument()
+                Import.insert(input_file, doc.Name)
                 shapes = []
                 for obj in doc.Objects:
                     if hasattr(obj, "Shape"):
@@ -606,7 +615,12 @@ class FreecadOperations:
             self._ensure_output_dir(output_path)
 
             try:
-                doc = FreeCAD.openDocument(input_file)
+                # See export_step()'s comment above -- input_file is a STEP
+                # file, not a native .FCStd project, so it must be loaded via
+                # Import.insert() into a fresh document, not openDocument()
+                # (FORGE-83).
+                doc = FreeCAD.newDocument()
+                Import.insert(input_file, doc.Name)
 
                 # Find the first shape object
                 shape = None
