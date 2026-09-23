@@ -196,11 +196,29 @@ def _requires_approval(runtime: HarnessRuntime, name: str) -> bool:
         return False
 
 
+#: Tools that take a ``project_id`` and persist into the Twin. When a chat
+#: thread is scoped to a project, calls to these tools get ``project_id``
+#: force-set to the thread's project server-side (FORGE-81) rather than
+#: relying on the model to remember to include it — the prompt-only reminder
+#: (``api_gateway/chat/routes.py::_project_brief``) was found to be
+#: unreliable with weaker models (FORGE-78 fixed one instance of this for
+#: ``record_engineering_entity``; the same gap persisted for the rest).
+_PROJECT_SCOPED_TOOLS = frozenset(
+    {
+        "mcp_twin_commit_geometry",
+        "mcp_twin_record_decision",
+        "mcp_twin_record_constraint_set",
+        "mcp_twin_record_engineering_entity",
+    }
+)
+
+
 async def _execute_calls(
     runtime: HarnessRuntime,
     calls: list[dict[str, Any]],
     thought: str,
     cache: TurnToolCache,
+    project_id: str | None = None,
 ) -> list[tuple[ReActStep, str, str]]:
     """Execute one batch of model-emitted calls.
 
@@ -212,11 +230,18 @@ async def _execute_calls(
     parallel calls; before MET-569 they were awaited one at a time, so four
     independent reads cost four serial round-trips. Exceptions are isolated per
     call: one failing tool never cancels its siblings.
+
+    ``project_id``, when given (the thread's scoped project), is force-set on
+    any call to a tool in ``_PROJECT_SCOPED_TOOLS`` — overriding whatever the
+    model passed or omitted — so a project-scoped thread can never persist an
+    orphaned node (FORGE-81).
     """
     entries: list[tuple[str, str, dict[str, Any], str]] = []
     for c in calls:
         name = str(c["name"])
         args = c.get("arguments") or {}
+        if project_id and name in _PROJECT_SCOPED_TOOLS:
+            args = {**args, "project_id": project_id}
         entries.append((str(c["id"]), name, args, dedup_key(name, args)))
 
     # One execution per distinct (tool, arguments) — this collapses duplicates
@@ -314,8 +339,12 @@ async def run_native_tools(
     cost_model: str = "",
     pricing: TokenPricing | None = None,
     max_tools: int | None = None,
+    project_id: str | None = None,
 ) -> ReActResult:
     """Drive a native tool-calling loop until the model returns a final answer.
+
+    ``project_id`` (FORGE-81), when given, is force-set on every call to a
+    tool in ``_PROJECT_SCOPED_TOOLS`` — see ``_execute_calls``.
 
     ``history`` is the prior conversation ([{role, content}], oldest first) so
     the model can answer with context from earlier turns; it is seeded ahead of
@@ -472,7 +501,7 @@ async def run_native_tools(
                 }
             )
             for step, content, call_id in await _execute_calls(
-                runtime, list(calls), text, tool_cache
+                runtime, list(calls), text, tool_cache, project_id=project_id
             ):
                 steps.append(step)
                 await _emit(step)
