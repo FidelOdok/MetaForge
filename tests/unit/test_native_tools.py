@@ -88,21 +88,29 @@ async def test_calls_tool_then_answers() -> None:
     assert res.steps[0].observation == {"result": 42}
 
 
-def _runtime_with_recorder(tool_name: str) -> tuple[HarnessRuntime, dict[str, Any]]:
-    """A native tool registered under a real project-scoped tool name that
-    records the arguments it actually received, for asserting server-side
-    project_id injection (FORGE-81)."""
+def _runtime_with_recorder(
+    tool_name: str, *, declares_project_id: bool
+) -> tuple[HarnessRuntime, dict[str, Any]]:
+    """A native tool that records the arguments it actually received, for
+    asserting server-side project_id injection (FORGE-81). Its input schema
+    declares a top-level ``project_id`` property iff ``declares_project_id``
+    -- injection is schema-driven, not name-based, so this is what actually
+    controls whether a call is eligible."""
     seen: dict[str, Any] = {}
 
     async def _recorder(args: dict[str, Any]) -> dict[str, Any]:
         seen["args"] = args
         return {"ok": True}
 
+    properties: dict[str, Any] = {"x": {"type": "number"}}
+    if declares_project_id:
+        properties["project_id"] = {"type": "string"}
+
     tools = ToolRegistry()
     tools.register_native(
         tool_name,
         description="records its arguments",
-        input_schema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": properties},
         handler=_recorder,
     )
     return HarnessRuntime.build(CONFIG, tools=tools), seen
@@ -110,14 +118,20 @@ def _runtime_with_recorder(tool_name: str) -> tuple[HarnessRuntime, dict[str, An
 
 @pytest.mark.asyncio
 async def test_project_id_injected_when_model_omits_it() -> None:
-    """A project-scoped thread's project_id is force-set on a project-scoped
-    tool call even when the model didn't include it (FORGE-81)."""
-    rt, seen = _runtime_with_recorder("mcp_twin_commit_geometry")
+    """A project-scoped thread's project_id is force-set on a call to any
+    tool whose schema declares project_id, even when the model didn't
+    include it -- whether that's a raw twin.* tool or a higher-level skill
+    wrapper like skill_mechanical_generate_cad (FORGE-81)."""
+    rt, seen = _runtime_with_recorder("skill_mechanical_generate_cad", declares_project_id=True)
     inv = _scripted(
         {
             "text": "",
             "tool_calls": [
-                {"id": "c1", "name": "mcp_twin_commit_geometry", "arguments": {"name": "plate"}}
+                {
+                    "id": "c1",
+                    "name": "skill_mechanical_generate_cad",
+                    "arguments": {"name": "plate"},
+                }
             ],
         },
         {"text": "Committed.", "tool_calls": []},
@@ -131,7 +145,7 @@ async def test_project_id_injected_when_model_omits_it() -> None:
 async def test_project_id_overrides_a_model_supplied_value() -> None:
     """The thread's project_id always wins over whatever the model passed --
     a project-scoped thread can never write to a different project."""
-    rt, seen = _runtime_with_recorder("mcp_twin_record_decision")
+    rt, seen = _runtime_with_recorder("mcp_twin_record_decision", declares_project_id=True)
     inv = _scripted(
         {
             "text": "",
@@ -153,7 +167,7 @@ async def test_project_id_overrides_a_model_supplied_value() -> None:
 async def test_project_id_left_alone_without_thread_scope() -> None:
     """No thread project_id (unscoped/assistant thread) -- arguments pass
     through unmodified, whatever the model did or didn't include."""
-    rt, seen = _runtime_with_recorder("mcp_twin_commit_geometry")
+    rt, seen = _runtime_with_recorder("mcp_twin_commit_geometry", declares_project_id=True)
     inv = _scripted(
         {
             "text": "",
@@ -166,16 +180,29 @@ async def test_project_id_left_alone_without_thread_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_project_id_not_injected_for_unscoped_tools() -> None:
-    """A tool outside _PROJECT_SCOPED_TOOLS never gets project_id injected,
-    even inside a project-scoped thread."""
-    rt, seen = _runtime_with_recorder("double")
+async def test_project_id_not_injected_for_tools_without_the_field() -> None:
+    """A tool whose own schema doesn't declare project_id never gets one
+    injected, even inside a project-scoped thread."""
+    rt, seen = _runtime_with_recorder("double", declares_project_id=False)
     inv = _scripted(
         {"text": "", "tool_calls": [{"id": "c1", "name": "double", "arguments": {"x": 21}}]},
         {"text": "42.", "tool_calls": []},
     )
     await run_native_tools(rt, "double 21", invoke=inv, project_id="proj-123")
     assert "project_id" not in seen["args"]
+
+
+@pytest.mark.asyncio
+async def test_project_id_not_injected_for_unknown_tool() -> None:
+    """A call to a tool name the registry doesn't recognize is left alone --
+    the unknown-tool error surfaces from call_tool, not from injection."""
+    rt, seen = _runtime_with_recorder("double", declares_project_id=False)
+    inv = _scripted(
+        {"text": "", "tool_calls": [{"id": "c1", "name": "ghost_tool", "arguments": {}}]},
+        {"text": "That tool doesn't exist.", "tool_calls": []},
+    )
+    await run_native_tools(rt, "do it", invoke=inv, project_id="proj-123")
+    assert "args" not in seen  # the recorder (registered as "double") never ran
 
 
 @pytest.mark.asyncio
