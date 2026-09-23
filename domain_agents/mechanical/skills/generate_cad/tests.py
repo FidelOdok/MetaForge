@@ -374,6 +374,42 @@ class TestGenerateCadHandler:
         assert output.commit_error is not None
         assert "output/bracket_test.step" in output.commit_error
 
+    async def test_commit_geometry_resolves_relative_path_against_workspace(
+        self, tmp_path, monkeypatch
+    ):
+        """A relative cad_file (what the adapter actually returns) is resolved against
+        ADAPTER_WORKSPACE_DIR -- the shared volume the gateway and adapter containers
+        both mount -- rather than the gateway process's own CWD."""
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+
+        ctx, handler, work_product = await _make_ctx_and_handler()
+
+        relative_cad_file = "output/plate_None.step"
+        step_file = tmp_path / relative_cad_file
+        step_file.parent.mkdir(parents=True, exist_ok=True)
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+        ctx.mcp.register_tool_response(
+            "cadquery.create_parametric", {**CADQUERY_CAD_RESULT, "cad_file": relative_cad_file}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response(
+            "twin.commit_geometry",
+            {"node_id": "node-456", "model_url": "https://twin.local/models/node-456"},
+        )
+
+        output = await handler.execute(
+            GenerateCadInput(
+                work_product_id=work_product.id,
+                shape_type="plate",
+                dimensions={"width": 596.0, "height": 335.0, "thickness": 10.0},
+            )
+        )
+
+        assert output.committed is True
+        assert output.twin_node_id == "node-456"
+        assert output.commit_error is None
+
     async def test_validate_output_zero_volume(self):
         """Output validation catches zero volume."""
         from .schema import BoundingBox, GenerateCadOutput
