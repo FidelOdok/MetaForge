@@ -46,7 +46,7 @@ lands its real, typed deliverable in the twin:
 | **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
 | **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
 | **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off |
-| **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness |
+| **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness / Release Gate (G8) |
 
 The Preliminary Feasibility gate's mass/cost/power and risk criteria are
 computed for real (not just shown as prose) by
@@ -62,24 +62,28 @@ real too, via `evaluate_g5_concept_selection`, reading
 26.12) is what populates them: it proposes 2-3 candidate concepts, picks
 one, and records the decision linked back to the architecture decision (see
 [Concept selection / Decision Agent](#concept-selection-decision-agent-forge-73)
-below). Three more gate evaluators exist but have no phase of their own in
-any flow yet: `evaluate_g6_design_sketch` (G6, Preliminary Design / Design
-Sketch — reads
-the existing `design_sketch` work product + its `approve-sketch` REST
-endpoint, and the `system_architecture` work product's
-component/interface counts, rather than inventing a parallel checkpoint;
-its "requirement coverage" criterion is likewise real when a caller
-supplies a `traceability_coverage` accessor, FORGE-73),
+below). The Release gate's checks are real too, via `evaluate_g8_release`
+(the Manufacturing Prep phase's gate): real checks against
+`TwinAPI.list_baselines()` and `"evidence"` entities' staleness status
+(FORGE-51/59), plus `"waiver"`/`"release_approval"` `EngineeringEntity`
+declarations that only count once approved via
+`twin.approve_engineering_entity` (see
+[Waiver / release model](#waiver-release-model-forge-73) below), plus
+"required verification complete" via the same injected
+`traceability_coverage` accessor G6 uses. Two more gate evaluators exist but
+have no phase of their own in any flow yet: `evaluate_g6_design_sketch` (G6,
+Preliminary Design / Design Sketch — reads the existing `design_sketch` work
+product + its `approve-sketch` REST endpoint, and the `system_architecture`
+work product's component/interface counts, rather than inventing a parallel
+checkpoint; its "requirement coverage" criterion is likewise real when a
+caller supplies a `traceability_coverage` accessor, FORGE-73) and
 `evaluate_g7_verification_readiness` (G7 — per-critical-requirement
 verification-method/ownership checks, reusing the same `metadata
-["verification_method"]`/`Constraint.source` conventions
-`TraceabilityAgent` already established), and `evaluate_g8_release` (G8 —
-real checks against `TwinAPI.list_baselines()` and `"evidence"` entities'
-staleness status, FORGE-51/59, plus "required verification complete" via
-the same injected `traceability_coverage` accessor G6 uses). See
-`twin_core/consistency/gates.py`'s module docstring for exactly which
-checks each evaluates today vs. still advisory pending Phase 6 (Evidence
-Integration, FORGE-41) or a not-yet-built phase for that gate.
+["verification_method"]`/`Constraint.source` conventions `TraceabilityAgent`
+already established). See `twin_core/consistency/gates.py`'s module
+docstring for exactly which checks each evaluates today vs. still advisory
+pending Phase 6 (Evidence Integration, FORGE-41) or a not-yet-built phase
+for that gate.
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
 A full `hardware_v1` run now commits **nine real, typed work products** —
@@ -340,6 +344,38 @@ produces `entity_type="objective"` records, isn't wired into any live
 execution path yet — so this handler's selection is the LLM's own reasoning,
 not an objective-weighted ranking. Wiring a real read path for engineering
 entities is separate, later work.
+
+### Waiver / release model (FORGE-73)
+
+`evaluate_g8_release`'s "waivers approved" and "build/manufacturing release
+approved" checks used to always come back `NOT_EVALUATED` — there was no
+"waiver" concept in the graph at all (`HITLEngine`'s "waiver" was only ever
+a transient approval-classification category, never persisted), and nothing
+ever advanced an `EngineeringEntity`'s `authority` past `proposed` except
+`create_baseline` (straight to `baselined`) — so a "waiver" or "release"
+record could never be genuinely *approved* versus merely *proposed*, even
+if one existed.
+
+`"waiver"` and `"release_approval"` now join `EngineeringEntityType`, the
+same home `"budget"`/`"invariant"` got — an agent declares one via the
+existing `twin.record_engineering_entity` tool (a waiver should `parent_refs`
+the requirement/constraint it excepts). The new part is
+`twin.approve_engineering_entity` (`api_gateway/twin/
+engineering_entity_approval.py`): a real approval step, generic across every
+`EngineeringEntityType`, advancing `authority` from `proposed` to
+`reviewed`/`approved` (never `baselined` — that stays exclusively
+`create_baseline`'s job). `evaluate_g8_release` reads both back for real:
+
+- **Waivers approved**: zero waivers recorded is a real PASS — nothing
+  outstanding needs one, the same vacuous-pass exception G4's
+  "architecture satisfies major constraints" already documents for zero
+  recorded constraints. A recorded-but-unapproved waiver FAILS — a raised
+  exception can't silently count as resolved just because a node exists.
+- **Build/manufacturing release approved**: the opposite default — a
+  missing `release_approval` FAILS, not `NOT_EVALUATED`, since
+  release-to-manufacture is an unconditionally required sign-off (spec
+  section 63; HITL Level 4 Mandatory Authority), the same posture the
+  baseline check already takes for a missing baseline.
 
 ## What's built vs. planned
 

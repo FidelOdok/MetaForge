@@ -50,6 +50,8 @@ _ENTITY_TYPES = frozenset(
         "evidence",
         "budget",
         "invariant",
+        "waiver",
+        "release_approval",
     }
 )
 

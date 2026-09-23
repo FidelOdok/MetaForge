@@ -35,9 +35,9 @@ class Gate:
     so the human reviewer sees real data, not just prose. This keeps the gate
     skeleton hardcoded while the criteria come from the project itself.
 
-    ``gate_id`` (FORGE-73): the spec's own G-number ("G3", "G4", "G5", ...)
+    ``gate_id`` (FORGE-73): the spec's own G-number ("G3", "G4", "G5", "G8")
     when this gate corresponds to a real ``twin_core.consistency.gates``
-    evaluator -- ``None`` for gates that don't (most of them; G6-G8 have no
+    evaluator -- ``None`` for gates that don't (most of them; G6/G7 have no
     Phase mapping decided yet, see ``executor.py``'s ``ConsistencyGateChecker``).
     Purely informational today: a mapped gate's real evaluation status is
     surfaced in the human-facing gate reason, same as ``enforce_constraints``
@@ -513,12 +513,19 @@ HARDWARE_V1 = FlowDefinition(
             required_deliverables=("design_decision",),
             disciplines=("supply_chain", "compliance"),
             gate=Gate(
-                name="Manufacturing readiness",
+                name="Manufacturing readiness / Release Gate (G8)",
+                gate_id="G8",
                 enforce_constraints=True,
                 criteria=(
                     "BOM complete and costed",
                     "Fabrication outputs identified",
                     "Assembly and bring-up plan written",
+                    # FORGE-73: G8's own criteria per the spec (section 23) --
+                    # advisory here, same posture as FORGE-61's G4 addition;
+                    # the real evaluation is evaluate_g8_release, surfaced via
+                    # TwinConsistencyGateChecker same as G3/G4/G5.
+                    "Waivers approved",
+                    "Build/manufacturing release approved",
                 ),
             ),
         ),

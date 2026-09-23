@@ -1,10 +1,10 @@
-"""TwinConsistencyGateChecker: real G3/G4/G5 status for design-flow gates
+"""TwinConsistencyGateChecker: real G3/G4/G5/G8 status for design-flow gates
 (FORGE-73).
 
-Only three gate_ids are mapped -- see Gate.gate_id's own docstring for why
-G6-G8 aren't (yet). InMemoryTwinAPI throughout since evaluate_g3_feasibility/
-evaluate_g4_architecture/evaluate_g5_concept_selection do real graph reads,
-not something worth faking.
+Only four gate_ids are mapped -- see Gate.gate_id's own docstring for why
+G6/G7 aren't (yet). InMemoryTwinAPI throughout since evaluate_g3_feasibility/
+evaluate_g4_architecture/evaluate_g5_concept_selection/evaluate_g8_release
+do real graph reads, not something worth faking.
 """
 
 from __future__ import annotations
@@ -150,3 +150,25 @@ class TestG5ConceptSelection:
         )
         report = await checker.check("G5", str(project_id))
         assert report.evaluation.status.value != "failed"
+
+
+class TestG8Release:
+    async def test_real_evaluation_comes_back(self, checker, project_id):
+        report = await checker.check("G8", str(project_id))
+        assert report.checked is True
+        assert report.evaluation is not None
+        assert report.evaluation.gate_id == "G8"
+
+    async def test_no_waivers_recorded_passes_that_check(self, checker, project_id):
+        """FORGE-73: zero waivers is a real PASS, not a vacuous one --
+        nothing outstanding needs approval."""
+        report = await checker.check("G8", str(project_id))
+        check = next(c for c in report.evaluation.checks if c.id == "waivers_approved")
+        assert check.status.value == "pass"
+
+    async def test_no_release_approval_fails_that_check(self, checker, project_id):
+        """Unlike waivers, a missing release_approval is a real, actionable
+        gap -- release-to-manufacture is unconditionally required."""
+        report = await checker.check("G8", str(project_id))
+        check = next(c for c in report.evaluation.checks if c.id == "release_approved")
+        assert check.status.value == "fail"

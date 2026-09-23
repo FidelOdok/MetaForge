@@ -163,11 +163,20 @@ callable G6 takes, reading ``.verification_to_evidence`` off it instead
 assigned a method -- ``EdgeType.VALIDATES`` has zero real creators
 anywhere in production code, so that edge type itself still isn't a
 usable signal). ``None`` keeps this ``NOT_EVALUATED`` exactly as before.
-"Waivers approved" and "build/manufacturing release approved" come back
-``NOT_EVALUATED``: grepped for "waiver" -- the only real hit is a transient
-classification string ``HITLEngine`` accepts as an approval-request
-category (never persisted to the graph, no ``list_waivers``/project scoping
-possible), confirmed pure white space.
+"Waivers approved" and "build/manufacturing release approved" are real now
+(FORGE-73, waiver/release model): ``"waiver"``/``"release_approval"`` joined
+``EngineeringEntityType`` the same way ``"budget"``/``"invariant"`` did, and
+``twin.approve_engineering_entity`` (new MCP tool,
+``api_gateway/twin/engineering_entity_approval.py``) gives ``AuthorityState``
+a real approval step distinct from creation -- previously the only code
+path that ever advanced authority was ``create_baseline`` (straight to
+BASELINED), so nothing could ever be genuinely "approved" versus merely
+"proposed". Zero waivers recorded is a real PASS (nothing outstanding needs
+one -- same vacuous-pass exception as G4's zero-constraints case above); a
+recorded-but-unapproved waiver FAILS. A missing ``release_approval`` FAILS
+(not ``NOT_EVALUATED``) -- release-to-manufacture is an unconditionally
+required sign-off (spec section 63, HITL Level 4 Mandatory Authority), same
+posture as the baseline check's own missing-baseline FAIL above.
 """
 
 from __future__ import annotations
@@ -183,7 +192,7 @@ from twin_core.api import TwinAPI
 from twin_core.consistency.budgets import BudgetEngine, budget_from_entity
 from twin_core.consistency.invariants import InvariantEngine, invariant_from_entity
 from twin_core.consistency.models import Budget, Invariant
-from twin_core.models.enums import ConstraintSeverity, WorkProductType
+from twin_core.models.enums import AuthorityState, ConstraintSeverity, WorkProductType
 
 
 class GateCheckStatus(StrEnum):
@@ -760,12 +769,6 @@ async def evaluate_g7_verification_readiness(twin: TwinAPI, project_id: UUID) ->
     return GateEvaluation(gate_id="G7", status=_status_from_checks(checks), checks=checks)
 
 
-_G8_NOT_EVALUATED_CHECKS = (
-    ("waivers_approved", "Waivers approved"),
-    ("release_approved", "Build/manufacturing release approved"),
-)
-
-
 async def _evaluate_verification_complete_check(
     project_id: UUID,
     traceability_coverage: TraceabilityCoverageAccessor | None,
@@ -831,6 +834,63 @@ async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> Gat
     )
 
 
+_APPROVED_AUTHORITY = (AuthorityState.APPROVED, AuthorityState.BASELINED)
+
+
+async def _evaluate_waivers_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    """'Waivers approved' (spec section 23): zero recorded 'waiver' entities
+    is a real PASS -- nothing outstanding needs one -- same vacuous-pass
+    exception G4's "architecture satisfies major constraints" already
+    documents for zero recorded constraints. A raised-but-unapproved waiver
+    (authority still PROPOSED/REVIEWED) FAILS: the gate cannot silently
+    treat a recorded exception as resolved just because a node exists.
+    """
+    entities = await twin.list_engineering_entities(project_id=project_id, entity_type="waiver")
+    if not entities:
+        return GateCheck(
+            id="waivers_approved",
+            label="Waivers approved",
+            status=GateCheckStatus.PASS,
+            detail="no waivers recorded for this project -- nothing outstanding",
+        )
+    unapproved = [w for w in entities if w.authority not in _APPROVED_AUTHORITY]
+    return GateCheck(
+        id="waivers_approved",
+        label="Waivers approved",
+        status=GateCheckStatus.FAIL if unapproved else GateCheckStatus.PASS,
+        detail=(
+            f"{len(unapproved)} of {len(entities)} waiver(s) not yet approved "
+            f"(twin.approve_engineering_entity)"
+            if unapproved
+            else f"all {len(entities)} waiver(s) approved"
+        ),
+    )
+
+
+async def _evaluate_release_approval_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    """'Build/manufacturing release approved' (spec section 23): unlike
+    waivers, release-to-manufacture is an unconditionally required sign-off
+    (spec section 63: "release → no stale evidence"; section 24: Level 4
+    Mandatory Authority) -- absence FAILS, same as G8's own "configuration
+    baseline fixed" check treats a missing baseline (a real, actionable gap,
+    not a vacuous NOT_EVALUATED).
+    """
+    entities = await twin.list_engineering_entities(
+        project_id=project_id, entity_type="release_approval"
+    )
+    approved = [r for r in entities if r.authority in _APPROVED_AUTHORITY]
+    return GateCheck(
+        id="release_approved",
+        label="Build/manufacturing release approved",
+        status=GateCheckStatus.PASS if approved else GateCheckStatus.FAIL,
+        detail=(
+            f"{len(approved)} of {len(entities)} release_approval(s) approved"
+            if entities
+            else "no release_approval recorded for this project -- release requires one"
+        ),
+    )
+
+
 async def evaluate_g8_release(
     twin: TwinAPI,
     project_id: UUID,
@@ -844,14 +904,7 @@ async def evaluate_g8_release(
         await _evaluate_baseline_check(twin, project_id),
         await _evaluate_stale_evidence_check(twin, project_id),
         await _evaluate_verification_complete_check(project_id, traceability_coverage),
+        await _evaluate_waivers_check(twin, project_id),
+        await _evaluate_release_approval_check(twin, project_id),
     ]
-    for check_id, label in _G8_NOT_EVALUATED_CHECKS:
-        checks.append(
-            GateCheck(
-                id=check_id,
-                label=label,
-                status=GateCheckStatus.NOT_EVALUATED,
-                detail="no data source exists yet -- see this module's docstring",
-            )
-        )
     return GateEvaluation(gate_id="G8", status=_status_from_checks(checks), checks=checks)

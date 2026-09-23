@@ -150,6 +150,43 @@ async def test_records_an_invariant_entity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_records_a_waiver_entity() -> None:
+    """FORGE-73 (waiver/release model): 'waiver'/'release_approval' are real
+    entity_types now -- created PROPOSED, only real once approved via
+    twin.approve_engineering_entity (see test_engineering_entity_approval.py)."""
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)
+
+    out = await record(
+        entity_type="waiver",
+        statement="Waiving the 5kg mass budget for the demo unit by 200g.",
+        project_id=PROJECT_ID,
+    )
+    assert out["entity_type"] == "waiver"
+
+    stored = await twin.get_engineering_entity(UUID(out["node_id"]))
+    assert stored is not None
+    assert stored.authority.value == "proposed"
+
+
+@pytest.mark.asyncio
+async def test_records_a_release_approval_entity() -> None:
+    twin = InMemoryTwinAPI.create()
+    record = make_engineering_entity_recorder(twin)
+
+    out = await record(
+        entity_type="release_approval",
+        statement="Approved for manufacturing release.",
+        project_id=PROJECT_ID,
+    )
+    assert out["entity_type"] == "release_approval"
+
+    stored = await twin.get_engineering_entity(UUID(out["node_id"]))
+    assert stored is not None
+    assert stored.authority.value == "proposed"
+
+
+@pytest.mark.asyncio
 async def test_invalid_entity_type_rejected() -> None:
     twin = InMemoryTwinAPI.create()
     record = make_engineering_entity_recorder(twin)
