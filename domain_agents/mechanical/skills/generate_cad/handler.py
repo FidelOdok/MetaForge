@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import base64
-import os
 import time
-from pathlib import Path
 from typing import Any
 
 import structlog
 
 from domain_agents.shared.cad_backend import resolve_cad_backend
+from domain_agents.shared.commit_geometry import commit_geometry
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -29,66 +27,13 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
     ``freecad.create_parametric`` MCP tool to produce a STEP file from
     shape parameters (type + dimensions). If the preferred backend is
     unavailable, it falls back to the other with a warning. Both backends
-    run as separate adapter containers; see ``_commit_geometry`` for how
-    the resulting file path is resolved against the shared workspace.
+    run as separate adapter containers; see
+    ``domain_agents.shared.commit_geometry.commit_geometry`` for how the
+    resulting file path is resolved against the shared workspace.
     """
 
     input_type = GenerateCadInput
     output_type = GenerateCadOutput
-
-    async def _commit_geometry(
-        self, *, cad_file: str, shape_type: str, material: str, project_id: str | None
-    ) -> tuple[bool, str | None, str | None, str | None]:
-        """Best-effort persist the exported STEP file via twin.commit_geometry.
-
-        ``cadquery.create_parametric``/``freecad.create_parametric`` write the
-        STEP file inside their own adapter container and echo back the same
-        path they were given (e.g. ``output/plate_None.step``) rather than an
-        absolute one. That path is only valid relative to the adapter's own
-        CWD, but it lands on the ``adapter-workspace`` volume the adapter and
-        this gateway process both mount (the adapter at its CWD, this process
-        at ``ADAPTER_WORKSPACE_DIR``, default ``/workspace``) -- so a relative
-        *cad_file* is resolved against that shared root, mirroring
-        ``api_gateway.twin.regenerate_geometry._regenerate_via_cadquery``.
-
-        Returns:
-            (committed, twin_node_id, model_url, commit_error).
-        """
-        if not await self.context.mcp.is_available("twin.commit_geometry"):
-            return False, None, None, "twin.commit_geometry tool is not available"
-
-        resolved_path = Path(cad_file)
-        if not resolved_path.is_absolute():
-            workspace_root = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
-            resolved_path = workspace_root / cad_file
-
-        try:
-            step_base64 = base64.b64encode(resolved_path.read_bytes()).decode("ascii")
-        except OSError as exc:
-            self.logger.warning(
-                "Could not read generated CAD file to commit it",
-                cad_file=cad_file,
-                resolved_path=str(resolved_path),
-                error=str(exc),
-            )
-            return False, None, None, f"could not read {resolved_path}: {exc}"
-
-        arguments: dict[str, Any] = {
-            "name": f"{shape_type} ({material})",
-            "step_base64": step_base64,
-            "domain": "mechanical",
-            "format": "step",
-        }
-        if project_id:
-            arguments["project_id"] = project_id
-
-        try:
-            result = await self.context.mcp.invoke("twin.commit_geometry", arguments, timeout=60)
-        except Exception as exc:
-            self.logger.warning("twin.commit_geometry failed", error=str(exc))
-            return False, None, None, str(exc)
-
-        return True, result.get("node_id"), result.get("model_url"), None
 
     async def validate_preconditions(self, input_data: GenerateCadInput) -> list[str]:
         """Check that the work_product exists and at least one CAD tool is available."""
@@ -196,10 +141,10 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
             model_url: str | None = None
             commit_error: str | None = None
             if input_data.commit:
-                committed, twin_node_id, model_url, commit_error = await self._commit_geometry(
+                committed, twin_node_id, model_url, commit_error = await commit_geometry(
+                    self.context.mcp,
                     cad_file=cad_file,
-                    shape_type=input_data.shape_type,
-                    material=input_data.material,
+                    name=f"{input_data.shape_type} ({input_data.material})",
                     project_id=input_data.project_id,
                 )
                 span.set_attribute("committed", committed)

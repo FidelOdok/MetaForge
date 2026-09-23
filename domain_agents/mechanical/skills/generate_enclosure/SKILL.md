@@ -6,15 +6,19 @@ Generate a PCB enclosure from board dimensions, connector cutouts, and mounting 
 
 1. Takes PCB dimensions, connector cutout specs, and mounting hole positions as input
 2. Invokes the `cadquery.generate_enclosure` MCP tool to create a parametric enclosure
-3. Returns the STEP file path, internal volume, external dimensions, and mounting info
+3. Persists it into the Twin via `twin.commit_geometry` (unless `commit=false`)
+4. Returns the STEP file path, internal volume, external dimensions, mounting info, and commit result
 
 ## Tools Required
 
 - `cadquery.generate_enclosure` -- CadQuery PCB enclosure generation
+- `twin.commit_geometry` -- persistence (best-effort; failure is reported on the output, not raised)
 
 ## Input
 
-- `work_product_id` -- UUID of the enclosure work_product in the Digital Twin
+- `work_product_id` -- UUID of an existing enclosure work_product to link to, e.g. a PCB
+  work product an Electronics Agent already created (optional -- `commit_geometry` creates
+  a fresh `CAD_MODEL` work product when omitted, same as `generate_cad`)
 - `pcb_length` -- PCB length in mm
 - `pcb_width` -- PCB width in mm
 - `pcb_thickness` -- PCB thickness in mm (default: 1.6)
@@ -23,6 +27,8 @@ Generate a PCB enclosure from board dimensions, connector cutouts, and mounting 
 - `mounting_holes` -- List of mounting hole positions (x, y, diameter)
 - `wall_thickness` -- Enclosure wall thickness in mm (default: 2.0)
 - `material` -- Material name (default: ABS)
+- `project_id` -- Project UUID to link the resulting work product to, when committed
+- `commit` -- Persist into the Twin immediately (default: true)
 
 ## Output
 
@@ -31,6 +37,10 @@ Generate a PCB enclosure from board dimensions, connector cutouts, and mounting 
 - `external_dimensions` -- External length, width, height
 - `mounting_info` -- Hole count and cutout count
 - `material` -- Material used
+- `committed` -- Whether the geometry was persisted into the Twin
+- `twin_node_id` -- Twin node ID of the committed `cad_model`, when committed
+- `model_url` -- Viewer URL of the committed `cad_model`, when committed
+- `commit_error` -- Set when `commit=true` was requested but persistence was skipped or failed
 
 ## Cross-Domain Usage
 
