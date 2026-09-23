@@ -141,6 +141,23 @@ async def test_project_brief_carries_constraint_violations_instruction(
 
 
 @pytest.mark.asyncio
+async def test_project_brief_carries_engineering_entity_project_id_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FORGE-78: a waiver (or any EngineeringEntity) recorded via chat with
+    no project_id is invisible to this project's gate checks -- e.g.
+    evaluate_g8_release's waivers_approved check never saw one recorded
+    this way, silently reporting a vacuous PASS. Same convention as
+    FORGE-75's constraint_violations nudge."""
+    project = _project([_wp("Gimbal Base", "cad_model")])
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+
+    assert brief is not None
+    assert "twin.record_engineering_entity" in brief
+    assert brief.count("p-123") >= 3  # commit_geometry, constraint_violations, this instruction
+
+
+@pytest.mark.asyncio
 async def test_project_brief_caps_work_product_list(monkeypatch: pytest.MonkeyPatch) -> None:
     import api_gateway.chat.routes as routes
 

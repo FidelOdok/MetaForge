@@ -332,6 +332,13 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
         f'with `project_id="{project.id}"` — without it, the result may include '
         f"other projects' violations (FORGE-75)."
     )
+    lines.append(
+        f'\nAlways pass `project_id="{project.id}"` on `twin.record_engineering_entity` '
+        f"too (intent, stakeholder_need, objective, risk, budget, invariant, waiver, "
+        f"release_approval, ...) — without it the entity is unscoped and invisible to "
+        f"this project's gate checks (e.g. a waiver recorded with no project_id never "
+        f"counts toward the G8 release gate, FORGE-78)."
+    )
     return "\n".join(lines)
 
 
