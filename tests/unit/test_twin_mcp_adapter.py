@@ -651,6 +651,93 @@ class TestRecordEngineeringEntity:
 
 
 # ---------------------------------------------------------------------------
+# approve_engineering_entity (FORGE-73, waiver/release model)
+# ---------------------------------------------------------------------------
+
+
+class TestApproveEngineeringEntity:
+    async def test_tool_not_exposed_without_an_approver(self) -> None:
+        srv = TwinServer(twin=_FakeTwin())
+        assert "twin.approve_engineering_entity" not in set(srv.tool_ids)
+
+    async def test_tool_exposed_when_approver_given(self) -> None:
+        async def approver(**kwargs: Any) -> dict[str, Any]:
+            return {
+                "node_id": "n1",
+                "entity_type": "waiver",
+                "authority": "approved",
+                "revision": 2,
+            }
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_approver=approver)
+        assert "twin.approve_engineering_entity" in set(srv.tool_ids)
+
+    async def test_calls_approver_with_defaults(self) -> None:
+        calls: dict[str, Any] = {}
+
+        async def approver(**kwargs: Any) -> dict[str, Any]:
+            calls.update(kwargs)
+            return {
+                "node_id": "n1",
+                "entity_type": "waiver",
+                "authority": "approved",
+                "revision": 2,
+            }
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_approver=approver)
+        raw = await srv.handle_request(
+            _request("twin.approve_engineering_entity", {"entity_id": "n1"})
+        )
+        data = json.loads(raw)["result"]["data"]
+        assert data["authority"] == "approved"
+        assert calls["entity_id"] == "n1"
+        assert calls["target_state"] == "approved"
+        assert calls["approved_by"] is None
+        assert calls["expected_revision"] is None
+
+    async def test_passes_through_target_state_approved_by_and_revision(self) -> None:
+        calls: dict[str, Any] = {}
+
+        async def approver(**kwargs: Any) -> dict[str, Any]:
+            calls.update(kwargs)
+            return {
+                "node_id": "n1",
+                "entity_type": "waiver",
+                "authority": "reviewed",
+                "revision": 2,
+            }
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_approver=approver)
+        await srv.handle_request(
+            _request(
+                "twin.approve_engineering_entity",
+                {
+                    "entity_id": "n1",
+                    "target_state": "reviewed",
+                    "approved_by": "safety-lead",
+                    "expected_revision": 1,
+                },
+            )
+        )
+        assert calls["target_state"] == "reviewed"
+        assert calls["approved_by"] == "safety-lead"
+        assert calls["expected_revision"] == 1
+
+    async def test_missing_entity_id_rejected(self) -> None:
+        async def approver(**kwargs: Any) -> dict[str, Any]:
+            return {
+                "node_id": "n1",
+                "entity_type": "waiver",
+                "authority": "approved",
+                "revision": 2,
+            }
+
+        srv = TwinServer(twin=_FakeTwin(), engineering_entity_approver=approver)
+        raw = await srv.handle_request(_request("twin.approve_engineering_entity", {}))
+        assert "error" in json.loads(raw)
+
+
+# ---------------------------------------------------------------------------
 # Subgraph serialisation helper
 # ---------------------------------------------------------------------------
 

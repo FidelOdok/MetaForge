@@ -659,6 +659,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.ect_tools import make_ect_bridge
+    from api_gateway.twin.engineering_entity_approval import make_engineering_entity_approver
     from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
     from api_gateway.twin.evidence_recorder import make_evidence_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
@@ -709,6 +710,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # verification_case/evidence) -- the "why" a requirement exists,
         # recorded before/alongside the quantified requirements themselves.
         engineering_entity_recorder=make_engineering_entity_recorder(twin, project_backend),
+        # FORGE-73 (waiver/release model): a real approval step distinct from
+        # creation, so a waiver/release_approval only counts once actually
+        # approved, never just because it was recorded.
+        engineering_entity_approver=make_engineering_entity_approver(twin),
         # MET-587: chat-triggered design flows (run.start_design_flow) — the
         # flow's own phase gates are the HITL approval mechanism.
         run_launcher=make_run_launcher(),

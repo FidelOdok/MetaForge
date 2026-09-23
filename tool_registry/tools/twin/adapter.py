@@ -45,6 +45,7 @@ class TwinServer(McpToolServer):
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
         engineering_entity_recorder: Any = None,
+        engineering_entity_approver: Any = None,
         document_recorder: Any = None,
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
@@ -91,6 +92,12 @@ class TwinServer(McpToolServer):
         # seam as constraint_recorder; None keeps tool_registry free of
         # api_gateway imports.
         self._engineering_entity_recorder = engineering_entity_recorder
+        # FORGE-73 (waiver/release model): an injected async ``approve(...)``
+        # that advances one EngineeringEntity's authority (proposed ->
+        # reviewed/approved) -- distinct from creation, so a raised-but-
+        # unapproved waiver/release_approval can't silently count as done.
+        # Same injection seam as engineering_entity_recorder.
+        self._engineering_entity_approver = engineering_entity_approver
         # MET-588: an injected async ``record(...)`` (make_document_recorder)
         # that persists an arbitrary text/markdown artifact as a PRD/
         # DOCUMENTATION work product — MinIO blob + twin node + project link.
@@ -168,6 +175,8 @@ class TwinServer(McpToolServer):
             self._register_record_constraint_set()
         if engineering_entity_recorder is not None:
             self._register_record_engineering_entity()
+        if engineering_entity_approver is not None:
+            self._register_approve_engineering_entity()
         if document_recorder is not None:
             self._register_record_document()
         if design_sketch_recorder is not None:
@@ -1119,9 +1128,9 @@ class TwinServer(McpToolServer):
                 description=(
                     "Persist one Engineering Intent & Requirements Harness entity: "
                     "an intent, stakeholder_need, objective, assumption, question, "
-                    "risk, verification_case, evidence, budget, or invariant. Use "
-                    "to capture WHY a product/requirement exists before recording "
-                    "the quantified requirements themselves "
+                    "risk, verification_case, evidence, budget, invariant, waiver, "
+                    "or release_approval. Use to capture WHY a product/requirement "
+                    "exists before recording the quantified requirements themselves "
                     "(twin.record_constraint_set). Link it to the entity it "
                     "derives_from/satisfies/motivates/etc. via parent_refs so the "
                     "chain from stated intent to a specific requirement stays "
@@ -1131,7 +1140,12 @@ class TwinServer(McpToolServer):
                     "'==') persists as a numeric limit the G3 Preliminary "
                     "Feasibility gate reads automatically -- give it a `title` "
                     "(e.g. 'mass_budget', 'INV-MASS') so the gate's check labels "
-                    "stay readable."
+                    "stay readable. A 'waiver' (an explicit exception to a specific "
+                    "requirement/constraint -- link it via parent_refs) or "
+                    "'release_approval' (release-to-manufacture sign-off) only "
+                    "counts toward the G8 Release gate once approved with "
+                    "twin.approve_engineering_entity -- creating one alone leaves "
+                    "it PROPOSED, which FAILS an outstanding waiver's check."
                 ),
                 capability="twin_engineering_entity",
                 input_schema={
@@ -1150,6 +1164,8 @@ class TwinServer(McpToolServer):
                                 "evidence",
                                 "budget",
                                 "invariant",
+                                "waiver",
+                                "release_approval",
                             ],
                         },
                         "statement": {
@@ -1238,6 +1254,90 @@ class TwinServer(McpToolServer):
             relation=relation if isinstance(relation, str) else "derives_from",
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.approve_engineering_entity (FORGE-73, waiver/release model)
+    # ------------------------------------------------------------------
+
+    _APPROVAL_TARGET_STATES = ("reviewed", "approved")
+
+    def _register_approve_engineering_entity(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.approve_engineering_entity",
+                adapter_id="twin",
+                name="Approve Engineering Entity",
+                description=(
+                    "Advance one EngineeringEntity's authority from 'proposed' to "
+                    "'reviewed' or 'approved' -- a real, distinct approval step, not "
+                    "implied by creation. Needed for a 'waiver' or 'release_approval' "
+                    "entity (twin.record_engineering_entity) to count as approved "
+                    "for the G8 Release gate: a proposed-but-unapproved one FAILS "
+                    "that gate's check, exactly like an unmitigated critical risk "
+                    "fails G3. Does NOT advance to 'baselined' -- that only happens "
+                    "through a real Baseline (a separate mechanism)."
+                ),
+                capability="twin_engineering_entity",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The EngineeringEntity's node UUID.",
+                        },
+                        "target_state": {
+                            "type": "string",
+                            "enum": list(self._APPROVAL_TARGET_STATES),
+                            "default": "approved",
+                        },
+                        "approved_by": {
+                            "type": "string",
+                            "description": (
+                                "Who approved this, recorded in metadata (plain "
+                                "agent-asserted string, same trust level as every "
+                                "other created_by/approved_by field in this codebase)."
+                            ),
+                        },
+                        "expected_revision": {
+                            "type": "integer",
+                            "description": (
+                                "Optimistic-concurrency guard: the entity's revision "
+                                "as last read. Omit for a caller that hasn't read it."
+                            ),
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "entity_type": {"type": "string"},
+                        "authority": {"type": "string"},
+                        "revision": {"type": "integer"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.approve_engineering_entity,
+        )
+
+    async def approve_engineering_entity(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        entity_id = arguments.get("entity_id")
+        if not entity_id or not isinstance(entity_id, str):
+            raise ValueError(
+                "twin.approve_engineering_entity: 'entity_id' is required (non-empty string)"
+            )
+        target_state = arguments.get("target_state")
+        approved_by = arguments.get("approved_by")
+        expected_revision = arguments.get("expected_revision")
+        return await self._engineering_entity_approver(
+            entity_id=entity_id,
+            target_state=target_state if isinstance(target_state, str) else "approved",
+            approved_by=approved_by if isinstance(approved_by, str) else None,
+            expected_revision=(expected_revision if isinstance(expected_revision, int) else None),
         )
 
     # ------------------------------------------------------------------

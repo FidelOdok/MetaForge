@@ -22,6 +22,7 @@ from twin_core.consistency import (
     evaluate_g3_feasibility,
     evaluate_g4_architecture,
     evaluate_g5_concept_selection,
+    evaluate_g8_release,
 )
 
 logger = structlog.get_logger(__name__)
@@ -201,9 +202,9 @@ class TwinConstraintChecker:
 
 class TwinConsistencyGateChecker:
     """`ConsistencyGateChecker` backed by `twin_core.consistency.gates`
-    (FORGE-73). Only three ``gate_id``s are mapped today -- see
+    (FORGE-73). Only four ``gate_id``s are mapped today -- see
     :class:`~orchestrator.design_flow.spec.Gate`'s own docstring for why
-    G6-G8 aren't (yet). Purely informational: the executor never fails a
+    G6/G7 aren't (yet). Purely informational: the executor never fails a
     gate on this checker's result (no ``enforce_*`` flag exists for it).
     """
 
@@ -224,6 +225,8 @@ class TwinConsistencyGateChecker:
             evaluation = await evaluate_g4_architecture(self._twin, pid)
         elif gate_id == "G5":
             evaluation = await evaluate_g5_concept_selection(self._twin, pid)
+        elif gate_id == "G8":
+            evaluation = await evaluate_g8_release(self._twin, pid)
         else:
             return ConsistencyGateReport(checked=False)
 

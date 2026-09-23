@@ -45,6 +45,14 @@ EngineeringEntityType = Literal[
     # twin_core.consistency.invariants.invariant_from_entity.
     "budget",
     "invariant",
+    # FORGE-73 (waiver/release model): an explicit, human-approved exception
+    # to a specific requirement/constraint (waiver, statement + optional
+    # `parent_refs` to the thing being waived) or a release-to-manufacture
+    # sign-off (release_approval) -- both real only once approved via
+    # twin.approve_engineering_entity (authority PROPOSED -> APPROVED), never
+    # from creation alone. See twin_core.consistency.gates's G8 section.
+    "waiver",
+    "release_approval",
 ]
 
 

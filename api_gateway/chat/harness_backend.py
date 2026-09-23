@@ -185,6 +185,11 @@ _GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {
     "twin.record_decision": (GATE_TWIN_WRITE,),
     "twin.record_constraint_set": (GATE_TWIN_WRITE,),
     "twin.record_engineering_entity": (GATE_TWIN_WRITE,),
+    # FORGE-73 (waiver/release model): same gate tier as every other twin-
+    # writing tool -- approver identity is an agent-asserted string, same
+    # trust level as created_by everywhere else (see
+    # api_gateway/twin/engineering_entity_approval.py's module docstring).
+    "twin.approve_engineering_entity": (GATE_TWIN_WRITE,),
     "twin.record_evidence": (GATE_TWIN_WRITE,),
     "twin.record_claim": (GATE_TWIN_WRITE,),
     "twin.record_document": (GATE_TWIN_WRITE,),

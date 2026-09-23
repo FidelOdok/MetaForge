@@ -17,7 +17,7 @@ from twin_core.consistency import (
 from twin_core.models.baseline import Baseline
 from twin_core.models.constraint import Constraint
 from twin_core.models.engineering_entity import EngineeringEntity
-from twin_core.models.enums import ConstraintSeverity
+from twin_core.models.enums import AuthorityState, ConstraintSeverity
 
 
 @pytest.fixture
@@ -45,6 +45,25 @@ def _critical_req(project_id, name="req1", metadata=None, source="") -> Constrai
 def _evidence(project_id, statement="sim result", metadata=None) -> EngineeringEntity:
     return EngineeringEntity(
         entity_type="evidence", statement=statement, project_id=project_id, metadata=metadata or {}
+    )
+
+
+def _waiver(
+    project_id, statement="waived", authority: AuthorityState = AuthorityState.PROPOSED
+) -> EngineeringEntity:
+    return EngineeringEntity(
+        entity_type="waiver", statement=statement, project_id=project_id, authority=authority
+    )
+
+
+def _release_approval(
+    project_id, statement="release", authority: AuthorityState = AuthorityState.PROPOSED
+) -> EngineeringEntity:
+    return EngineeringEntity(
+        entity_type="release_approval",
+        statement=statement,
+        project_id=project_id,
+        authority=authority,
     )
 
 
@@ -173,17 +192,77 @@ class TestG8StaleEvidenceCheck:
 
 
 class TestG8NotEvaluatedChecks:
-    async def test_verification_waivers_release_are_not_evaluated(self, twin, project_id):
+    async def test_verification_complete_is_not_evaluated_without_an_accessor(
+        self, twin, project_id
+    ):
         result = await evaluate_g8_release(twin, project_id)
-        ids = {c.id for c in result.checks}
-        for expected in ("required_verification_complete", "waivers_approved", "release_approved"):
-            assert expected in ids
-            check = next(c for c in result.checks if c.id == expected)
-            assert check.status == GateCheckStatus.NOT_EVALUATED
+        check = next(c for c in result.checks if c.id == "required_verification_complete")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
 
     async def test_gate_id_is_g8(self, twin, project_id):
         result = await evaluate_g8_release(twin, project_id)
         assert result.gate_id == "G8"
+
+
+class TestG8WaiversApprovedCheck:
+    async def test_no_waivers_recorded_is_a_real_pass_not_vacuous(self, twin, project_id):
+        """FORGE-73: unlike stale-evidence/baseline, zero waivers is a real
+        PASS -- nothing outstanding needs one -- same vacuous-pass exception
+        as G4's zero-constraints case."""
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "waivers_approved")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_unapproved_waiver_fails(self, twin, project_id):
+        await twin.create_engineering_entity(_waiver(project_id, authority=AuthorityState.PROPOSED))
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "waivers_approved")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_approved_waiver_passes(self, twin, project_id):
+        await twin.create_engineering_entity(_waiver(project_id, authority=AuthorityState.APPROVED))
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "waivers_approved")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_one_unapproved_among_several_still_fails(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _waiver(project_id, "w1", authority=AuthorityState.APPROVED)
+        )
+        await twin.create_engineering_entity(
+            _waiver(project_id, "w2", authority=AuthorityState.PROPOSED)
+        )
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "waivers_approved")
+        assert check.status == GateCheckStatus.FAIL
+
+
+class TestG8ReleaseApprovedCheck:
+    async def test_none_recorded_fails_not_a_vacuous_pass(self, twin, project_id):
+        """Unlike waivers, release-to-manufacture is an unconditionally
+        required sign-off -- absence FAILS, same posture as the baseline
+        check's own missing-baseline FAIL."""
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "release_approved")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_unapproved_release_approval_fails(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _release_approval(project_id, authority=AuthorityState.PROPOSED)
+        )
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "release_approved")
+        assert check.status == GateCheckStatus.FAIL
+
+    async def test_approved_release_approval_passes(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _release_approval(project_id, authority=AuthorityState.APPROVED)
+        )
+        result = await evaluate_g8_release(twin, project_id)
+        check = next(c for c in result.checks if c.id == "release_approved")
+        assert check.status == GateCheckStatus.PASS
 
 
 class TestVerificationCompleteWithInjectedAccessor:
