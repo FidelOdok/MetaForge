@@ -765,18 +765,50 @@ def _tool_families(runtime: Any) -> list[str]:
     return sorted(families)
 
 
+def _public_url_notice() -> str:
+    """Tell the model how to render a relative link a tool result returns.
+
+    ``twin.commit_geometry`` and friends return ``model_url`` as a bare
+    relative path (``/v1/twin/nodes/<id>/model``) — correct for the dashboard
+    and CLI, which resolve it against a base URL they already know. The chat
+    model has no such context, so left unguided it fabricates a plausible-
+    looking placeholder host (observed: ``https://example.com/...``) to turn
+    the path into a well-formed markdown link (FORGE-79 follow-up). With
+    ``METAFORGE_PUBLIC_URL`` set, tell it the real host to prefix with;
+    otherwise tell it to present the path as-is rather than invent one.
+    """
+    public_url = (os.environ.get("METAFORGE_PUBLIC_URL") or "").strip().rstrip("/")
+    if public_url:
+        return (
+            f"This gateway's public URL is {public_url}. When a tool result contains "
+            'a relative link (e.g. "/v1/twin/nodes/<id>/model"), present it to the '
+            f"user as an absolute link by prefixing it with {public_url} — never invent "
+            "or guess a different domain such as example.com."
+        )
+    return (
+        'Tool results may contain relative links (e.g. "/v1/twin/nodes/<id>/model") '
+        "with no host. Present these to the user exactly as given, as a relative path "
+        "— never invent or guess a placeholder domain such as example.com."
+    )
+
+
 def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> str:
     """Layered system prompt for the native path (MET-566).
 
-    Sections: identity/rules -> current date -> capability summary (tool
-    families from the registry) -> project brief -> response guidance. The
-    project brief moves here from the fake ``[project context]`` user/assistant
-    history pair (the ReAct path keeps that pair as its fallback). Everything
-    here is stable per thread (date at day granularity, brief per project) so
-    provider prompt caches hit across turns; per-turn volatile content — the
-    retrieved-context block — stays in the message stream instead.
+    Sections: identity/rules -> current date -> public-URL notice -> capability
+    summary (tool families from the registry) -> project brief -> response
+    guidance. The project brief moves here from the fake ``[project context]``
+    user/assistant history pair (the ReAct path keeps that pair as its
+    fallback). Everything here is stable per thread (date at day granularity,
+    brief per project) so provider prompt caches hit across turns; per-turn
+    volatile content — the retrieved-context block — stays in the message
+    stream instead.
     """
-    sections = [NATIVE_SYSTEM, f"Current date: {datetime.now(UTC).date().isoformat()}."]
+    sections = [
+        NATIVE_SYSTEM,
+        f"Current date: {datetime.now(UTC).date().isoformat()}.",
+        _public_url_notice(),
+    ]
     families = _tool_families(runtime)
     if families:
         sections.append(
