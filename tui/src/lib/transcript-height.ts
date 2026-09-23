@@ -97,3 +97,44 @@ export function pendingHeight(
   }
   return rows;
 }
+
+/** Shape of `useChat`'s `pendingApproval` (kept local, same reason as PendingLike). */
+export interface ToolApprovalLike {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
+const TOOL_APPROVAL_MAX_ARG_LINES = 4;
+
+/**
+ * A compact, bounded preview of a paused tool call's arguments (FORGE-33) --
+ * generic across every `requires_approval` tool (twin.commit_geometry,
+ * twin.record_decision, project.create/update/delete), so no per-tool field
+ * knowledge is baked in here; just a truncated pretty-printed JSON view.
+ * Shared by <ToolApprovalModal> and `toolApprovalHeight` so they can never
+ * drift out of sync (same pattern as `pending`'s clipped `liveSteps`/`liveText`).
+ */
+export function toolApprovalArgPreview(
+  args: Record<string, unknown>,
+  maxLines = TOOL_APPROVAL_MAX_ARG_LINES,
+): string[] {
+  const lines = JSON.stringify(args, null, 2).split("\n");
+  if (lines.length <= maxLines) return lines;
+  return [...lines.slice(0, maxLines - 1), `… ${lines.length - (maxLines - 1)} more line(s)`];
+}
+
+/** Rows the tool-approval modal occupies, mirroring <ToolApprovalModal>'s JSX
+ * (border box: marginTop + header + preview block + footer, 2 border rows). */
+export function toolApprovalHeight(approval: ToolApprovalLike | null, cols: number): number {
+  if (!approval) return 0;
+  const wrapW = Math.max(1, cols - 2); // Box has paddingX={1}
+  const previewLines = toolApprovalArgPreview(approval.arguments);
+  let rows = 2; // border top + bottom
+  rows += 1; // marginTop
+  rows += wrappedLines(`Approval required — ${approval.tool}`, wrapW);
+  rows += 1; // marginTop before preview block
+  rows += previewLines.reduce((n, l) => n + wrappedLines(l, wrapW), 0);
+  rows += 1; // marginTop before footer
+  rows += 1; // footer line ([a] approve  [x] reject)
+  return rows;
+}

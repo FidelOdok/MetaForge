@@ -1,7 +1,8 @@
 /**
  * Chat SSE client for /v1/chat. Mirrors the gateway's event contract
  * (api_gateway/chat/streaming.py): message.delta / agent.step / context.stats /
- * agent.done / error. `streamThread` yields parsed events off the fetch body stream.
+ * tool.approval_requested / agent.done / error. `streamThread` yields parsed
+ * events off the fetch body stream.
  */
 
 import { log } from "../log.js";
@@ -53,6 +54,15 @@ export interface ScopeChanged {
   project_name: string | null;
 }
 
+/** A `requires_approval` tool call (twin.commit_geometry, twin.record_decision,
+ * project.create/update/delete) is paused mid-turn, waiting on a decision.
+ * `run_id` is what `POST /v1/chat/tool_approvals/{run_id}` needs to resolve it. */
+export interface ToolApprovalRequested {
+  run_id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
 export type ChatEvent =
   | { type: "message.delta"; delta: string }
   | { type: "agent.thinking"; delta: string; kind: "draft" | "reasoning" }
@@ -60,6 +70,7 @@ export type ChatEvent =
   | { type: "agent.step"; step: AgentStep }
   | { type: "context.stats"; stats: ContextStats }
   | { type: "scope.changed"; scope: ScopeChanged }
+  | { type: "tool.approval_requested"; approval: ToolApprovalRequested }
   | { type: "agent.done" }
   | { type: "error"; error: string }
   | { type: "other"; event: string; data: unknown };
@@ -111,6 +122,15 @@ export function parseEvent(raw: string): ChatEvent | null {
           scope_kind: String(data.scope_kind ?? ""),
           scope_entity_id: String(data.scope_entity_id ?? ""),
           project_name: data.project_name == null ? null : String(data.project_name),
+        },
+      };
+    case "tool.approval_requested":
+      return {
+        type: "tool.approval_requested",
+        approval: {
+          run_id: String(data.run_id ?? ""),
+          tool: String(data.tool ?? ""),
+          arguments: (data.arguments as Record<string, unknown>) ?? {},
         },
       };
     case "agent.done":

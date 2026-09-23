@@ -6,10 +6,21 @@ vi.mock('../../hooks/use-assistant', () => ({
   useDecideProposal: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+// FORGE-33: real network call otherwise (getPendingToolApprovals hits
+// /chat/tool_approvals) — same hermetic-mock treatment as use-assistant above.
+// Defaults to an empty pending list so tests that don't care about this
+// panel (most of them) don't need their own mockReturnValue.
+vi.mock('../../hooks/use-tool-approvals', () => ({
+  usePendingToolApprovals: vi.fn(() => ({ data: { runs: [] } })),
+  useDecideToolApproval: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 import { ApprovalsPage } from '../ApprovalsPage';
 import { useProposals } from '../../hooks/use-assistant';
+import { usePendingToolApprovals } from '../../hooks/use-tool-approvals';
 
 const mockUseProposals = vi.mocked(useProposals);
+const mockUsePendingToolApprovals = vi.mocked(usePendingToolApprovals);
 
 describe('ApprovalsPage', () => {
   it('shows loading state', () => {
@@ -38,7 +49,37 @@ describe('ApprovalsPage', () => {
     expect(screen.queryByText('P9')).not.toBeInTheDocument();
   });
 
+  it('FORGE-33: shows empty state for pending tool calls by default', () => {
+    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
+    render(<ApprovalsPage />);
+    expect(screen.getByText('No tool calls awaiting approval')).toBeInTheDocument();
+  });
+
+  it('FORGE-33: renders a pending tool call awaiting approval', () => {
+    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
+    mockUsePendingToolApprovals.mockReturnValue({
+      data: {
+        runs: [{
+          id: 'run_1',
+          status: 'awaiting_approval',
+          request: { tool: 'mcp_twin_commit_geometry', arguments: { name: 'leg bracket' } },
+          created_at: Date.now() / 1000,
+          updated_at: Date.now() / 1000,
+          error: null,
+          approval_reason: "approval required for tool 'mcp_twin_commit_geometry'",
+          result: null,
+          history: ['queued', 'running', 'awaiting_approval'],
+        }],
+      },
+    } as unknown as ReturnType<typeof usePendingToolApprovals>);
+    render(<ApprovalsPage />);
+    expect(screen.getByText('mcp_twin_commit_geometry')).toBeInTheDocument();
+    expect(screen.getByText(/leg bracket/)).toBeInTheDocument();
+    expect(screen.queryByText('No tool calls awaiting approval')).not.toBeInTheDocument();
+  });
+
   it('renders proposals', () => {
+    mockUsePendingToolApprovals.mockReturnValue({ data: { runs: [] } } as unknown as ReturnType<typeof usePendingToolApprovals>);
     mockUseProposals.mockReturnValue({
       data: {
         proposals: [{

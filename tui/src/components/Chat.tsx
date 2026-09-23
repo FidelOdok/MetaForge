@@ -7,10 +7,11 @@ import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ThreadSummary } from "../api/client.js";
 import { describeThread, pickerCandidates } from "../lib/resume.js";
 import { stepRows, tailLines } from "../lib/live-tail.js";
-import { pendingHeight, transcriptHeight } from "../lib/transcript-height.js";
+import { pendingHeight, toolApprovalHeight, transcriptHeight } from "../lib/transcript-height.js";
 import { appendHistory, loadHistory } from "../history.js";
 import { StepTrace } from "./StepTrace.js";
 import { Thinking } from "./Thinking.js";
+import { ToolApprovalModal } from "./ToolApprovalModal.js";
 import { Welcome, welcomeHeight } from "./Welcome.js";
 
 /** A completed conversation turn, rendered once into <Static> and never again. */
@@ -80,7 +81,8 @@ export function Chat({
    *  (a callback would lag one render behind and strand transition frames). */
   chat: UseChat;
 }) {
-  const { status, error, messages, pending, send } = chat;
+  const { status, error, messages, pending, pendingApproval, approvalBusy, resolveApproval, send } =
+    chat;
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   // MET-595: /resume thread picker — when non-null it replaces the input box.
@@ -106,7 +108,16 @@ export function Chat({
   const histPos = useRef<number | null>(null);
   const draft = useRef("");
 
-  useInput((_i, key) => {
+  useInput((input, key) => {
+    // FORGE-33: a paused tool call captures a/x before anything else — the
+    // turn is blocked server-side until this resolves.
+    if (pendingApproval !== null) {
+      if (!approvalBusy) {
+        if (input === "a") resolveApproval("approve");
+        else if (input === "x") resolveApproval("reject");
+      }
+      return;
+    }
     // Picker mode captures navigation keys (MET-595).
     if (picker !== null) {
       if (key.upArrow) setPickerIdx((i) => Math.max(0, i - 1));
@@ -329,6 +340,14 @@ export function Chat({
         </Box>
       ) : null}
 
+      {pendingApproval ? (
+        <ToolApprovalModal
+          tool={pendingApproval.tool}
+          arguments={pendingApproval.arguments}
+          busy={approvalBusy}
+        />
+      ) : null}
+
       {reconnecting ? (
         <Box paddingX={1}>
           <Thinking label="reconnecting to gateway" />
@@ -384,7 +403,15 @@ export function Chat({
   // Static, the first turn just appends to the scrollback and drops this spacer
   // box — no frame is stranded. `FOOTER_ROWS` is App's two-line status bar; the
   // extra row keeps the splash fully on-screen if the height estimate is off.
-  if (!started) {
+  //
+  // FORGE-33: a fixed `height=` box can't grow for content — on a real (or
+  // the default-fallback 24-row, see useTerminalSize) terminal, the welcome
+  // splash alone can leave too few rows for the approval modal to render
+  // without clipping its footer. A pending approval on the very first turn
+  // (a real case — the first message can already call twin.commit_geometry)
+  // falls through to the transcript layout below instead, whose `minHeight`
+  // spacer degrades gracefully (clamped at 0) rather than hard-clipping.
+  if (!started && !pendingApproval) {
     const FOOTER_ROWS = 2;
     const spacerHeight = Math.max(
       3,
@@ -422,14 +449,15 @@ export function Chat({
   const FOOTER_ROWS = 2;
   const staticEstimate =
     welcomeHeight(cols, client.baseUrl()) + transcriptHeight(messages, cols);
-  const liveEstimate = pending
-    ? pendingHeight(
-        { text: liveText, steps: liveSteps, thinking: pending.thinking, startedAction: pending.startedAction },
-        cols,
-        busy,
-        hiddenSteps > 0 ? 1 : 0,
-      )
-    : 0;
+  const liveEstimate =
+    (pending
+      ? pendingHeight(
+          { text: liveText, steps: liveSteps, thinking: pending.thinking, startedAction: pending.startedAction },
+          cols,
+          busy,
+          hiddenSteps > 0 ? 1 : 0,
+        )
+      : 0) + toolApprovalHeight(pendingApproval, cols);
   const pinHeight = Math.max(0, termRows - staticEstimate - FOOTER_ROWS - 1 - liveEstimate);
   return (
     <Box flexDirection="column" flexGrow={1}>

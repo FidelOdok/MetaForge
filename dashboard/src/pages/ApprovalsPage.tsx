@@ -1,9 +1,11 @@
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
+import { usePendingToolApprovals, useDecideToolApproval } from '../hooks/use-tool-approvals';
 import { useActiveProject } from '../hooks/use-active-project';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
 import type { Proposal } from '../api/endpoints/assistant';
+import type { ToolApprovalRun } from '../api/endpoints/toolApprovals';
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
 const KC = {
@@ -227,10 +229,111 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
   );
 }
 
+// ─── ToolApprovalCard ────────────────────────────────────────────────────────
+// FORGE-33: a `requires_approval` tool call (twin.commit_geometry,
+// twin.record_decision, project.create/update/delete) paused mid-chat-turn.
+// Unlike a Proposal, the list this renders is already filtered to pending —
+// there's no history to show, just the tool + a compact arguments preview.
+function ToolApprovalCard({ approval }: { approval: ToolApprovalRun }) {
+  const decide = useDecideToolApproval();
+  const argEntries = Object.entries(approval.request.arguments ?? {});
+
+  function handleDecision(decision: 'approve' | 'reject') {
+    decide.mutate({ runId: approval.id, decision });
+  }
+
+  return (
+    <div
+      className="rounded-lg space-y-3 p-4"
+      style={{
+        background: KC.glass,
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        border: `1px solid ${KC.border}`,
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2 min-w-0">
+          <StatusDot status="pending" />
+          <div className="min-w-0">
+            <div className="font-mono font-medium leading-snug" style={{ color: KC.onSurface }}>
+              {approval.request.tool}
+            </div>
+            <div className="mt-1">
+              <span className="font-mono" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
+                {formatRelativeTime(new Date(approval.created_at * 1000).toISOString())}
+              </span>
+            </div>
+          </div>
+        </div>
+        <span
+          className="font-mono shrink-0 rounded px-1.5 py-0.5"
+          style={{ fontSize: 10, backgroundColor: KC.surfaceHigh, color: KC.onSurfaceVariant }}
+        >
+          awaiting approval
+        </span>
+      </div>
+
+      {argEntries.length > 0 && (
+        <div
+          className="rounded overflow-auto"
+          style={{
+            backgroundColor: KC.surfaceLowest,
+            border: `1px solid ${KC.border}`,
+            maxHeight: 160,
+          }}
+        >
+          <div className="font-mono text-xs p-3 space-y-0.5">
+            {argEntries.map(([key, value]) => {
+              const raw = typeof value === 'object' ? JSON.stringify(value) : String(value);
+              return (
+                <div key={key} style={{ color: KC.onSurfaceVariant }}>
+                  {key}: {raw}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 pt-1">
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => handleDecision('approve')}
+          disabled={decide.isPending}
+          className="gap-1.5"
+          style={{ backgroundColor: KC.primaryContainer, color: KC.surface, border: 'none' }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>check_circle</span>
+          Approve
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleDecision('reject')}
+          disabled={decide.isPending}
+          className="gap-1.5"
+          style={{
+            backgroundColor: 'rgba(255,180,171,0.10)',
+            color: KC.error,
+            border: `1px solid rgba(255,180,171,0.20)`,
+          }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>cancel</span>
+          Reject
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── ApprovalsPage ───────────────────────────────────────────────────────────
 export function ApprovalsPage() {
   const { activeProjectId } = useActiveProject();
   const { data, isLoading } = useProposals(activeProjectId ?? undefined);
+  const { data: toolApprovalsData } = usePendingToolApprovals();
+  const pendingToolApprovals = toolApprovalsData?.runs ?? [];
 
   if (isLoading) {
     return (
@@ -456,6 +559,50 @@ export function ApprovalsPage() {
           >
             changes required
           </span>
+        </div>
+      </div>
+
+      {/* ── PENDING TOOL CALLS panel (FORGE-33) ────────────────────────────
+          A live chat turn (twin.commit_geometry/record_decision, project
+          writes) paused mid-flight, waiting on this exact decision — distinct
+          from a Proposal, which nothing downstream is actively blocked on. */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={glassPanel}>
+          <div
+            style={{
+              padding: '10px 16px',
+              borderBottom: `1px solid ${KC.border}`,
+            }}
+          >
+            <span
+              className="font-mono"
+              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+            >
+              PENDING TOOL CALLS
+            </span>
+          </div>
+          <div style={{ padding: 12 }}>
+            {pendingToolApprovals.length === 0 ? (
+              <EmptyState
+                title="No tool calls awaiting approval"
+                description="A live chat turn paused on twin.commit_geometry, twin.record_decision, or a project write will appear here."
+                icon={
+                  <span
+                    className="material-symbols-outlined"
+                    style={{ fontSize: 40, color: KC.onSurfaceVariant }}
+                  >
+                    pending_actions
+                  </span>
+                }
+              />
+            ) : (
+              <div className="space-y-3">
+                {pendingToolApprovals.map((approval) => (
+                  <ToolApprovalCard key={approval.id} approval={approval} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
