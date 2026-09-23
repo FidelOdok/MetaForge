@@ -46,7 +46,15 @@ class MountingInfo(BaseModel):
 class GenerateEnclosureInput(BaseModel):
     """Input for the generate_enclosure skill."""
 
-    work_product_id: UUID = Field(..., description="Twin work_product ID for the enclosure")
+    work_product_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Twin work_product ID for the enclosure, when linking to an "
+            "existing one (e.g. a PCB work product an Electronics Agent "
+            "already created). Optional -- commit_geometry creates a fresh "
+            "CAD_MODEL work product when omitted, same as generate_cad."
+        ),
+    )
     pcb_length: float = Field(..., gt=0, description="PCB length in mm")
     pcb_width: float = Field(..., gt=0, description="PCB width in mm")
     pcb_thickness: float = Field(default=1.6, gt=0, description="PCB thickness in mm")
@@ -61,12 +69,23 @@ class GenerateEnclosureInput(BaseModel):
     )
     wall_thickness: float = Field(default=2.0, gt=0, description="Enclosure wall thickness in mm")
     material: str = Field(default="ABS", description="Material name for metadata")
+    project_id: str | None = Field(
+        default=None,
+        description="Project UUID to link the resulting work product to, when committed",
+    )
+    commit: bool = Field(
+        default=True,
+        description=(
+            "Persist the generated geometry into the Twin via twin.commit_geometry "
+            "immediately (best-effort -- failure is reported on the output, not raised)"
+        ),
+    )
 
 
 class GenerateEnclosureOutput(BaseModel):
     """Output from the generate_enclosure skill."""
 
-    work_product_id: UUID = Field(..., description="Twin work_product ID")
+    work_product_id: UUID | None = Field(default=None, description="Twin work_product ID")
     cad_file: str = Field(..., description="Path to generated enclosure STEP file")
     internal_volume: float = Field(..., ge=0, description="Internal volume in mm^3")
     external_dimensions: ExternalDimensions = Field(
@@ -76,3 +95,17 @@ class GenerateEnclosureOutput(BaseModel):
         default_factory=MountingInfo, description="Mounting feature summary"
     )
     material: str = Field(..., description="Material used")
+    committed: bool = Field(
+        default=False,
+        description="Whether the geometry was persisted into the Twin as a cad_model work product",
+    )
+    twin_node_id: str | None = Field(
+        default=None, description="Twin node ID of the committed cad_model, when committed"
+    )
+    model_url: str | None = Field(
+        default=None, description="Viewer URL of the committed cad_model, when committed"
+    )
+    commit_error: str | None = Field(
+        default=None,
+        description="Set when commit=True was requested but persistence was skipped or failed",
+    )

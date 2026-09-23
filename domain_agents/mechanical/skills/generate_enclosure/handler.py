@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from domain_agents.shared.commit_geometry import commit_geometry
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -35,11 +36,12 @@ class GenerateEnclosureHandler(SkillBase[GenerateEnclosureInput, GenerateEnclosu
         """Check that the work_product exists and CadQuery enclosure tool is available."""
         errors: list[str] = []
 
-        work_product = await self.context.twin.get_work_product(
-            input_data.work_product_id, branch=self.context.branch
-        )
-        if work_product is None:
-            errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
+        if input_data.work_product_id is not None:
+            work_product = await self.context.twin.get_work_product(
+                input_data.work_product_id, branch=self.context.branch
+            )
+            if work_product is None:
+                errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         if not await self.context.mcp.is_available("cadquery.generate_enclosure"):
             errors.append("CadQuery generate_enclosure tool is not available")
@@ -91,17 +93,36 @@ class GenerateEnclosureHandler(SkillBase[GenerateEnclosureInput, GenerateEnclosu
             raw_dims: dict[str, Any] = result.get("external_dimensions", {})
             raw_mount: dict[str, Any] = result.get("mounting_info", {})
 
+            cad_file: str = result.get("cad_file", "")
+
             self.logger.info(
                 "Enclosure generated",
-                cad_file=result.get("cad_file", ""),
+                cad_file=cad_file,
                 elapsed_s=round(elapsed, 3),
             )
 
             span.set_attribute("elapsed_s", elapsed)
 
+            # Persist into the Twin so this skill always leaves a reviewable
+            # work product behind, same as generate_cad (FORGE-84) -- this
+            # skill previously never committed at all, so even a successful
+            # call was lost the moment the adapter container recreated.
+            committed = False
+            twin_node_id: str | None = None
+            model_url: str | None = None
+            commit_error: str | None = None
+            if input_data.commit:
+                committed, twin_node_id, model_url, commit_error = await commit_geometry(
+                    self.context.mcp,
+                    cad_file=cad_file,
+                    name=f"Enclosure ({input_data.material})",
+                    project_id=input_data.project_id,
+                )
+                span.set_attribute("committed", committed)
+
             return GenerateEnclosureOutput(
                 work_product_id=input_data.work_product_id,
-                cad_file=result.get("cad_file", ""),
+                cad_file=cad_file,
                 internal_volume=float(result.get("internal_volume", 0.0)),
                 external_dimensions=ExternalDimensions(
                     length=float(raw_dims.get("length", 0.0)),
@@ -113,6 +134,10 @@ class GenerateEnclosureHandler(SkillBase[GenerateEnclosureInput, GenerateEnclosu
                     cutout_count=int(raw_mount.get("cutout_count", 0)),
                 ),
                 material=result.get("material", input_data.material),
+                committed=committed,
+                twin_node_id=twin_node_id,
+                model_url=model_url,
+                commit_error=commit_error,
             )
 
     async def validate_output(self, output: GenerateEnclosureOutput) -> list[str]:
