@@ -29,6 +29,19 @@ test("parses context.stats (unwraps the data envelope)", () => {
   }
 });
 
+test("parses tool.approval_requested (unwraps the data envelope, FORGE-33)", () => {
+  const raw =
+    'event: tool.approval_requested\ndata: {"data":{"run_id":"run_1","tool":"mcp_twin_commit_geometry",' +
+    '"arguments":{"name":"leg bracket"}},"thread_id":"t1"}';
+  const ev = parseEvent(raw);
+  assert.equal(ev?.type, "tool.approval_requested");
+  if (ev?.type === "tool.approval_requested") {
+    assert.equal(ev.approval.run_id, "run_1");
+    assert.equal(ev.approval.tool, "mcp_twin_commit_geometry");
+    assert.equal(ev.approval.arguments.name, "leg bracket");
+  }
+});
+
 test("parses agent.done and error", () => {
   assert.deepEqual(parseEvent("event: agent.done\ndata: {}"), { type: "agent.done" });
   assert.deepEqual(parseEvent('event: error\ndata: {"error":"boom"}'), {

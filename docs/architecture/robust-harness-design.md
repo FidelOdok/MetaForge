@@ -407,3 +407,34 @@ give an operator a genuinely read-only chat surface. Reads and `freecad.*` /
 ephemeral workspace. The gate is a static precondition; the per-call human
 decision for the same tools remains the separate "ask" tier
 (`requires_approval`).
+
+### Approval UI for the "ask" tier (FORGE-33)
+
+`requires_approval` (`twin.commit_geometry`, `twin.record_decision`,
+`project.create/update/delete`) pauses the run server-side
+(`HarnessRuntime._await_approval`,
+`api_gateway/chat/tool_approvals.py`'s `InMemoryRunStore`) and broadcasts a
+`tool.approval_requested` SSE event (`run_id`, `tool`, `arguments`) on the
+same `/v1/chat/threads/{id}/stream` the turn is already using. The resolution
+endpoint (`GET`/`POST /v1/chat/tool_approvals[/{run_id}]`) was real from the
+start, but until FORGE-33 no client consumed either — a paused call had no
+UI anywhere and always hit the deny-by-default timeout
+(`chat_approval_timeout_seconds`, 1800s default).
+
+Two clients now do:
+
+- **TUI** (`tui/src/components/ToolApprovalModal.tsx`) — an inline `[a]
+  approve` / `[x] reject` prompt in the chat view itself, the same
+  keypress convention `GateModal` already used for design-flow gate
+  approvals (a different mechanism, `/v1/runs/{id}/approval`). The turn's
+  own HTTP request stays open server-side while the human decides;
+  submitting a decision doesn't reconnect anything, the same SSE stream
+  just resumes delivering whatever comes next.
+- **Dashboard** (`dashboard/src/pages/ApprovalsPage.tsx`, "PENDING TOOL
+  CALLS" panel) — a polled list (`usePendingToolApprovals`, 5s interval;
+  no chat UI exists in the dashboard to hook an inline prompt into, so
+  this is deliberately async rather than live) alongside the existing
+  Proposals panel, since both answer "what needs my decision right now."
+
+Neither client changed the backend — the SSE event and REST endpoint were
+already complete; the gap was entirely "no consumer."

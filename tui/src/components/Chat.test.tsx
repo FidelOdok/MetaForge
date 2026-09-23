@@ -24,6 +24,9 @@ function chatState(overrides: Partial<UseChat> = {}): UseChat {
     pending: null,
     contextStats: null,
     threadScope: null,
+    pendingApproval: null,
+    approvalBusy: false,
+    resolveApproval: () => {},
     send: () => {},
     resume: () => {},
     threadId: null,
@@ -129,6 +132,74 @@ test("/project is not sent to the agent as a message", async () => {
   await tick();
   stdin.write("\r");
   await tick();
+  assert.deepEqual(sent, []);
+  unmount();
+});
+
+test("FORGE-33: a paused tool call renders the approval modal", () => {
+  const { lastFrame, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({
+        status: "thinking",
+        pendingApproval: {
+          run_id: "run_1",
+          tool: "mcp_twin_commit_geometry",
+          arguments: { name: "leg bracket" },
+        },
+      }),
+    }),
+  );
+  const frame = lastFrame() ?? "";
+  assert.match(frame, /Approval required/);
+  assert.match(frame, /mcp_twin_commit_geometry/);
+  assert.match(frame, /\[a\] approve/);
+  unmount();
+});
+
+test("FORGE-33: pressing 'a' resolves the pending approval", async () => {
+  const decisions: string[] = [];
+  const { stdin, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({
+        status: "thinking",
+        pendingApproval: {
+          run_id: "run_1",
+          tool: "twin.record_decision",
+          arguments: {},
+        },
+        resolveApproval: (decision: "approve" | "reject") => decisions.push(decision),
+      }),
+    }),
+  );
+  stdin.write("a");
+  await tick();
+  assert.deepEqual(decisions, ["approve"]);
+  unmount();
+});
+
+test("FORGE-33: pressing 'x' rejects, and a-key input isn't sent as a chat message", async () => {
+  const decisions: string[] = [];
+  const sent: string[] = [];
+  const { stdin, unmount } = render(
+    React.createElement(Chat, {
+      client: fakeClient(),
+      chat: chatState({
+        status: "thinking",
+        pendingApproval: {
+          run_id: "run_1",
+          tool: "twin.record_decision",
+          arguments: {},
+        },
+        resolveApproval: (decision: "approve" | "reject") => decisions.push(decision),
+        send: (c: string) => sent.push(c),
+      }),
+    }),
+  );
+  stdin.write("x");
+  await tick();
+  assert.deepEqual(decisions, ["reject"]);
   assert.deepEqual(sent, []);
   unmount();
 });

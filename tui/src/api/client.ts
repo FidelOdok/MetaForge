@@ -326,6 +326,14 @@ export class GatewayClient {
     return this.post<Run>(`/v1/runs/${id}/approval`, { decision });
   }
 
+  /** Approve or reject a `requires_approval` tool call paused mid-chat-turn
+   * (twin.commit_geometry, twin.record_decision, project.create/update/delete
+   * -- FORGE-33). `runId` is the `run_id` carried on the
+   * `tool.approval_requested` SSE event. */
+  async submitToolApproval(runId: string, decision: "approve" | "reject"): Promise<Run> {
+    return this.post<Run>(`/v1/chat/tool_approvals/${runId}`, { decision });
+  }
+
   /**
    * Create a chat thread in the given scope.
    *

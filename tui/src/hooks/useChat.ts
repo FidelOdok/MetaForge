@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GatewayError, type GatewayClient } from "../api/client.js";
-import { streamThread, type AgentStep, type ContextStats } from "../api/chat.js";
+import {
+  streamThread,
+  type AgentStep,
+  type ContextStats,
+  type ToolApprovalRequested,
+} from "../api/chat.js";
 import { describeEmptyTurn, newTurnStats, type TurnStats } from "../chat-diagnostics.js";
 import { assistantScope, scopeKey, type ChatScope } from "../lib/project.js";
 import { log } from "../log.js";
@@ -38,6 +43,13 @@ export interface UseChat {
    * a project the agent isn't working in.
    */
   threadScope: ChatScope | null;
+  /** A `requires_approval` tool call paused mid-turn (FORGE-33), or null.
+   * The turn's own HTTP request stays open server-side until this resolves
+   * (approve/reject) or the server-side timeout denies it by default. */
+  pendingApproval: ToolApprovalRequested | null;
+  /** True while a decision is in flight (disables re-pressing a/x). */
+  approvalBusy: boolean;
+  resolveApproval: (decision: "approve" | "reject") => void;
   send: (content: string) => void;
 }
 
@@ -72,6 +84,10 @@ export function useChat(
   );
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
   const [threadScope, setThreadScope] = useState<ChatScope | null>(null);
+  // FORGE-33: the paused tool call, if any, and whether a decision POST is
+  // currently in flight for it.
+  const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequested | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState(false);
   // MET-595: when set, the connect effect ATTACHES to this existing thread
   // (backfilling its transcript) instead of creating a new one. seq forces the
   // effect to rerun even when resuming the same id twice.
@@ -193,6 +209,10 @@ export function useChat(
     bufRef.current = { text: "", steps: [], thinking: "", startedAction: "" };
     statsRef.current = newTurnStats();
     setPending(null);
+    // FORGE-33: the turn ended (aborted, errored, or a server-side timeout
+    // denied the pending call) — a stale approval prompt must not linger.
+    setPendingApproval(null);
+    setApprovalBusy(false);
     setStatus("idle");
   };
 
@@ -346,6 +366,14 @@ export function useChat(
               case "context.stats":
                 setContextStats(ev.stats);
                 break;
+              case "tool.approval_requested":
+                // FORGE-33: the turn's own request stays open server-side
+                // (up to chat_approval_timeout_seconds, 30 min default) —
+                // nothing to abort here, just surface the prompt.
+                if (!thinkingRef.current) break;
+                setApprovalBusy(false);
+                setPendingApproval(ev.approval);
+                break;
               case "scope.changed": {
                 // The agent's chat.set_project_scope tool rescoped THIS thread
                 // in place (MET-580) — no new thread, so this is the only
@@ -416,6 +444,30 @@ export function useChat(
     setResumeReq((r) => ({ threadId, seq: (r?.seq ?? 0) + 1 }));
   }, []);
 
+  // FORGE-33: submit the human's decision for the paused tool call. The
+  // turn's own SSE stream (still open) delivers whatever comes next
+  // (message.delta/agent.step on approve, agent.done with no reply on
+  // reject) — this only needs to clear the prompt and surface a failure.
+  const resolveApproval = useCallback(
+    (decision: "approve" | "reject") => {
+      const approval = pendingApproval;
+      if (!approval || approvalBusy) return;
+      setApprovalBusy(true);
+      void client.submitToolApproval(approval.run_id, decision).then(
+        () => {
+          setPendingApproval(null);
+          setApprovalBusy(false);
+        },
+        (e: Error) => {
+          log.error("chat.tool_approval_failed", { runId: approval.run_id, error: e.message });
+          setError(`approval: ${e.message}`);
+          setApprovalBusy(false);
+        },
+      );
+    },
+    [client, pendingApproval, approvalBusy],
+  );
+
   const send = useCallback(
     (content: string) => {
       const threadId = threadRef.current;
@@ -475,6 +527,9 @@ export function useChat(
     pending,
     contextStats,
     threadScope,
+    pendingApproval,
+    approvalBusy,
+    resolveApproval,
     send,
     resume,
     threadId: attachedThread,

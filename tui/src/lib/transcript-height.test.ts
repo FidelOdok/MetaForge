@@ -1,6 +1,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { messageHeight, pendingHeight, transcriptHeight, wrappedLines } from "./transcript-height.js";
+import {
+  messageHeight,
+  pendingHeight,
+  toolApprovalArgPreview,
+  toolApprovalHeight,
+  transcriptHeight,
+  wrappedLines,
+} from "./transcript-height.js";
 
 test("wrappedLines: newlines + wrapping + empty lines count", () => {
   assert.equal(wrappedLines("short", 80), 1);
@@ -83,4 +90,33 @@ test("pendingHeight: fed the MET-617-clipped tail, not the raw turn, stays bound
   const rawSteps = Array.from({ length: 40 }, () => ({ tool: "echo" }));
   const clippedPending = { text: "…tail of a very long streamed answer", steps: rawSteps.slice(-3) };
   assert.ok(pendingHeight(clippedPending, 82, true, 1) < pendingHeight({ text: "x".repeat(4000), steps: rawSteps }, 82, true, 0));
+});
+
+test("toolApprovalArgPreview: short args pass through unbounded", () => {
+  const lines = toolApprovalArgPreview({ name: "leg bracket" });
+  assert.ok(lines.length <= 4);
+  assert.ok(lines.some((l) => l.includes("leg bracket")));
+});
+
+test("toolApprovalArgPreview: large args are truncated with a count marker", () => {
+  const args = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`field_${i}`, i]));
+  const lines = toolApprovalArgPreview(args, 4);
+  assert.equal(lines.length, 4);
+  assert.match(lines[lines.length - 1] ?? "", /more line\(s\)/);
+});
+
+test("toolApprovalHeight: null approval is zero", () => {
+  assert.equal(toolApprovalHeight(null, 82), 0);
+});
+
+test("toolApprovalHeight: grows with a larger arguments preview", () => {
+  const small = toolApprovalHeight({ tool: "twin.record_decision", arguments: {} }, 82);
+  const large = toolApprovalHeight(
+    {
+      tool: "twin.record_decision",
+      arguments: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`f${i}`, i])),
+    },
+    82,
+  );
+  assert.ok(large > small);
 });
