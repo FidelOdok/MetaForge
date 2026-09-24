@@ -45,7 +45,7 @@ class RunLauncher:
         if session_id:
             request["session_id"] = session_id
         run = routes._store.create(request)
-        routes._launch_flow(run.id)
+        await routes._launch_flow(run.id)
         definition = FLOWS[flow]
         logger.info(
             "design_flow_launched_from_tool",
