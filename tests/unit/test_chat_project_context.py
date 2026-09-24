@@ -8,11 +8,14 @@ native path, legacy history pair on ReAct — is decided in
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
 from api_gateway.chat.models import ChatThreadRecord
 from api_gateway.projects.schemas import ProjectResponse, ProjectWorkProductResponse
+from twin_core.models.enums import WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 
 class _FakeProjectBackend:
@@ -256,3 +259,135 @@ async def test_project_without_requirements_gets_no_go_deeper_nudge(
     brief = await _brief(monkeypatch, _thread("project", "p-123"), _project([]))
     assert brief is not None
     assert "traceable" not in brief
+
+
+# --------------------------------------------------------------------------
+# Requirement doc content excerpts (FORGE-86)
+# --------------------------------------------------------------------------
+
+
+def _doc_wp(name: str, wp_type: str, wp_id: str, updated_at: str) -> ProjectWorkProductResponse:
+    return ProjectWorkProductResponse(
+        id=wp_id, name=name, type=wp_type, status="created", updated_at=updated_at
+    )
+
+
+class _FakeTwinForBrief:
+    """Minimal twin stub returning a fixed WorkProduct by id."""
+
+    def __init__(self, work_products: dict[str, WorkProduct]) -> None:
+        self._wps = work_products
+
+    async def get_work_product(self, wp_id: Any) -> WorkProduct | None:
+        return self._wps.get(str(wp_id))
+
+
+def _make_wp(name: str) -> WorkProduct:
+    return WorkProduct(
+        name=name,
+        type=WorkProductType.CONSTRAINT_SET,
+        domain="systems",
+        file_path="",
+        content_hash="sha256:test",
+        format="md",
+        created_by="human",
+        metadata={"minio_object_key": f"work-products/{name}/doc.md"},
+    )
+
+
+async def _brief_with_twin(
+    monkeypatch: pytest.MonkeyPatch, thread: ChatThreadRecord, project: Any, twin: Any
+) -> str | None:
+    import api_gateway.chat.routes as routes
+    import api_gateway.projects.routes as projects_routes
+
+    monkeypatch.setattr(projects_routes, "_backend", _FakeProjectBackend(project))
+    monkeypatch.setattr(routes, "_twin", twin)
+    return await routes._project_brief(thread)
+
+
+@pytest.mark.asyncio
+async def test_requirement_doc_excerpt_is_inlined(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A prd/constraint_set's actual content -- not just its name -- reaches
+    the brief, resolved via the same blob mechanism every other
+    work-product-content reader in this codebase already uses."""
+    wp_id = str(uuid4())
+    stored_wp = _make_wp("Bracket requirements")
+    monkeypatch.setattr(
+        "api_gateway.twin.blob_store.resolve_work_product_blob",
+        lambda wp: (b"Max mass: 500g. Max cost: $10.", "doc.md"),
+    )
+
+    project = _project(
+        [_doc_wp("Bracket requirements", "constraint_set", wp_id, "2026-07-01T00:00:00Z")]
+    )
+    twin = _FakeTwinForBrief({wp_id: stored_wp})
+    brief = await _brief_with_twin(monkeypatch, _thread("project", "p-123"), project, twin)
+
+    assert brief is not None
+    assert "Max mass: 500g. Max cost: $10." in brief
+    assert "### Bracket requirements (constraint_set)" in brief
+
+
+@pytest.mark.asyncio
+async def test_requirement_doc_excerpt_is_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+    import api_gateway.chat.routes as routes
+
+    wp_id = str(uuid4())
+    long_text = "x" * (routes._BRIEF_DOC_EXCERPT_CHARS + 500)
+    monkeypatch.setattr(
+        "api_gateway.twin.blob_store.resolve_work_product_blob",
+        lambda wp: (long_text.encode(), "doc.md"),
+    )
+
+    project = _project([_doc_wp("Big PRD", "prd", wp_id, "2026-07-01T00:00:00Z")])
+    twin = _FakeTwinForBrief({wp_id: _make_wp("Big PRD")})
+    brief = await _brief_with_twin(monkeypatch, _thread("project", "p-123"), project, twin)
+
+    assert brief is not None
+    assert "(truncated)" in brief
+    assert "x" * (routes._BRIEF_DOC_EXCERPT_CHARS + 1) not in brief
+
+
+@pytest.mark.asyncio
+async def test_requirement_doc_excerpt_failure_falls_back_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A work product id that isn't a real UUID (or any other resolution
+    failure) never breaks brief assembly -- the name-only line still shows."""
+    project = _project([_wp("Legacy Requirements", "prd")])  # non-UUID id from _wp()
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+
+    assert brief is not None
+    assert "Legacy Requirements" in brief
+
+
+@pytest.mark.asyncio
+async def test_requirement_doc_excerpts_capped_and_most_recent_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import api_gateway.chat.routes as routes
+
+    ids = [str(uuid4()) for _ in range(routes._BRIEF_DOC_LIMIT + 2)]
+    wps = [
+        _doc_wp(f"Doc {i}", "constraint_set", ids[i], f"2026-07-{i + 1:02d}T00:00:00Z")
+        for i in range(len(ids))
+    ]
+    monkeypatch.setattr(
+        "api_gateway.twin.blob_store.resolve_work_product_blob",
+        lambda wp: (f"content of {wp.name}".encode(), "doc.md"),
+    )
+
+    project = _project(wps)
+    twin = _FakeTwinForBrief({i: _make_wp(f"Doc {n}") for n, i in enumerate(ids)})
+    brief = await _brief_with_twin(monkeypatch, _thread("project", "p-123"), project, twin)
+
+    assert brief is not None
+    # Most recently updated (highest index) docs win, capped at the limit.
+    most_recent = [
+        f"Doc {i}" for i in range(len(ids) - 1, len(ids) - 1 - routes._BRIEF_DOC_LIMIT, -1)
+    ]
+    for name in most_recent:
+        assert f"content of {name}" in brief
+    oldest = "content of Doc 0"
+    assert oldest not in brief
