@@ -12,12 +12,12 @@ import type { KnowledgeSearchResult, KnowledgeType, SourceSummary } from '../typ
 // ---------------------------------------------------------------------------
 
 const TYPE_CHIP: Record<KnowledgeType, { color: string; bg: string }> = {
-  design_decision: { color: '#86cfff', bg: 'rgba(134,207,255,0.1)' },
-  component:       { color: '#3dd68c', bg: 'rgba(61,214,140,0.1)'  },
-  failure:         { color: '#ffb4ab', bg: 'rgba(255,180,171,0.1)' },
-  constraint:      { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  session:         { color: '#ffb783', bg: 'rgba(230,126,34,0.12)' },
-  other:           { color: '#9a9aaa', bg: 'rgba(154,154,170,0.1)' },
+  design_decision: { color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.1)' },
+  component:       { color: 'var(--mf-c-3dd68c)', bg: 'rgba(61,214,140,0.1)'  },
+  failure:         { color: 'var(--mf-c-ffb4ab)', bg: 'rgba(255,180,171,0.1)' },
+  constraint:      { color: 'var(--mf-c-f59e0b)', bg: 'rgba(245,158,11,0.12)' },
+  session:         { color: 'var(--mf-c-ffb783)', bg: 'rgba(255, 90, 10,0.12)' },
+  other:           { color: 'var(--mf-c-9a9aaa)', bg: 'var(--mf-r-154-154-170-0p1)' },
 };
 
 const KNOWLEDGE_TYPES: ReadonlyArray<KnowledgeType> = [
@@ -110,7 +110,7 @@ function SortHeader({ label, field, sortKey, sortDir, onSort, align = 'left', wi
         fontSize: 10,
         textTransform: 'uppercase',
         letterSpacing: '0.07em',
-        color: active ? '#e2e2eb' : '#9a9aaa',
+        color: active ? 'var(--mf-c-e2e2eb)' : 'var(--mf-c-9a9aaa)',
         padding: 0,
         textAlign: align,
       }}
@@ -130,9 +130,9 @@ function SortHeader({ label, field, sortKey, sortDir, onSort, align = 'left', wi
 // ---------------------------------------------------------------------------
 
 const GLASS: React.CSSProperties = {
-  background: 'rgba(30,31,38,0.85)',
+  background: 'var(--mf-r-30-31-38-0p85)',
   backdropFilter: 'blur(16px)',
-  border: '1px solid rgba(65,72,90,0.2)',
+  border: '1px solid var(--mf-r-65-72-90-0p2)',
   borderRadius: 4,
 };
 
@@ -222,8 +222,8 @@ export function KnowledgePage() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <span style={{ fontSize: 18, fontWeight: 500, color: '#e8e8ed' }}>Knowledge</span>
-          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>
+          <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--mf-c-e8e8ed)' }}>Knowledge</span>
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>
             {isSearching
               ? `${searchResults?.length ?? 0} match${(searchResults?.length ?? 0) === 1 ? '' : 'es'}`
               : `${total} ${total === 1 ? 'source' : 'sources'} · L1 corpus`}
@@ -232,7 +232,7 @@ export function KnowledgePage() {
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <span
             className="material-symbols-outlined"
-            style={{ position: 'absolute', left: 8, fontSize: 14, color: '#9a9aaa', pointerEvents: 'none' }}
+            style={{ position: 'absolute', left: 8, fontSize: 14, color: 'var(--mf-c-9a9aaa)', pointerEvents: 'none' }}
           >
             search
           </span>
@@ -245,12 +245,12 @@ export function KnowledgePage() {
             style={{
               width: 260,
               padding: '6px 10px 6px 28px',
-              background: 'rgba(30,31,38,0.85)',
-              border: '1px solid rgba(65,72,90,0.3)',
+              background: 'var(--mf-r-30-31-38-0p85)',
+              border: '1px solid var(--mf-r-65-72-90-0p3)',
               borderRadius: 4,
               fontFamily: 'monospace',
               fontSize: 11,
-              color: '#e2e2eb',
+              color: 'var(--mf-c-e2e2eb)',
               outline: 'none',
             }}
           />
@@ -273,8 +273,8 @@ export function KnowledgePage() {
               borderRadius: 4,
               border: 'none',
               cursor: 'pointer',
-              background: filterType === 'all' ? '#e67e22' : 'rgba(30,31,38,0.85)',
-              color: filterType === 'all' ? '#000' : '#9a9aaa',
+              background: filterType === 'all' ? '#ff5a0a' : 'var(--mf-r-30-31-38-0p85)',
+              color: filterType === 'all' ? '#000' : 'var(--mf-c-9a9aaa)',
               transition: 'background 0.15s, color 0.15s',
             }}
           >
@@ -297,8 +297,8 @@ export function KnowledgePage() {
                   borderRadius: 4,
                   border: 'none',
                   cursor: 'pointer',
-                  background: active ? '#e67e22' : 'rgba(30,31,38,0.85)',
-                  color: active ? '#000' : '#9a9aaa',
+                  background: active ? '#ff5a0a' : 'var(--mf-r-30-31-38-0p85)',
+                  color: active ? '#000' : 'var(--mf-c-9a9aaa)',
                   transition: 'background 0.15s, color 0.15s',
                 }}
               >
@@ -314,10 +314,10 @@ export function KnowledgePage() {
         <div style={GLASS} role="region" aria-label="Search results">
           {isSearchLoading ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 8 }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#9a9aaa' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--mf-c-9a9aaa)' }}>
                 progress_activity
               </span>
-              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>Searching…</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>Searching…</span>
             </div>
           ) : !searchResults || searchResults.length === 0 ? (
             <div
@@ -332,10 +332,10 @@ export function KnowledgePage() {
                 textAlign: 'center',
               }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#9a9aaa', opacity: 0.4 }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--mf-c-9a9aaa)', opacity: 0.4 }}>
                 search_off
               </span>
-              <span style={{ fontSize: 13, color: '#e2e2eb' }}>No matches for &ldquo;{debouncedSearch}&rdquo;</span>
+              <span style={{ fontSize: 13, color: 'var(--mf-c-e2e2eb)' }}>No matches for &ldquo;{debouncedSearch}&rdquo;</span>
             </div>
           ) : (
             <div role="rowgroup">
@@ -355,7 +355,7 @@ export function KnowledgePage() {
             gridTemplateColumns: 'minmax(220px, 1.6fr) 140px 90px 130px 110px 110px',
             gap: 12,
             padding: '10px 16px',
-            borderBottom: '1px solid rgba(65,72,90,0.2)',
+            borderBottom: '1px solid var(--mf-r-65-72-90-0p2)',
             alignItems: 'center',
           }}
         >
@@ -369,7 +369,7 @@ export function KnowledgePage() {
               fontSize: 10,
               textTransform: 'uppercase',
               letterSpacing: '0.07em',
-              color: '#9a9aaa',
+              color: 'var(--mf-c-9a9aaa)',
             }}
           >
             vendor
@@ -380,7 +380,7 @@ export function KnowledgePage() {
               fontSize: 10,
               textTransform: 'uppercase',
               letterSpacing: '0.07em',
-              color: '#9a9aaa',
+              color: 'var(--mf-c-9a9aaa)',
             }}
           >
             mpn
@@ -398,10 +398,10 @@ export function KnowledgePage() {
               gap: 8,
             }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#9a9aaa' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--mf-c-9a9aaa)' }}>
               progress_activity
             </span>
-            <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9a9aaa' }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>
               Loading…
             </span>
           </div>
@@ -440,20 +440,20 @@ function EmptySourcesState() {
     >
       <span
         className="material-symbols-outlined"
-        style={{ fontSize: 32, color: '#9a9aaa', opacity: 0.4 }}
+        style={{ fontSize: 32, color: 'var(--mf-c-9a9aaa)', opacity: 0.4 }}
       >
         psychology
       </span>
-      <span style={{ fontSize: 13, color: '#e2e2eb' }}>
+      <span style={{ fontSize: 13, color: 'var(--mf-c-e2e2eb)' }}>
         No sources ingested yet
       </span>
       <code
         style={{
           fontFamily: 'monospace',
           fontSize: 11,
-          color: '#86cfff',
-          background: 'rgba(20,21,26,0.9)',
-          border: '1px solid rgba(65,72,90,0.3)',
+          color: 'var(--mf-c-86cfff)',
+          background: 'var(--mf-r-20-21-26-0p9)',
+          border: '1px solid var(--mf-r-65-72-90-0p3)',
           borderRadius: 3,
           padding: '4px 10px',
         }}
@@ -498,9 +498,9 @@ function SearchResultRow({
         flexDirection: 'column',
         gap: 4,
         padding: '10px 16px',
-        borderBottom: '1px solid rgba(65,72,90,0.08)',
+        borderBottom: '1px solid var(--mf-r-65-72-90-0p08)',
         cursor: clickable ? 'pointer' : 'default',
-        background: hovered ? '#282a30' : 'transparent',
+        background: hovered ? 'var(--mf-c-282a30)' : 'transparent',
         transition: 'background 0.15s',
         outline: 'none',
       }}
@@ -512,7 +512,7 @@ function SearchResultRow({
             style={{
               fontFamily: 'monospace',
               fontSize: 11,
-              color: '#9a9aaa',
+              color: 'var(--mf-c-9a9aaa)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -522,7 +522,7 @@ function SearchResultRow({
           </span>
         )}
       </div>
-      <span style={{ fontSize: 12, color: '#d4d4d8', lineHeight: 1.5 }}>
+      <span style={{ fontSize: 12, color: 'var(--mf-c-d4d4d8)', lineHeight: 1.5 }}>
         {result.content.length > 240 ? `${result.content.slice(0, 240)}…` : result.content}
       </span>
     </div>
@@ -564,9 +564,9 @@ function SourceRow({
         gap: 12,
         alignItems: 'center',
         padding: '8px 16px',
-        borderBottom: '1px solid rgba(65,72,90,0.08)',
+        borderBottom: '1px solid var(--mf-r-65-72-90-0p08)',
         cursor: 'pointer',
-        background: hovered ? '#282a30' : 'transparent',
+        background: hovered ? 'var(--mf-c-282a30)' : 'transparent',
         transition: 'background 0.15s',
         outline: 'none',
       }}
@@ -576,7 +576,7 @@ function SourceRow({
         style={{
           fontFamily: 'monospace',
           fontSize: 12,
-          color: '#d4d4d8',
+          color: 'var(--mf-c-d4d4d8)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -590,7 +590,7 @@ function SourceRow({
         style={{
           fontFamily: 'monospace',
           fontSize: 12,
-          color: '#e2e2eb',
+          color: 'var(--mf-c-e2e2eb)',
           textAlign: 'right',
         }}
       >
@@ -600,7 +600,7 @@ function SourceRow({
         style={{
           fontFamily: 'monospace',
           fontSize: 11,
-          color: '#9a9aaa',
+          color: 'var(--mf-c-9a9aaa)',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -612,7 +612,7 @@ function SourceRow({
         style={{
           fontFamily: 'monospace',
           fontSize: 11,
-          color: vendor === '—' ? '#5a5a66' : '#d4d4d8',
+          color: vendor === '—' ? 'var(--mf-c-5a5a66)' : 'var(--mf-c-d4d4d8)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -624,7 +624,7 @@ function SourceRow({
         style={{
           fontFamily: 'monospace',
           fontSize: 11,
-          color: mpn === '—' ? '#5a5a66' : '#d4d4d8',
+          color: mpn === '—' ? 'var(--mf-c-5a5a66)' : 'var(--mf-c-d4d4d8)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',

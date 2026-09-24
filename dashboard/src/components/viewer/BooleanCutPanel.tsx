@@ -12,11 +12,11 @@ import { resolveGatewayHref } from '../../lib/gatewayConfig';
 // predates that token set living anywhere shared/importable (same rationale
 // as the ViewCube colors in R3FViewer.tsx), so the handful of colors this
 // panel needs are declared locally.
-const KC_SURFACE = 'rgba(30,31,38,0.92)';
-const KC_BORDER = 'rgba(65,72,90,0.3)';
-const KC_ON_SURFACE = '#e2e2eb';
-const KC_ON_SURFACE_VARIANT = '#9a9aaa';
-const KC_ORANGE = '#e67e22';
+const KC_SURFACE = 'var(--mf-r-30-31-38-0p92)';
+const KC_BORDER = 'var(--mf-r-65-72-90-0p3)';
+const KC_ON_SURFACE = 'var(--mf-c-e2e2eb)';
+const KC_ON_SURFACE_VARIANT = 'var(--mf-c-9a9aaa)';
+const KC_ORANGE = '#ff5a0a';
 
 interface BooleanCutPanelProps {
   /** Called after a successful cut with the new node's id, so the host page
@@ -145,7 +145,7 @@ export function BooleanCutPanel({ onCutComplete }: BooleanCutPanelProps) {
           onClick={() => onCut('subtract')}
           disabled={booleanCut.mode !== 'ready' || booleanCut.cutting}
           className="rounded px-2.5 py-1 font-medium transition-opacity hover:opacity-90 disabled:opacity-40"
-          style={{ background: '#c0392b', color: '#fff' }}
+          style={{ background: '#c0392b', color: 'var(--mf-c-fff)' }}
         >
           {booleanCut.cutting ? 'Cutting…' : 'Hole'}
         </button>
@@ -154,7 +154,7 @@ export function BooleanCutPanel({ onCutComplete }: BooleanCutPanelProps) {
           onClick={() => onCut('union')}
           disabled={booleanCut.mode !== 'ready' || booleanCut.cutting}
           className="rounded px-2.5 py-1 font-medium transition-opacity hover:opacity-90 disabled:opacity-40"
-          style={{ background: KC_ORANGE, color: '#fff' }}
+          style={{ background: KC_ORANGE, color: 'var(--mf-c-fff)' }}
         >
           {booleanCut.cutting ? 'Cutting…' : 'Group'}
         </button>

@@ -25,17 +25,17 @@ import { WP_TYPE_ICONS } from '../../utils/wp-icons';
 
 // ── KC tokens ─────────────────────────────────────────────────────────────────
 const KC = {
-  surface: '#111319',
-  surfaceContainer: 'rgba(30,31,38,0.92)',
-  surfaceHigh: '#282a30',
-  border: 'rgba(65,72,90,0.35)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  orange: '#e67e22',
-  green: '#3dd68c',
-  teal: '#86cfff',
-  amber: '#f5a623',
-  red: '#e74c3c',
+  surface: 'var(--mf-c-111319)',
+  surfaceContainer: 'var(--mf-r-30-31-38-0p92)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  border: 'var(--mf-r-65-72-90-0p35)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  orange: '#ff5a0a',
+  green: 'var(--mf-c-3dd68c)',
+  teal: 'var(--mf-c-86cfff)',
+  amber: 'var(--mf-c-f5a623)',
+  red: 'var(--mf-c-e74c3c)',
 } as const;
 
 // ── Domain → accent colour ────────────────────────────────────────────────────
@@ -43,9 +43,9 @@ const DOMAIN_COLOR: Record<string, string> = {
   mechanical: KC.teal,
   electronics: KC.amber,
   firmware: KC.green,
-  simulation: '#a78bfa',
-  compliance: '#f472b6',
-  supply_chain: '#34d399',
+  simulation: 'var(--mf-c-a78bfa)',
+  compliance: 'var(--mf-c-f472b6)',
+  supply_chain: 'var(--mf-c-34d399)',
 };
 
 function domainColor(domain: string) {
@@ -58,7 +58,7 @@ const EDGE_COLOR: Record<string, string> = {
   implements: KC.green,
   validates: KC.teal,
   contains: KC.onSurfaceVariant,
-  versioned_by: '#a78bfa',
+  versioned_by: 'var(--mf-c-a78bfa)',
   constrained_by: KC.amber,
   produced_by: KC.green,
   uses_component: KC.teal,
@@ -286,7 +286,7 @@ export function TwinGraphCanvas({
         proOptions={{ hideAttribution: true }}
       >
         <Background
-          color="rgba(154,154,170,0.12)"
+          color="var(--mf-r-154-154-170-0p12)"
           gap={32}
           size={1}
           style={{ background: 'transparent' }}

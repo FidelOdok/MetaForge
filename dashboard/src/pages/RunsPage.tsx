@@ -5,11 +5,11 @@ import { useRuns } from '../hooks/use-runs';
 import type { HarnessRun } from '../types/run';
 
 const KC = {
-  surfaceContainer: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
-  surfaceBorder: 'rgba(65,72,90,0.2)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
+  surfaceContainer: 'var(--mf-r-30-31-38-0p85)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  surfaceBorder: 'var(--mf-r-65-72-90-0p2)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
 } as const;
 
 const glassPanel: React.CSSProperties = {
@@ -52,7 +52,7 @@ function RunRow({ run }: { run: HarnessRun }) {
           alignItems: 'center',
           gap: 16,
           padding: '0 16px',
-          borderBottom: '1px solid rgba(65,72,90,0.08)',
+          borderBottom: '1px solid var(--mf-r-65-72-90-0p08)',
           color: KC.onSurface,
         }}
         onMouseEnter={(e) => {

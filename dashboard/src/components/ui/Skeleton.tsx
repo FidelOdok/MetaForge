@@ -8,7 +8,7 @@ export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
       className={clsx('animate-pulse rounded', className)}
-      style={{ background: '#282a30' }}
+      style={{ background: 'var(--mf-c-282a30)' }}
     />
   );
 }
@@ -17,7 +17,7 @@ export function SkeletonCard() {
   return (
     <div
       className="rounded-lg p-5"
-      style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.2)' }}
+      style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
     >
       <div className="mb-3 flex items-start justify-between">
         <Skeleton className="h-4 w-40" />
@@ -43,11 +43,11 @@ export function SkeletonTable({ rows = 5, cols = 4 }: SkeletonTableProps) {
   return (
     <div
       className="rounded-lg overflow-hidden"
-      style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.2)' }}
+      style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
     >
       <div
         className="flex gap-3 px-3 py-2"
-        style={{ borderBottom: '1px solid rgba(65,72,90,0.2)', background: '#191b22' }}
+        style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', background: 'var(--mf-c-191b22)' }}
       >
         {Array.from({ length: cols }).map((_, i) => (
           <Skeleton key={i} className="h-3 flex-1" />
@@ -57,7 +57,7 @@ export function SkeletonTable({ rows = 5, cols = 4 }: SkeletonTableProps) {
         <div
           key={rowIdx}
           className="flex gap-3 px-3 py-2.5"
-          style={{ borderBottom: rowIdx < rows - 1 ? '1px solid rgba(65,72,90,0.1)' : 'none' }}
+          style={{ borderBottom: rowIdx < rows - 1 ? '1px solid var(--mf-r-65-72-90-0p1)' : 'none' }}
         >
           {Array.from({ length: cols }).map((_, colIdx) => (
             <Skeleton
@@ -82,7 +82,7 @@ export function SkeletonList({ rows = 5 }: SkeletonListProps) {
         <div
           key={i}
           className="flex items-center gap-4 rounded-lg p-5"
-          style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.2)' }}
+          style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
         >
           <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
           <div className="flex-1 space-y-2">

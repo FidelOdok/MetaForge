@@ -16,16 +16,16 @@ import {
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
 const KC = {
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  success: '#3dd68c',
-  warning: '#f59e0b',
-  error: '#ffb4ab',
-  tertiary: '#86cfff',
-  primary: '#e67e22',
-  border: 'rgba(65,72,90,0.2)',
-  glass: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  success: 'var(--mf-c-3dd68c)',
+  warning: 'var(--mf-c-f59e0b)',
+  error: 'var(--mf-c-ffb4ab)',
+  tertiary: 'var(--mf-c-86cfff)',
+  primary: '#ff5a0a',
+  border: 'var(--mf-r-65-72-90-0p2)',
+  glass: 'var(--mf-r-30-31-38-0p85)',
+  surfaceHigh: 'var(--mf-c-282a30)',
 } as const;
 
 const glassPanel: React.CSSProperties = {
@@ -37,7 +37,7 @@ const glassPanel: React.CSSProperties = {
 };
 
 const inputStyle: React.CSSProperties = {
-  background: '#111319',
+  background: 'var(--mf-c-111319)',
   border: `1px solid ${KC.border}`,
   borderRadius: 4,
   color: KC.onSurface,

@@ -17,7 +17,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 const glassCard = {
-  background: 'rgba(30,31,38,0.85)',
+  background: 'var(--mf-r-30-31-38-0p85)',
 } as const;
 
 const workProductTypeIcon: Record<string, string> = {
@@ -30,14 +30,14 @@ const workProductTypeIcon: Record<string, string> = {
 };
 
 const statusDotColor: Record<string, string> = {
-  valid: '#3dd68c',
-  warning: '#f59e0b',
-  error: '#ffb4ab',
-  unknown: '#9a9aaa',
+  valid: 'var(--mf-c-3dd68c)',
+  warning: 'var(--mf-c-f59e0b)',
+  error: 'var(--mf-c-ffb4ab)',
+  unknown: 'var(--mf-c-9a9aaa)',
 };
 
 function getStatusDotColor(status: string): string {
-  return statusDotColor[status] ?? '#9a9aaa';
+  return statusDotColor[status] ?? 'var(--mf-c-9a9aaa)';
 }
 
 // Simulated agent activity feed — derived from work products
@@ -52,14 +52,14 @@ interface ActivityEntry {
 function buildActivityFeed(workProducts: { name: string; type: string; status: string; updatedAt: string }[]): ActivityEntry[] {
   return workProducts.slice(0, 8).map((wp) => {
     const tagMap: Record<string, { tag: string; color: string; bg: string }> = {
-      schematic: { tag: 'twin.save', color: '#ffb783', bg: 'rgba(230,126,34,0.15)' },
-      pcb: { tag: 'agent.run', color: '#86cfff', bg: 'rgba(134,207,255,0.15)' },
-      cad_model: { tag: 'agent.run', color: '#86cfff', bg: 'rgba(134,207,255,0.15)' },
-      firmware: { tag: 'twin.save', color: '#ffb783', bg: 'rgba(230,126,34,0.15)' },
-      bom: { tag: 'bom.risk', color: '#ffb4ab', bg: 'rgba(255,180,171,0.15)' },
-      gerber: { tag: 'gate.check', color: '#3dd68c', bg: 'rgba(61,214,140,0.15)' },
+      schematic: { tag: 'twin.save', color: 'var(--mf-c-ffb783)', bg: 'rgba(255, 90, 10,0.15)' },
+      pcb: { tag: 'agent.run', color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.15)' },
+      cad_model: { tag: 'agent.run', color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.15)' },
+      firmware: { tag: 'twin.save', color: 'var(--mf-c-ffb783)', bg: 'rgba(255, 90, 10,0.15)' },
+      bom: { tag: 'bom.risk', color: 'var(--mf-c-ffb4ab)', bg: 'rgba(255,180,171,0.15)' },
+      gerber: { tag: 'gate.check', color: 'var(--mf-c-3dd68c)', bg: 'rgba(61,214,140,0.15)' },
     };
-    const style = tagMap[wp.type] ?? { tag: 'agent.run', color: '#86cfff', bg: 'rgba(134,207,255,0.15)' };
+    const style = tagMap[wp.type] ?? { tag: 'agent.run', color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.15)' };
     const statusVerb = wp.status === 'valid' ? 'validated' : wp.status === 'warning' ? 'flagged' : wp.status === 'error' ? 'failed' : 'updated';
 
     return {
@@ -95,13 +95,13 @@ export function ProjectDetailPage() {
       <div>
         {/* Skeleton header */}
         <div className="flex items-center gap-2 mb-4">
-          <div className="h-3 rounded w-16 animate-pulse" style={{ background: 'rgba(65,72,90,0.4)' }} />
+          <div className="h-3 rounded w-16 animate-pulse" style={{ background: 'var(--mf-r-65-72-90-0p4)' }} />
         </div>
         <div className="grid grid-cols-4 gap-3 mb-4">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="glass rounded p-4 animate-pulse" style={glassCard}>
-              <div className="h-7 rounded w-12 mb-2" style={{ background: 'rgba(65,72,90,0.4)' }} />
-              <div className="h-2 rounded w-20" style={{ background: 'rgba(65,72,90,0.3)' }} />
+              <div className="h-7 rounded w-12 mb-2" style={{ background: 'var(--mf-r-65-72-90-0p4)' }} />
+              <div className="h-2 rounded w-20" style={{ background: 'var(--mf-r-65-72-90-0p3)' }} />
             </div>
           ))}
         </div>
@@ -168,25 +168,25 @@ export function ProjectDetailPage() {
         <Link
           to="/projects"
           className="flex items-center gap-1 font-mono transition-opacity hover:opacity-80"
-          style={{ fontSize: '11px', color: '#9a9aaa' }}
+          style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)' }}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: '14px', color: '#9a9aaa' }}>arrow_back</span>
+          <span className="material-symbols-outlined" style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}>arrow_back</span>
           Projects
         </Link>
-        <span style={{ fontSize: '11px', color: '#9a9aaa' }}>/</span>
-        <span className="font-mono" style={{ fontSize: '11px', color: '#e2e2eb' }}>{project.name}</span>
+        <span style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)' }}>/</span>
+        <span className="font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-e2e2eb)' }}>{project.name}</span>
       </div>
 
       {/* Page header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-baseline gap-2">
-          <span style={{ fontSize: '18px', fontWeight: 500, color: '#e2e2eb', letterSpacing: '-0.02em' }}>
+          <span style={{ fontSize: '18px', fontWeight: 500, color: 'var(--mf-c-e2e2eb)', letterSpacing: '-0.02em' }}>
             {project.name}
           </span>
           <StatusBadge status={project.status} />
         </div>
         <div className="flex items-center gap-3">
-          <span className="font-mono" style={{ fontSize: '11px', color: '#9a9aaa' }}>
+          <span className="font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)' }}>
             updated {formatRelativeTime(project.lastUpdated)}
           </span>
           {!isEditing && (
@@ -196,7 +196,7 @@ export function ProjectDetailPage() {
                 aria-label="Rename project"
                 onClick={startEditing}
                 className="flex items-center justify-center rounded transition-colors hover:bg-surface-high"
-                style={{ width: 26, height: 26, color: '#9a9aaa' }}
+                style={{ width: 26, height: 26, color: 'var(--mf-c-9a9aaa)' }}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
               </button>
@@ -205,7 +205,7 @@ export function ProjectDetailPage() {
                 aria-label="Delete project"
                 onClick={() => setShowDeleteConfirm(true)}
                 className="flex items-center justify-center rounded transition-colors hover:bg-surface-high"
-                style={{ width: 26, height: 26, color: '#9a9aaa' }}
+                style={{ width: 26, height: 26, color: 'var(--mf-c-9a9aaa)' }}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
               </button>
@@ -221,7 +221,7 @@ export function ProjectDetailPage() {
             <label
               htmlFor="edit-project-name"
               className="block mb-1 font-mono"
-              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}
+              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}
             >
               Project name
             </label>
@@ -230,15 +230,15 @@ export function ProjectDetailPage() {
               type="text"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              className="w-full rounded px-3 py-1.5 text-xs outline-none focus:border-[rgba(65,72,90,0.6)]"
-              style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.3)', color: '#e2e2eb' }}
+              className="w-full rounded px-3 py-1.5 text-xs outline-none focus:border-[var(--mf-r-65-72-90-0p6)]"
+              style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p3)', color: 'var(--mf-c-e2e2eb)' }}
             />
           </div>
           <div>
             <label
               htmlFor="edit-project-desc"
               className="block mb-1 font-mono"
-              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}
+              style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}
             >
               Description
             </label>
@@ -247,8 +247,8 @@ export function ProjectDetailPage() {
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
               rows={2}
-              className="w-full rounded px-3 py-1.5 text-xs outline-none resize-none focus:border-[rgba(65,72,90,0.6)]"
-              style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.3)', color: '#e2e2eb' }}
+              className="w-full rounded px-3 py-1.5 text-xs outline-none resize-none focus:border-[var(--mf-r-65-72-90-0p6)]"
+              style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p3)', color: 'var(--mf-c-e2e2eb)' }}
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -262,7 +262,7 @@ export function ProjectDetailPage() {
         </form>
       ) : (
         project.description && (
-          <p className="mb-4 font-mono" style={{ fontSize: '11px', color: '#9a9aaa', lineHeight: '1.6' }}>
+          <p className="mb-4 font-mono" style={{ fontSize: '11px', color: 'var(--mf-c-9a9aaa)', lineHeight: '1.6' }}>
             {project.description}
           </p>
         )
@@ -272,20 +272,20 @@ export function ProjectDetailPage() {
       <div className="grid grid-cols-4 gap-3 mb-4">
         {/* Work Products */}
         <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div style={{ fontSize: '28px', fontWeight: 300, color: '#e2e2eb', lineHeight: 1, letterSpacing: '-0.02em' }}>
+          <div style={{ fontSize: '28px', fontWeight: 300, color: 'var(--mf-c-e2e2eb)', lineHeight: 1, letterSpacing: '-0.02em' }}>
             {project.work_products.length}
           </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
+          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
             Work Products
           </div>
         </div>
 
         {/* Gate Readiness */}
         <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div style={{ fontSize: '28px', fontWeight: 300, color: '#3dd68c', lineHeight: 1, letterSpacing: '-0.02em' }}>
+          <div style={{ fontSize: '28px', fontWeight: 300, color: 'var(--mf-c-3dd68c)', lineHeight: 1, letterSpacing: '-0.02em' }}>
             {readiness}%
           </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
+          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
             Gate Readiness
           </div>
           <div className="absolute" style={{ right: '14px', bottom: '14px' }}>
@@ -293,7 +293,7 @@ export function ProjectDetailPage() {
               <circle cx="19" cy="19" r="14" fill="none" stroke="rgba(61,214,140,0.12)" strokeWidth="3" />
               <circle
                 cx="19" cy="19" r="14" fill="none"
-                stroke="#3dd68c"
+                stroke="var(--mf-c-3dd68c)"
                 strokeWidth="3"
                 strokeLinecap="round"
                 strokeDasharray="75.4"
@@ -307,25 +307,25 @@ export function ProjectDetailPage() {
 
         {/* Active Agents */}
         <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div className="font-mono" style={{ fontSize: '28px', fontWeight: 300, color: '#86cfff', lineHeight: 1, letterSpacing: '-0.02em' }}>
+          <div className="font-mono" style={{ fontSize: '28px', fontWeight: 300, color: 'var(--mf-c-86cfff)', lineHeight: 1, letterSpacing: '-0.02em' }}>
             {project.agentCount}
           </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
+          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
             Active Agents
           </div>
         </div>
 
         {/* Risk Alerts */}
         <div className="glass rounded p-4 relative overflow-hidden" style={glassCard}>
-          <div style={{ fontSize: '28px', fontWeight: 300, color: errorCount > 0 ? '#ffb4ab' : '#e2e2eb', lineHeight: 1, letterSpacing: '-0.02em' }}>
+          <div style={{ fontSize: '28px', fontWeight: 300, color: errorCount > 0 ? 'var(--mf-c-ffb4ab)' : 'var(--mf-c-e2e2eb)', lineHeight: 1, letterSpacing: '-0.02em' }}>
             {errorCount}
           </div>
-          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9a9aaa' }}>
+          <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
             Risk Alerts
           </div>
           {errorCount > 0 && (
             <div className="absolute" style={{ right: '14px', bottom: '18px' }}>
-              <div className="pulse-ring relative" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffb4ab' }} />
+              <div className="pulse-ring relative" style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--mf-c-ffb4ab)' }} />
             </div>
           )}
         </div>
@@ -339,12 +339,12 @@ export function ProjectDetailPage() {
           {/* Panel header */}
           <div
             className="flex items-center justify-between px-4 py-2"
-            style={{ borderBottom: '1px solid rgba(65,72,90,0.2)' }}
+            style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}
           >
-            <span className="font-mono" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9a9aaa' }}>
+            <span className="font-mono" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--mf-c-9a9aaa)' }}>
               Work Products
             </span>
-            <span className="font-mono" style={{ fontSize: '10px', color: '#9a9aaa' }}>
+            <span className="font-mono" style={{ fontSize: '10px', color: 'var(--mf-c-9a9aaa)' }}>
               {project.work_products.length} total
             </span>
           </div>
@@ -376,7 +376,7 @@ export function ProjectDetailPage() {
                 {/* Type icon */}
                 <span
                   className="material-symbols-outlined flex-shrink-0"
-                  style={{ fontSize: '14px', color: '#9a9aaa' }}
+                  style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}
                 >
                   {workProductTypeIcon[wp.type] ?? 'description'}
                 </span>
@@ -384,7 +384,7 @@ export function ProjectDetailPage() {
                 {/* Name */}
                 <span
                   className="flex-1 text-sm font-medium"
-                  style={{ color: '#e2e2eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  style={{ color: 'var(--mf-c-e2e2eb)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
                   {wp.name}
                 </span>
@@ -392,7 +392,7 @@ export function ProjectDetailPage() {
                 {/* Type pill */}
                 <span
                   className="font-mono rounded flex-shrink-0"
-                  style={{ fontSize: '10px', color: '#9a9aaa', background: '#282a30', padding: '1px 5px' }}
+                  style={{ fontSize: '10px', color: 'var(--mf-c-9a9aaa)', background: 'var(--mf-c-282a30)', padding: '1px 5px' }}
                 >
                   {wp.type}
                 </span>
@@ -403,7 +403,7 @@ export function ProjectDetailPage() {
                 {/* Timestamp */}
                 <span
                   className="font-mono flex-shrink-0"
-                  style={{ fontSize: '10px', color: '#9a9aaa', minWidth: '60px', textAlign: 'right' }}
+                  style={{ fontSize: '10px', color: 'var(--mf-c-9a9aaa)', minWidth: '60px', textAlign: 'right' }}
                 >
                   {formatRelativeTime(wp.updatedAt)}
                 </span>
@@ -417,17 +417,17 @@ export function ProjectDetailPage() {
           {/* Panel header */}
           <div
             className="flex items-center justify-between px-4 py-2"
-            style={{ borderBottom: '1px solid rgba(65,72,90,0.2)' }}
+            style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}
           >
-            <span className="font-mono" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9a9aaa' }}>
+            <span className="font-mono" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--mf-c-9a9aaa)' }}>
               Activity
             </span>
             <div className="flex items-center gap-1.5">
               <span
                 className="live-dot"
-                style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#3dd68c', display: 'inline-block' }}
+                style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--mf-c-3dd68c)', display: 'inline-block' }}
               />
-              <span className="font-mono" style={{ fontSize: '10px', color: '#3dd68c', letterSpacing: '0.06em' }}>
+              <span className="font-mono" style={{ fontSize: '10px', color: 'var(--mf-c-3dd68c)', letterSpacing: '0.06em' }}>
                 LIVE
               </span>
             </div>
@@ -435,7 +435,7 @@ export function ProjectDetailPage() {
 
           {activity.length === 0 ? (
             <div className="px-4 py-6 text-center">
-              <span className="font-mono" style={{ fontSize: '10px', color: '#9a9aaa' }}>
+              <span className="font-mono" style={{ fontSize: '10px', color: 'var(--mf-c-9a9aaa)' }}>
                 No recent activity
               </span>
             </div>
@@ -453,11 +453,11 @@ export function ProjectDetailPage() {
                   {entry.tag}
                 </span>
                 <span
-                  style={{ fontSize: '12px', color: '#9a9aaa', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  style={{ fontSize: '12px', color: 'var(--mf-c-9a9aaa)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
                   {entry.message}
                 </span>
-                <span className="font-mono flex-shrink-0" style={{ fontSize: '10px', color: '#9a9aaa' }}>
+                <span className="font-mono flex-shrink-0" style={{ fontSize: '10px', color: 'var(--mf-c-9a9aaa)' }}>
                   {entry.timestamp}
                 </span>
               </div>
@@ -472,13 +472,13 @@ export function ProjectDetailPage() {
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.5)' }}
         >
-          <div className="w-full max-w-sm rounded p-5" style={{ background: '#1e1f26', border: '1px solid rgba(65,72,90,0.3)' }}>
+          <div className="w-full max-w-sm rounded p-5" style={{ background: 'var(--mf-c-1e1f26)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}>
             <div className="flex items-center gap-2 mb-3">
-              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: '#ffb4ab' }}>warning</span>
-              <span style={{ fontSize: '14px', fontWeight: 500, color: '#e2e2eb' }}>Delete project</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--mf-c-ffb4ab)' }}>warning</span>
+              <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--mf-c-e2e2eb)' }}>Delete project</span>
             </div>
-            <p className="mb-4" style={{ fontSize: '12px', color: '#9a9aaa', lineHeight: '1.5' }}>
-              Delete <strong style={{ color: '#e2e2eb' }}>{project.name}</strong>? This removes the
+            <p className="mb-4" style={{ fontSize: '12px', color: 'var(--mf-c-9a9aaa)', lineHeight: '1.5' }}>
+              Delete <strong style={{ color: 'var(--mf-c-e2e2eb)' }}>{project.name}</strong>? This removes the
               project record and cannot be undone.
               {project.work_products.length > 0 && (
                 <>

@@ -9,20 +9,20 @@ import type { ToolApprovalRun } from '../api/endpoints/toolApprovals';
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
 const KC = {
-  surface:          '#111319',
-  surfaceLow:       '#191b22',
-  surfaceContainer: '#1e1f26',
-  surfaceHigh:      '#282a30',
-  surfaceHighest:   '#33343b',
-  surfaceLowest:    '#0c0e14',
-  onSurface:        '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  primary:          '#ffb783',
-  primaryContainer: '#e67e22',
-  error:            '#ffb4ab',
-  success:          '#3dd68c',
-  border:           'rgba(65,72,90,0.2)',
-  glass:            'rgba(30,31,38,0.85)',
+  surface:          'var(--mf-c-111319)',
+  surfaceLow:       'var(--mf-c-191b22)',
+  surfaceContainer: 'var(--mf-c-1e1f26)',
+  surfaceHigh:      'var(--mf-c-282a30)',
+  surfaceHighest:   'var(--mf-c-33343b)',
+  surfaceLowest:    'var(--mf-c-0c0e14)',
+  onSurface:        'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  primary:          'var(--mf-c-ffb783)',
+  primaryContainer: '#ff5a0a',
+  error:            'var(--mf-c-ffb4ab)',
+  success:          'var(--mf-c-3dd68c)',
+  border:           'var(--mf-r-65-72-90-0p2)',
+  glass:            'var(--mf-r-30-31-38-0p85)',
 } as const;
 
 // ─── Status dot ─────────────────────────────────────────────────────────────
@@ -404,7 +404,7 @@ export function ApprovalsPage() {
           style={{
             ...glassPanel,
             padding: 16,
-            borderLeft: '2px solid #f59e0b',
+            borderLeft: '2px solid var(--mf-c-f59e0b)',
           }}
         >
           <div className="mb-2">
@@ -430,7 +430,7 @@ export function ApprovalsPage() {
           <div
             style={{
               height: 4,
-              background: 'rgba(154,154,170,0.15)',
+              background: 'var(--mf-r-154-154-170-0p15)',
               borderRadius: 2,
               marginBottom: 6,
             }}
@@ -439,7 +439,7 @@ export function ApprovalsPage() {
               style={{
                 height: '100%',
                 width: `${pendingPct}%`,
-                background: '#f59e0b',
+                background: 'var(--mf-c-f59e0b)',
                 borderRadius: 2,
                 transition: 'width 0.4s ease',
               }}
@@ -484,7 +484,7 @@ export function ApprovalsPage() {
           <div
             style={{
               height: 4,
-              background: 'rgba(154,154,170,0.15)',
+              background: 'var(--mf-r-154-154-170-0p15)',
               borderRadius: 2,
               marginBottom: 6,
             }}
@@ -538,7 +538,7 @@ export function ApprovalsPage() {
           <div
             style={{
               height: 4,
-              background: 'rgba(154,154,170,0.15)',
+              background: 'var(--mf-r-154-154-170-0p15)',
               borderRadius: 2,
               marginBottom: 6,
             }}

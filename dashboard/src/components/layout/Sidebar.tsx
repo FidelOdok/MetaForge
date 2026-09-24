@@ -26,8 +26,8 @@ export function Sidebar() {
       className="fixed inset-y-0 left-0 z-40 flex flex-col items-center"
       style={{
         width: 48,
-        background: '#191b22',
-        borderRight: '1px solid rgba(65,72,90,0.2)',
+        background: 'var(--mf-c-191b22)',
+        borderRight: '1px solid var(--mf-r-65-72-90-0p2)',
       }}
     >
       {/* Logo mark */}
@@ -36,11 +36,11 @@ export function Sidebar() {
         style={{
           width: 32,
           height: 32,
-          background: '#e67e22',
+          background: '#ff5a0a',
           fontFamily: 'Inter, sans-serif',
           fontWeight: 700,
           fontSize: 15,
-          color: '#111319',
+          color: 'var(--mf-c-111319)',
           letterSpacing: '-0.02em',
           userSelect: 'none',
         }}
@@ -92,10 +92,10 @@ export function Sidebar() {
           style={{
             width: 28,
             height: 28,
-            background: '#282a30',
+            background: 'var(--mf-c-282a30)',
             fontSize: 10,
             fontWeight: 600,
-            color: '#9a9aaa',
+            color: 'var(--mf-c-9a9aaa)',
             letterSpacing: '0.03em',
             cursor: 'pointer',
           }}

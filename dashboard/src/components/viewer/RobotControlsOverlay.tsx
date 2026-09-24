@@ -1,9 +1,9 @@
 import { useViewerStore } from '../../store/viewer-store';
 
-const KC_SURFACE = 'rgba(30,31,38,0.92)';
-const KC_BORDER = 'rgba(65,72,90,0.3)';
-const KC_ON_SURFACE = '#e2e2eb';
-const KC_ON_SURFACE_VARIANT = '#9a9aaa';
+const KC_SURFACE = 'var(--mf-r-30-31-38-0p92)';
+const KC_BORDER = 'var(--mf-r-65-72-90-0p3)';
+const KC_ON_SURFACE = 'var(--mf-c-e2e2eb)';
+const KC_ON_SURFACE_VARIANT = 'var(--mf-c-9a9aaa)';
 
 /**
  * MET-747: the HTML-overlay half of the "View Robot" consolidation —
@@ -27,7 +27,7 @@ export function RobotControlsOverlay() {
       style={{ background: KC_SURFACE, backdropFilter: 'blur(16px)', border: `1px solid ${KC_BORDER}`, width: 260 }}
     >
       {robotError && (
-        <div className="font-mono" style={{ fontSize: 10, color: '#ffb4ab' }}>
+        <div className="font-mono" style={{ fontSize: 10, color: 'var(--mf-c-ffb4ab)' }}>
           {robotError}
         </div>
       )}

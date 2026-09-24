@@ -9,17 +9,17 @@ import type { TwinNode } from '../../types/twin';
 
 // ── Kinetic Console tokens (mirrors TwinViewerPage's local KC) ──────────────
 const KC = {
-  surface: '#111319',
-  surfaceLow: '#191b22',
-  surfaceHigh: '#282a30',
-  border: 'rgba(65,72,90,0.2)',
-  borderMid: 'rgba(65,72,90,0.35)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  orange: '#e67e22',
-  orangeFaint: 'rgba(230,126,34,0.15)',
-  orangeBorder: 'rgba(230,126,34,0.45)',
-  green: '#3dd68c',
+  surface: 'var(--mf-c-111319)',
+  surfaceLow: 'var(--mf-c-191b22)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  border: 'var(--mf-r-65-72-90-0p2)',
+  borderMid: 'var(--mf-r-65-72-90-0p35)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  orange: '#ff5a0a',
+  orangeFaint: 'rgba(255, 90, 10,0.15)',
+  orangeBorder: 'rgba(255, 90, 10,0.45)',
+  green: 'var(--mf-c-3dd68c)',
   greenFaint: 'rgba(61,214,140,0.14)',
   greenBorder: 'rgba(61,214,140,0.4)',
 } as const;
@@ -139,7 +139,7 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
         position: 'fixed',
         inset: 0,
         zIndex: 500,
-        background: 'rgba(8,9,13,0.92)',
+        background: 'var(--mf-r-8-9-13-0p92)',
         backdropFilter: 'blur(6px)',
         display: 'flex',
         flexDirection: 'column',
@@ -188,7 +188,7 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
               ) : (
                 <span
                   className="font-mono uppercase"
-                  style={{ fontSize: 9, color: '#f5b04d', background: 'rgba(245,176,77,0.14)', padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em' }}
+                  style={{ fontSize: 9, color: 'var(--mf-c-f5b04d)', background: 'rgba(245,176,77,0.14)', padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em' }}
                 >
                   Needs approval
                 </span>
@@ -209,7 +209,7 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
               onClick={handleApprove}
               disabled={approveSketch.isPending}
               className="text-xs"
-              style={{ background: KC.green, border: 'none', color: '#0b1410' }}
+              style={{ background: KC.green, border: 'none', color: 'var(--mf-c-0b1410)' }}
             >
               <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>check</span>
               {approveSketch.isPending ? 'Approving…' : 'Approve'}
@@ -241,7 +241,7 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
       {/* Body */}
       <div className="flex-1 min-h-0" style={{ animation: 'fspm-rise-in 200ms ease-out', display: 'flex' }}>
         {kind === 'image' && (
-          <div className="flex-1 flex items-center justify-center p-8" style={{ background: '#0a0b0f', backgroundImage: 'linear-gradient(45deg, #12131a 25%, transparent 25%), linear-gradient(-45deg, #12131a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #12131a 75%), linear-gradient(-45deg, transparent 75%, #12131a 75%)', backgroundSize: '20px 20px', backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px' }}>
+          <div className="flex-1 flex items-center justify-center p-8" style={{ background: 'var(--mf-c-0a0b0f)', backgroundImage: 'linear-gradient(45deg, var(--mf-c-12131a) 25%, transparent 25%), linear-gradient(-45deg, var(--mf-c-12131a) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--mf-c-12131a) 75%), linear-gradient(-45deg, transparent 75%, var(--mf-c-12131a) 75%)', backgroundSize: '20px 20px', backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px' }}>
             <img
               src={inlineUrl}
               alt={node.name}
@@ -251,11 +251,11 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
         )}
 
         {kind === 'pdf' && (
-          <iframe src={inlineUrl} title={node.name} style={{ flex: 1, border: 'none', background: '#fff' }} />
+          <iframe src={inlineUrl} title={node.name} style={{ flex: 1, border: 'none', background: 'var(--mf-c-fff)' }} />
         )}
 
         {kind === 'html' && (
-          <div className="flex-1 flex items-center justify-center p-6" style={{ background: '#0a0b0f' }}>
+          <div className="flex-1 flex items-center justify-center p-6" style={{ background: 'var(--mf-c-0a0b0f)' }}>
             {error ? (
               <div className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>{error}</div>
             ) : loading ? (
@@ -265,14 +265,14 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
                 title={node.name}
                 srcDoc={text ?? ''}
                 sandbox="allow-scripts"
-                style={{ width: '100%', height: '100%', maxWidth: 1400, border: `1px solid ${KC.border}`, borderRadius: 6, background: '#fff', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
+                style={{ width: '100%', height: '100%', maxWidth: 1400, border: `1px solid ${KC.border}`, borderRadius: 6, background: 'var(--mf-c-fff)', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
               />
             )}
           </div>
         )}
 
         {kind === 'text' && (
-          <div className="flex-1 min-h-0 overflow-auto flex justify-center" style={{ background: '#0d0e13' }}>
+          <div className="flex-1 min-h-0 overflow-auto flex justify-center" style={{ background: 'var(--mf-c-0d0e13)' }}>
             <div style={{ width: '100%', maxWidth: 980, padding: '24px 20px' }}>
               {error ? (
                 <div className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>{error}</div>
@@ -300,7 +300,7 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
         )}
 
         {kind === 'robot' && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4" style={{ background: '#0a0b0f' }}>
+          <div className="flex-1 flex flex-col items-center justify-center gap-4" style={{ background: 'var(--mf-c-0a0b0f)' }}>
             <span className="material-symbols-outlined" style={{ fontSize: 48, color: KC.onSurfaceVariant }}>smart_toy</span>
             <div className="font-mono text-center" style={{ fontSize: 12, color: KC.onSurfaceVariant, maxWidth: 360 }}>
               Robot descriptions are best explored live -- joints, physics, and posing all run in the main 3D viewer.
@@ -313,7 +313,7 @@ export function FullScreenPreviewModal({ node, onClose }: FullScreenPreviewModal
         )}
 
         {kind === 'none' && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ background: '#0a0b0f' }}>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ background: 'var(--mf-c-0a0b0f)' }}>
             <span className="material-symbols-outlined" style={{ fontSize: 40, color: KC.onSurfaceVariant }}>visibility_off</span>
             <div className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
               Inline preview not available for .{fmt || 'this type'} -- use Open or Download.

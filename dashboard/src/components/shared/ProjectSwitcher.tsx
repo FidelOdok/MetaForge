@@ -22,7 +22,7 @@ export function ProjectSwitcher() {
         aria-label="active project"
         value={activeProjectId ?? ''}
         onChange={(e) => setActiveProjectId(e.target.value || null)}
-        className="bg-surface-high border border-[rgba(65,72,90,0.3)] text-on-surface text-xs rounded px-2 py-1 outline-none focus:border-[rgba(65,72,90,0.6)] max-w-[180px]"
+        className="bg-surface-high border border-[var(--mf-r-65-72-90-0p3)] text-on-surface text-xs rounded px-2 py-1 outline-none focus:border-[var(--mf-r-65-72-90-0p6)] max-w-[180px]"
       >
         <option value="">All projects</option>
         {projects.map((p) => (

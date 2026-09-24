@@ -6,18 +6,18 @@ import { useSession } from '../hooks/use-sessions';
 
 // KC color tokens
 const KC = {
-  surfaceContainer: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
-  surfaceLowest: '#0a0b10',
-  surfaceBorder: 'rgba(65,72,90,0.2)',
-  surfaceBorderFaint: 'rgba(65,72,90,0.08)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  primary: '#ffb783',
-  done: '#3dd68c',
-  error: '#ffb4ab',
-  info: '#86cfff',
-  warning: '#f59e0b',
+  surfaceContainer: 'var(--mf-r-30-31-38-0p85)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  surfaceLowest: 'var(--mf-c-0a0b10)',
+  surfaceBorder: 'var(--mf-r-65-72-90-0p2)',
+  surfaceBorderFaint: 'var(--mf-r-65-72-90-0p08)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  primary: 'var(--mf-c-ffb783)',
+  done: 'var(--mf-c-3dd68c)',
+  error: 'var(--mf-c-ffb4ab)',
+  info: 'var(--mf-c-86cfff)',
+  warning: 'var(--mf-c-f59e0b)',
 } as const;
 
 // Covers both the MCP capture vocabulary (thought/action/decision/

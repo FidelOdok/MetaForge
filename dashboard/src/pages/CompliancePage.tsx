@@ -7,16 +7,16 @@ import type { ChecklistItem, ComplianceRegime, EvidenceType } from '../types/com
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
 const KC = {
-  surface: '#111319',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  success: '#3dd68c',
-  warning: '#f59e0b',
-  error: '#ffb4ab',
-  tertiary: '#86cfff',
-  border: 'rgba(65,72,90,0.2)',
-  glass: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
+  surface: 'var(--mf-c-111319)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  success: 'var(--mf-c-3dd68c)',
+  warning: 'var(--mf-c-f59e0b)',
+  error: 'var(--mf-c-ffb4ab)',
+  tertiary: 'var(--mf-c-86cfff)',
+  border: 'var(--mf-r-65-72-90-0p2)',
+  glass: 'var(--mf-r-30-31-38-0p85)',
+  surfaceHigh: 'var(--mf-c-282a30)',
 } as const;
 
 const glassPanel: React.CSSProperties = {
@@ -40,7 +40,7 @@ const REGIME_COLOR: Record<ComplianceRegime, string> = {
   UKCA: KC.tertiary,
   CE: KC.warning,
   FCC: KC.success,
-  PSTI: '#c792ea',
+  PSTI: 'var(--mf-c-c792ea)',
 };
 
 function statusIcon(status: ChecklistItem['evidence_status']): { symbol: string; color: string } {
@@ -111,7 +111,7 @@ function RegimeCard({ regime, items }: { regime: ComplianceRegime; items: Checkl
       <div className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant, marginBottom: 10 }}>
         {evidenced} / {total} requirements
       </div>
-      <div style={{ height: 4, background: 'rgba(154,154,170,0.15)', borderRadius: 2 }}>
+      <div style={{ height: 4, background: 'var(--mf-r-154-154-170-0p15)', borderRadius: 2 }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 2, transition: 'width 0.4s ease' }} />
       </div>
     </div>
@@ -231,7 +231,7 @@ function ChecklistRow({
   const isMissing = item.evidence_status === 'MISSING';
 
   return (
-    <div style={{ borderBottom: `1px solid rgba(65,72,90,0.08)` }}>
+    <div style={{ borderBottom: `1px solid var(--mf-r-65-72-90-0p08)` }}>
       <div
         role="button"
         tabIndex={isMissing ? 0 : undefined}

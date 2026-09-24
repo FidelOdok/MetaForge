@@ -45,20 +45,20 @@ function getModelLoadErrorMessage(error: unknown): string {
 
 // ── KC tokens ────────────────────────────────────────────────────────────────
 const KC = {
-  surface: '#111319',
-  surfaceLow: '#191b22',
-  surfaceContainer: 'rgba(30,31,38,0.88)',
-  surfaceHigh: '#282a30',
-  border: 'rgba(65,72,90,0.2)',
-  borderMid: 'rgba(65,72,90,0.3)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  orange: '#e67e22',
-  orangeFaint: 'rgba(230,126,34,0.15)',
-  orangeBorder: 'rgba(230,126,34,0.45)',
-  teal: '#86cfff',
-  green: '#3dd68c',
-  statusBar: 'rgba(12,14,20,0.95)',
+  surface: 'var(--mf-c-111319)',
+  surfaceLow: 'var(--mf-c-191b22)',
+  surfaceContainer: 'var(--mf-r-30-31-38-0p88)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  border: 'var(--mf-r-65-72-90-0p2)',
+  borderMid: 'var(--mf-r-65-72-90-0p3)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  orange: '#ff5a0a',
+  orangeFaint: 'rgba(255, 90, 10,0.15)',
+  orangeBorder: 'rgba(255, 90, 10,0.45)',
+  teal: 'var(--mf-c-86cfff)',
+  green: 'var(--mf-c-3dd68c)',
+  statusBar: 'var(--mf-r-12-14-20-0p95)',
 } as const;
 
 
@@ -112,7 +112,7 @@ function ToolBtn({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: active ? 'rgba(40,42,48,0.9)' : 'transparent',
+        background: active ? 'var(--mf-r-40-42-48-0p9)' : 'transparent',
         // Left accent via inset box-shadow — avoids mixing the `border`/`borderLeft`
         // shorthands with their longhands (React rerender warning, MET-511).
         border: 'none',
@@ -175,7 +175,7 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
       <div className="flex items-center gap-2 mb-1" style={{ flexWrap: 'wrap' }}>
         <span
           className="font-mono"
-          style={{ fontSize: 10, color: KC.orange, background: 'rgba(230,126,34,0.1)', padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          style={{ fontSize: 10, color: KC.orange, background: 'rgba(255, 90, 10,0.1)', padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}
         >
           {wpType ?? 'unknown'}
         </span>
@@ -183,7 +183,7 @@ function WorkProductFileSection({ node }: { node: TwinNode }) {
         {needsApproval && (
           <span
             className="font-mono uppercase"
-            style={{ fontSize: 9, color: '#f5b04d', background: 'rgba(245,176,77,0.14)', padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em' }}
+            style={{ fontSize: 9, color: 'var(--mf-c-f5b04d)', background: 'rgba(245,176,77,0.14)', padding: '2px 6px', borderRadius: 3, letterSpacing: '0.06em' }}
           >
             Needs approval
           </span>
@@ -212,7 +212,7 @@ type _ExportFormat = (typeof _EXPORT_FORMATS)[number];
 
 const _exportInputStyle: React.CSSProperties = {
   fontSize: 11,
-  background: '#1e1f26',
+  background: 'var(--mf-c-1e1f26)',
   border: `1px solid ${KC.border}`,
   color: KC.onSurface,
 };
@@ -549,7 +549,7 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             <table className="w-full" style={{ borderCollapse: 'collapse' }}>
               <tbody>
                 {Object.entries(node.properties).map(([k, v]) => (
-                  <tr key={k} style={{ borderBottom: '1px solid rgba(65,72,90,0.1)' }}>
+                  <tr key={k} style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}>
                     <td className="py-1 pr-3 font-mono" style={{ fontSize: 11, color: KC.onSurfaceVariant, width: '40%' }}>{k}</td>
                     <td className="py-1 font-mono" style={{ fontSize: 11, color: KC.onSurface }}>{String(v)}</td>
                   </tr>
@@ -696,7 +696,7 @@ function SceneDropdown({
         className="flex items-center gap-1.5 rounded px-3"
         style={{
           height: 28,
-          background: 'rgba(30,31,38,0.85)',
+          background: 'var(--mf-r-30-31-38-0p85)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
           border: `1px solid ${KC.border}`,
@@ -722,7 +722,7 @@ function SceneDropdown({
             width: 232,
             zIndex: 60,
             overflow: 'hidden',
-            background: 'rgba(25,27,34,0.96)',
+            background: 'var(--mf-r-25-27-34-0p96)',
           }}
         >
           <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${KC.border}` }}>
@@ -1008,7 +1008,7 @@ export function TwinViewerPage() {
         height: 'calc(100vh - 40px)', // 40px = h-10 topbar
         overflow: 'hidden',
         background: KC.surface,
-        backgroundImage: 'radial-gradient(circle, rgba(154,154,170,0.18) 1px, transparent 1px)',
+        backgroundImage: 'radial-gradient(circle, var(--mf-r-154-154-170-0p18) 1px, transparent 1px)',
         backgroundSize: '32px 32px',
       }}
     >
@@ -1065,11 +1065,11 @@ export function TwinViewerPage() {
               >
                 <span
                   className="material-symbols-outlined"
-                  style={{ fontSize: 22, color: '#ffb4ab', display: 'block', marginBottom: 6 }}
+                  style={{ fontSize: 22, color: 'var(--mf-c-ffb4ab)', display: 'block', marginBottom: 6 }}
                 >
                   error
                 </span>
-                <p className="font-mono text-xs" style={{ color: '#ffb4ab', marginBottom: 4 }}>
+                <p className="font-mono text-xs" style={{ color: 'var(--mf-c-ffb4ab)', marginBottom: 4 }}>
                   Model failed to load
                 </p>
                 <p className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
@@ -1151,7 +1151,7 @@ export function TwinViewerPage() {
                     style={{
                       height: 36,
                       padding: '0 12px',
-                      background: active ? 'rgba(40,42,48,1)' : 'transparent',
+                      background: active ? 'var(--mf-r-40-42-48-1)' : 'transparent',
                       cursor: 'pointer',
                       border: 'none',
                       boxShadow: active ? `inset 2px 0 0 ${KC.orange}` : 'none',
@@ -1159,7 +1159,7 @@ export function TwinViewerPage() {
                       width: '100%',
                     }}
                     onMouseEnter={(e) => {
-                      if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(40,42,48,0.6)';
+                      if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'var(--mf-r-40-42-48-0p6)';
                     }}
                     onMouseLeave={(e) => {
                       if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
@@ -1257,7 +1257,7 @@ export function TwinViewerPage() {
           className="flex items-center gap-1.5 rounded px-3"
           style={{
             height: 28,
-            background: 'rgba(30,31,38,0.7)',
+            background: 'var(--mf-r-30-31-38-0p7)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
             border: `1px solid ${KC.border}`,
@@ -1266,7 +1266,7 @@ export function TwinViewerPage() {
           <span style={{ fontSize: 12, color: KC.onSurfaceVariant }}>Digital Twin</span>
           {selectedNode && (
             <>
-              <span style={{ fontSize: 11, color: 'rgba(154,154,170,0.4)' }}>›</span>
+              <span style={{ fontSize: 11, color: 'var(--mf-r-154-154-170-0p4)' }}>›</span>
               <span style={{ fontSize: 12, color: KC.onSurface }}>{selectedNode.name}</span>
             </>
           )}
@@ -1276,7 +1276,7 @@ export function TwinViewerPage() {
               fontSize: 9,
               fontWeight: 600,
               background: isGraphMode ? '#00a3e4' : KC.orange,
-              color: isGraphMode ? '#fff' : KC.surface,
+              color: isGraphMode ? 'var(--mf-c-fff)' : KC.surface,
               letterSpacing: '0.04em',
             }}
           >
@@ -1299,7 +1299,7 @@ export function TwinViewerPage() {
           className="flex items-center gap-1.5 rounded px-2"
           style={{
             height: 28,
-            background: importOpen ? KC.orangeFaint : 'rgba(30,31,38,0.85)',
+            background: importOpen ? KC.orangeFaint : 'var(--mf-r-30-31-38-0p85)',
             backdropFilter: 'blur(16px)',
             border: `1px solid ${importOpen ? KC.orangeBorder : KC.borderMid}`,
             color: importOpen ? KC.orange : KC.onSurfaceVariant,
@@ -1321,7 +1321,7 @@ export function TwinViewerPage() {
             className="flex items-center gap-1.5 rounded px-2"
             style={{
               height: 28,
-              background: assemblyExportOpen ? KC.orangeFaint : 'rgba(30,31,38,0.85)',
+              background: assemblyExportOpen ? KC.orangeFaint : 'var(--mf-r-30-31-38-0p85)',
               backdropFilter: 'blur(16px)',
               border: `1px solid ${assemblyExportOpen ? KC.orangeBorder : KC.borderMid}`,
               color: assemblyExportOpen ? KC.orange : KC.onSurfaceVariant,
@@ -1340,7 +1340,7 @@ export function TwinViewerPage() {
         <div
           className="flex items-center rounded overflow-hidden"
           style={{
-            background: 'rgba(25,27,34,0.9)',
+            background: 'var(--mf-r-25-27-34-0p9)',
             backdropFilter: 'blur(16px)',
             border: `1px solid ${KC.borderMid}`,
           }}
@@ -1364,7 +1364,7 @@ export function TwinViewerPage() {
           >
             MODEL
           </button>
-          <div style={{ width: 1, height: 16, background: 'rgba(65,72,90,0.4)' }} />
+          <div style={{ width: 1, height: 16, background: 'var(--mf-r-65-72-90-0p4)' }} />
           <button
             type="button"
             onClick={() => setViewMode('graph')}
@@ -1395,7 +1395,7 @@ export function TwinViewerPage() {
             style={{
               width: 32,
               height: 32,
-              background: 'rgba(30,31,38,0.8)',
+              background: 'var(--mf-r-30-31-38-0p8)',
               backdropFilter: 'blur(16px)',
               border: `1px solid ${KC.border}`,
               color: KC.onSurfaceVariant,
@@ -1478,7 +1478,7 @@ export function TwinViewerPage() {
                 onChange={(e) => setQuality(e.target.value)}
                 className="flex-1 font-mono rounded px-2 py-1 text-xs cursor-pointer"
                 style={{
-                  background: 'rgba(40,42,48,0.9)',
+                  background: 'var(--mf-r-40-42-48-0p9)',
                   border: `1px solid ${KC.border}`,
                   color: KC.onSurfaceVariant,
                 }}
@@ -1520,16 +1520,16 @@ export function TwinViewerPage() {
             <div
               className="flex flex-col items-center justify-center rounded cursor-pointer"
               style={{
-                border: '2px dashed rgba(65,72,90,0.4)',
+                border: '2px dashed var(--mf-r-65-72-90-0p4)',
                 padding: '20px 16px',
                 textAlign: 'center',
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(230,126,34,0.4)';
-                (e.currentTarget as HTMLDivElement).style.background = 'rgba(230,126,34,0.04)';
+                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(255, 90, 10,0.4)';
+                (e.currentTarget as HTMLDivElement).style.background = 'rgba(255, 90, 10,0.04)';
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(65,72,90,0.4)';
+                (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--mf-r-65-72-90-0p4)';
                 (e.currentTarget as HTMLDivElement).style.background = 'transparent';
               }}
             >
@@ -1556,7 +1556,7 @@ export function TwinViewerPage() {
             className="flex items-center gap-1.5 rounded px-3"
             style={{
               height: 32,
-              background: 'rgba(30,31,38,0.8)',
+              background: 'var(--mf-r-30-31-38-0p8)',
               backdropFilter: 'blur(16px)',
               border: `1px solid ${KC.border}`,
               fontSize: 10,
@@ -1610,7 +1610,7 @@ export function TwinViewerPage() {
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: isFetching ? '#f59e0b' : '#00a3e4',
+              background: isFetching ? 'var(--mf-c-f59e0b)' : '#00a3e4',
               flexShrink: 0,
               display: 'inline-block',
             }}
@@ -1619,7 +1619,7 @@ export function TwinViewerPage() {
             {isFetching ? 'Syncing…' : 'Synced'}
           </span>
           {!isFetching && dataUpdatedAt > 0 && (
-            <span className="font-mono" style={{ fontSize: 11, color: 'rgba(154,154,170,0.55)' }}>
+            <span className="font-mono" style={{ fontSize: 11, color: 'var(--mf-r-154-154-170-0p55)' }}>
               {formatRelativeTime(new Date(dataUpdatedAt).toISOString())}
             </span>
           )}

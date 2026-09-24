@@ -97,7 +97,7 @@ export function Topbar() {
       className="glass flex h-10 shrink-0 items-center justify-between px-5"
       style={{
         background: 'rgba(25,27,34,0.85)',
-        borderBottom: '1px solid rgba(65,72,90,0.2)',
+        borderBottom: '1px solid var(--mf-r-65-72-90-0p2)',
       }}
     >
       {/* Breadcrumbs */}

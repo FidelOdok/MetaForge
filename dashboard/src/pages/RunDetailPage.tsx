@@ -5,15 +5,15 @@ import { useRun, useSubmitApproval } from '../hooks/use-runs';
 import type { RunStatus } from '../types/run';
 
 const KC = {
-  surfaceContainer: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
-  surfaceBorder: 'rgba(65,72,90,0.2)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  running: '#e67e22',
-  done: '#3dd68c',
-  error: '#ffb4ab',
-  logBg: '#0a0b10',
+  surfaceContainer: 'var(--mf-r-30-31-38-0p85)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  surfaceBorder: 'var(--mf-r-65-72-90-0p2)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  running: '#ff5a0a',
+  done: 'var(--mf-c-3dd68c)',
+  error: 'var(--mf-c-ffb4ab)',
+  logBg: 'var(--mf-c-0a0b10)',
 } as const;
 
 const glassPanel: React.CSSProperties = {
@@ -90,14 +90,14 @@ export function RunDetailPage() {
             <button
               onClick={() => approval.mutate({ id: run.id, decision: 'approve' })}
               disabled={approval.isPending}
-              style={{ height: 30, padding: '0 14px', background: KC.running, border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, color: '#fff', fontFamily: 'inherit' }}
+              style={{ height: 30, padding: '0 14px', background: KC.running, border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, color: 'var(--mf-c-fff)', fontFamily: 'inherit' }}
             >
               Approve
             </button>
             <button
               onClick={() => approval.mutate({ id: run.id, decision: 'reject' })}
               disabled={approval.isPending}
-              style={{ height: 30, padding: '0 14px', background: 'rgba(65,72,90,0.35)', border: `1px solid ${KC.surfaceBorder}`, borderRadius: 4, cursor: 'pointer', fontSize: 11, color: KC.onSurface, fontFamily: 'inherit' }}
+              style={{ height: 30, padding: '0 14px', background: 'var(--mf-r-65-72-90-0p35)', border: `1px solid ${KC.surfaceBorder}`, borderRadius: 4, cursor: 'pointer', fontSize: 11, color: KC.onSurface, fontFamily: 'inherit' }}
             >
               Reject
             </button>

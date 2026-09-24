@@ -25,8 +25,8 @@ function formatPrice(amount: number, currency: string): string {
 function BomRow({ component }: { component: BomComponent }) {
   return (
     <tr
-      className="hover:bg-[#282a30] cursor-default"
-      style={{ height: '36px', borderBottom: '1px solid rgba(65,72,90,0.1)' }}
+      className="hover:bg-[var(--mf-c-282a30)] cursor-default"
+      style={{ height: '36px', borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}
     >
       <td className="px-3">
         {component.imageUrl ? (
@@ -34,7 +34,7 @@ function BomRow({ component }: { component: BomComponent }) {
             src={component.imageUrl}
             alt={component.partNumber}
             className="rounded"
-            style={{ width: '20px', height: '20px', objectFit: 'contain', background: '#191b22' }}
+            style={{ width: '20px', height: '20px', objectFit: 'contain', background: 'var(--mf-c-191b22)' }}
           />
         ) : (
           <div style={{ width: '20px', height: '20px' }} />
@@ -166,7 +166,7 @@ export function BomPage() {
       style={{
         fontSize: '12px',
         opacity: sortField === field ? 1 : 0.4,
-        color: sortField === field ? '#e2e2eb' : '#9a9aaa',
+        color: sortField === field ? 'var(--mf-c-e2e2eb)' : 'var(--mf-c-9a9aaa)',
         verticalAlign: 'middle',
         marginLeft: '2px',
       }}
@@ -192,8 +192,8 @@ export function BomPage() {
           onClick={handleExportCsv}
           className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
           style={{
-            background: '#282a30',
-            border: '1px solid rgba(65,72,90,0.3)',
+            background: 'var(--mf-c-282a30)',
+            border: '1px solid var(--mf-r-65-72-90-0p3)',
           }}
         >
           <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>download</span>
@@ -206,7 +206,7 @@ export function BomPage() {
         <div className="relative flex items-center">
           <span
             className="material-symbols-outlined absolute left-2 pointer-events-none"
-            style={{ fontSize: '14px', color: '#9a9aaa' }}
+            style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}
           >
             search
           </span>
@@ -217,8 +217,8 @@ export function BomPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="rounded pl-7 pr-2 py-1 text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none"
             style={{
-              background: '#282a30',
-              border: '1px solid rgba(65,72,90,0.3)',
+              background: 'var(--mf-c-282a30)',
+              border: '1px solid var(--mf-r-65-72-90-0p3)',
               width: '220px',
             }}
           />
@@ -226,7 +226,7 @@ export function BomPage() {
         <div className="relative flex items-center">
           <span
             className="material-symbols-outlined absolute left-2 pointer-events-none"
-            style={{ fontSize: '14px', color: '#9a9aaa' }}
+            style={{ fontSize: '14px', color: 'var(--mf-c-9a9aaa)' }}
           >
             filter_list
           </span>
@@ -235,8 +235,8 @@ export function BomPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="rounded pl-7 pr-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
             style={{
-              background: '#282a30',
-              border: '1px solid rgba(65,72,90,0.3)',
+              background: 'var(--mf-c-282a30)',
+              border: '1px solid var(--mf-r-65-72-90-0p3)',
               width: '160px',
             }}
           >
@@ -259,8 +259,8 @@ export function BomPage() {
         <div
           className="rounded-lg overflow-hidden"
           style={{
-            background: 'rgba(30,31,38,0.85)',
-            border: '1px solid rgba(65,72,90,0.2)',
+            background: 'var(--mf-r-30-31-38-0p85)',
+            border: '1px solid var(--mf-r-65-72-90-0p2)',
           }}
         >
           {[...Array(6)].map((_, i) => (
@@ -269,8 +269,8 @@ export function BomPage() {
               className="animate-pulse"
               style={{
                 height: '36px',
-                borderBottom: '1px solid rgba(65,72,90,0.1)',
-                background: i % 2 === 0 ? 'rgba(40,42,48,0.3)' : 'transparent',
+                borderBottom: '1px solid var(--mf-r-65-72-90-0p1)',
+                background: i % 2 === 0 ? 'var(--mf-r-40-42-48-0p3)' : 'transparent',
               }}
             />
           ))}
@@ -302,15 +302,15 @@ export function BomPage() {
         <div
           className="rounded-lg overflow-hidden overflow-x-auto"
           style={{
-            background: 'rgba(30,31,38,0.85)',
-            border: '1px solid rgba(65,72,90,0.2)',
+            background: 'var(--mf-r-30-31-38-0p85)',
+            border: '1px solid var(--mf-r-65-72-90-0p2)',
           }}
         >
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr style={{ background: '#191b22' }}>
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
                 <th
-                  style={{ height: '32px', borderBottom: '1px solid rgba(65,72,90,0.2)', width: '32px' }}
+                  style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', width: '32px' }}
                   aria-label="Image"
                 />
                 {(
@@ -327,7 +327,7 @@ export function BomPage() {
                   <th
                     key={field}
                     className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
-                    style={{ height: '32px', borderBottom: '1px solid rgba(65,72,90,0.2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
                     onClick={() => handleSort(field)}
                   >
                     {label}
