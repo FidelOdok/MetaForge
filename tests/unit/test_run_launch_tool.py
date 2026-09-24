@@ -26,14 +26,22 @@ class _FakeCreatedProject:
 
 
 class _FakeProjectBackend:
-    """Records create_project calls, returns a fixed-id project each time."""
+    """Records create_project calls, returns a fixed-id project each time.
+
+    Mirrors ProjectBackend.create_project's real signature exactly (all
+    three of name/description/status required, no catch-all **kwargs) --
+    a looser fake here is exactly how FORGE-87's first cut shipped a
+    missing required `status` kwarg without any test catching it: the
+    real PgProjectBackend/InMemoryProjectBackend both require it with no
+    default, but a permissive fake tolerated the call anyway.
+    """
 
     def __init__(self, project_id: str = "auto-proj-1") -> None:
         self.project_id = project_id
         self.calls: list[dict[str, Any]] = []
 
-    async def create_project(self, *, name: str, description: str = "", **_: Any) -> Any:
-        self.calls.append({"name": name, "description": description})
+    async def create_project(self, *, name: str, description: str, status: str) -> Any:
+        self.calls.append({"name": name, "description": description, "status": status})
         return _FakeCreatedProject(self.project_id)
 
 
@@ -156,7 +164,9 @@ async def test_ensure_run_project_autocreates_when_missing() -> None:
     await routes._ensure_run_project(run, backend)
 
     assert run.request["project_id"] == "auto-proj-1"
-    assert backend.calls == [{"name": "a 2-axis camera gimbal", "description": ""}]
+    assert backend.calls == [
+        {"name": "a 2-axis camera gimbal", "description": "", "status": "draft"}
+    ]
 
 
 @pytest.mark.asyncio
