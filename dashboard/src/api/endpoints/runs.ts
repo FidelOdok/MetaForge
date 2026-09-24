@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 import apiClient from '../client';
 import type { ApprovalDecision, HarnessRun, RunStatus } from '../../types/run';
 
@@ -37,13 +39,18 @@ export async function listRuns(): Promise<HarnessRun[]> {
   return data.runs.map(mapRun);
 }
 
-/** Fetch one run via `GET /v1/runs/{id}`; undefined if not found. */
+/**
+ * Fetch one run via `GET /v1/runs/{id}`; undefined if the gateway says 404.
+ * Any other failure is rethrown so the page can show "could not be loaded"
+ * instead of a misleading "not found".
+ */
 export async function getRun(id: string): Promise<HarnessRun | undefined> {
   try {
     const { data } = await apiClient.get<RunRaw>(`/runs/${id}`);
     return mapRun(data);
-  } catch {
-    return undefined;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 404) return undefined;
+    throw err;
   }
 }
 

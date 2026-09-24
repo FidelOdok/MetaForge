@@ -60,6 +60,12 @@ vi.mock('../../components/viewer/ExplodedViewControls', () => ({
   ExplodedViewControls: () => <div data-testid="exploded-controls" />,
 }));
 
+vi.mock('../../components/viewer/TwinAgentChat', () => ({
+  TwinAgentChat: ({ projectId }: { projectId: string | null }) => (
+    <div data-testid="twin-agent-chat">{projectId ?? 'unscoped'}</div>
+  ),
+}));
+
 vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
   TwinGraphCanvas: ({ nodes }: { nodes: { name: string }[] }) => (
     <div data-testid="twin-graph-canvas">
@@ -70,9 +76,11 @@ vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
 
 import { TwinViewerPage } from '../TwinViewerPage';
 import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../../hooks/use-twin';
-import { fireEvent, act } from '@testing-library/react';
+import { fireEvent, act, within } from '@testing-library/react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../store/project-store';
+import { useLayoutStore } from '../../store/layout-store';
+import { setSampleModeForTests } from '../../lib/sample-workspace';
 
 const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
@@ -97,6 +105,8 @@ function TwinWithNavHarness() {
 describe('TwinViewerPage', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/twin');
+    // Expanded explorer so node rows render as buttons (collapsed shows the domain rail).
+    useLayoutStore.setState({ sidebarCollapsed: false });
   });
 
 
@@ -140,9 +150,11 @@ describe('TwinViewerPage', () => {
     mockUseTwinNodes.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
     mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useTwinNode>);
     render(<TwinViewerPage />);
-    // KC spec uses 'MODEL' and 'GRAPH' (uppercase monospace) in the segmented toggle
-    expect(screen.getByText('MODEL')).toBeInTheDocument();
-    expect(screen.getAllByText('GRAPH').length).toBeGreaterThanOrEqual(1);
+    const group = screen.getByRole('group', { name: 'View mode' });
+    for (const label of ['Graph', 'Model', 'Sim', 'Assembly']) {
+      expect(within(group).getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    expect(within(group).getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows revision history for a selected node (previously unwired to any UI)', () => {
@@ -413,6 +425,94 @@ describe('TwinViewerPage', () => {
       expect(urdfLink).toHaveAttribute('href', '/api/v1/cad-export/download/abc/model.urdf');
       const meshLink = screen.getByText('model.stl').closest('a');
       expect(meshLink).toHaveAttribute('href', '/api/v1/cad-export/download/abc/model.stl');
+    });
+  });
+
+  describe('console workspace (status strip, explorer, inspector)', () => {
+    const nodes = [
+      { id: 'n1', name: 'bracket-v1.step', type: 'work_product', domain: 'mechanical', status: 'valid', properties: { wp_type: 'cad_model' }, updatedAt: '2026-09-22T12:00:00Z' },
+      { id: 'c1', name: 'Clearance', type: 'constraint', domain: 'mechanical', status: 'violation', properties: {}, updatedAt: '2026-09-22T11:00:00Z' },
+      { id: 'e1', name: 'power-budget', type: 'work_product', domain: 'electronics', status: 'stale', properties: {}, updatedAt: '2026-09-22T10:00:00Z' },
+    ];
+
+    beforeEach(() => {
+      mockUseTwinNodes.mockReturnValue({ data: nodes, isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
+      mockUseTwinRelationships.mockReturnValue({
+        data: [{ id: 'r1', sourceId: 'n1', targetId: 'c1', type: 'constrained_by', label: 'constrained by' }],
+      } as unknown as ReturnType<typeof useTwinRelationships>);
+      mockUseTwinNode.mockImplementation(
+        (id?: string) => ({ data: nodes.find((n) => n.id === id), isLoading: false }) as unknown as ReturnType<typeof useTwinNode>,
+      );
+      mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    });
+
+    it('summarises attention, totals and orphan nodes, and links to a design run', () => {
+      useProjectStore.setState({ activeProjectId: 'proj-a', hasSelected: true });
+      render(<TwinViewerPage />);
+      const strip = screen.getByRole('region', { name: 'Needs attention' });
+      expect(within(strip).getByRole('button', { name: /2 need attention/ })).toBeInTheDocument();
+      expect(within(strip).getByRole('button', { name: /3 work products & nodes/ })).toBeInTheDocument();
+      expect(within(strip).getByText('without relationships').parentElement).toHaveTextContent('1 without relationships');
+      expect(within(strip).getByRole('link', { name: /Start design run/ })).toHaveAttribute('href', '/runs/new?project=proj-a');
+      expect(screen.queryByText('Sample data · resets on refresh')).not.toBeInTheDocument();
+    });
+
+    it('filters the explorer to nodes needing attention and by search', () => {
+      render(<TwinViewerPage />);
+      const explorer = screen.getByRole('complementary', { name: 'Explorer' });
+      fireEvent.click(within(explorer).getByRole('button', { name: 'Needs attention' }));
+      expect(within(explorer).queryByRole('button', { name: /bracket-v1\.step/ })).not.toBeInTheDocument();
+      expect(within(explorer).getByRole('button', { name: /Clearance/ })).toBeInTheDocument();
+      fireEvent.click(within(explorer).getByRole('button', { name: 'All' }));
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the twin' }), { target: { value: 'power' } });
+      expect(within(explorer).getByText('1 nodes')).toBeInTheDocument();
+      expect(within(explorer).getByRole('button', { name: /power-budget/ })).toBeInTheDocument();
+    });
+
+    it('shows the domain rail when the explorer is minimised', () => {
+      useLayoutStore.setState({ sidebarCollapsed: true });
+      render(<TwinViewerPage />);
+      const explorer = screen.getByRole('complementary', { name: 'Explorer' });
+      expect(within(explorer).getByTitle('All work products')).toHaveTextContent('3');
+      expect(within(explorer).getByTitle('mechanical')).toHaveTextContent('ME2');
+      expect(within(explorer).getByTitle('electronics')).toHaveTextContent('EL1');
+    });
+
+    it('inspector lists linked constraints for the selected node', () => {
+      render(<TwinViewerPage />);
+      fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+      const inspector = screen.getByRole('complementary', { name: 'Node inspector' });
+      expect(within(inspector).getByText('mechanical · work_product')).toBeInTheDocument();
+      fireEvent.click(within(inspector).getByRole('button', { name: 'constraints' }));
+      expect(within(inspector).getByRole('button', { name: /Clearance/ })).toHaveTextContent('violation');
+    });
+
+    it('opens the assembly view and the timeline', () => {
+      render(<TwinViewerPage />);
+      fireEvent.click(screen.getByRole('button', { name: 'Assembly' }));
+      expect(screen.getByText('Build the assembly')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Timeline' }));
+      expect(screen.getByText('Latest work product updates')).toBeInTheDocument();
+    });
+
+    it('shows the gateway-unavailable state when the twin query fails', () => {
+      mockUseTwinNodes.mockReturnValue({ data: undefined, isLoading: false, isError: true, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
+      render(<TwinViewerPage />);
+      expect(screen.getByText('Twin data unavailable')).toBeInTheDocument();
+      expect(screen.getByText('Gateway disconnected')).toBeInTheDocument();
+    });
+
+    it('marks sample mode with a badge and pins the sample project', () => {
+      setSampleModeForTests(true);
+      try {
+        render(<TwinViewerPage />);
+        expect(screen.getByText('Sample data · resets on refresh')).toBeInTheDocument();
+        expect(screen.getByText('Drone FC · sample')).toBeInTheDocument();
+        expect(mockUseTwinNodes).toHaveBeenLastCalledWith('sample-drone-fc');
+        expect(screen.getByTestId('twin-agent-chat')).toHaveTextContent('sample-drone-fc');
+      } finally {
+        setSampleModeForTests(false);
+      }
     });
   });
 });

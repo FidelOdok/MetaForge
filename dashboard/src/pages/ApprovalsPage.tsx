@@ -1,11 +1,54 @@
+import { Link } from 'react-router-dom';
+import { ArrowUpRight } from 'lucide-react';
+
 import { useProposals, useDecideProposal } from '../hooks/use-assistant';
 import { usePendingToolApprovals, useDecideToolApproval } from '../hooks/use-tool-approvals';
 import { useActiveProject } from '../hooks/use-active-project';
+import { useRuns } from '../hooks/use-runs';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatRelativeTime } from '../utils/format-time';
 import type { Proposal } from '../api/endpoints/assistant';
 import type { ToolApprovalRun } from '../api/endpoints/toolApprovals';
+
+// ─── Run approval gates (design-flow runs paused at a gate) ──────────────────
+function RunGatesQueue() {
+  const runs = useRuns();
+  const awaiting = (runs.data ?? []).filter((r) => r.status === 'awaiting_approval');
+
+  return (
+    <section className="context-panel run-review-queue" aria-labelledby="run-gates-heading">
+      <div className="section-heading">
+        <h2 id="run-gates-heading">Run approval gates</h2>
+        <span className="eyebrow">ALL PROJECTS</span>
+      </div>
+      {runs.isLoading ? (
+        <p className="review-queue-message" role="status">
+          Loading run gates…
+        </p>
+      ) : runs.isError ? (
+        <p className="review-queue-message" role="alert">
+          Run gates could not be loaded. Check your gateway connection.
+        </p>
+      ) : awaiting.length ? (
+        <div className="review-list">
+          {awaiting.map((run) => (
+            <Link key={run.id} to={`/runs/${run.id}`}>
+              <strong>{String(run.request.goal ?? run.id)}</strong>
+              <span>{run.approvalReason ?? 'Inspect the evidence before approving execution.'}</span>
+              <span className="text-action">
+                Inspect and decide
+                <ArrowUpRight size={16} />
+              </span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <p className="review-queue-message">No runs awaiting approval.</p>
+      )}
+    </section>
+  );
+}
 
 // ─── Kinetic Console design tokens ──────────────────────────────────────────
 const KC = {
@@ -119,7 +162,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
               <span
                 className="font-mono rounded px-1.5 py-0.5"
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   backgroundColor: KC.surfaceHigh,
                   color: KC.onSurfaceVariant,
                 }}
@@ -128,7 +171,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
               </span>
               <span
                 className="font-mono"
-                style={{ fontSize: 11, color: KC.onSurfaceVariant }}
+                style={{ fontSize: 12, color: KC.onSurfaceVariant }}
               >
                 {formatRelativeTime(proposal.created_at)}
               </span>
@@ -140,7 +183,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
         <span
           className="font-mono shrink-0 rounded px-1.5 py-0.5"
           style={{
-            fontSize: 10,
+            fontSize: 12,
             backgroundColor:
               proposal.status === 'approved' ? 'rgba(61,214,140,0.12)' :
               proposal.status === 'rejected' ? 'rgba(255,180,171,0.12)' :
@@ -163,7 +206,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
               key={wp}
               className="rounded px-1.5 py-0.5 font-mono"
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 backgroundColor: KC.surfaceHigh,
                 color: KC.onSurfaceVariant,
                 border: `1px solid ${KC.border}`,
@@ -214,11 +257,17 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
         </div>
       )}
 
+      {decide.isError && (
+        <p role="alert" style={{ color: KC.error }}>
+          The decision could not be saved. Check the connection and try again.
+        </p>
+      )}
+
       {/* Decision metadata */}
       {proposal.decided_at && (
         <div
           className="font-mono"
-          style={{ fontSize: 11, color: KC.onSurfaceVariant }}
+          style={{ fontSize: 12, color: KC.onSurfaceVariant }}
         >
           Decided {formatRelativeTime(proposal.decided_at)}
           {proposal.reviewer && ` · ${proposal.reviewer}`}
@@ -260,7 +309,7 @@ function ToolApprovalCard({ approval }: { approval: ToolApprovalRun }) {
               {approval.request.tool}
             </div>
             <div className="mt-1">
-              <span className="font-mono" style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
+              <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
                 {formatRelativeTime(new Date(approval.created_at * 1000).toISOString())}
               </span>
             </div>
@@ -268,7 +317,7 @@ function ToolApprovalCard({ approval }: { approval: ToolApprovalRun }) {
         </div>
         <span
           className="font-mono shrink-0 rounded px-1.5 py-0.5"
-          style={{ fontSize: 10, backgroundColor: KC.surfaceHigh, color: KC.onSurfaceVariant }}
+          style={{ fontSize: 12, backgroundColor: KC.surfaceHigh, color: KC.onSurfaceVariant }}
         >
           awaiting approval
         </span>
@@ -331,9 +380,39 @@ function ToolApprovalCard({ approval }: { approval: ToolApprovalRun }) {
 // ─── ApprovalsPage ───────────────────────────────────────────────────────────
 export function ApprovalsPage() {
   const { activeProjectId } = useActiveProject();
-  const { data, isLoading } = useProposals(activeProjectId ?? undefined);
+  const { data, isLoading, isError } = useProposals(activeProjectId ?? undefined);
   const { data: toolApprovalsData } = usePendingToolApprovals();
   const pendingToolApprovals = toolApprovalsData?.runs ?? [];
+
+  if (isError) {
+    return (
+      <div>
+        <div className="page-heading">
+          <div>
+            <p className="eyebrow">HUMAN REVIEW</p>
+            <h1>Approvals.</h1>
+          </div>
+        </div>
+        <RunGatesQueue />
+        {/* Tool calls come from a separate endpoint; a paused chat turn is
+            still actionable even when proposals fail to load. */}
+        {pendingToolApprovals.length > 0 && (
+          <div className="space-y-3" style={{ marginBottom: 16 }}>
+            {pendingToolApprovals.map((approval) => (
+              <ToolApprovalCard key={approval.id} approval={approval} />
+            ))}
+          </div>
+        )}
+        <div className="workspace-empty" role="alert">
+          <h2>Proposals could not be loaded</h2>
+          <p>Check your gateway connection and try again.</p>
+          <Link className="text-action" to="/settings">
+            Connection settings
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -390,6 +469,8 @@ export function ApprovalsPage() {
         </div>
       </div>
 
+      <RunGatesQueue />
+
       {/* ── 3-column regime cards ────────────────────────────────────────── */}
       <div
         style={{
@@ -410,7 +491,7 @@ export function ApprovalsPage() {
           <div className="mb-2">
             <span
               className="font-mono"
-              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               PENDING
             </span>
@@ -422,7 +503,7 @@ export function ApprovalsPage() {
             {pendingCount}
             <span
               className="font-mono"
-              style={{ fontSize: 11, color: KC.onSurfaceVariant, marginLeft: 6, fontWeight: 400 }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, marginLeft: 6, fontWeight: 400 }}
             >
               proposals
             </span>
@@ -447,7 +528,7 @@ export function ApprovalsPage() {
           </div>
           <span
             className="font-mono"
-            style={{ fontSize: 10, color: KC.onSurfaceVariant }}
+            style={{ fontSize: 12, color: KC.onSurfaceVariant }}
           >
             awaiting review
           </span>
@@ -464,7 +545,7 @@ export function ApprovalsPage() {
           <div className="mb-2">
             <span
               className="font-mono"
-              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               APPROVED
             </span>
@@ -476,7 +557,7 @@ export function ApprovalsPage() {
             {approvedCount}
             <span
               className="font-mono"
-              style={{ fontSize: 11, color: KC.onSurfaceVariant, marginLeft: 6, fontWeight: 400 }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, marginLeft: 6, fontWeight: 400 }}
             >
               proposals
             </span>
@@ -501,7 +582,7 @@ export function ApprovalsPage() {
           </div>
           <span
             className="font-mono"
-            style={{ fontSize: 10, color: KC.onSurfaceVariant }}
+            style={{ fontSize: 12, color: KC.onSurfaceVariant }}
           >
             gate passed
           </span>
@@ -518,7 +599,7 @@ export function ApprovalsPage() {
           <div className="mb-2">
             <span
               className="font-mono"
-              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               REJECTED
             </span>
@@ -530,7 +611,7 @@ export function ApprovalsPage() {
             {rejectedCount}
             <span
               className="font-mono"
-              style={{ fontSize: 11, color: KC.onSurfaceVariant, marginLeft: 6, fontWeight: 400 }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, marginLeft: 6, fontWeight: 400 }}
             >
               proposals
             </span>
@@ -555,7 +636,7 @@ export function ApprovalsPage() {
           </div>
           <span
             className="font-mono"
-            style={{ fontSize: 10, color: KC.onSurfaceVariant }}
+            style={{ fontSize: 12, color: KC.onSurfaceVariant }}
           >
             changes required
           </span>
@@ -576,7 +657,7 @@ export function ApprovalsPage() {
           >
             <span
               className="font-mono"
-              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               PENDING TOOL CALLS
             </span>
@@ -617,7 +698,7 @@ export function ApprovalsPage() {
           >
             <span
               className="font-mono"
-              style={{ fontSize: 10, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
+              style={{ fontSize: 12, color: KC.onSurfaceVariant, letterSpacing: '0.06em' }}
             >
               PROPOSALS
             </span>

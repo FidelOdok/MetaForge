@@ -1,5 +1,23 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import {
+  Activity,
+  Box,
+  Camera,
+  ChevronDown,
+  Clock3,
+  Columns2,
+  Layers,
+  Maximize2,
+  MessageSquare,
+  Minimize2,
+  Network,
+  PanelLeftClose,
+  PanelRightClose,
+  Search,
+  Upload,
+  X,
+} from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
@@ -12,9 +30,10 @@ import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
+import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { useViewerStore } from '../store/viewer-store';
+import { useLayoutStore } from '../store/layout-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
-import { getMockManifest, getMockGlbUrl } from '../api/endpoints/convert';
 import { getNodeModel, nodeFileUrl } from '../api/endpoints/twin';
 import { FullScreenPreviewModal } from '../components/viewer/FullScreenPreviewModal';
 import { iconForNode } from '../utils/wp-icons';
@@ -24,6 +43,14 @@ import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 import { resolveGatewayHref } from '../lib/gatewayConfig';
+import apiClient from '../api/client';
+import { installSampleAdapter, isSampleMode, SAMPLE_PROJECT_ID, SAMPLE_PROJECT_NAME } from '../lib/sample-workspace';
+import './TwinViewerPage.css';
+
+// `?demo=1` serves the illustrative sample workspace offline. Idempotent, so
+// it is harmless if the shared client already installs it.
+installSampleAdapter(apiClient);
+
 
 // MET-720: names the cadquery adapter's material density table
 // (tool_registry/tools/cadquery/materials.py) actually recognizes.
@@ -61,81 +88,6 @@ const KC = {
   statusBar: 'var(--mf-r-12-14-20-0p95)',
 } as const;
 
-
-// ── Small helpers ─────────────────────────────────────────────────────────────
-
-function GlassPanel({
-  children,
-  style,
-  className,
-}: {
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-  className?: string;
-}) {
-  return (
-    <div
-      className={className}
-      style={{
-        background: KC.surfaceContainer,
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        border: `1px solid ${KC.border}`,
-        borderRadius: 6,
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function ToolBtn({
-  icon,
-  active,
-  title,
-  onClick,
-}: {
-  icon: string;
-  active?: boolean;
-  title: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      style={{
-        width: 48,
-        height: 48,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: active ? 'var(--mf-r-40-42-48-0p9)' : 'transparent',
-        // Left accent via inset box-shadow — avoids mixing the `border`/`borderLeft`
-        // shorthands with their longhands (React rerender warning, MET-511).
-        border: 'none',
-        boxShadow: active ? `inset 2px 0 0 ${KC.orange}` : 'none',
-        color: active ? KC.orange : KC.onSurfaceVariant,
-        cursor: 'pointer',
-        transition: 'color 0.12s, background 0.12s',
-        outline: 'none',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.background = KC.surfaceHigh;
-      }}
-      onMouseLeave={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-      }}
-    >
-      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{icon}</span>
-    </button>
-  );
-}
-
-// ── NodeDetail (right floating panel) ────────────────────────────────────────
-// ── Work-product file: worktype + path + download / open / preview (MET-483) ──
 // MET-747 follow-up: format-kind detection now lives in FullScreenPreviewModal
 // (the "Preview" action opens that instead of a cramped 320px inline strip).
 
@@ -667,131 +619,43 @@ function NodeHistorySection({ nodeId }: { nodeId: string }) {
   );
 }
 
-// ── SceneDropdown ─────────────────────────────────────────────────────────────
-function SceneDropdown({
-  nodes,
-  selectedId,
-  onSelect,
-}: {
-  nodes: TwinNode[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    if (open) document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [open]);
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded px-3"
-        style={{
-          height: 28,
-          background: 'var(--mf-r-30-31-38-0p85)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          border: `1px solid ${KC.border}`,
-          fontSize: 11,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: KC.onSurfaceVariant,
-          cursor: 'pointer',
-          fontFamily: "'Roboto Mono', monospace",
-        }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>account_tree</span>
-        SCENE
-        <span style={{ fontSize: 10, marginLeft: 1 }}>▾</span>
-      </button>
-
-      {open && (
-        <GlassPanel
-          style={{
-            position: 'absolute',
-            top: 36,
-            left: 0,
-            width: 232,
-            zIndex: 60,
-            overflow: 'hidden',
-            background: 'var(--mf-r-25-27-34-0p96)',
-          }}
-        >
-          <div className="px-4 py-2.5" style={{ borderBottom: `1px solid ${KC.border}` }}>
-            <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
-              Twin Nodes · {nodes.length}
-            </span>
-          </div>
-          <div className="py-1" style={{ maxHeight: 280, overflowY: 'auto' }}>
-            {nodes.length === 0 ? (
-              <div className="px-3 py-2 font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
-                No nodes yet
-              </div>
-            ) : (
-              nodes.map((n) => {
-                const isActive = n.id === selectedId;
-                return (
-                  <button
-                    key={n.id}
-                    type="button"
-                    onClick={() => { onSelect(n.id); setOpen(false); }}
-                    className="flex items-center gap-2 w-full text-left"
-                    style={{
-                      padding: '6px 12px',
-                      background: isActive ? KC.orangeFaint : 'transparent',
-                      color: isActive ? KC.orange : KC.onSurfaceVariant,
-                      fontSize: 12,
-                      cursor: 'pointer',
-                      border: 'none',
-                      boxShadow: isActive ? `inset 2px 0 0 ${KC.orange}` : 'none',
-                      width: '100%',
-                      fontFamily: 'Inter, sans-serif',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = KC.surfaceHigh;
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                    }}
-                  >
-                    <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: 14 }}>
-                      {iconForNode(n)}
-                    </span>
-                    <span className="truncate">{n.name}</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </GlassPanel>
-      )}
-    </div>
-  );
-}
-
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
+type TwinTab = 'graph' | 'model' | 'sim' | 'asm';
+type InspectorTab = 'overview' | 'constraints' | 'history';
+type NodeScope = 'all' | 'attention' | string;
+
+const TWIN_TABS: TwinTab[] = ['graph', 'model', 'sim', 'asm'];
+const TAB_LABELS: Record<TwinTab, string> = { graph: 'Graph', model: 'Model', sim: 'Sim', asm: 'Assembly' };
+const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history'];
+
+/** Status words that put a node in the "need attention" bucket. */
+function needsAttention(node: TwinNode): boolean {
+  return /fail|invalid|violation|stale|changed|warning/i.test(node.status);
+}
 
 export function TwinViewerPage() {
+  const sampleMode = isSampleMode();
+
   // ── state ──
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [assemblyExportOpen, setAssemblyExportOpen] = useState(false);
   const [conversionPhase, setConversionPhase] = useState<ConversionPhase>('idle');
   const [quality, setQuality] = useState('standard');
-  const [showTree, setShowTree] = useState(true);
-  // Collapse toggle for the left pane (Nodes list in graph mode / Components
-  // tree in 3D mode) so it can be tucked away to free up canvas space.
-  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(true);
+  const [chatMax, setChatMax] = useState(false);
+  const [chatMin, setChatMin] = useState(!sampleMode);
+  const [chatDock, setChatDock] = useState<'overlay' | 'side'>('overlay');
+  const [tab, setTab] = useState<TwinTab>('graph');
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview');
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<NodeScope>('all');
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const railMin = useLayoutStore((s) => s.sidebarCollapsed);
+  const toggleRail = useLayoutStore((s) => s.toggleSidebar);
 
   // Capture the live WebGL canvas as a PNG download (Screenshot button).
   function handleScreenshot() {
@@ -808,21 +672,27 @@ export function TwinViewerPage() {
   // Same tracking for the robot-description auto-loader (MET-747).
   const [loadedRobotNodeId, setLoadedRobotNodeId] = useState<string | null>(null);
   // MET-683: distinguish "nothing loaded yet" from "we tried and the backend
-  // rejected it" -- previously a failed conversion (e.g. an empty/invalid
-  // STEP) silently fell back to the generic upload placeholder with no
-  // indication a model was ever attempted, console.error only.
+  // rejected it" -- a failed conversion must not silently fall back to the
+  // generic upload placeholder.
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
-  // Deep-link: /twin?node=<id> preselects a node (e.g. from a project's work
-  // product list, MET-514).
+  // Deep-link: /twin?node=<id> preselects a node (MET-514).
   const [searchParams] = useSearchParams();
 
-  // ── project scope — Context UI ──
-  // Reads the single global active-project selection every page now shares
-  // (the Topbar switcher), instead of the page-local scope this used to keep.
-  const { activeProjectId } = useActiveProject();
+  // ── project scope ──
+  // The single global active-project selection (Topbar switcher). Sample mode
+  // pins the illustrative Drone FC workspace.
+  const { activeProjectId: selectedProjectId, activeProject } = useActiveProject();
+  const activeProjectId = sampleMode ? SAMPLE_PROJECT_ID : selectedProjectId;
+  const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;
 
   // ── data ──
-  const { data: nodes, isLoading, isFetching, dataUpdatedAt } = useTwinNodes(activeProjectId ?? undefined);
+  const {
+    data: nodes,
+    isLoading,
+    isError,
+    isFetching,
+    dataUpdatedAt,
+  } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
   const { data: relationships = [] } = useTwinRelationships(activeProjectId ?? undefined);
   const items = nodes ?? [];
@@ -838,26 +708,20 @@ export function TwinViewerPage() {
   const clearModel = useViewerStore((s) => s.clearModel);
   const loadRobotDescription = useViewerStore((s) => s.loadRobotDescription);
   const robotDescription = useViewerStore((s) => s.robotDescription);
+  const robotPhysicsEnabled = useViewerStore((s) => s.robotPhysicsEnabled);
+  const setRobotPhysicsEnabled = useViewerStore((s) => s.setRobotPhysicsEnabled);
 
   const uploadMutation = useUploadAndConvert();
 
   // MET-514: sync the selected node with the ?node= deep link. Symmetric --
-  // clears the selection when the param disappears too (e.g. the sidebar's
-  // plain /twin link doesn't remount this page, only re-renders it with
-  // empty searchParams; MET-686 fixed a stale-selection bug where the
-  // previous work product's detail panel and breadcrumb kept showing).
+  // clears the selection when the param disappears too (MET-686).
   useEffect(() => {
     setSelectedId(searchParams.get('node'));
   }, [searchParams]);
 
   // MET-674: clear the selected node (and its cached model) when the active
-  // project changes -- otherwise the detail panel and breadcrumb keep
-  // showing the PREVIOUS project's node after the node list/canvas has
-  // already updated to the new project. Guarded to skip the null -> X
-  // transition (MET-686): on a cold session (no project ever persisted),
-  // useActiveProject's own "auto-select the newest project" effect can land
-  // a moment after mount, racing the ?node= deep-link effect above and
-  // wiping the just-navigated-to node before the user ever sees it.
+  // project changes. Skips the null -> X transition (MET-686) so a cold
+  // session's auto-selected project doesn't wipe a deep-linked node.
   const prevProjectIdRef = useRef(activeProjectId);
   useEffect(() => {
     if (prevProjectIdRef.current !== null && prevProjectIdRef.current !== activeProjectId) {
@@ -868,31 +732,21 @@ export function TwinViewerPage() {
     prevProjectIdRef.current = activeProjectId;
   }, [activeProjectId]);
 
-  // MET-683: a stale error from a previously-selected node must not linger
-  // once the user picks a different node (including a non-CAD one, which
-  // never re-enters the load effect below to clear it itself).
+  // MET-683: a stale error from a previously-selected node must not linger.
   useEffect(() => {
     setModelLoadError(null);
   }, [selectedNode?.id]);
 
-  // MET-505: in MODEL view, auto-load the selected node's geometry. Previously
-  // the viewer only loaded via the graph-mode "View in 3D" button, so picking a
-  // CAD node from the scene dropdown left the "upload a STEP file" placeholder.
+  // MET-505: in MODEL view, auto-load the selected node's geometry.
   useEffect(() => {
     if (viewMode !== '3d') return;
     const n = selectedNode;
     if (!n || n.properties.wp_type !== 'cad_model') return;
     // MET-747: also reload if a robot description's mutual-exclusion clear
-    // wiped glbUrl since this node was last loaded -- loadedModelNodeId
-    // alone can't tell "already showing" from "was showing, then cleared
-    // by switching to a robot and back to this same node".
+    // wiped glbUrl since this node was last loaded.
     if (loadedModelNodeId === n.id && glbUrl) return;
     // MET-683: clear any PREVIOUS node's geometry before attempting this
-    // node's load -- otherwise a failed load left the prior node's model on
-    // screen under the new node's breadcrumb, with no error overlay (it was
-    // gated on `!glbUrl`, which a stale-but-present model kept satisfying as
-    // false), silently misleading the user rather than showing nothing/an
-    // error for the node they actually just selected.
+    // node's load so a failure never leaves the prior model on screen.
     clearModel();
     let cancelled = false;
     (async () => {
@@ -915,11 +769,6 @@ export function TwinViewerPage() {
         setLoadedModelNodeId(n.id);
         setModelLoadError(null);
       } catch (err) {
-        // MET-683: this used to be swallowed to a console.error only, leaving
-        // the generic "Upload a STEP file..." placeholder up with no sign a
-        // load was ever attempted -- confirmed live against a real node whose
-        // STEP export was empty (OCCT 422 "Can't export empty scenes!"), the
-        // dashboard gave zero indication anything was wrong.
         if (!cancelled) {
           console.error('Failed to auto-load 3D model:', err);
           setModelLoadError(getModelLoadErrorMessage(err));
@@ -931,20 +780,9 @@ export function TwinViewerPage() {
     };
   }, [viewMode, selectedNode, loadedModelNodeId, glbUrl, loadModel, clearModel]);
 
-  // MET-747: same auto-load pattern as MET-505 above, for robot_description
-  // nodes -- selecting a different robot while already in 3D/MODEL mode
-  // swaps the main viewer's content instead of requiring a fresh click.
-  // loadRobotDescription itself clears any loaded GLB model (mutual
-  // exclusion lives in the store, not here).
-  //
-  // Guards on `hasRobotLoaded` (a primitive boolean), NOT the
-  // `robotDescription` object itself -- loadRobotDescription creates a
-  // brand-new {nodeId} object every call, so using that object as an effect
-  // dependency meant its reference "changed" on every run even when nodeId
-  // didn't, defeating the loadedRobotNodeId guard and causing an infinite
-  // render loop (confirmed live: React's "Maximum update depth exceeded").
-  // Boolean(robotDescription) is Object.is-stable across re-renders once
-  // true, which is all this guard actually needs.
+  // MET-747: same auto-load pattern for robot_description nodes. Guards on a
+  // primitive boolean, not the robotDescription object (a fresh object per
+  // load would loop forever).
   const hasRobotLoaded = Boolean(robotDescription);
   useEffect(() => {
     if (viewMode !== '3d') return;
@@ -979,653 +817,515 @@ export function TwinViewerPage() {
   );
 
   const handlePartClick = useCallback(
-    (part: PartInfo) => { selectPart(part.meshName); },
+    (part: PartInfo) => {
+      selectPart(part.meshName);
+    },
     [selectPart],
   );
 
-  const isGraphMode = viewMode === 'graph';
+  // Something else (e.g. "View 3D Model") switched the viewer to 3D: follow it.
+  useEffect(() => {
+    if (viewMode === '3d') setTab((t) => (t === 'graph' ? 'model' : t));
+  }, [viewMode]);
 
-  // ── status bar label ──
-  const statusLabel = isGraphMode ? 'GRAPH VIEW' : 'ORBIT MODE';
-  // Was a hardcoded "X 0.0 Y 0.0 Z 0.0" that never reflected the actual
-  // camera or selection — now shows the real selected part, or an honest
-  // "no selection" state.
-  const statusCenter = isGraphMode
-    ? `${items.length} node${items.length !== 1 ? 's' : ''}`
-    : selectedMeshName
-      ? `selected · ${selectedMeshName}`
-      : 'no selection';
+  const switchTab = (next: TwinTab) => {
+    setTab(next);
+    setViewMode(next === 'graph' || next === 'asm' ? 'graph' : '3d');
+  };
+
+  const selectNode = (id: string | null) => {
+    setSelectedId(id);
+    setInspectorOpen(true);
+  };
+
+  // ── derived ──
+  const query = search.toLowerCase();
+  const visible = items.filter(
+    (n) =>
+      (scope === 'all' || (scope === 'attention' && needsAttention(n)) || n.domain === scope) &&
+      `${n.name} ${n.domain} ${n.id}`.toLowerCase().includes(query),
+  );
+  const visibleIds = new Set(visible.map((n) => n.id));
+  const domains = [...new Set(items.map((n) => n.domain))];
+  const linked = new Set(relationships.flatMap((r) => [r.sourceId, r.targetId]));
+  const linkedConstraints = items.filter(
+    (n) =>
+      n.type === 'constraint' &&
+      (!selectedId ||
+        n.id === selectedId ||
+        relationships.some(
+          (r) => (r.sourceId === selectedId && r.targetId === n.id) || (r.targetId === selectedId && r.sourceId === n.id),
+        )),
+  );
+  // Only inspect a node that belongs to the current node list (MET-674).
+  const node = selectedNode && items.some((n) => n.id === selectedNode.id) ? selectedNode : undefined;
+  const recent = [...items]
+    .filter((n) => n.updatedAt)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 12);
+  const robotNodes = items.filter((n) => n.properties.wp_type === 'robot_description');
+  const is3d = tab === 'model' || tab === 'sim';
+
+  const syncLabel = sampleMode
+    ? 'Sample data'
+    : isError
+      ? 'Gateway disconnected'
+      : isFetching
+        ? 'Syncing…'
+        : dataUpdatedAt
+          ? 'Synced'
+          : 'Awaiting data';
 
   return (
-    /*
-     * Full-bleed canvas: escapes AppLayout's p-6 (24px) padding by using
-     * negative margins, then fills the remaining viewport height.
-     */
     <div
-      style={{
-        position: 'relative',
-        margin: -24,
-        height: 'calc(100vh - 40px)', // 40px = h-10 topbar
-        overflow: 'hidden',
-        background: KC.surface,
-        backgroundImage: 'radial-gradient(circle, var(--mf-r-154-154-170-0p18) 1px, transparent 1px)',
-        backgroundSize: '32px 32px',
-      }}
+      className="tw-workspace"
+      data-inspector={inspectorOpen ? 'on' : 'off'}
+      data-rail={railMin ? 'min' : 'on'}
+      data-chat={chatDock}
     >
+      <header className="tw-top">
+        <button
+          className="tw-icon"
+          onClick={toggleRail}
+          title={railMin ? 'Expand navigation and explorer' : 'Minimise navigation and explorer'}
+          aria-expanded={!railMin}
+        >
+          <PanelLeftClose size={18} />
+        </button>
+        <div className="tw-brand">
+          <Network size={18} />
+          <h1>Digital Twin</h1>
+          <span>{projectName ?? 'No project'}</span>
+        </div>
+        <label className="tw-search">
+          <Search size={15} />
+          <input
+            type="search"
+            placeholder="Search the twin"
+            aria-label="Search the twin"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <div className="tw-segment" role="group" aria-label="View mode">
+          {TWIN_TABS.map((t) => (
+            <button key={t} aria-pressed={tab === t} onClick={() => switchTab(t)}>
+              {TAB_LABELS[t]}
+            </button>
+          ))}
+        </div>
+        {is3d && glbUrl && (
+          <button className="tw-icon" title="Screenshot" onClick={handleScreenshot}>
+            <Camera size={18} />
+          </button>
+        )}
+        <button className="tw-icon" title="Import work product" onClick={() => setImportOpen(true)}>
+          <Upload size={18} />
+        </button>
+        <button
+          className="tw-icon"
+          title="Toggle inspector"
+          aria-pressed={inspectorOpen}
+          onClick={() => setInspectorOpen((v) => !v)}
+        >
+          <PanelRightClose size={18} />
+        </button>
+      </header>
 
-      {/* ═══════════════════════════════════════════
-          CANVAS — full-bleed content area
-      ════════════════════════════════════════════ */}
-      <div style={{ position: 'absolute', inset: 0 }}>
-        {isGraphMode ? (
-          /* Graph mode: interactive node-link graph of the twin */
-          isLoading ? (
-            <div className="flex items-center justify-center h-full font-mono text-xs" style={{ color: KC.onSurfaceVariant }}>
-              Loading twin graph…
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3">
-              <span className="material-symbols-outlined" style={{ fontSize: 40, color: KC.onSurfaceVariant, opacity: 0.4 }}>hub</span>
-              <span className="font-mono text-xs" style={{ color: KC.onSurfaceVariant }}>Empty twin</span>
-              <span className="font-mono" style={{ fontSize: 11, color: KC.onSurfaceVariant, opacity: 0.6 }}>
-                Work products will appear here when agents run.
-              </span>
+      <section className="tw-attention" aria-label="Needs attention">
+        {sampleMode && <strong className="sample-badge">Sample data · resets on refresh</strong>}
+        <button
+          aria-pressed={scope === 'attention'}
+          onClick={() => setScope(scope === 'attention' ? 'all' : 'attention')}
+        >
+          <span className="tw-warning">{items.filter(needsAttention).length}</span> need attention
+        </button>
+        <button
+          onClick={() => {
+            setSearch('');
+            setScope('all');
+          }}
+        >
+          <b>{items.length}</b> work products & nodes
+        </button>
+        <span>
+          <b>{items.filter((n) => !linked.has(n.id)).length}</b> without relationships
+        </span>
+        <Link to={`/runs/new${activeProjectId ? '?project=' + encodeURIComponent(activeProjectId) : ''}`}>
+          Start design run ↗
+        </Link>
+      </section>
+
+      <section className="tw-view" aria-label="Twin model and graph">
+        <div className="tw-render-area">
+          {tab === 'graph' ? (
+            isLoading ? (
+              <div className="tw-empty" role="status">
+                Loading twin graph…
+              </div>
+            ) : isError ? (
+              <div className="tw-empty" role="alert">
+                <Network size={30} />
+                <h2>Twin data unavailable</h2>
+                <p>Connect your gateway to load this project.</p>
+                <Link to="/settings">Connection settings ↗</Link>
+              </div>
+            ) : items.length ? (
+              <TwinGraphCanvas
+                nodes={visible}
+                relationships={relationships.filter((r) => visibleIds.has(r.sourceId) && visibleIds.has(r.targetId))}
+                selectedId={selectedId}
+                onSelectNode={selectNode}
+              />
+            ) : (
+              <div className="tw-empty">
+                <Network size={32} />
+                <h2>Empty twin</h2>
+                <p>Import a work product or start a design run.</p>
+                <button onClick={() => setImportOpen(true)}>Import work product</button>
+              </div>
+            )
+          ) : tab === 'asm' ? (
+            <div className="tw-assembly">
+              <div className="tw-assembly-heading">
+                <Layers size={20} />
+                <h2>Assembly</h2>
+                <button onClick={() => setAssemblyExportOpen((v) => !v)}>Configure export</button>
+              </div>
+              {node?.assembly ? (
+                <>
+                  <h3>{node.name}</h3>
+                  <div className="tw-assembly-tree">
+                    {node.assembly.parts.map((part) => (
+                      <button key={part.link_name} onClick={() => selectNode(part.node_id)}>
+                        <Box size={16} />
+                        {part.link_name}
+                        <small>{part.material || 'Material unspecified'}</small>
+                      </button>
+                    ))}
+                    {node.assembly.joints.map((joint) => (
+                      <p key={joint.name}>
+                        {joint.base} → {joint.follower}
+                        <small>
+                          {joint.name} · {joint.type}
+                        </small>
+                      </p>
+                    ))}
+                  </div>
+                  <details>
+                    <summary>Assembly source</summary>
+                    <pre>{JSON.stringify(node.assembly, null, 2)}</pre>
+                  </details>
+                </>
+              ) : (
+                <div className="tw-empty">
+                  <Layers size={32} />
+                  <h2>Build the assembly</h2>
+                  <p>
+                    Select a robot description to inspect its links and joints, or configure an export from your work
+                    products.
+                  </p>
+                  <button onClick={() => setAssemblyExportOpen(true)}>Configure assembly</button>
+                </div>
+              )}
             </div>
           ) : (
-            <TwinGraphCanvas
-              nodes={items}
-              relationships={relationships}
-              selectedId={selectedId}
-              onSelectNode={setSelectedId}
-            />
-          )
-        ) : (
-          /* 3D model mode */
-          <>
-            <R3FViewer onPartClick={handlePartClick} onBooleanCutComplete={setSelectedId} />
-            {!glbUrl && modelLoadError && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 46,
-                  maxWidth: 420,
-                  textAlign: 'center',
-                  pointerEvents: 'none',
-                  // MET-683: an opaque backdrop so this overlay fully covers
-                  // R3FViewer's own "Upload a STEP file..." placeholder text
-                  // underneath instead of visually overlapping it.
-                  background: KC.surface,
-                  border: `1px solid ${KC.border}`,
-                  borderRadius: 6,
-                  padding: '20px 24px',
-                }}
-              >
-                <span
-                  className="material-symbols-outlined"
-                  style={{ fontSize: 22, color: 'var(--mf-c-ffb4ab)', display: 'block', marginBottom: 6 }}
-                >
-                  error
-                </span>
-                <p className="font-mono text-xs" style={{ color: 'var(--mf-c-ffb4ab)', marginBottom: 4 }}>
-                  Model failed to load
-                </p>
-                <p className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
-                  {modelLoadError}
-                </p>
-              </div>
-            )}
-            {glbUrl && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 88,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  zIndex: 45,
-                }}
-              >
-                <ExplodedViewControls />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* ═══════════════════════════════════════════
-          GRAPH MODE: floating node list (left)
-      ════════════════════════════════════════════ */}
-      {isGraphMode && items.length > 0 && (
-        <GlassPanel
-          style={{
-            position: 'absolute',
-            top: 56,
-            left: 16,
-            bottom: leftPaneCollapsed ? undefined : 80,
-            width: 260,
-            zIndex: 40,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            className="flex items-center gap-2 px-3 flex-shrink-0"
-            style={{ height: 36, borderBottom: leftPaneCollapsed ? 'none' : `1px solid ${KC.border}` }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14, color: KC.onSurfaceVariant }}>hub</span>
-            <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
-              Nodes
-            </span>
-            <span
-              className="font-mono rounded px-1.5"
-              style={{ fontSize: 10, background: KC.surfaceHigh, color: KC.onSurfaceVariant }}
-            >
-              {items.length}
-            </span>
-            <button
-              type="button"
-              onClick={() => setLeftPaneCollapsed((c) => !c)}
-              className="ml-auto flex items-center justify-center"
-              title={leftPaneCollapsed ? 'Expand' : 'Collapse'}
-              aria-label={leftPaneCollapsed ? 'Expand nodes panel' : 'Collapse nodes panel'}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: KC.onSurfaceVariant }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                {leftPaneCollapsed ? 'expand_more' : 'expand_less'}
-              </span>
-            </button>
-          </div>
-          {!leftPaneCollapsed && (
-          <ul className="flex-1 overflow-y-auto" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {items.map((node) => {
-              const active = node.id === selectedId;
-              return (
-                <li key={node.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(active ? null : node.id)}
-                    className="flex w-full items-center gap-2 text-left"
-                    style={{
-                      height: 36,
-                      padding: '0 12px',
-                      background: active ? 'var(--mf-r-40-42-48-1)' : 'transparent',
-                      cursor: 'pointer',
-                      border: 'none',
-                      boxShadow: active ? `inset 2px 0 0 ${KC.orange}` : 'none',
-                      outline: 'none',
-                      width: '100%',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'var(--mf-r-40-42-48-0p6)';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                    }}
-                  >
-                    <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: node.status === 'valid' || node.status === 'active' ? KC.green : KC.onSurfaceVariant, flexShrink: 0 }} />
-                    <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: 14, color: active ? KC.orange : KC.onSurfaceVariant }}>
-                      {iconForNode(node)}
-                    </span>
-                    <span className="flex-1 truncate font-mono" style={{ fontSize: 12, color: active ? KC.onSurface : KC.onSurfaceVariant }}>
-                      {node.name}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          )}
-        </GlassPanel>
-      )}
-
-      {/* ═══════════════════════════════════════════
-          GRAPH MODE: floating node detail (right)
-      ════════════════════════════════════════════ */}
-      {isGraphMode && selectedNode && (
-        <GlassPanel
-          style={{
-            position: 'absolute',
-            top: 56,
-            right: 72, // leave room for right toolbar (48px) + gap
-            bottom: 80,
-            width: 320,
-            zIndex: 40,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <NodeDetail node={selectedNode} onClose={() => setSelectedId(null)} />
-        </GlassPanel>
-      )}
-
-      {/* ═══════════════════════════════════════════
-          3D MODE: component tree (left panel)
-      ════════════════════════════════════════════ */}
-      {!isGraphMode && manifest && showTree && (
-        <GlassPanel
-          style={{
-            position: 'absolute',
-            top: 56,
-            left: 16,
-            bottom: leftPaneCollapsed ? undefined : 80,
-            width: 240,
-            zIndex: 40,
-            overflow: 'hidden',
-          }}
-        >
-          <ComponentTree
-            collapsed={leftPaneCollapsed}
-            onToggleCollapse={() => setLeftPaneCollapsed((c) => !c)}
-          />
-        </GlassPanel>
-      )}
-
-      {/* ═══════════════════════════════════════════
-          3D MODE: BOM annotation panel (right)
-      ════════════════════════════════════════════ */}
-      {!isGraphMode && selectedMeshName && manifest && (
-        <GlassPanel
-          style={{
-            position: 'absolute',
-            top: 56,
-            right: 72,
-            bottom: 80,
-            width: 300,
-            zIndex: 40,
-            overflow: 'hidden',
-          }}
-        >
-          <BomAnnotationPanel />
-        </GlassPanel>
-      )}
-
-      {/* ═══════════════════════════════════════════
-          TOP-LEFT: Scene dropdown + breadcrumb pill
-      ════════════════════════════════════════════ */}
-      <div
-        className="flex items-center gap-2"
-        style={{ position: 'absolute', top: 16, left: 16, zIndex: 50 }}
-      >
-        <SceneDropdown nodes={items} selectedId={selectedId} onSelect={setSelectedId} />
-
-        {/* Breadcrumb pill */}
-        <div
-          className="flex items-center gap-1.5 rounded px-3"
-          style={{
-            height: 28,
-            background: 'var(--mf-r-30-31-38-0p7)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            border: `1px solid ${KC.border}`,
-          }}
-        >
-          <span style={{ fontSize: 12, color: KC.onSurfaceVariant }}>Digital Twin</span>
-          {selectedNode && (
             <>
-              <span style={{ fontSize: 11, color: 'var(--mf-r-154-154-170-0p4)' }}>›</span>
-              <span style={{ fontSize: 12, color: KC.onSurface }}>{selectedNode.name}</span>
+              <R3FViewer onPartClick={handlePartClick} onBooleanCutComplete={selectNode} />
+              {!glbUrl && modelLoadError && (
+                <div className="tw-model-error" role="alert">
+                  <strong>Model failed to load</strong> {modelLoadError}
+                </div>
+              )}
+              {tab === 'model' && glbUrl && (
+                <div className="tw-view-controls">
+                  <ExplodedViewControls />
+                </div>
+              )}
+              {tab === 'sim' && (
+                <div className="tw-sim-controls">
+                  <Activity size={16} />
+                  <strong>Robotics physics</strong>
+                  <button
+                    disabled={!robotDescription}
+                    aria-pressed={robotPhysicsEnabled}
+                    onClick={() => setRobotPhysicsEnabled(!robotPhysicsEnabled)}
+                  >
+                    {robotPhysicsEnabled ? 'Stop' : 'Run'}
+                  </button>
+                  <span>
+                    {robotDescription
+                      ? 'Gravity · joint constraints · simplified colliders'
+                      : 'Select a robot-description node'}
+                  </span>
+                </div>
+              )}
+              {tab === 'sim' && !robotDescription && (
+                <div className="tw-sim-prompt">
+                  <h2>Choose a robot to simulate</h2>
+                  <p>Load its geometry and joint configuration into the same workspace.</p>
+                  {robotNodes.map((n) => (
+                    <button key={n.id} onClick={() => selectNode(n.id)}>
+                      {n.name} ↗
+                    </button>
+                  ))}
+                  <Link to="/runs">View recorded simulation runs ↗</Link>
+                </div>
+              )}
             </>
           )}
-          <span
-            className="ml-2 rounded px-1.5 font-mono"
-            style={{
-              fontSize: 9,
-              fontWeight: 600,
-              background: isGraphMode ? '#00a3e4' : KC.orange,
-              color: isGraphMode ? 'var(--mf-c-fff)' : KC.surface,
-              letterSpacing: '0.04em',
-            }}
-          >
-            {isGraphMode ? 'GRAPH' : '3D'}
-          </span>
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════
-          TOP-RIGHT: MODEL|GRAPH toggle + utility buttons
-      ════════════════════════════════════════════ */}
-      <div
-        className="flex items-center gap-2"
-        style={{ position: 'absolute', top: 16, right: 64, zIndex: 50 }}
-      >
-        {/* Import */}
-        <button
-          type="button"
-          onClick={() => setImportOpen((p) => !p)}
-          className="flex items-center gap-1.5 rounded px-2"
-          style={{
-            height: 28,
-            background: importOpen ? KC.orangeFaint : 'var(--mf-r-30-31-38-0p85)',
-            backdropFilter: 'blur(16px)',
-            border: `1px solid ${importOpen ? KC.orangeBorder : KC.borderMid}`,
-            color: importOpen ? KC.orange : KC.onSurfaceVariant,
-            fontSize: 11,
-            cursor: 'pointer',
-            letterSpacing: '0.06em',
-            fontFamily: "'Roboto Mono', monospace",
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>file_upload</span>
-          IMPORT
-        </button>
-
-        {/* Export assembly for sim (MET-721) — only meaningful with a node list to pick parts from */}
-        {isGraphMode && items.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setAssemblyExportOpen((p) => !p)}
-            className="flex items-center gap-1.5 rounded px-2"
-            style={{
-              height: 28,
-              background: assemblyExportOpen ? KC.orangeFaint : 'var(--mf-r-30-31-38-0p85)',
-              backdropFilter: 'blur(16px)',
-              border: `1px solid ${assemblyExportOpen ? KC.orangeBorder : KC.borderMid}`,
-              color: assemblyExportOpen ? KC.orange : KC.onSurfaceVariant,
-              fontSize: 11,
-              cursor: 'pointer',
-              letterSpacing: '0.06em',
-              fontFamily: "'Roboto Mono', monospace",
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>precision_manufacturing</span>
-            ASSEMBLY
-          </button>
-        )}
-
-        {/* MODEL | GRAPH segmented toggle */}
-        <div
-          className="flex items-center rounded overflow-hidden"
-          style={{
-            background: 'var(--mf-r-25-27-34-0p9)',
-            backdropFilter: 'blur(16px)',
-            border: `1px solid ${KC.borderMid}`,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setViewMode('3d')}
-            style={{
-              padding: '0 12px',
-              height: 28,
-              fontSize: 11,
-              fontFamily: "'Roboto Mono', monospace",
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              background: !isGraphMode ? KC.orangeFaint : 'transparent',
-              color: !isGraphMode ? KC.orange : KC.onSurfaceVariant,
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'color 0.12s, background 0.12s',
-            }}
-          >
-            MODEL
-          </button>
-          <div style={{ width: 1, height: 16, background: 'var(--mf-r-65-72-90-0p4)' }} />
-          <button
-            type="button"
-            onClick={() => setViewMode('graph')}
-            style={{
-              padding: '0 12px',
-              height: 28,
-              fontSize: 11,
-              fontFamily: "'Roboto Mono', monospace",
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              background: isGraphMode ? KC.orangeFaint : 'transparent',
-              color: isGraphMode ? KC.orange : KC.onSurfaceVariant,
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'color 0.12s, background 0.12s',
-            }}
-          >
-            GRAPH
-          </button>
         </div>
 
-        {/* Screenshot — captures the 3D canvas (only meaningful in model mode) */}
-        {!isGraphMode && glbUrl && (
-          <button
-            type="button"
-            onClick={handleScreenshot}
-            className="flex items-center justify-center rounded"
-            style={{
-              width: 32,
-              height: 32,
-              background: 'var(--mf-r-30-31-38-0p8)',
-              backdropFilter: 'blur(16px)',
-              border: `1px solid ${KC.border}`,
-              color: KC.onSurfaceVariant,
-              cursor: 'pointer',
-            }}
-            title="Screenshot"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>photo_camera</span>
-          </button>
-        )}
-      </div>
-
-      {/* ═══════════════════════════════════════════
-          RIGHT: Vertical viewport toolbar
-      ════════════════════════════════════════════ */}
-      <GlassPanel
-        style={{
-          position: 'absolute',
-          right: 16,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          zIndex: 50,
-          padding: '4px 0',
-          overflow: 'hidden',
-        }}
-      >
-        <ToolBtn icon="hub" active={isGraphMode} title="Graph View" onClick={() => setViewMode('graph')} />
-        <ToolBtn
-          icon="account_tree"
-          active={!isGraphMode && showTree}
-          title="Tree View"
-          onClick={() => setShowTree((v) => !v)}
-        />
-      </GlassPanel>
-
-      {/* ═══════════════════════════════════════════
-          IMPORT PANEL (slide-in under top bar)
-      ════════════════════════════════════════════ */}
-      {assemblyExportOpen && (
-        <div style={{ position: 'absolute', top: 52, right: 16, zIndex: 50 }}>
-          <AssemblyExportPanel
-            items={items}
-            onClose={() => setAssemblyExportOpen(false)}
-            activeProjectId={activeProjectId}
-          />
-        </div>
-      )}
-
-      {importOpen && (
-        <GlassPanel
-          style={{
-            position: 'absolute',
-            top: 52,
-            right: 16,
-            width: 320,
-            zIndex: 50,
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            className="flex items-center justify-between px-3"
-            style={{ height: 36, borderBottom: `1px solid ${KC.border}` }}
-          >
-            <span className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
-              Import Work Product
-            </span>
-            <button
-              type="button"
-              onClick={() => setImportOpen(false)}
-              style={{ background: 'transparent', border: 'none', color: KC.onSurfaceVariant, cursor: 'pointer', padding: 4 }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
-            </button>
-          </div>
-          <div className="p-3">
-            {/* Quality + upload row */}
-            <div className="flex items-center gap-2 mb-3">
-              <select
-                value={quality}
-                onChange={(e) => setQuality(e.target.value)}
-                className="flex-1 font-mono rounded px-2 py-1 text-xs cursor-pointer"
-                style={{
-                  background: 'var(--mf-r-40-42-48-0p9)',
-                  border: `1px solid ${KC.border}`,
-                  color: KC.onSurfaceVariant,
+        <aside className="tw-explorer" aria-label="Explorer">
+          {railMin ? (
+            <div className="tw-rail-min">
+              <button
+                title="All work products"
+                onClick={() => {
+                  setScope('all');
+                  toggleRail();
                 }}
               >
+                <Layers size={18} />
+                <small>{items.length}</small>
+              </button>
+              {domains.map((d) => (
+                <button
+                  key={d}
+                  title={d}
+                  onClick={() => {
+                    setScope(d);
+                    toggleRail();
+                  }}
+                >
+                  <span>{d.slice(0, 2).toUpperCase()}</span>
+                  <small>{items.filter((n) => n.domain === d).length}</small>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <header>
+                <h2>Explorer</h2>
+                <span>{visible.length} nodes</span>
+                <button className="tw-icon" aria-label="Collapse nodes panel" onClick={toggleRail}>
+                  <PanelLeftClose size={16} />
+                </button>
+              </header>
+              <div className="tw-scope">
+                <button aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
+                  All
+                </button>
+                <button aria-pressed={scope === 'attention'} onClick={() => setScope('attention')}>
+                  Needs attention
+                </button>
+              </div>
+              <div className="tw-node-list">
+                {!visible.length && <p className="tw-muted">{search ? 'No matching work products' : 'No work products'}</p>}
+                {domains.map((d) => (
+                  <section key={d}>
+                    {visible.some((n) => n.domain === d) && <h3>{d}</h3>}
+                    {visible
+                      .filter((n) => n.domain === d)
+                      .map((n) => (
+                        <button
+                          key={n.id}
+                          title={n.name}
+                          aria-current={n.id === selectedId ? 'true' : undefined}
+                          onClick={() => selectNode(n.id)}
+                        >
+                          <span className={`tw-node-state ${needsAttention(n) ? 'needs-attention' : ''}`} />
+                          <span className="material-symbols-outlined">{iconForNode(n)}</span>
+                          <span>{n.name}</span>
+                        </button>
+                      ))}
+                  </section>
+                ))}
+                {is3d && manifest && (
+                  <section className="tw-component-tree">
+                    <ComponentTree />
+                  </section>
+                )}
+              </div>
+            </>
+          )}
+        </aside>
+
+        {importOpen && (
+          <section className="tw-popover" aria-label="Import work product">
+            <header>
+              <h2>Import work product</h2>
+              <button className="tw-icon" aria-label="Close import" onClick={() => setImportOpen(false)}>
+                <X size={16} />
+              </button>
+            </header>
+            <p>Convert CAD geometry for the twin viewer.</p>
+            <label>
+              Geometry quality
+              <select value={quality} onChange={(e) => setQuality(e.target.value)}>
                 <option value="preview">Preview</option>
                 <option value="standard">Standard</option>
                 <option value="fine">Fine</option>
               </select>
-              {conversionPhase !== 'idle' ? (
-                <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: KC.onSurfaceVariant }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 13, color: KC.orange }}>sync</span>
-                  {conversionPhase === 'uploading' ? 'Uploading…' : conversionPhase === 'converting' ? 'Converting…' : 'Loading…'}
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadMutation.isPending}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-mono cursor-pointer"
-                  style={{ background: KC.orange, color: KC.surface, border: 'none' }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 13 }}>upload_file</span>
-                  Upload STEP
-                </button>
-              )}
-              {!glbUrl && (
-                <button
-                  type="button"
-                  onClick={() => { loadModel(getMockGlbUrl(), getMockManifest()); setViewMode('3d'); setImportOpen(false); }}
-                  className="rounded px-2 py-1 text-xs font-mono cursor-pointer"
-                  style={{ background: 'transparent', border: `1px dashed ${KC.border}`, color: KC.onSurfaceVariant }}
-                >
-                  Demo
-                </button>
-              )}
-            </div>
+            </label>
+            <button className="tw-upload" disabled={uploadMutation.isPending} onClick={() => fileInputRef.current?.click()}>
+              <Upload size={24} />
+              {conversionPhase === 'idle' ? 'Choose STEP or IGES file' : `${conversionPhase}…`}
+            </button>
+            <input ref={fileInputRef} type="file" accept=".step,.stp,.iges,.igs" hidden onChange={handleUpload} />
+            {uploadMutation.isError && <p role="alert">Import failed. Check the gateway connection and file.</p>}
+          </section>
+        )}
 
-            {/* Drop zone */}
-            <div
-              className="flex flex-col items-center justify-center rounded cursor-pointer"
-              style={{
-                border: '2px dashed var(--mf-r-65-72-90-0p4)',
-                padding: '20px 16px',
-                textAlign: 'center',
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(255, 90, 10,0.4)';
-                (e.currentTarget as HTMLDivElement).style.background = 'rgba(255, 90, 10,0.04)';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--mf-r-65-72-90-0p4)';
-                (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-              }}
-            >
-              <span className="material-symbols-outlined mb-1.5" style={{ fontSize: 24, color: KC.onSurfaceVariant }}>file_upload</span>
-              <p className="font-mono text-xs" style={{ color: KC.onSurface, marginBottom: 3 }}>
-                Drag & drop or click to browse
-              </p>
-              <p className="font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
-                .step .stp .iges .kicad_sch .kicad_pcb · max 100 MB
-              </p>
-            </div>
+        {assemblyExportOpen && (
+          <div className="tw-export-panel">
+            <AssemblyExportPanel
+              items={items}
+              onClose={() => setAssemblyExportOpen(false)}
+              activeProjectId={activeProjectId}
+            />
           </div>
-          <input ref={fileInputRef} type="file" accept=".step,.stp,.iges,.igs" className="hidden" onChange={handleUpload} />
-        </GlassPanel>
-      )}
+        )}
 
-      {/* ═══════════════════════════════════════════
-          BOTTOM-LEFT: Sessions button
-      ════════════════════════════════════════════ */}
-      <div style={{ position: 'absolute', bottom: 40, left: 16, zIndex: 50 }}>
-        <Link to="/sessions" style={{ textDecoration: 'none' }}>
-          <button
-            type="button"
-            className="flex items-center gap-1.5 rounded px-3"
-            style={{
-              height: 32,
-              background: 'var(--mf-r-30-31-38-0p8)',
-              backdropFilter: 'blur(16px)',
-              border: `1px solid ${KC.border}`,
-              fontSize: 10,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: KC.onSurfaceVariant,
-              cursor: 'pointer',
-              fontFamily: "'Roboto Mono', monospace",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = KC.onSurface; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = KC.onSurfaceVariant; }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>schedule</span>
-            Sessions
-          </button>
-        </Link>
+        {timelineOpen && (
+          <section className="tw-timeline">
+            <header>
+              <h2>Latest work product updates</h2>
+              <button className="tw-icon" aria-label="Close timeline" onClick={() => setTimelineOpen(false)}>
+                <X size={16} />
+              </button>
+            </header>
+            <div>
+              {recent.length ? (
+                recent.map((n) => (
+                  <button key={n.id} onClick={() => selectNode(n.id)}>
+                    <time>{formatRelativeTime(n.updatedAt)}</time>
+                    <strong>{n.name}</strong>
+                    <span>{n.status}</span>
+                  </button>
+                ))
+              ) : (
+                <p>No recorded updates for this project.</p>
+              )}
+            </div>
+            <Link to="/sessions">Full session history ↗</Link>
+          </section>
+        )}
+      </section>
+
+      <div className="tw-chat-position" data-size={chatMax ? 'max' : chatMin ? 'min' : 'normal'} hidden={!agentOpen}>
+        <TwinAgentChat
+          key={activeProjectId ?? 'unscoped'}
+          projectId={activeProjectId}
+          projectName={projectName}
+          node={node}
+          onApplied={() => {
+            setLoadedModelNodeId(null);
+            clearModel();
+          }}
+          onEngage={() => setChatMin(false)}
+          headerActions={
+            <>
+              <button
+                className="sc-icon"
+                title={chatMin ? 'Open conversation' : 'Minimise conversation'}
+                onClick={() => {
+                  setChatMin((v) => !v);
+                  setChatMax(false);
+                }}
+              >
+                <ChevronDown size={16} />
+              </button>
+              <button
+                className="sc-icon"
+                title={chatMax ? 'Restore conversation' : 'Expand conversation'}
+                onClick={() => {
+                  setChatMax((v) => !v);
+                  setChatMin(false);
+                }}
+              >
+                {chatMax ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
+              <button
+                className="sc-icon"
+                title={chatDock === 'side' ? 'Float conversation' : 'Dock conversation to side'}
+                onClick={() => {
+                  setChatDock((d) => (d === 'side' ? 'overlay' : 'side'));
+                  setChatMin(false);
+                }}
+              >
+                <Columns2 size={16} />
+              </button>
+            </>
+          }
+        />
       </div>
 
+      {inspectorOpen && (
+        <aside className="tw-inspector" aria-label="Node inspector">
+          <header>
+            <div>
+              <h2>{node?.name || selectedMeshName || 'Inspector'}</h2>
+              <p>{node ? `${node.domain} · ${node.type}` : 'Select an object to inspect'}</p>
+            </div>
+            <button className="tw-icon" aria-label="Close inspector" onClick={() => setInspectorOpen(false)}>
+              <X size={16} />
+            </button>
+          </header>
+          <div className="tw-inspector-tabs" role="group" aria-label="Inspector view">
+            {INSPECTOR_TABS.map((t) => (
+              <button key={t} aria-pressed={inspectorTab === t} onClick={() => setInspectorTab(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="tw-inspector-content">
+            {node ? (
+              inspectorTab === 'overview' ? (
+                <NodeDetail node={node} onClose={() => setSelectedId(null)} />
+              ) : inspectorTab === 'history' ? (
+                <NodeHistorySection nodeId={node.id} />
+              ) : (
+                <div className="tw-constraints">
+                  {linkedConstraints.length ? (
+                    linkedConstraints.map((c) => (
+                      <button key={c.id} onClick={() => selectNode(c.id)}>
+                        <strong>{c.name}</strong>
+                        <span>{c.status}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <p>No linked constraints recorded.</p>
+                  )}
+                </div>
+              )
+            ) : selectedMeshName && manifest ? (
+              <BomAnnotationPanel />
+            ) : (
+              <div className="tw-empty">
+                <Box size={28} />
+                <p>Inspect geometry, properties and the evidence behind a design.</p>
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
 
-      {/* ═══════════════════════════════════════════
-          STATUS BAR — 32px pinned to bottom
-      ════════════════════════════════════════════ */}
-      <footer
-        className="flex items-center justify-between px-4"
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 32,
-          zIndex: 50,
-          background: KC.statusBar,
-        }}
-      >
-        <span
-          className="font-mono uppercase"
-          style={{ fontSize: 11, letterSpacing: '0.08em', color: KC.onSurfaceVariant, width: 140 }}
-        >
-          {statusLabel}
+      <footer className="tw-status">
+        <span>{node?.name || selectedMeshName || 'No selection'}</span>
+        <button onClick={() => setTimelineOpen((v) => !v)} aria-expanded={timelineOpen}>
+          <Clock3 size={14} />
+          Timeline
+        </button>
+        <button onClick={() => setAgentOpen((v) => !v)} aria-pressed={agentOpen}>
+          <MessageSquare size={14} />
+          Agent
+        </button>
+        <span className="tw-sync">
+          {syncLabel}
+          {dataUpdatedAt > 0 && !isError && <small>{formatRelativeTime(new Date(dataUpdatedAt).toISOString())}</small>}
         </span>
-
-        <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant, letterSpacing: '0.05em' }}>
-          {statusCenter}
-        </span>
-
-        <div className="flex items-center gap-2" style={{ width: 140, justifyContent: 'flex-end' }}>
-          {/* Was a static "Synced · live" regardless of actual fetch state —
-              now reflects the real 10s twin-node poll (useTwinNodes). */}
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: isFetching ? 'var(--mf-c-f59e0b)' : '#00a3e4',
-              flexShrink: 0,
-              display: 'inline-block',
-            }}
-          />
-          <span className="font-mono" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
-            {isFetching ? 'Syncing…' : 'Synced'}
-          </span>
-          {!isFetching && dataUpdatedAt > 0 && (
-            <span className="font-mono" style={{ fontSize: 11, color: 'var(--mf-r-154-154-170-0p55)' }}>
-              {formatRelativeTime(new Date(dataUpdatedAt).toISOString())}
-            </span>
-          )}
-        </div>
       </footer>
-
     </div>
   );
 }

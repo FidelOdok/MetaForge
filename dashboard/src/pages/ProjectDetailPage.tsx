@@ -40,7 +40,8 @@ function getStatusDotColor(status: string): string {
   return statusDotColor[status] ?? 'var(--mf-c-9a9aaa)';
 }
 
-// Simulated agent activity feed — derived from work products
+// Artifact update snapshot, derived from the project's work products (most
+// recently updated first). This is a point-in-time view, not a live feed.
 interface ActivityEntry {
   tag: string;
   tagColor: string;
@@ -50,31 +51,21 @@ interface ActivityEntry {
 }
 
 function buildActivityFeed(workProducts: { name: string; type: string; status: string; updatedAt: string }[]): ActivityEntry[] {
-  return workProducts.slice(0, 8).map((wp) => {
-    const tagMap: Record<string, { tag: string; color: string; bg: string }> = {
-      schematic: { tag: 'twin.save', color: 'var(--mf-c-ffb783)', bg: 'rgba(255, 90, 10,0.15)' },
-      pcb: { tag: 'agent.run', color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.15)' },
-      cad_model: { tag: 'agent.run', color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.15)' },
-      firmware: { tag: 'twin.save', color: 'var(--mf-c-ffb783)', bg: 'rgba(255, 90, 10,0.15)' },
-      bom: { tag: 'bom.risk', color: 'var(--mf-c-ffb4ab)', bg: 'rgba(255,180,171,0.15)' },
-      gerber: { tag: 'gate.check', color: 'var(--mf-c-3dd68c)', bg: 'rgba(61,214,140,0.15)' },
-    };
-    const style = tagMap[wp.type] ?? { tag: 'agent.run', color: 'var(--mf-c-86cfff)', bg: 'rgba(134,207,255,0.15)' };
-    const statusVerb = wp.status === 'valid' ? 'validated' : wp.status === 'warning' ? 'flagged' : wp.status === 'error' ? 'failed' : 'updated';
-
-    return {
-      tag: style.tag,
-      tagColor: style.color,
-      tagBg: style.bg,
-      message: `${wp.name} ${statusVerb}`,
+  return [...workProducts]
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 8)
+    .map((wp) => ({
+      tag: wp.type.replace('_', ' '),
+      tagColor: 'var(--mf-c-86cfff)',
+      tagBg: 'rgba(134,207,255,0.1)',
+      message: `${wp.name} \u00b7 ${wp.status}`,
       timestamp: formatRelativeTime(wp.updatedAt),
-    };
-  });
+    }));
 }
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: project, isLoading } = useProject(id);
+  const { data: project, isLoading, isError, refetch } = useProject(id);
   const navigate = useNavigate();
   const toast = useToast();
   const updateProject = useUpdateProject();
@@ -105,6 +96,17 @@ export function ProjectDetailPage() {
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div role="alert" className="workspace-empty">
+        <h1>Project could not be loaded</h1>
+        <p>Check your gateway connection, then try again.</p>
+        <Button onClick={() => void refetch()}>Try again</Button>
+        <Link to="/settings">Connection settings</Link>
       </div>
     );
   }
@@ -214,6 +216,19 @@ export function ProjectDetailPage() {
         </div>
       </div>
 
+      {/* Primary project actions */}
+      <div className="project-tools" style={{ marginBottom: 24 }}>
+        <Link className="action-primary" to={`/runs/new?project=${encodeURIComponent(project.id)}`}>
+          Start design run
+        </Link>
+        <Link className="action-secondary" to="/twin">
+          Open twin &amp; agent
+        </Link>
+        <Link className="action-secondary" to="/bom">
+          Bill of materials
+        </Link>
+      </div>
+
       {/* Description, or the rename/redescribe form */}
       {isEditing ? (
         <form onSubmit={handleSaveEdit} className="glass rounded p-4 mb-4 space-y-3" style={glassCard}>
@@ -286,7 +301,7 @@ export function ProjectDetailPage() {
             {readiness}%
           </div>
           <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
-            Gate Readiness
+            Artifacts marked valid
           </div>
           <div className="absolute" style={{ right: '14px', bottom: '14px' }}>
             <svg width="38" height="38" viewBox="0 0 38 38">
@@ -296,8 +311,8 @@ export function ProjectDetailPage() {
                 stroke="var(--mf-c-3dd68c)"
                 strokeWidth="3"
                 strokeLinecap="round"
-                strokeDasharray="75.4"
-                strokeDashoffset={String(75.4 * (1 - readiness / 100))}
+                strokeDasharray="87.96"
+                strokeDashoffset={String(87.96 * (1 - readiness / 100))}
                 transform="rotate(-90 19 19)"
                 opacity="0.85"
               />
@@ -311,7 +326,7 @@ export function ProjectDetailPage() {
             {project.agentCount}
           </div>
           <div className="font-mono mt-1" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--mf-c-9a9aaa)' }}>
-            Active Agents
+            Agent task count
           </div>
         </div>
 
@@ -332,7 +347,7 @@ export function ProjectDetailPage() {
       </div>
 
       {/* Two-column: work products + activity */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 300px' }}>
+      <div className="project-detail-columns grid gap-3">
 
         {/* Work Products panel */}
         <div className="glass rounded overflow-hidden" style={glassCard}>
@@ -412,7 +427,7 @@ export function ProjectDetailPage() {
           )}
         </div>
 
-        {/* Agent Activity panel */}
+        {/* Artifact updates panel */}
         <div className="glass rounded overflow-hidden" style={glassCard}>
           {/* Panel header */}
           <div
@@ -420,7 +435,7 @@ export function ProjectDetailPage() {
             style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}
           >
             <span className="font-mono" style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--mf-c-9a9aaa)' }}>
-              Activity
+              Artifact updates
             </span>
             <div className="flex items-center gap-1.5">
               <span
@@ -428,7 +443,7 @@ export function ProjectDetailPage() {
                 style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--mf-c-3dd68c)', display: 'inline-block' }}
               />
               <span className="font-mono" style={{ fontSize: '10px', color: 'var(--mf-c-3dd68c)', letterSpacing: '0.06em' }}>
-                LIVE
+                SNAPSHOT
               </span>
             </div>
           </div>
@@ -436,7 +451,7 @@ export function ProjectDetailPage() {
           {activity.length === 0 ? (
             <div className="px-4 py-6 text-center">
               <span className="font-mono" style={{ fontSize: '10px', color: 'var(--mf-c-9a9aaa)' }}>
-                No recent activity
+                No work-product updates
               </span>
             </div>
           ) : (

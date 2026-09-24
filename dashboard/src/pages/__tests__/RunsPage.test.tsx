@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test/test-utils';
 import type { HarnessRun } from '../../types/run';
 
@@ -20,38 +21,72 @@ const RUNNING_RUN: HarnessRun = {
   history: ['queued', 'running'],
 };
 
+const DONE_RUN: HarnessRun = {
+  id: 'run_2',
+  status: 'completed',
+  request: { goal: 'quadruped leg' },
+  createdAt: Date.now() / 1000 - 600,
+  updatedAt: Date.now() / 1000 - 500,
+  history: ['queued', 'running', 'completed'],
+};
+
+function mockRuns(value: Partial<ReturnType<typeof useRuns>>) {
+  mockUseRuns.mockReturnValue({ refetch: vi.fn(), isFetching: false, ...value } as unknown as ReturnType<typeof useRuns>);
+}
+
 describe('RunsPage', () => {
   it('shows loading state', () => {
-    mockUseRuns.mockReturnValue({ data: undefined, isLoading: true } as unknown as ReturnType<typeof useRuns>);
+    mockRuns({ data: undefined, isLoading: true });
     render(<RunsPage />);
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.getByText('Loading runs…')).toBeInTheDocument();
   });
 
-  it('does not render a "New run" button that would create an orphaned, permanently-stuck run', () => {
-    // Regression (MET-671): the button called createRun with a bare
-    // { goal: "demo run" } and no `flow` id. The backend's create_run only
-    // ever drives a run to completion via the design-flow executor, which
-    // requires a `flow` id -- a bare goal starts the run and then NOTHING
-    // ever transitions it out of "running". Clicking the button left a
-    // permanently-stuck, unrecoverable "Running" entry with no cancel
-    // affordance anywhere. The dashboard has no real flow-selection UI, so
-    // the button had no legitimate action to perform -- removed rather than
-    // wired to fabricated data.
-    mockUseRuns.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useRuns>);
+  it('shows an error state when runs cannot be loaded', () => {
+    mockRuns({ data: undefined, isLoading: false, isError: true });
     render(<RunsPage />);
+    expect(screen.getByText('Runs could not be loaded')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /connection settings/i })).toHaveAttribute('href', '/settings');
+  });
+
+  it('links "New design run" to the flow wizard instead of creating a bare run', () => {
+    // Regression (MET-671): a button that POSTed a bare { goal } with no
+    // `flow` id left a permanently-stuck run. Launch now goes through the
+    // /runs/new wizard, which always sends a design-flow request.
+    mockRuns({ data: [], isLoading: false });
+    render(<RunsPage />);
+    expect(screen.getByRole('link', { name: /new design run/i })).toHaveAttribute('href', '/runs/new');
     expect(screen.queryByRole('button', { name: /new run/i })).not.toBeInTheDocument();
   });
 
-  it('shows an honest empty state pointing at the CLI/MCP as the real way to launch a run', () => {
-    mockUseRuns.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useRuns>);
+  it('shows the empty state pointing at the wizard and CLI/MCP', () => {
+    mockRuns({ data: [], isLoading: false });
     render(<RunsPage />);
-    expect(screen.getByText(/this page observes them live/i)).toBeInTheDocument();
+    expect(screen.getByText('No runs yet')).toBeInTheDocument();
+    expect(screen.getByText(/CLI or MCP client/i)).toBeInTheDocument();
   });
 
   it('renders run rows when runs exist', () => {
-    mockUseRuns.mockReturnValue({ data: [RUNNING_RUN], isLoading: false } as unknown as ReturnType<typeof useRuns>);
+    mockRuns({ data: [RUNNING_RUN], isLoading: false });
     render(<RunsPage />);
     expect(screen.getByText('design a bracket')).toBeInTheDocument();
     expect(screen.getByText('run_1')).toBeInTheDocument();
+  });
+
+  it('filters by search text and status', async () => {
+    const user = userEvent.setup();
+    mockRuns({ data: [RUNNING_RUN, DONE_RUN], isLoading: false });
+    render(<RunsPage />);
+
+    await user.type(screen.getByLabelText('Search runs'), 'quadruped');
+    expect(screen.queryByText('design a bracket')).not.toBeInTheDocument();
+    expect(screen.getByText('quadruped leg')).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Search runs'));
+    await user.selectOptions(screen.getByLabelText('Run status'), 'running');
+    expect(screen.getByText('design a bracket')).toBeInTheDocument();
+    expect(screen.queryByText('quadruped leg')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Run status'), 'failed');
+    expect(screen.getByText('No matching runs')).toBeInTheDocument();
   });
 });

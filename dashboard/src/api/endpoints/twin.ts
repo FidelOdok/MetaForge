@@ -1,6 +1,7 @@
 import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription } from '../../types/twin';
 import apiClient from '../client';
 import { apiUrl } from '../../lib/gatewayConfig';
+import { isSampleMode, sampleFileUrl } from '../../lib/sample-workspace';
 
 const MOCK_RELATIONSHIPS: TwinRelationship[] = [
   { id: 'rel-001', sourceId: 'node-001', targetId: 'node-004', type: 'constrained_by', label: 'Stress constraint' },
@@ -226,6 +227,8 @@ export async function getNodeVersionHistory(nodeId: string): Promise<WorkProduct
 
 /** URL the browser hits to open (inline) or download a work product's file. */
 export function nodeFileUrl(nodeId: string, download = false): string {
+  // Sample mode (`?demo=1`) serves static illustrative files from public/samples.
+  if (isSampleMode()) return sampleFileUrl(nodeId);
   return apiUrl(`/twin/nodes/${nodeId}/file${download ? '?download=true' : ''}`);
 }
 

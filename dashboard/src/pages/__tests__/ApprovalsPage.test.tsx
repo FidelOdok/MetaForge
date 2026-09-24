@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen } from '../../test/test-utils';
 
 vi.mock('../../hooks/use-assistant', () => ({
@@ -15,12 +15,22 @@ vi.mock('../../hooks/use-tool-approvals', () => ({
   useDecideToolApproval: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+vi.mock('../../hooks/use-runs', () => ({
+  useRuns: vi.fn(),
+}));
+
 import { ApprovalsPage } from '../ApprovalsPage';
+import { useRuns } from '../../hooks/use-runs';
 import { useProposals } from '../../hooks/use-assistant';
 import { usePendingToolApprovals } from '../../hooks/use-tool-approvals';
 
 const mockUseProposals = vi.mocked(useProposals);
 const mockUsePendingToolApprovals = vi.mocked(usePendingToolApprovals);
+const mockUseRuns = vi.mocked(useRuns);
+
+beforeEach(() => {
+  mockUseRuns.mockReturnValue({ data: [], isLoading: false, isError: false } as unknown as ReturnType<typeof useRuns>);
+});
 
 describe('ApprovalsPage', () => {
   it('shows loading state', () => {
@@ -101,5 +111,35 @@ describe('ApprovalsPage', () => {
     } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
     expect(screen.getByText('Update stress report')).toBeInTheDocument();
+  });
+
+  it('shows an error state when proposals cannot be loaded', () => {
+    mockUseProposals.mockReturnValue({ data: undefined, isLoading: false, isError: true } as unknown as ReturnType<typeof useProposals>);
+    render(<ApprovalsPage />);
+    expect(screen.getByText('Proposals could not be loaded')).toBeInTheDocument();
+    expect(screen.getByText('Run approval gates')).toBeInTheDocument();
+  });
+
+  it('lists runs paused at an approval gate, linking to the run', () => {
+    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
+    mockUseRuns.mockReturnValue({
+      data: [
+        { id: 'run_gate', status: 'awaiting_approval', request: { goal: 'lift 2 kg' }, createdAt: 0, updatedAt: 0, approvalReason: 'Requirements sign-off', history: [] },
+        { id: 'run_done', status: 'completed', request: { goal: 'finished run' }, createdAt: 0, updatedAt: 0, history: [] },
+      ],
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRuns>);
+    render(<ApprovalsPage />);
+    expect(screen.getByText('lift 2 kg').closest('a')).toHaveAttribute('href', '/runs/run_gate');
+    expect(screen.getByText('Requirements sign-off')).toBeInTheDocument();
+    expect(screen.queryByText('finished run')).not.toBeInTheDocument();
+  });
+
+  it('reports when run gates cannot be loaded', () => {
+    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
+    mockUseRuns.mockReturnValue({ data: undefined, isLoading: false, isError: true } as unknown as ReturnType<typeof useRuns>);
+    render(<ApprovalsPage />);
+    expect(screen.getByText(/Run gates could not be loaded/)).toBeInTheDocument();
   });
 });

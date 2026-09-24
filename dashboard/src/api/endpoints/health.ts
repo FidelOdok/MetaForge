@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { HealthStatus } from '../../types/health';
 import { gatewayUrl } from '../../lib/gatewayConfig';
+import { isSampleMode } from '../../lib/sample-workspace';
 
 /**
  * ``GET /health`` lives at the gateway's bare root (``api_gateway/health.py``'s
@@ -11,6 +12,9 @@ import { gatewayUrl } from '../../lib/gatewayConfig';
  * have a matching passthrough entry for.
  */
 export async function getHealth(): Promise<HealthStatus> {
+  if (isSampleMode()) {
+    return { status: 'healthy', version: 'sample', uptime_seconds: 0, timestamp: new Date().toISOString(), components: [] };
+  }
   const { data } = await axios.get<HealthStatus>(gatewayUrl('/health'), { timeout: 10_000 });
   return data;
 }

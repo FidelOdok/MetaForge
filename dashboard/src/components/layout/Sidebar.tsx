@@ -1,109 +1,113 @@
+import { useState, type FocusEvent, type MouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
+import { ArrowUpRight, Settings, X } from 'lucide-react';
+import { useLayoutStore } from '../../store/layout-store';
+import { MOBILE_NAV_MAX_WIDTH, NAV_GROUPS } from './nav';
 
-// ---------------------------------------------------------------------------
-// Nav items — Material Symbols Outlined icon names
-// ---------------------------------------------------------------------------
+interface SidebarProps {
+  /** Mobile drawer open state. */
+  open?: boolean;
+  onClose?: () => void;
+}
 
-const NAV_ITEMS = [
-  { to: '/projects',  icon: 'grid_view',    title: 'Platform'             },
-  { to: '/sessions',  icon: 'account_tree', title: 'Orchestrator'         },
-  { to: '/runs',      icon: 'play_circle',  title: 'Runs'                 },
-  { to: '/approvals', icon: 'task_alt',     title: 'Approvals'            },
-  { to: '/bom',       icon: 'inventory_2',  title: 'BOM'                  },
-  { to: '/twin',      icon: 'hub',          title: 'Digital Twin'         },
-  { to: '/files',     icon: 'folder',       title: 'Files'                },
-  { to: '/knowledge', icon: 'psychology',   title: 'Knowledge'            },
-  { to: '/compliance', icon: 'verified_user', title: 'Compliance'         },
-] as const;
+interface TooltipState {
+  label: string;
+  top: number;
+}
 
-// ---------------------------------------------------------------------------
-// NavRail — 48px icon-only, always visible
-// ---------------------------------------------------------------------------
+const DOCS_URL = 'https://fidelodok.github.io/MetaForge/';
+const SETTINGS_LABEL = 'Settings & connection';
 
-export function Sidebar() {
+/**
+ * Floating workspace navigation. On desktop it collapses to an icon rail
+ * (labels become hover/focus tooltips); on mobile it is an off-canvas drawer.
+ */
+export function Sidebar({ open = false, onClose }: SidebarProps) {
+  const collapsed = useLayoutStore((s) => s.sidebarCollapsed);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+
+  const showTooltip = (el: HTMLElement, label: string) => {
+    if (!collapsed || window.innerWidth <= MOBILE_NAV_MAX_WIDTH) return;
+    const rect = el.getBoundingClientRect();
+    setTooltip({ label, top: rect.top + rect.height / 2 });
+  };
+  const hideTooltip = () => setTooltip(null);
+
+  const tooltipHandlers = (label: string) => ({
+    onMouseEnter: (e: MouseEvent<HTMLElement>) => showTooltip(e.currentTarget, label),
+    onMouseLeave: hideTooltip,
+    onFocus: (e: FocusEvent<HTMLElement>) => showTooltip(e.currentTarget, label),
+    onBlur: hideTooltip,
+  });
+
+  const close = () => onClose?.();
+
   return (
-    <nav
-      className="fixed inset-y-0 left-0 z-40 flex flex-col items-center"
-      style={{
-        width: 48,
-        background: 'var(--mf-c-191b22)',
-        borderRight: '1px solid var(--mf-r-65-72-90-0p2)',
-      }}
-    >
-      {/* Logo mark */}
-      <div
-        className="mt-3 mb-3 flex shrink-0 items-center justify-center rounded"
-        style={{
-          width: 32,
-          height: 32,
-          background: '#ff5a0a',
-          fontFamily: 'Inter, sans-serif',
-          fontWeight: 700,
-          fontSize: 15,
-          color: 'var(--mf-c-111319)',
-          letterSpacing: '-0.02em',
-          userSelect: 'none',
-        }}
-      >
-        M
-      </div>
-
-      {/* Nav items */}
-      <div className="flex flex-1 flex-col items-center w-full">
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            title={item.title}
-            className={({ isActive }) =>
-              [
-                'nav-btn flex w-full items-center justify-center transition-colors',
-                isActive
-                  ? 'nav-active text-primary-container'
-                  : 'text-on-surface-variant hover:bg-surface-high hover:text-on-surface',
-              ].join(' ')
-            }
-            style={{ height: 44 }}
-          >
-            <span className="material-symbols-outlined">{item.icon}</span>
+    <>
+      {tooltip &&
+        collapsed &&
+        createPortal(
+          <span className="rail-tooltip" role="tooltip" style={{ top: tooltip.top }}>
+            {tooltip.label}
+          </span>,
+          document.body,
+        )}
+      {open && (
+        <button type="button" className="nav-backdrop" aria-label="Close navigation" onClick={close} />
+      )}
+      <aside className={`workspace-sidebar ${open ? 'is-open' : ''}`}>
+        <div className="brand-row">
+          <NavLink to="/projects" className="collapsed-brand" aria-label="MetaForge projects">
+            <img className="brand-logo-dark" src="/metaforge-symbol-dark.svg" alt="" width="28" height="32" />
+            <img className="brand-logo-light" src="/metaforge-symbol-light.svg" alt="" width="28" height="32" />
           </NavLink>
-        ))}
-      </div>
-
-      {/* Bottom: settings + avatar */}
-      <div className="flex flex-col items-center gap-1 pb-3">
-        <NavLink
-          to="/settings"
-          title="Settings"
-          className={({ isActive }) =>
-            [
-              'flex items-center justify-center rounded transition-colors',
-              isActive
-                ? 'text-primary-container bg-surface-high'
-                : 'text-on-surface-variant hover:bg-surface-high hover:text-on-surface',
-            ].join(' ')
-          }
-          style={{ width: 32, height: 32 }}
-        >
-          <span className="material-symbols-outlined">settings</span>
-        </NavLink>
-        <div
-          className="flex shrink-0 items-center justify-center rounded-full"
-          style={{
-            width: 28,
-            height: 28,
-            background: 'var(--mf-c-282a30)',
-            fontSize: 10,
-            fontWeight: 600,
-            color: 'var(--mf-c-9a9aaa)',
-            letterSpacing: '0.03em',
-            cursor: 'pointer',
-          }}
-          title="Profile"
-        >
-          MF
+          <NavLink to="/projects" className="brand" onClick={close}>
+            <img className="brand-logo brand-logo-dark" src="/metaforge-logo.svg" alt="MetaForge" width="200" height="64" />
+            <img className="brand-logo brand-logo-light" src="/metaforge-logo-light.svg" alt="MetaForge" width="200" height="64" />
+          </NavLink>
+          <button type="button" className="mobile-close icon-control" aria-label="Close navigation" onClick={close}>
+            <X size={20} />
+          </button>
         </div>
-      </div>
-    </nav>
+
+        <nav aria-label="Main navigation" className="workspace-nav">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label} className="nav-group">
+              <p>{group.label}</p>
+              {group.items.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  aria-label={label}
+                  {...tooltipHandlers(label)}
+                  onClick={close}
+                  className={({ isActive }) => `workspace-nav-link ${isActive ? 'selected' : ''}`}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span>{label}</span>
+                </NavLink>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        <div className="sidebar-bottom">
+          <NavLink
+            to="/settings"
+            aria-label={SETTINGS_LABEL}
+            {...tooltipHandlers(SETTINGS_LABEL)}
+            onClick={close}
+            className={({ isActive }) => `workspace-nav-link ${isActive ? 'selected' : ''}`}
+          >
+            <Settings size={18} aria-hidden="true" />
+            <span>{SETTINGS_LABEL}</span>
+          </NavLink>
+          <a className="docs-link" href={DOCS_URL} target="_blank" rel="noreferrer">
+            Documentation <ArrowUpRight size={15} aria-hidden="true" />
+          </a>
+        </div>
+      </aside>
+    </>
   );
 }

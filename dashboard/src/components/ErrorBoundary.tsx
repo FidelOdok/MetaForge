@@ -1,5 +1,5 @@
-import { trace } from '@opentelemetry/api';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { trace } from '@opentelemetry/api';
 import { logger } from '../lib/logger';
 
 interface Props {

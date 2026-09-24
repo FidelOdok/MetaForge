@@ -37,9 +37,16 @@ describe('listRuns', () => {
 });
 
 describe('getRun', () => {
-  it('returns undefined on error', async () => {
-    mockGet.mockRejectedValueOnce(new Error('404'));
+  it('returns undefined on a 404', async () => {
+    mockGet.mockRejectedValueOnce(
+      Object.assign(new Error('Not Found'), { isAxiosError: true, response: { status: 404 } }),
+    );
     expect(await getRun('nope')).toBeUndefined();
+  });
+
+  it('rethrows other failures so the page can report them', async () => {
+    mockGet.mockRejectedValueOnce(new Error('Network Error'));
+    await expect(getRun('run_1')).rejects.toThrow('Network Error');
   });
 });
 

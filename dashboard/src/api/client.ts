@@ -2,6 +2,7 @@ import { context as otelContext, propagation } from '@opentelemetry/api';
 import axios from 'axios';
 import { logger } from '../lib/logger';
 import { apiBase } from '../lib/gatewayConfig';
+import { installSampleAdapter } from '../lib/sample-workspace';
 
 /**
  * Base Axios instance for all MetaForge API requests.
@@ -71,5 +72,9 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+// In sample mode (`?demo=1`) every request is answered by the in-memory sample
+// workspace instead of the network, so all pages work offline.
+installSampleAdapter(apiClient);
 
 export default apiClient;
