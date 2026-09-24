@@ -249,6 +249,17 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   `twin.commit_geometry` soft-warns (never blocks) when geometry lands
   in an unconstrained project. Chat nudges; the design-flow gates
   (MET-582/583) enforce.
+- **Requirement doc content excerpts (FORGE-86)** — the brief used to
+  list every work product as a bare `name — type (status)` line, so a
+  recorded `prd`/`constraint_set`'s actual content was invisible to the
+  agent short of a separate mid-turn twin lookup nothing prompted it to
+  make — confirmed live, no session ever did. The brief now inlines a
+  bounded excerpt (~1200 chars, via `resolve_work_product_blob`, the
+  same mechanism `blob_stager.py` and the CAD export routes already use)
+  of the project's most-recently-updated `prd`/`constraint_set` docs (up
+  to 3), so the agent actually sees stated requirements instead of just
+  their names. Best-effort: any resolution failure falls back to the
+  name-only line.
 - **Geometry-commit directive (MET-615)** — both harness system prompts
   (native and ReAct) and the project brief now state explicitly that
   `freecad.*`/`cadquery.*` tools only write to a local, ephemeral

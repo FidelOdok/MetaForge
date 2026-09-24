@@ -246,6 +246,41 @@ def _history_token_budget() -> int:
 
 
 _PROJECT_WP_LIMIT = 30  # most work products listed in the project brief
+_BRIEF_DOC_TYPES = {"prd", "constraint_set"}
+_BRIEF_DOC_EXCERPT_CHARS = 1200  # bounded per-document excerpt inlined in the brief
+_BRIEF_DOC_LIMIT = 3  # most-recently-updated prd/constraint_set docs to excerpt
+
+
+async def _brief_doc_excerpt(wp_id: str) -> str | None:
+    """Best-effort: a bounded excerpt of a prd/constraint_set work product's
+    actual stored content (FORGE-86).
+
+    Without this, the brief only ever lists a work product's name — the
+    model has no way to see what a recorded requirement actually SAYS short
+    of calling a twin tool mid-turn to fetch it, which nothing prompts it to
+    do, so recorded requirements are functionally invisible. Both
+    ``twin.record_constraint_set`` and the requirements handler store their
+    content as a rendered markdown blob (mirrors ``twin.record_decision``),
+    retrievable via the same ``resolve_work_product_blob`` every other
+    work-product-content reader in this codebase already uses
+    (``blob_stager.py``, the CAD export routes). Failure here (missing
+    blob, decode error, deleted node) is swallowed — the brief still
+    renders with just the name, exactly as before this existed.
+    """
+    from api_gateway.twin.blob_store import resolve_work_product_blob
+
+    try:
+        wp = await _twin.get_work_product(UUID(wp_id))
+        if wp is None:
+            return None
+        content, _filename = resolve_work_product_blob(wp)
+        text = content.decode("utf-8", errors="replace")
+    except Exception as exc:  # noqa: BLE001 — best-effort, brief must still render
+        logger.debug("brief_doc_excerpt_failed", work_product_id=wp_id, error=str(exc))
+        return None
+    if len(text) > _BRIEF_DOC_EXCERPT_CHARS:
+        text = text[:_BRIEF_DOC_EXCERPT_CHARS] + "\n... (truncated)"
+    return text
 
 
 async def _project_brief(thread: ChatThreadRecord) -> str | None:
@@ -280,6 +315,18 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
             lines.append(f"- …and {len(project.work_products) - _PROJECT_WP_LIMIT} more")
     else:
         lines.append("\nThis project has no work products yet.")
+
+    # FORGE-86: inline the actual content of the most-recently-updated
+    # requirement docs, not just their names — see _brief_doc_excerpt.
+    doc_wps = sorted(
+        (wp for wp in project.work_products if wp.type in _BRIEF_DOC_TYPES),
+        key=lambda wp: wp.updated_at,
+        reverse=True,
+    )[:_BRIEF_DOC_LIMIT]
+    for wp in doc_wps:
+        excerpt = await _brief_doc_excerpt(wp.id)
+        if excerpt:
+            lines.append(f"\n### {wp.name} ({wp.type})\n{excerpt}")
 
     # MET-584: requirements-discovery directive. Chat has no gates, so the
     # elicitation nudge lives in the brief — the enforcement twin of this is
