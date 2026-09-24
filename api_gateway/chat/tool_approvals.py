@@ -19,10 +19,12 @@ import structlog
 from fastapi import APIRouter, HTTPException
 
 from api_gateway.runs.schemas import ApprovalRequest, RunListResponse, RunResponse
+from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
     InvalidTransition,
+    Run,
     RunNotFoundError,
     RunStatus,
 )
@@ -31,10 +33,30 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/chat/tool_approvals", tags=["chat-tool-approvals"])
 
+_ledger: SqliteRunLedger | None = None
+
+# A gateway restart drops any in-flight `HarnessRuntime._await_approval()`
+# coroutine along with the process, so a restored AWAITING_APPROVAL row can
+# never actually be resolved -- the chat turn that was waiting on it is gone.
+# Persist the record for audit/history (FORGE-89), but mark it FAILED/orphaned
+# rather than resumable, unlike design-flow's own init_run_ledger() (which
+# restores AWAITING_APPROVAL as-is because a design-flow run genuinely can
+# resume). Do not copy that precedent here.
+_ORPHANED_ERROR = "orphaned: gateway restarted while this approval was pending"
+
+
+def _on_transition(run: Run) -> None:
+    if _ledger is not None:
+        try:
+            _ledger.record_run(run)
+        except Exception as exc:
+            logger.warning("tool_approval_ledger_write_failed", run_id=run.id, error=str(exc))
+
+
 # Process-level (not per-turn) so a separate approval-decision request can
 # reach the same live run a paused call_tool() is polling. Pass this same
 # instance into build_agent_runtime(runs=...) from the chat harness wiring.
-_approval_store = InMemoryRunStore()
+_approval_store = InMemoryRunStore(on_transition=_on_transition)
 
 
 def get_approval_store() -> InMemoryRunStore:
@@ -43,8 +65,44 @@ def get_approval_store() -> InMemoryRunStore:
 
 def reset_approval_store() -> None:
     """Rewire a fresh store — tests only, mirrors api_gateway.runs.routes."""
-    global _approval_store
-    _approval_store = InMemoryRunStore()
+    global _approval_store, _ledger
+    _approval_store = InMemoryRunStore(on_transition=_on_transition)
+    _ledger = None
+
+
+def init_approval_ledger(ledger: SqliteRunLedger | None) -> None:
+    """Wire a durable ledger for chat tool-approvals (FORGE-89).
+
+    Any row restored in AWAITING_APPROVAL is marked FAILED/orphaned instead
+    of resumable -- see the module-level note on `_ORPHANED_ERROR`.
+    """
+    global _ledger
+    _ledger = ledger
+    if ledger is None:
+        return
+    restored = 0
+    orphaned = 0
+    for row in ledger.list_runs():
+        status = RunStatus(row["status"])
+        error = row["error"]
+        if status is RunStatus.AWAITING_APPROVAL:
+            status = RunStatus.FAILED
+            error = _ORPHANED_ERROR
+            orphaned += 1
+        _approval_store.restore(
+            Run(
+                id=row["id"],
+                status=status,
+                request=row["request"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                error=error,
+                result=row["result"],
+                history=[status],
+            )
+        )
+        restored += 1
+    logger.info("tool_approval_ledger_wired", restored=restored, orphaned=orphaned)
 
 
 @router.get("", response_model=RunListResponse)

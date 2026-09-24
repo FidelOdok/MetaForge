@@ -438,3 +438,25 @@ Two clients now do:
 
 Neither client changed the backend — the SSE event and REST endpoint were
 already complete; the gap was entirely "no consumer."
+
+### Tool-approval durability (FORGE-89)
+
+`api_gateway/chat/tool_approvals.py`'s `InMemoryRunStore` was process-local
+only — a gateway restart silently dropped any approval record, pending or
+resolved, with no trace it ever existed. It now writes through to a
+`SqliteRunLedger` (`orchestrator/harness/ledger.py`,
+`default_tool_approvals_ledger_path()` — a separate file from the
+design-flow run ledger, `~/.metaforge/tool_approvals_ledger.db` by default,
+override via `METAFORGE_TOOL_APPROVALS_LEDGER_PATH`), wired in
+`api_gateway/server.py` alongside the existing `/v1/runs` ledger and gated
+behind the same `METAFORGE_RUNS_LEDGER_DISABLE` flag.
+
+This deliberately does **not** mirror design-flow's `init_run_ledger()`,
+which rehydrates non-terminal runs as resumable: a design-flow run's phase
+executor can genuinely pick back up after a restart, but the chat turn that
+was polling a paused `HarnessRuntime._await_approval()` coroutine cannot —
+the coroutine (and the SSE stream feeding it) died with the process. So a
+restored `awaiting_approval` row is marked `failed` with an
+`"orphaned: gateway restarted while this approval was pending"` error
+instead of `awaiting_approval` — the record persists for audit/history, but
+nothing implies it is still actionable.
