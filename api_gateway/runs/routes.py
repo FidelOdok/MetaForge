@@ -142,7 +142,36 @@ def _is_design_flow(request: dict) -> bool:
     return bool(request.get("flow")) or request.get("kind") == "design_flow"
 
 
-def _launch_flow(run_id: str) -> None:
+async def _ensure_run_project(run: Any, project_backend: Any) -> None:
+    """Auto-create a bare project for a run that started without one (FORGE-87).
+
+    A run started without a project_id (the CLI's --goal-only path, and
+    RunLauncher.start()'s default) left the intent phase with nothing to
+    attach its deliverables to -- twin.record_engineering_entity requires
+    project_id as a non-null string, and the model's own recovery attempt
+    (mcp_project_create) is a requires_approval tool nobody is watching to
+    approve in an unattended run, so it always timed out and the flow
+    failed at its very first gate. Reproduced live: every hardware_v1 run
+    started this way failed within ~50s.
+
+    Auto-creating a bare project from the goal gives the flow somewhere to
+    record into -- this is flow-internal infrastructure setup the run needs
+    to function, not a user-facing decision, so it bypasses the approval
+    gate entirely (a direct backend call, not the gated mcp_project_create
+    tool). Mutates ``run.request`` in place, which every later phase/gate
+    check reads from the same stored ``Run`` object.
+    """
+    if run.request.get("project_id"):
+        return
+    goal = str(run.request.get("goal") or "Untitled design")
+    project = await project_backend.create_project(
+        name=goal[:80], description=goal if len(goal) > 80 else ""
+    )
+    run.request["project_id"] = project.id
+    logger.info("design_flow_project_autocreated", run_id=run.id, project_id=project.id)
+
+
+async def _launch_flow(run_id: str) -> None:
     """Spawn the design-flow executor for ``run_id`` as a tracked background task.
 
     The brain is a HybridBrain: deterministic handlers drive the mechanical
@@ -182,6 +211,10 @@ def _launch_flow(run_id: str) -> None:
     bom_recorder = make_bom_recorder(get_twin(), project_backend)
     doc_recorder = make_document_recorder(get_twin(), project_backend)
     react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
+
+    run = _store.get(run_id)
+    await _ensure_run_project(run, project_backend)
+
     # Per-flow brain routing:
     #  - design_v1: deterministic quadruped-demo handlers (reliable, hardcoded).
     #  - mech_v1:   goal-driven hybrid — the LLM specs the part, a deterministic
@@ -189,7 +222,7 @@ def _launch_flow(run_id: str) -> None:
     #  - hardware_v1: electronics uses a deterministic handler (guaranteed BOM +
     #               closed power budget); other phases stay native.
     #  - others: the native brain drives every phase.
-    flow_id = _store.get(run_id).request.get("flow")
+    flow_id = run.request.get("flow")
     if flow_id == "design_v1":
         handlers: dict[str, Any] = {
             "requirements": RequirementsHandler(bridge),
@@ -243,7 +276,7 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
     run = _store.create(body.request)
     if _is_design_flow(body.request) and body.start:
         # The executor owns the lifecycle (start -> phases -> gates -> terminal).
-        _launch_flow(run.id)
+        await _launch_flow(run.id)
         logger.info("run_api_created", run_id=run.id, started=True, kind="design_flow")
     elif body.start:
         run = _store.start(run.id)
