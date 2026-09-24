@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useProjectStore } from '../store/project-store';
 import { useProjects } from './use-projects';
 import type { Project } from '../types/project';
+import { SAMPLE_PROJECT_ID, isSampleMode } from '../lib/sample-workspace';
 
 /**
  * The single active-project context every page reads from (Context UI).
@@ -15,7 +16,9 @@ import type { Project } from '../types/project';
  * that permanent for the session (persisted).
  */
 export function useActiveProject() {
-  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const storedProjectId = useProjectStore((s) => s.activeProjectId);
+  // The sample workspace is always scoped to its one illustrative project.
+  const activeProjectId = isSampleMode() ? SAMPLE_PROJECT_ID : storedProjectId;
   const hasSelected = useProjectStore((s) => s.hasSelected);
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
   const autoSelectIfUnset = useProjectStore((s) => s.autoSelectIfUnset);

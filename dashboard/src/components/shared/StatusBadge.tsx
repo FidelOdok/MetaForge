@@ -30,20 +30,20 @@ const STATUS_MAP: Record<string, { variant: 'success' | 'warning' | 'error' | 'i
 
 // Status dot colors for use in tables/lists
 const DOT_COLORS: Record<string, string> = {
-  running:   '#e67e22',
-  active:    '#e67e22',
-  completed: '#3dd68c',
-  approved:  '#3dd68c',
-  valid:     '#3dd68c',
-  available: '#3dd68c',
-  failed:    '#ffb4ab',
-  error:     '#ffb4ab',
-  rejected:  '#ffb4ab',
-  out_of_stock: '#ffb4ab',
-  warning:   '#f59e0b',
-  low_stock: '#f59e0b',
-  draft:     '#f59e0b',
-  abandoned: '#f59e0b',
+  running:   '#ff5a0a',
+  active:    '#ff5a0a',
+  completed: 'var(--mf-c-3dd68c)',
+  approved:  'var(--mf-c-3dd68c)',
+  valid:     'var(--mf-c-3dd68c)',
+  available: 'var(--mf-c-3dd68c)',
+  failed:    'var(--mf-c-ffb4ab)',
+  error:     'var(--mf-c-ffb4ab)',
+  rejected:  'var(--mf-c-ffb4ab)',
+  out_of_stock: 'var(--mf-c-ffb4ab)',
+  warning:   'var(--mf-c-f59e0b)',
+  low_stock: 'var(--mf-c-f59e0b)',
+  draft:     'var(--mf-c-f59e0b)',
+  abandoned: 'var(--mf-c-f59e0b)',
 };
 
 interface StatusBadgeProps {
@@ -57,7 +57,7 @@ export function StatusBadge({ status, className, dot }: StatusBadgeProps) {
   const config = STATUS_MAP[status] ?? { variant: 'default' as const, label: status };
 
   if (dot) {
-    const color = DOT_COLORS[status] ?? '#9a9aaa';
+    const color = DOT_COLORS[status] ?? 'var(--mf-c-9a9aaa)';
     return (
       <span className={`inline-flex items-center gap-1.5 font-mono text-xs text-on-surface-variant ${className ?? ''}`}>
         <span

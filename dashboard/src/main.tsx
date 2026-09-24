@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './index.css';
 
-// Initialize theme from localStorage / system preference
+// Sync the theme store with the persisted Light / Dark / System preference
+// (index.html already applied it before first paint).
 import './store/theme-store';
 
 // Observability — init before React render.

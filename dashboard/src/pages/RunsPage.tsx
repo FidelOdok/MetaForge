@@ -1,132 +1,159 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowUpRight, Play, RefreshCw, Search } from 'lucide-react';
 
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { useRuns } from '../hooks/use-runs';
-import type { HarnessRun } from '../types/run';
+import type { RunStatus } from '../types/run';
 
-const KC = {
-  surfaceContainer: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
-  surfaceBorder: 'rgba(65,72,90,0.2)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-} as const;
+const RUN_STATUSES: RunStatus[] = [
+  'running',
+  'queued',
+  'awaiting_approval',
+  'completed',
+  'failed',
+  'rejected',
+  'canceled',
+];
 
-const glassPanel: React.CSSProperties = {
-  background: KC.surfaceContainer,
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  borderRadius: 4,
-  border: `1px solid ${KC.surfaceBorder}`,
-};
-
-const panelHeader: React.CSSProperties = {
-  height: 36,
-  borderBottom: `1px solid ${KC.surfaceBorder}`,
-  padding: '0 16px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-};
-
-const monoLabel: React.CSSProperties = {
-  fontFamily: 'Roboto Mono, monospace',
-  fontSize: 10,
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase',
-  color: KC.onSurfaceVariant,
-};
-
-function fmtTime(epochSeconds: number): string {
-  return new Date(epochSeconds * 1000).toLocaleTimeString('en-GB', { hour12: false });
+function toIso(epochSeconds: number): string {
+  return new Date(epochSeconds * 1000).toISOString();
 }
 
-function RunRow({ run }: { run: HarnessRun }) {
-  const goal = typeof run.request.goal === 'string' ? run.request.goal : '(no goal)';
-  return (
-    <Link to={`/runs/${run.id}`} style={{ textDecoration: 'none', display: 'block' }}>
-      <div
-        style={{
-          height: 40,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          padding: '0 16px',
-          borderBottom: '1px solid rgba(65,72,90,0.08)',
-          color: KC.onSurface,
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLDivElement).style.background = KC.surfaceHigh;
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-        }}
-      >
-        <span
-          style={{
-            fontSize: 10,
-            fontFamily: 'Roboto Mono, monospace',
-            background: KC.surfaceHigh,
-            color: KC.onSurfaceVariant,
-            padding: '2px 6px',
-            borderRadius: 3,
-            flexShrink: 0,
-          }}
-        >
-          {run.id}
-        </span>
-        <span
-          style={{
-            flex: 1,
-            fontSize: 13,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {goal}
-        </span>
-        <StatusBadge status={run.status} dot />
-        <span style={{ fontFamily: 'Roboto Mono, monospace', fontSize: 11, color: KC.onSurfaceVariant, flexShrink: 0 }}>
-          {fmtTime(run.updatedAt)}
-        </span>
-      </div>
-    </Link>
-  );
+function toLocal(epochSeconds: number): string {
+  return new Date(epochSeconds * 1000).toLocaleString();
 }
 
 export function RunsPage() {
-  const { data: runs, isLoading } = useRuns();
-  const items = runs ?? [];
+  const runs = useRuns();
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<'all' | RunStatus>('all');
+
+  const filtered = (runs.data ?? [])
+    .filter(
+      (r) =>
+        (status === 'all' || r.status === status) &&
+        `${r.id} ${String(r.request.goal ?? '')}`.toLowerCase().includes(query.toLowerCase()),
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const filtering = !!query || status !== 'all';
 
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 500, color: KC.onSurface, lineHeight: 1.2 }}>
-          Harness Runs
-        </h1>
-        <span style={{ fontFamily: 'Roboto Mono, monospace', fontSize: 12, color: KC.onSurfaceVariant }}>
-          {items.length} run{items.length !== 1 ? 's' : ''}
-        </span>
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">EXECUTION &amp; EVIDENCE</p>
+          <h1>
+            Runs<span className="heading-period">.</span>
+          </h1>
+          <p className="page-description">
+            Follow execution, inspect outcomes, and review approval gates.
+          </p>
+        </div>
+        <div className="heading-actions">
+          <Link className="action-primary" to="/runs/new">
+            <Play size={16} />
+            New design run
+          </Link>
+          <button
+            type="button"
+            className="action-secondary"
+            onClick={() => void runs.refetch()}
+            disabled={runs.isFetching}
+          >
+            <RefreshCw size={16} />
+            Refresh
+          </button>
+        </div>
       </div>
 
-      <div style={{ ...glassPanel }}>
-        <div style={panelHeader}>
-          <span style={monoLabel}>ALL RUNS</span>
-        </div>
-        {isLoading ? (
-          <div style={{ padding: 16, fontSize: 12, color: KC.onSurfaceVariant, fontFamily: 'Roboto Mono, monospace' }}>
-            Loading…
-          </div>
-        ) : items.length === 0 ? (
-          <div style={{ padding: 16, fontSize: 13, color: KC.onSurfaceVariant }}>
-            No runs yet. Runs are launched by driving the harness via the CLI (`forge chat`) or
-            an MCP client with a design flow — this page observes them live.
-          </div>
-        ) : (
-          items.map((run) => <RunRow key={run.id} run={run} />)
-        )}
+      <div className="project-toolbar">
+        <label className="project-search">
+          <Search size={18} />
+          <input
+            aria-label="Search runs"
+            placeholder="Search by goal or run ID…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+        <select
+          aria-label="Run status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as 'all' | RunStatus)}
+        >
+          <option value="all">All statuses</option>
+          {RUN_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s.replace(/_/g, ' ')}
+            </option>
+          ))}
+        </select>
       </div>
+
+      {runs.isLoading ? (
+        <div className="workspace-empty" role="status">
+          Loading runs…
+        </div>
+      ) : runs.isError ? (
+        <div className="workspace-empty" role="alert">
+          <h2>Runs could not be loaded</h2>
+          <p>Check your gateway connection and try again.</p>
+          <Link className="text-action" to="/settings">
+            Connection settings
+            <ArrowUpRight size={16} />
+          </Link>
+        </div>
+      ) : filtered.length ? (
+        <div className="runs-table-wrap">
+          <table className="runs-table">
+            <thead>
+              <tr>
+                <th scope="col">Goal / Run</th>
+                <th scope="col">Status</th>
+                <th scope="col">Last updated</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <Link to={`/runs/${r.id}`}>
+                      <strong>{String(r.request.goal ?? 'Untitled run')}</strong>
+                      <small>{r.id}</small>
+                    </Link>
+                  </td>
+                  <td>
+                    <StatusBadge status={r.status} dot />
+                  </td>
+                  <td>
+                    <time dateTime={toIso(r.updatedAt)}>{toLocal(r.updatedAt)}</time>
+                  </td>
+                  <td>
+                    <Link className="text-action" to={`/runs/${r.id}`}>
+                      Inspect
+                      <ArrowUpRight size={15} />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="workspace-empty">
+          <Play size={34} />
+          <h2>{filtering ? 'No matching runs' : 'No runs yet'}</h2>
+          <p>
+            {filtering
+              ? 'Try another search or status.'
+              : 'Start a design run here, or follow runs created through your CLI or MCP client.'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

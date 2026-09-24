@@ -1,148 +1,95 @@
+import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from './components/ui/Toast';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { ProjectDetailPage } from './pages/ProjectDetailPage';
-import { SessionsPage } from './pages/SessionsPage';
-import { SessionDetailPage } from './pages/SessionDetailPage';
-import { RunsPage } from './pages/RunsPage';
-import { RunDetailPage } from './pages/RunDetailPage';
-import { ApprovalsPage } from './pages/ApprovalsPage';
-import { BomPage } from './pages/BomPage';
-import { TwinViewerPage } from './pages/TwinViewerPage';
-import { FilesPage } from './pages/FilesPage';
-import { KnowledgePage } from './pages/KnowledgePage';
-import { SourceDetailPage } from './pages/SourceDetailPage';
-import { CompliancePage } from './pages/CompliancePage';
-import { SettingsPage } from './pages/SettingsPage';
+
+/** Code-split a page module by its named export. */
+function page<K extends string>(
+  load: () => Promise<Record<K, ComponentType>>,
+  name: K,
+): LazyExoticComponent<ComponentType> {
+  return lazy(() => load().then((m) => ({ default: m[name] })));
+}
+
+const ProjectsPage = page(() => import('./pages/ProjectsPage'), 'ProjectsPage');
+const ProjectDetailPage = page(() => import('./pages/ProjectDetailPage'), 'ProjectDetailPage');
+const SessionsPage = page(() => import('./pages/SessionsPage'), 'SessionsPage');
+const SessionDetailPage = page(() => import('./pages/SessionDetailPage'), 'SessionDetailPage');
+const NewRunPage = page(() => import('./pages/NewRunPage'), 'NewRunPage');
+const RunsPage = page(() => import('./pages/RunsPage'), 'RunsPage');
+const RunDetailPage = page(() => import('./pages/RunDetailPage'), 'RunDetailPage');
+const ApprovalsPage = page(() => import('./pages/ApprovalsPage'), 'ApprovalsPage');
+const BomPage = page(() => import('./pages/BomPage'), 'BomPage');
+const TwinViewerPage = page(() => import('./pages/TwinViewerPage'), 'TwinViewerPage');
+const FilesPage = page(() => import('./pages/FilesPage'), 'FilesPage');
+const KnowledgePage = page(() => import('./pages/KnowledgePage'), 'KnowledgePage');
+const SourceDetailPage = page(() => import('./pages/SourceDetailPage'), 'SourceDetailPage');
+const CompliancePage = page(() => import('./pages/CompliancePage'), 'CompliancePage');
+const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage');
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
 });
 
+const ROUTES: Array<[path: string, Page: ComponentType]> = [
+  ['projects', ProjectsPage],
+  ['projects/:id', ProjectDetailPage],
+  ['sessions', SessionsPage],
+  ['sessions/:id', SessionDetailPage],
+  ['runs', RunsPage],
+  ['runs/new', NewRunPage],
+  ['runs/:id', RunDetailPage],
+  ['approvals', ApprovalsPage],
+  ['bom', BomPage],
+  ['twin', TwinViewerPage],
+  ['files', FilesPage],
+  ['knowledge', KnowledgePage],
+  ['knowledge/sources/:id', SourceDetailPage],
+  ['compliance', CompliancePage],
+  ['settings', SettingsPage],
+];
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<Navigate to="/projects" />} />
+        <Suspense
+          fallback={
+            <div className="workspace-empty" role="status">
+              Loading workspace…
+            </div>
+          }
+        >
+          <Routes>
+            <Route element={<AppLayout />}>
+              <Route index element={<Navigate to="/projects" replace />} />
+              {ROUTES.map(([path, Page]) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <ErrorBoundary>
+                      <Page />
+                    </ErrorBoundary>
+                  }
+                />
+              ))}
+            </Route>
             <Route
-              path="projects"
+              path="*"
               element={
-                <ErrorBoundary>
-                  <ProjectsPage />
-                </ErrorBoundary>
+                <div className="workspace-empty">
+                  <h1>Page not found</h1>
+                  <a className="text-action" href="/projects">
+                    Return to projects
+                  </a>
+                </div>
               }
             />
-            <Route
-              path="projects/:id"
-              element={
-                <ErrorBoundary>
-                  <ProjectDetailPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="sessions"
-              element={
-                <ErrorBoundary>
-                  <SessionsPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="sessions/:id"
-              element={
-                <ErrorBoundary>
-                  <SessionDetailPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="runs"
-              element={
-                <ErrorBoundary>
-                  <RunsPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="runs/:id"
-              element={
-                <ErrorBoundary>
-                  <RunDetailPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="approvals"
-              element={
-                <ErrorBoundary>
-                  <ApprovalsPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="bom"
-              element={
-                <ErrorBoundary>
-                  <BomPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="twin"
-              element={
-                <ErrorBoundary>
-                  <TwinViewerPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="files"
-              element={
-                <ErrorBoundary>
-                  <FilesPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="knowledge"
-              element={
-                <ErrorBoundary>
-                  <KnowledgePage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="knowledge/sources/:id"
-              element={
-                <ErrorBoundary>
-                  <SourceDetailPage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="compliance"
-              element={
-                <ErrorBoundary>
-                  <CompliancePage />
-                </ErrorBoundary>
-              }
-            />
-            <Route
-              path="settings"
-              element={
-                <ErrorBoundary>
-                  <SettingsPage />
-                </ErrorBoundary>
-              }
-            />
-          </Route>
-        </Routes>
+          </Routes>
+        </Suspense>
         <Toaster />
       </BrowserRouter>
     </QueryClientProvider>

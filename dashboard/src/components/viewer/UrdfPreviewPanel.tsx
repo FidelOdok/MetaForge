@@ -6,11 +6,11 @@ import { useUrdfRobot, meshBaseUrlFrom } from '../../hooks/use-urdf-robot';
 import { useUrdfPhysics } from '../../hooks/use-urdf-physics';
 import { toDownloadHref, type ExportFile } from '../../api/endpoints/cad-export';
 
-const KC_SURFACE = 'rgba(30,31,38,0.92)';
-const KC_BORDER = 'rgba(65,72,90,0.3)';
-const KC_BORDER_MID = 'rgba(65,72,90,0.45)';
-const KC_ON_SURFACE = '#e2e2eb';
-const KC_ON_SURFACE_VARIANT = '#9a9aaa';
+const KC_SURFACE = 'var(--mf-r-30-31-38-0p92)';
+const KC_BORDER = 'var(--mf-r-65-72-90-0p3)';
+const KC_BORDER_MID = 'var(--mf-r-65-72-90-0p45)';
+const KC_ON_SURFACE = 'var(--mf-c-e2e2eb)';
+const KC_ON_SURFACE_VARIANT = 'var(--mf-c-9a9aaa)';
 
 interface UrdfPreviewPanelProps {
   /** The just-exported URDF file (any format's assembly export result can
@@ -108,12 +108,12 @@ export function UrdfPreviewPanel({ urdfFile, onClose }: UrdfPreviewPanelProps) {
 
       <div style={{ height: 260, position: 'relative', margin: '8px 12px', borderRadius: 4, overflow: 'hidden', border: `1px solid ${KC_BORDER}` }}>
         {fetchError && (
-          <div className="font-mono absolute inset-0 flex items-center justify-center p-2 text-center" style={{ fontSize: 10, color: '#ffb4ab' }}>
+          <div className="font-mono absolute inset-0 flex items-center justify-center p-2 text-center" style={{ fontSize: 10, color: 'var(--mf-c-ffb4ab)' }}>
             Failed to load URDF: {fetchError}
           </div>
         )}
         {parseError && (
-          <div className="font-mono absolute inset-0 flex items-center justify-center p-2 text-center" style={{ fontSize: 10, color: '#ffb4ab' }}>
+          <div className="font-mono absolute inset-0 flex items-center justify-center p-2 text-center" style={{ fontSize: 10, color: 'var(--mf-c-ffb4ab)' }}>
             Failed to parse URDF: {parseError.message}
           </div>
         )}
@@ -122,7 +122,7 @@ export function UrdfPreviewPanel({ urdfFile, onClose }: UrdfPreviewPanelProps) {
             data-testid="urdf-preview-canvas"
             camera={{ position: [1, 0.8, 1], fov: 50, near: 0.001, far: 1000 }}
             gl={{ preserveDrawingBuffer: true }}
-            style={{ background: '#1e1f26' }}
+            style={{ background: 'var(--mf-c-1e1f26)' }}
           >
             <Suspense fallback={null}>
               {robot && (

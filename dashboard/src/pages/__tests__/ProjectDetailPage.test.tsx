@@ -72,6 +72,45 @@ describe('ProjectDetailPage', () => {
     expect(screen.getByText('Schematic')).toBeInTheDocument();
   });
 
+  it('shows a retryable error when the project fails to load', () => {
+    const refetch = vi.fn();
+    mockUseProject.mockReturnValue({ data: undefined, isLoading: false, isError: true, refetch } as unknown as ReturnType<typeof useProject>);
+    render(<ProjectDetailPage />);
+    expect(screen.getByText('Project could not be loaded')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(refetch).toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Connection settings' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('renders project actions, metrics and the artifact snapshot', () => {
+    mockUseProject.mockReturnValue({
+      data: {
+        id: 'proj-001',
+        name: 'Drone FC',
+        description: '',
+        status: 'active',
+        work_products: [
+          { id: 'a1', name: 'Main board', type: 'cad_model', status: 'valid', updatedAt: new Date().toISOString() },
+          { id: 'a2', name: 'Power BOM', type: 'bom', status: 'error', updatedAt: new Date(Date.now() - 60_000).toISOString() },
+        ],
+        agentCount: 3,
+        lastUpdated: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useProject>);
+    render(<ProjectDetailPage />);
+    expect(screen.getByRole('link', { name: 'Start design run' })).toHaveAttribute('href', '/runs/new?project=proj-001');
+    expect(screen.getByRole('link', { name: 'Open twin & agent' })).toHaveAttribute('href', '/twin');
+    expect(screen.getByRole('link', { name: 'Bill of materials' })).toHaveAttribute('href', '/bom');
+    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.getByText('Artifacts marked valid')).toBeInTheDocument();
+    expect(screen.getByText('SNAPSHOT')).toBeInTheDocument();
+    expect(screen.getByText('Main board \u00b7 valid')).toBeInTheDocument();
+    expect(screen.getByText('cad model')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Main board/ })).toHaveAttribute('href', '/twin?node=a1');
+  });
+
   describe('rename', () => {
     beforeEach(() => {
       mockUseProject.mockReturnValue({

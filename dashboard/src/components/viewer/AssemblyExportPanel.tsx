@@ -25,18 +25,18 @@ const UrdfPreviewPanel = lazy(() =>
 
 // Kinetic Console palette — same rationale as BooleanCutPanel.tsx (this file
 // predates the token set living anywhere shared/importable).
-const KC_SURFACE = 'rgba(30,31,38,0.92)';
-const KC_BORDER = 'rgba(65,72,90,0.3)';
-const KC_BORDER_MID = 'rgba(65,72,90,0.45)';
-const KC_ON_SURFACE = '#e2e2eb';
-const KC_ON_SURFACE_VARIANT = '#9a9aaa';
-const KC_ORANGE = '#e67e22';
-const KC_ORANGE_FAINT = 'rgba(230,126,34,0.15)';
-const KC_ORANGE_BORDER = 'rgba(230,126,34,0.45)';
+const KC_SURFACE = 'var(--mf-r-30-31-38-0p92)';
+const KC_BORDER = 'var(--mf-r-65-72-90-0p3)';
+const KC_BORDER_MID = 'var(--mf-r-65-72-90-0p45)';
+const KC_ON_SURFACE = 'var(--mf-c-e2e2eb)';
+const KC_ON_SURFACE_VARIANT = 'var(--mf-c-9a9aaa)';
+const KC_ORANGE = '#ff5a0a';
+const KC_ORANGE_FAINT = 'rgba(255, 90, 10,0.15)';
+const KC_ORANGE_BORDER = 'rgba(255, 90, 10,0.45)';
 
 const inputStyle: React.CSSProperties = {
   fontSize: 11,
-  background: '#1e1f26',
+  background: 'var(--mf-c-1e1f26)',
   border: `1px solid ${KC_BORDER}`,
   color: KC_ON_SURFACE,
   borderRadius: 4,
@@ -435,7 +435,7 @@ export function AssemblyExportPanel({ items, onClose, activeProjectId }: Assembl
             </Button>
           </div>
           {fetchedSessionId && sessionSummary.isError && (
-            <div className="font-mono" style={{ fontSize: 10, color: '#ffb4ab' }}>
+            <div className="font-mono" style={{ fontSize: 10, color: 'var(--mf-c-ffb4ab)' }}>
               No live session found for "{fetchedSessionId}" — it may have expired (30 min idle) or
               never existed. Add parts/joints manually below instead.
             </div>

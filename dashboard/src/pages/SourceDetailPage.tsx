@@ -22,7 +22,7 @@ export function SourceDetailPage() {
             alignItems: 'center',
             gap: 6,
             fontSize: 12,
-            color: '#9a9aaa',
+            color: 'var(--mf-c-9a9aaa)',
             textDecoration: 'none',
           }}
         >
@@ -34,14 +34,14 @@ export function SourceDetailPage() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-        <span style={{ fontSize: 18, fontWeight: 500, color: '#e8e8ed' }}>
+        <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--mf-c-e8e8ed)' }}>
           Source detail
         </span>
         <span
           style={{
             fontFamily: 'monospace',
             fontSize: 11,
-            color: '#9a9aaa',
+            color: 'var(--mf-c-9a9aaa)',
             wordBreak: 'break-all',
           }}
         >
@@ -51,9 +51,9 @@ export function SourceDetailPage() {
 
       <div
         style={{
-          background: 'rgba(30,31,38,0.85)',
+          background: 'var(--mf-r-30-31-38-0p85)',
           backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(65,72,90,0.2)',
+          border: '1px solid var(--mf-r-65-72-90-0p2)',
           borderRadius: 4,
           padding: 32,
           textAlign: 'center',
@@ -61,18 +61,18 @@ export function SourceDetailPage() {
       >
         <span
           className="material-symbols-outlined"
-          style={{ fontSize: 32, color: '#9a9aaa', opacity: 0.4 }}
+          style={{ fontSize: 32, color: 'var(--mf-c-9a9aaa)', opacity: 0.4 }}
         >
           construction
         </span>
-        <p style={{ fontSize: 13, color: '#e2e2eb', marginTop: 12 }}>
+        <p style={{ fontSize: 13, color: 'var(--mf-c-e2e2eb)', marginTop: 12 }}>
           Source detail page — coming in v2.
         </p>
         <p
           style={{
             fontFamily: 'monospace',
             fontSize: 11,
-            color: '#9a9aaa',
+            color: 'var(--mf-c-9a9aaa)',
             marginTop: 6,
           }}
         >

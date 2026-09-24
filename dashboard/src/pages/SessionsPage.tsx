@@ -7,16 +7,16 @@ import type { AgentSession } from '../types/session';
 
 // KC color tokens
 const KC = {
-  surfaceContainer: 'rgba(30,31,38,0.85)',
-  surfaceHigh: '#282a30',
-  surfaceBorder: 'rgba(65,72,90,0.2)',
-  onSurface: '#e2e2eb',
-  onSurfaceVariant: '#9a9aaa',
-  running: '#e67e22',
-  done: '#3dd68c',
-  pending: '#9a9aaa',
-  error: '#ffb4ab',
-  logBg: '#0a0b10',
+  surfaceContainer: 'var(--mf-r-30-31-38-0p85)',
+  surfaceHigh: 'var(--mf-c-282a30)',
+  surfaceBorder: 'var(--mf-r-65-72-90-0p2)',
+  onSurface: 'var(--mf-c-e2e2eb)',
+  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
+  running: '#ff5a0a',
+  done: 'var(--mf-c-3dd68c)',
+  pending: 'var(--mf-c-9a9aaa)',
+  error: 'var(--mf-c-ffb4ab)',
+  logBg: 'var(--mf-c-0a0b10)',
 } as const;
 
 // Glass panel style
@@ -63,20 +63,20 @@ function dagNodeStyle(status: DagNodeStatus): React.CSSProperties {
       return {
         background: 'rgba(61,214,140,0.1)',
         border: '1px solid rgba(61,214,140,0.35)',
-        color: '#3dd68c',
+        color: 'var(--mf-c-3dd68c)',
       };
     case 'RUNNING':
       return {
-        background: 'rgba(230,126,34,0.12)',
-        border: '1px solid rgba(230,126,34,0.55)',
-        color: '#e67e22',
+        background: 'rgba(255, 90, 10,0.12)',
+        border: '1px solid rgba(255, 90, 10,0.55)',
+        color: '#ff5a0a',
       };
     case 'QUEUED':
     default:
       return {
-        background: 'rgba(65,72,90,0.1)',
-        border: '1px dashed rgba(65,72,90,0.4)',
-        color: '#9a9aaa',
+        background: 'var(--mf-r-65-72-90-0p1)',
+        border: '1px dashed var(--mf-r-65-72-90-0p4)',
+        color: 'var(--mf-c-9a9aaa)',
       };
   }
 }
@@ -86,7 +86,7 @@ function DagNodeIcon({ status }: { status: DagNodeStatus }) {
     return (
       <span
         className="material-symbols-outlined"
-        style={{ fontSize: 14, color: '#3dd68c', lineHeight: 1 }}
+        style={{ fontSize: 14, color: 'var(--mf-c-3dd68c)', lineHeight: 1 }}
       >
         check_circle
       </span>
@@ -98,7 +98,7 @@ function DagNodeIcon({ status }: { status: DagNodeStatus }) {
         className="material-symbols-outlined"
         style={{
           fontSize: 14,
-          color: '#e67e22',
+          color: '#ff5a0a',
           lineHeight: 1,
           display: 'inline-block',
           animation: 'spin 1s linear infinite',
@@ -111,7 +111,7 @@ function DagNodeIcon({ status }: { status: DagNodeStatus }) {
   return (
     <span
       className="material-symbols-outlined"
-      style={{ fontSize: 14, color: '#9a9aaa', lineHeight: 1 }}
+      style={{ fontSize: 14, color: 'var(--mf-c-9a9aaa)', lineHeight: 1 }}
     >
       schedule
     </span>
@@ -157,7 +157,7 @@ function DagNodePill({ node }: { node: DagNode }) {
 function DagConnector({ from, to }: { from: DagNodeStatus; to: DagNodeStatus }) {
   const isDoneToRunning = from === 'DONE' && to === 'RUNNING';
   const isDoneToDone = from === 'DONE' && to === 'DONE';
-  const color = isDoneToDone ? '#3dd68c' : isDoneToRunning ? '#e67e22' : 'rgba(65,72,90,0.4)';
+  const color = isDoneToDone ? 'var(--mf-c-3dd68c)' : isDoneToRunning ? '#ff5a0a' : 'var(--mf-r-65-72-90-0p4)';
   const dashed = !isDoneToDone && !isDoneToRunning;
 
   return (
@@ -248,7 +248,7 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: isRunning ? '#3dd68c' : '#9a9aaa',
+              background: isRunning ? 'var(--mf-c-3dd68c)' : 'var(--mf-c-9a9aaa)',
               flexShrink: 0,
             }}
           />
@@ -257,7 +257,7 @@ function DagPanel({ sessions }: { sessions: AgentSession[] }) {
               fontFamily: 'Roboto Mono, monospace',
               fontSize: 10,
               letterSpacing: '0.08em',
-              color: isRunning ? '#3dd68c' : '#9a9aaa',
+              color: isRunning ? 'var(--mf-c-3dd68c)' : 'var(--mf-c-9a9aaa)',
             }}
           >
             {isRunning ? 'RUNNING' : 'IDLE'}
@@ -295,7 +295,7 @@ function logBadgeStyle(status: AgentSession['status']): React.CSSProperties {
     case 'running':
       return {
         background: 'rgba(134,207,255,0.12)',
-        color: '#86cfff',
+        color: 'var(--mf-c-86cfff)',
         padding: '0 5px',
         borderRadius: 3,
         fontSize: 9,
@@ -305,7 +305,7 @@ function logBadgeStyle(status: AgentSession['status']): React.CSSProperties {
     case 'completed':
       return {
         background: 'rgba(61,214,140,0.1)',
-        color: '#3dd68c',
+        color: 'var(--mf-c-3dd68c)',
         padding: '0 5px',
         borderRadius: 3,
         fontSize: 9,
@@ -315,7 +315,7 @@ function logBadgeStyle(status: AgentSession['status']): React.CSSProperties {
     case 'failed':
       return {
         background: 'rgba(255,180,171,0.12)',
-        color: '#ffb4ab',
+        color: 'var(--mf-c-ffb4ab)',
         padding: '0 5px',
         borderRadius: 3,
         fontSize: 9,
@@ -325,7 +325,7 @@ function logBadgeStyle(status: AgentSession['status']): React.CSSProperties {
     default:
       return {
         background: 'rgba(134,207,255,0.12)',
-        color: '#86cfff',
+        color: 'var(--mf-c-86cfff)',
         padding: '0 5px',
         borderRadius: 3,
         fontSize: 9,
@@ -490,7 +490,7 @@ function PendingApprovalCard() {
             justifyContent: 'center',
             gap: 4,
             fontSize: 11,
-            color: '#fff',
+            color: 'var(--mf-c-fff)',
             fontFamily: 'inherit',
           }}
         >
@@ -510,7 +510,7 @@ function PendingApprovalCard() {
           style={{
             flex: 1,
             height: 30,
-            background: 'rgba(65,72,90,0.35)',
+            background: 'var(--mf-r-65-72-90-0p35)',
             border: `1px solid ${KC.surfaceBorder}`,
             borderRadius: 4,
             cursor: 'pointer',
@@ -557,10 +557,10 @@ interface RosterAgent {
 }
 
 const ROSTER_AGENTS: RosterAgent[] = [
-  { icon: 'description', name: 'Requirements Agent', dotColor: '#3dd68c', dotPulse: true, statusLabel: 'running spec' },
-  { icon: 'precision_manufacturing', name: 'Mechanical Agent', dotColor: '#9a9aaa', dotPulse: false, statusLabel: 'idle' },
+  { icon: 'description', name: 'Requirements Agent', dotColor: 'var(--mf-c-3dd68c)', dotPulse: true, statusLabel: 'running spec' },
+  { icon: 'precision_manufacturing', name: 'Mechanical Agent', dotColor: 'var(--mf-c-9a9aaa)', dotPulse: false, statusLabel: 'idle' },
   { icon: 'memory', name: 'Electronics Agent', dotColor: '#f0a500', dotPulse: false, statusLabel: 'waiting' },
-  { icon: 'calculate', name: 'Simulation Agent', dotColor: '#9a9aaa', dotPulse: false, statusLabel: 'idle' },
+  { icon: 'calculate', name: 'Simulation Agent', dotColor: 'var(--mf-c-9a9aaa)', dotPulse: false, statusLabel: 'idle' },
 ];
 
 function AgentRosterPanel() {
@@ -591,7 +591,7 @@ function AgentRosterPanel() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            borderBottom: `1px solid rgba(65,72,90,0.08)`,
+            borderBottom: `1px solid var(--mf-r-65-72-90-0p08)`,
           }}
         >
           <span className="material-symbols-outlined" style={{ fontSize: 16, color: KC.onSurfaceVariant }}>
@@ -641,7 +641,7 @@ function SessionRow({ session }: { session: AgentSession }) {
           alignItems: 'center',
           gap: 16,
           padding: '0 16px',
-          borderBottom: `1px solid rgba(65,72,90,0.08)`,
+          borderBottom: `1px solid var(--mf-r-65-72-90-0p08)`,
           color: KC.onSurface,
         }}
         onMouseEnter={(e) => {

@@ -16,8 +16,8 @@ export function Card({ className, glass, ...props }: CardProps) {
         className
       )}
       style={{
-        background: glass ? 'rgba(30,31,38,0.85)' : '#1e1f26',
-        border: '1px solid rgba(65,72,90,0.2)',
+        background: glass ? 'var(--mf-r-30-31-38-0p85)' : 'var(--mf-c-1e1f26)',
+        border: '1px solid var(--mf-r-65-72-90-0p2)',
       }}
       {...props}
     />
