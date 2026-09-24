@@ -872,6 +872,21 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
 
         init_run_ledger(SqliteRunLedger(str(default_ledger_path())))
+    # FORGE-89: same gap as above but for the chat tool-approval queue
+    # (api_gateway/chat/tool_approvals.py), which had zero durability at
+    # all — an in-flight approval record vanished on every gateway restart
+    # with no trace it ever existed. Shares the runs-ledger disable flag
+    # since both are the same "skip touching a file" concern.
+    if (os.environ.get("METAFORGE_RUNS_LEDGER_DISABLE", "").strip().lower()) not in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        from api_gateway.chat.tool_approvals import init_approval_ledger
+        from orchestrator.harness.ledger import SqliteRunLedger, default_tool_approvals_ledger_path
+
+        init_approval_ledger(SqliteRunLedger(str(default_tool_approvals_ledger_path())))
     # MET-566: chat-turn context assembly (knowledge fragments with
     # attribution/staleness/conflicts). No-op when LightRAG isn't configured.
     init_context_assembler(
