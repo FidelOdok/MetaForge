@@ -165,7 +165,7 @@ async def _ensure_run_project(run: Any, project_backend: Any) -> None:
         return
     goal = str(run.request.get("goal") or "Untitled design")
     project = await project_backend.create_project(
-        name=goal[:80], description=goal if len(goal) > 80 else ""
+        name=goal[:80], description=goal if len(goal) > 80 else "", status="draft"
     )
     run.request["project_id"] = project.id
     logger.info("design_flow_project_autocreated", run_id=run.id, project_id=project.id)
