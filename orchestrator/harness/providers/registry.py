@@ -133,6 +133,34 @@ class UnknownProviderError(KeyError):
     """No registered provider with the given id or alias."""
 
 
+class InvalidModelError(ValueError):
+    """A model slug that can't work for this provider's family."""
+
+
+def validate_model(provider_id: str, model: str) -> None:
+    """Reject a model slug that can't work for ``provider_id`` (FORGE-93).
+
+    Deliberately narrow: this registry maintains no live model catalog, so it
+    can't allowlist valid slugs in general -- it only rejects conventions a
+    real, observed failure confirmed can never work. Today that's exactly one
+    rule: the Codex backend (ChatGPT-subscription auth) rejects any
+    ``vendor/model`` OpenRouter-style slug outright --
+    ``400 "The '<model>' model is not supported when using Codex with a
+    ChatGPT account."`` -- observed for ``openai/gpt-4o`` but true of any
+    slashed slug, since Codex's own models use bare ids (``gpt-5.5``,
+    ``gpt-5-codex``). Silently accepting one lets ``PUT /v1/harness/selection``
+    durably select a pairing that 400s on every single call thereafter, with
+    the provider pipeline's fallback masking it as a normal reply.
+    """
+    profile = get_profile(provider_id)
+    if profile.api_family == CODEX and "/" in model:
+        raise InvalidModelError(
+            f"'{model}' is not a valid model for provider '{provider_id}' (family "
+            f"{CODEX}): Codex expects a bare model slug (e.g. 'gpt-5.5', "
+            "'gpt-5-codex'), not a 'vendor/model' slug like OpenRouter uses."
+        )
+
+
 def available_providers() -> list[str]:
     """Canonical provider ids (not aliases), sorted."""
     return sorted({p.id for p in _PROFILES})

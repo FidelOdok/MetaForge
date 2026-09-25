@@ -55,11 +55,13 @@ from orchestrator.harness.providers.pricing import (
     estimate_cost_usd,
 )
 from orchestrator.harness.providers.registry import (
+    InvalidModelError,
     ProviderProfile,
     UnknownProviderError,
     available_providers,
     get_profile,
     resolve_provider,
+    validate_model,
 )
 from orchestrator.harness.providers.rotation import (
     AuthProfile,
@@ -108,10 +110,12 @@ __all__ = [
     "ProviderSpec",
     "RetryPolicy",
     "RoleModelSlots",
+    "InvalidModelError",
     "UnknownProviderError",
     "available_providers",
     "get_profile",
     "load_provider_config",
+    "validate_model",
     "resolve_provider",
     "rotating_invoke",
 ]

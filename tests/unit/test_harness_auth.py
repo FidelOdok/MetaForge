@@ -192,6 +192,48 @@ async def test_routes_set_api_key_and_selection(store_path: Path) -> None:
     assert any(p.id == "openai" and p.configured for p in resp.providers)
 
     await routes.delete_credential("openai")
+
+
+# FORGE-93: gateway active selection openai-codex + openai/gpt-4o is invalid
+# (Codex rejects any OpenRouter-style 'vendor/model' slug with a 400, and the
+# provider pipeline's fallback silently masked it) -- reject the pairing at
+# the write path instead of letting it become the durable active selection.
+@pytest.mark.asyncio
+async def test_set_selection_rejects_slashed_model_for_codex(store_path: Path) -> None:
+    from fastapi import HTTPException
+
+    from api_gateway.harness import routes
+    from orchestrator.harness.providers.auth_store import AuthStore
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.set_selection(
+            routes.SetSelectionRequest(provider="openai-codex", model="openai/gpt-4o")
+        )
+    assert exc_info.value.status_code == 400
+    assert "openai/gpt-4o" in str(exc_info.value.detail)
+    assert AuthStore().get_selection() is None  # never persisted
+
+
+@pytest.mark.asyncio
+async def test_set_selection_accepts_bare_model_for_codex(store_path: Path) -> None:
+    from api_gateway.harness import routes
+    from orchestrator.harness.providers.auth_store import AuthStore
+
+    await routes.set_selection(routes.SetSelectionRequest(provider="openai-codex", model="gpt-5.5"))
+    assert AuthStore().get_selection().model == "gpt-5.5"  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_set_selection_slashed_model_is_fine_for_non_codex(store_path: Path) -> None:
+    """The '/' rule is Codex-specific -- OpenRouter's own slugs are exactly
+    this shape and must keep working."""
+    from api_gateway.harness import routes
+    from orchestrator.harness.providers.auth_store import AuthStore
+
+    await routes.set_selection(
+        routes.SetSelectionRequest(provider="openrouter", model="openai/gpt-4o")
+    )
+    assert AuthStore().get_selection().model == "openai/gpt-4o"  # type: ignore[union-attr]
     assert AuthStore().get_credential("openai") is None
 
 

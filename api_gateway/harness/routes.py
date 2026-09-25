@@ -308,7 +308,13 @@ async def set_selection(body: SetSelectionRequest, _: None = Depends(_require_ad
         registry.get_profile(provider)
     except registry.UnknownProviderError as exc:
         raise HTTPException(status_code=400, detail=f"unknown provider '{provider}'") from exc
-    AuthStore().set_selection(provider, (body.model or "").strip() or None)
+    model = (body.model or "").strip() or None
+    if model is not None:
+        try:
+            registry.validate_model(provider, model)
+        except registry.InvalidModelError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    AuthStore().set_selection(provider, model)
     return OkResponse(provider=provider, method="selection")
 
 
