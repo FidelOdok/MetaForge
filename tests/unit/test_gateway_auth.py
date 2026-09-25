@@ -13,6 +13,7 @@ to annotate is protected anyway.
 
 from __future__ import annotations
 
+import sys
 import time
 
 import jwt
@@ -288,3 +289,59 @@ class TestCreateApp:
         app = create_app()
         assert app.state.auth_settings.enabled is True
         assert any(m.cls is AuthMiddleware for m in app.user_middleware)
+
+
+class TestMinimalInstall:
+    """PyJWT is a cloud-only dependency and must stay one.
+
+    ``api_gateway/__init__.py`` imports ``server``, which imports the auth
+    package, so anything touching ``api_gateway`` loads it — including a local
+    gateway that will never verify a token. An eager ``import jwt`` therefore
+    makes PyJWT a hard dependency of the entire package. That regression
+    shipped once and was caught by CI rather than locally, because the library
+    happened to be present transitively in the dev environment.
+    """
+
+    @staticmethod
+    def _hide_pyjwt(monkeypatch) -> None:
+        """Make ``jwt`` unimportable for the duration of one test.
+
+        Blocking ``meta_path`` alone is not enough: ``find_spec`` consults
+        ``sys.modules`` first and returns a cached module's spec without ever
+        reaching a finder. This module imports ``jwt`` at the top, so it is
+        always cached — the eviction below is what makes the check honest.
+        """
+
+        class Blocker:
+            def find_spec(self, name, path=None, target=None):
+                if name == "jwt" or name.startswith("jwt."):
+                    raise ImportError("No module named 'jwt'")
+                return None
+
+        for module in [m for m in sys.modules if m == "jwt" or m.startswith("jwt.")]:
+            monkeypatch.delitem(sys.modules, module, raising=False)
+        monkeypatch.setattr(sys, "meta_path", [Blocker(), *sys.meta_path])
+
+    def test_local_gateway_builds_without_pyjwt(self, monkeypatch):
+        monkeypatch.delenv("METAFORGE_AUTH_MODE", raising=False)
+        self._hide_pyjwt(monkeypatch)
+        for module in [m for m in sys.modules if m.startswith("api_gateway")]:
+            monkeypatch.delitem(sys.modules, module, raising=False)
+
+        from api_gateway.server import create_app
+
+        # Compared by value, not identity: purging the modules above means the
+        # freshly imported AuthMode is a different class object from the one
+        # this test module imported.
+        assert create_app().state.auth_settings.mode.value == "off"
+
+    def test_cloud_mode_without_pyjwt_refuses_by_name(self, monkeypatch):
+        """Named at startup, not discovered as a 500 on the first request."""
+        self._hide_pyjwt(monkeypatch)
+        with pytest.raises(AuthConfigurationError, match="PyJWT"):
+            load_auth_settings(
+                env={
+                    "METAFORGE_AUTH_MODE": "supabase",
+                    "METAFORGE_SUPABASE_URL": "https://proj.supabase.co",
+                }
+            )

@@ -18,9 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.auth import (
     AuthConfigurationError,
-    AuthMiddleware,
     AuthSettings,
-    TokenVerifier,
     load_auth_settings,
 )
 from api_gateway.bom.routes import router as bom_router
@@ -1339,6 +1337,10 @@ def create_app(
     # layer and arrives at the browser with its headers, as a readable error
     # rather than an opaque network failure.
     if auth_settings.enabled:
+        # Imported here, not at module scope: these pull in PyJWT, which is a
+        # cloud-only dependency. A local gateway must import nothing extra.
+        from api_gateway.auth import AuthMiddleware, TokenVerifier
+
         app.state.token_verifier = TokenVerifier(auth_settings)
         app.add_middleware(AuthMiddleware, verifier=app.state.token_verifier)
 

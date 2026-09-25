@@ -89,6 +89,10 @@ dev = [
     # "Library stubs not installed for yaml". The stubs are a type-check
     # dependency, so they belong in the extra that installs the type checker.
     "types-PyYAML>=6.0",
+    # MetaForge Cloud auth is a runtime [gateway] dependency, but the tests for
+    # it live in tests/unit and CI installs only .[dev] -- so without this the
+    # auth suite cannot run at all.
+    "pyjwt[crypto]>=2.8",
     # MET-735: the Makefile's integration/e2e targets pass --timeout, which
     # needs this plugin -- without it pytest rejects the flag outright and the
     # target fails on a usage error. Worth having rather than dropping: with

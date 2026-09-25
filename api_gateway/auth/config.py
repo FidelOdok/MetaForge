@@ -37,6 +37,7 @@ believe they deployed.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from dataclasses import dataclass
 from enum import StrEnum
@@ -157,6 +158,25 @@ def load_auth_settings(env: dict[str, str] | None = None) -> AuthSettings:
     if mode is AuthMode.OFF:
         logger.info("gateway_auth_disabled", mode=mode.value)
         return AuthSettings(mode=mode)
+
+    # PyJWT is a cloud-only dependency, so that a local gateway needs no crypto
+    # stack at all. Checked here rather than at import so the failure names the
+    # cause: a missing library must not be discovered as a 500 on the first
+    # authenticated request.
+    try:
+        pyjwt_missing = importlib.util.find_spec("jwt") is None
+    except (ImportError, ValueError):
+        # find_spec does not only return None for an absent module — it also
+        # raises when the name is unimportable for another reason. Either way
+        # we cannot verify tokens, and that must be the loud answer.
+        pyjwt_missing = True
+    if pyjwt_missing:
+        raise AuthConfigurationError(
+            "METAFORGE_AUTH_MODE=supabase needs PyJWT, which is not installed. "
+            "Install the gateway extra: pip install -e '.[gateway]' (or "
+            "pip install 'pyjwt[crypto]>=2.8'). Refusing to start rather than "
+            "leaving every route open."
+        )
 
     project_url = get("METAFORGE_SUPABASE_URL").rstrip("/")
     explicit_jwks = get("METAFORGE_SUPABASE_JWKS_URL")
