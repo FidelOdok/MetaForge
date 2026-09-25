@@ -447,6 +447,19 @@ future commit-capable skill are covered automatically. Deliberately static,
 like every other gate here: a call that happens to pass `commit=False` still
 pauses — a false-positive prompt is a minor cost, not a silent bypass.
 
+### Validate before pausing for approval (FORGE-222)
+
+`HarnessRuntime.call_tool` runs the declared-schema check
+(`orchestrator.harness.validation.validate_arguments`) BEFORE checking
+`requires_approval`, not after. Before this a gated tool's arguments were only
+validated inside `ToolRegistry.invoke`, which runs after the approval pause —
+so a human could be asked to approve a call that was always going to be
+rejected as invalid the moment it actually ran (live-observed: 13 large
+Design IR documents approved one at a time, most then failing validation).
+`ToolRegistry.invoke` still re-validates on the approved path too (cheap,
+and keeps it a safe standalone entrypoint for other callers) — this only
+moves *when* the very first check runs.
+
 ### Approval UI for the "ask" tier (FORGE-33)
 
 `requires_approval` (`twin.commit_geometry`, `twin.record_decision`,
