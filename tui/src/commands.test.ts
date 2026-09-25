@@ -74,37 +74,84 @@ test("resolveLoginMethod: an explicit --method always wins", () => {
   assert.equal(resolveLoginMethod("oauth", "openai", "openai"), "oauth");
 });
 
-// FORGE-92: a bare `process.exit()` right after `process.stdout.write()`
-// truncates output once it exceeds the pipe buffer -- writes to a pipe are
-// async in Node/Bun, and exit() doesn't wait for them to drain (observed:
-// forge twin list --json | wc -c silently cut at exactly 131072 bytes,
-// while redirecting to a file -- a synchronous write -- hid the bug
-// entirely). exitAfterFlush must deliver every byte through a real pipe.
-test("exitAfterFlush drains output larger than the pipe buffer before exiting", async () => {
-  const HERE = path.dirname(fileURLToPath(import.meta.url));
-  const commandsPath = path.join(HERE, "commands.ts");
-  const size = 1_500_000; // well past the observed 128 KiB pipe-buffer cliff
+// FORGE-92: a bare `process.exit()` right after an async `process.stdout.
+// write()` truncates output once it exceeds the pipe buffer -- observed:
+// `forge twin list --json | wc -c` silently cut at exactly 131072 bytes
+// under Node, while redirecting to a file (a synchronous write) hid the bug
+// entirely. `writeAllSync` fixes it by writing synchronously via
+// `fs.writeSync` with an EAGAIN retry loop, so nothing is left buffered by
+// the time the process exits.
+//
+// A first attempt instead waited for an *async* write to drain before
+// exiting (an empty `write(callback)`, then a `'drain'` listener) -- both
+// worked under Node but silently did NOT under Bun's compiled-binary stdout
+// stream, which is the runtime `forge` actually ships as (`bun build
+// --compile`). Live validation against the real binary caught it: still
+// truncated, just at a different threshold (65536 bytes). `writeAllSync`
+// sidesteps the whole async-drain-timing question by never buffering in the
+// first place, so it's tested here under BOTH runtimes -- under Bun only
+// when it's resolvable on PATH (this exact gap is why: a Node-only test
+// passed while the shipped artifact stayed broken).
+function runsWriteAllSyncScript(size: number): string {
+  const commandsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "commands.ts");
   // Generate the payload *inside* the spawned process rather than embedding
   // it as a literal in the script text -- passed as an argv string it blows
   // past the OS's ARG_MAX (spawn fails with E2BIG well under 1.5 MB).
-  const script = [
-    `import { exitAfterFlush } from ${JSON.stringify(commandsPath)};`,
-    `process.stdout.write("x".repeat(${size}));`,
-    `exitAfterFlush(0);`,
+  return [
+    `import { writeAllSync } from ${JSON.stringify(commandsPath)};`,
+    `writeAllSync(1, "x".repeat(${size}));`,
+    `process.exit(0);`,
   ].join("\n");
+}
 
-  const child = spawn(
-    process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", script],
-    { stdio: ["ignore", "pipe", "inherit"] },
-  );
+async function runScriptAndCollectStdout(
+  command: string,
+  args: string[],
+): Promise<{ code: number; bytes: number }> {
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "inherit"] });
   const chunks: Buffer[] = [];
   child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
   const code: number = await new Promise((resolve, reject) => {
     child.on("error", reject);
     child.on("close", (c) => resolve(c ?? -1));
   });
+  return { code, bytes: Buffer.concat(chunks).length };
+}
 
+test("writeAllSync (Node/tsx) delivers output larger than the pipe buffer before exiting", async () => {
+  const size = 1_500_000; // well past the observed 128 KiB pipe-buffer cliff
+  const { code, bytes } = await runScriptAndCollectStdout(process.execPath, [
+    "--import",
+    "tsx",
+    "--input-type=module",
+    "-e",
+    runsWriteAllSyncScript(size),
+  ]);
   assert.equal(code, 0);
-  assert.equal(Buffer.concat(chunks).length, size);
+  assert.equal(bytes, size);
+});
+
+test("writeAllSync (Bun) delivers output larger than the pipe buffer before exiting", async (t) => {
+  const size = 1_500_000;
+  try {
+    const { code, bytes } = await runScriptAndCollectStdout("bun", [
+      "-e",
+      runsWriteAllSyncScript(size),
+    ]);
+    assert.equal(code, 0);
+    assert.equal(bytes, size);
+  } catch (err) {
+    // ENOENT: not on PATH at all. EACCES: resolvable but not executable in
+    // this environment (observed on the self-hosted CI runner's "check" job
+    // -- the "binary" job's own setup-bun install evidently isn't usable
+    // here). Either way this is a bonus check, not a hard requirement: the
+    // "binary" CI job already builds with a real, guaranteed-usable bun and
+    // runs its own smoke check against the compiled artifact.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT" || code === "EACCES") {
+      t.skip(`bun not usable on PATH here (${code}) -- the runtime the shipped binary uses`);
+      return;
+    }
+    throw err;
+  }
 });

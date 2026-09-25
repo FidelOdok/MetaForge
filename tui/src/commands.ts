@@ -5,6 +5,7 @@
  * with a TTY launches the Ink TUI (see cli.tsx). Both share the same typed
  * gateway client, so there's one implementation, two modes.
  */
+import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { GatewayClient, GatewayError } from "./api/client.js";
 import { isTerminal, streamRunStatus } from "./api/runs.js";
@@ -50,29 +51,46 @@ export function parseArgs(argv: string[]): Parsed {
 }
 
 /**
- * FORGE-92: `process.stdout.write()` is asynchronous when stdout is a pipe
- * (Node/Bun), and a bare `process.exit()` kills the process before buffered
+ * FORGE-92: `process.stdout.write()` is asynchronous when stdout is a pipe,
+ * and a bare `process.exit()` right after kills the process before buffered
  * output drains -- truncating any `--json` output larger than the pipe
- * buffer (observed: silently cut at exactly 128 KiB; redirecting to a file
- * hid the bug because file writes are synchronous). Writing an empty chunk
- * with a callback rides the same FIFO write queue as every real write before
- * it, so the callback only fires once all of it has actually flushed to the
- * OS -- a reliable "wait for stdout to drain" that still forces a real exit
- * (unlike switching to `process.exitCode` and letting the loop idle out,
- * which would hang on the API client's open undici keep-alive Agent).
+ * buffer (observed: silently cut at exactly 128 KiB under Node, 64 KiB under
+ * the Bun-compiled binary `forge` actually ships as; redirecting to a file
+ * hid the bug because file writes are synchronous).
+ *
+ * A first pass tried waiting for the async write to drain before exiting
+ * (an empty `write(callback)`, then a `'drain'` listener) -- both worked
+ * under Node but NOT under Bun's compiled-binary stdout stream, which fires
+ * either signal before the preceding large write has actually reached the
+ * OS. Rather than chase Bun's async-stream timing further, this writes
+ * synchronously via `fs.writeSync` on the raw fd, retrying on `EAGAIN` when
+ * the pipe buffer is momentarily full -- verified correct under both
+ * runtimes, including against a deliberately slow reader. Once every write
+ * is synchronous there is nothing left to drain, so callers can `exit()`
+ * immediately afterward.
  */
-export function exitAfterFlush(code: number): void {
-  process.stdout.write("", () => process.exit(code));
+export function writeAllSync(fd: number, s: string): void {
+  const buf = Buffer.from(s, "utf8");
+  let offset = 0;
+  while (offset < buf.length) {
+    try {
+      offset += writeSync(fd, buf, offset, buf.length - offset);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "EAGAIN" || code === "EWOULDBLOCK") continue;
+      throw err;
+    }
+  }
 }
 
 const out = (x: unknown): void => {
-  process.stdout.write(`${JSON.stringify(x, null, 2)}\n`);
+  writeAllSync(1, `${JSON.stringify(x, null, 2)}\n`);
 };
 const line = (s: string): void => {
-  process.stdout.write(`${s}\n`);
+  writeAllSync(1, `${s}\n`);
 };
 function usage(msg: string): number {
-  process.stderr.write(`${msg}\n`);
+  writeAllSync(2, `${msg}\n`);
   return 2;
 }
 

@@ -45,6 +45,21 @@ jobs:
       # Verify the provenance stamp end-to-end — the check that makes
       # "is my CLI stale?" answerable (the trap the Python binary hit).
       - run: ./dist/forge --version
+      # FORGE-92: the "check" job's own writeAllSync-under-bun regression
+      # test can only run for real when bun happens to be usable on that
+      # job's PATH (observed: it wasn't, on this same self-hosted runner --
+      # `spawn bun EACCES`, silently skipped). This job's bun install IS
+      # guaranteed usable (bundle:bin above just proved it), so it's the one
+      # place a real bun-runtime check of the fix is certain to actually
+      # run — importing straight from src/ needs no build step; Bun runs TS
+      # natively.
+      - name: Verify writeAllSync delivers a large payload without truncation (bun)
+        run: |
+          bun -e '
+            import { writeAllSync } from "./src/commands.ts";
+            writeAllSync(1, "x".repeat(1500000));
+            process.exit(0);
+          ' | wc -c | grep -qx 1500000 || { echo "writeAllSync truncated output under bun"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: forge-linux-x64
