@@ -283,16 +283,20 @@ is exactly backwards. Instead:
 
 - every **native** tool is kept (few, curated, session-critical — e.g.
   `chat.set_project_scope` and the skill layer);
-- two more classes are protected the same way (FORGE-94), before the
+- three more classes are protected the same way (FORGE-94), before the
   round-robin runs: any tool `search_tools` has **pinned**
-  (`ToolRegistry.pin`/`pinned_names`), and any tool whose name ends
+  (`ToolRegistry.pin`/`pinned_names`); any tool whose name ends
   `_open_session` — a structural dependency for every other tool its own
   adapter registers, so dropping just the session opener while keeping its
   siblings is actively harmful in a way dropping any other single tool
-  isn't (this is what let FreeCAD's whole stateful authoring surface —
-  `open_session`, `pad_sketch`, `pocket_sketch`, `revolve_sketch`, ... — go
-  uncallable in practice: a large adapter's own alphabetical tail is
-  exactly where the round-robin's global budget ran out);
+  isn't; and any tool whose name ends one of `_SESSION_CRITICAL_VERBS`
+  (`pad_sketch`, `pocket_sketch`, `revolve_sketch`, `loft_sketches`,
+  `sweep_sketch`, `list_joints`) — protecting `open_session` alone wasn't
+  enough (re-test 2026-09-25): the verbs that actually turn an open
+  session's sketch into geometry, and the one that inspects joints just
+  added, still sorted into the same dropped tail (a large adapter's own
+  alphabetical tail is exactly where the round-robin's global budget ran
+  out);
 - the remaining budget is filled **round-robin across MCP origins**, so each
   adapter keeps a share and no capability vanishes wholesale;
 - the drop is **loud** — `tool_schemas_truncated` logs the limit, counts, and
