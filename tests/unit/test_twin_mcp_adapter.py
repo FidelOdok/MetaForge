@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -735,6 +736,108 @@ class TestApproveEngineeringEntity:
         srv = TwinServer(twin=_FakeTwin(), engineering_entity_approver=approver)
         raw = await srv.handle_request(_request("twin.approve_engineering_entity", {}))
         assert "error" in json.loads(raw)
+
+
+# ---------------------------------------------------------------------------
+# twin.commit_geometry -- file_path commit-by-reference (FORGE-224)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryFilePath:
+    """A stateless tool (freecad.create_parametric, cadquery.create_parametric/
+    execute_script/generate_enclosure, ...) has no session_id/obj_id -- its
+    result is just a 'cad_file' path on the shared adapter workspace. Before
+    this, a model calling twin.commit_geometry directly (not through a skill)
+    had no way to reference that output and had to hand-copy a base64 blob it
+    was never actually given."""
+
+    async def test_relative_file_path_is_resolved_against_the_workspace_root(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+        (tmp_path / "output").mkdir()
+        (tmp_path / "output" / "bracket_None.step").write_bytes(b"ISO-10303-21;")
+
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1", "model_url": "https://twin.local/models/node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        resp = json.loads(
+            await srv.handle_request(
+                _request(
+                    "twin.commit_geometry",
+                    {"file_path": "output/bracket_None.step", "name": "Bracket"},
+                )
+            )
+        )
+
+        assert "error" not in resp, resp
+        assert received["step_base64"] == base64.b64encode(b"ISO-10303-21;").decode("ascii")
+        assert resp["result"]["data"]["node_id"] == "node-1"
+
+    async def test_absolute_file_path_is_read_as_given(self, tmp_path, monkeypatch) -> None:
+        step_file = tmp_path / "box.step"
+        step_file.write_bytes(b"ISO-10303-21;HEADER;")
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-2"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request("twin.commit_geometry", {"file_path": str(step_file), "name": "Box"})
+        )
+
+        assert received["step_base64"] == base64.b64encode(b"ISO-10303-21;HEADER;").decode("ascii")
+
+    async def test_step_base64_wins_over_file_path_when_both_given(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+        (tmp_path / "part.step").write_bytes(b"ON-DISK-BYTES")
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-3"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        explicit = base64.b64encode(b"EXPLICIT-BYTES").decode("ascii")
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {"file_path": "part.step", "name": "Part", "step_base64": explicit},
+            )
+        )
+
+        assert received["step_base64"] == explicit
+
+    async def test_a_missing_file_is_a_clear_error_not_a_silent_empty_commit(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "node-4"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        resp = json.loads(
+            await srv.handle_request(
+                _request(
+                    "twin.commit_geometry",
+                    {"file_path": "does/not/exist.step", "name": "Ghost"},
+                )
+            )
+        )
+
+        # The framework flattens a handler ValueError to a generic
+        # client-facing message (the real detail is logged server-side) --
+        # same convention every other error case in this file asserts on.
+        assert "error" in resp
 
 
 # ---------------------------------------------------------------------------
