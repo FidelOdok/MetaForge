@@ -16,6 +16,7 @@ from tool_registry.tools.freecad.operations import (
     HAS_FREECAD,
     FreecadNotAvailableError,
     FreecadOperations,
+    _resolve_parameters,
 )
 
 # ---------------------------------------------------------------------------
@@ -45,6 +46,58 @@ class TestShapeDefaults:
         bracket = _SHAPE_DEFAULTS["bracket"]
         assert "hole_radius" in bracket
         assert "thickness" in bracket
+
+
+# ---------------------------------------------------------------------------
+# 1b. _resolve_parameters — FORGE-96: unknown keys are rejected, not
+#     silently dropped, and 'diameter' resolves to radius/2 where unambiguous.
+# ---------------------------------------------------------------------------
+
+
+class TestResolveParameters:
+    def test_known_keys_pass_through_unchanged(self) -> None:
+        resolved = _resolve_parameters("box", {"length": 100, "width": 50, "height": 20})
+        assert resolved == {"length": 100, "width": 50, "height": 20}
+
+    def test_unknown_key_raises_with_the_accepted_list(self) -> None:
+        with pytest.raises(ValueError, match=r"unknown parameter.*girth.*accepted.*radius"):
+            _resolve_parameters("cylinder", {"girth": 150, "height": 20})
+
+    def test_diameter_aliases_to_radius_for_cylinder(self) -> None:
+        # Live repro: shape_type="cylinder", parameters={"diameter": 150, ...}
+        # silently built the DEFAULT radius=5.0 pin instead of a Ø150 disc.
+        resolved = _resolve_parameters("cylinder", {"diameter": 150, "height": 20})
+        assert resolved == {"radius": 75.0, "height": 20}
+
+    def test_diameter_aliases_to_radius_for_sphere(self) -> None:
+        resolved = _resolve_parameters("sphere", {"diameter": 40})
+        assert resolved == {"radius": 20.0}
+
+    def test_diameter_is_rejected_for_shapes_without_a_plain_radius(self) -> None:
+        """cone has radius1/radius2 -- no unambiguous single 'diameter'."""
+        with pytest.raises(ValueError, match="diameter"):
+            _resolve_parameters("cone", {"diameter": 40, "height": 20})
+
+    def test_diameter_is_rejected_when_it_has_no_geometric_meaning(self) -> None:
+        with pytest.raises(ValueError, match="diameter"):
+            _resolve_parameters("box", {"diameter": 40})
+
+    def test_both_diameter_and_radius_given_is_rejected_not_silently_resolved(self) -> None:
+        """Ambiguous -- explicit rejection beats guessing which one wins."""
+        with pytest.raises(ValueError, match="diameter"):
+            _resolve_parameters("cylinder", {"diameter": 150, "radius": 5, "height": 20})
+
+    def test_unrecognized_shape_type_is_left_untouched(self) -> None:
+        """_build_shape's own 'Unsupported shape type' error is the more
+        relevant one for an unrecognized shape -- this must not pre-empt it
+        with a confusing 'unknown parameters: everything' error."""
+        params = {"anything": 1, "goes": 2}
+        assert _resolve_parameters("not_a_real_shape", params) == params
+
+    def test_multiple_unknown_keys_are_all_named(self) -> None:
+        # sorted() orders them alphabetically: 'bogus' before 'typo'.
+        with pytest.raises(ValueError, match=r"bogus.*typo"):
+            _resolve_parameters("box", {"length": 10, "bogus": 1, "typo": 2})
 
 
 # ---------------------------------------------------------------------------

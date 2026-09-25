@@ -314,6 +314,50 @@ _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
     },
 }
 
+# FORGE-96: 'diameter' is the natural word a caller reaches for describing a
+# disc/cylinder/sphere ("a 150mm diameter turntable"), but every shape here
+# is parameterized by radius. Aliased only for shapes whose defaults declare
+# a bare 'radius' (cylinder, sphere) -- cone's radius1/radius2 are per-end,
+# so there's no unambiguous single "diameter" for a frustum.
+_DIAMETER_ALIAS_SHAPES = frozenset(
+    shape for shape, defaults in _SHAPE_DEFAULTS.items() if "radius" in defaults
+)
+
+
+def _resolve_parameters(shape_type: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    """Translate known aliases and REJECT any parameter key the shape
+    builder doesn't read (FORGE-96).
+
+    Previously ``create_parametric`` merged caller parameters over defaults
+    with ``{**defaults, **parameters}`` and silently dropped any key
+    ``_build_shape`` doesn't read -- a caller asking for
+    ``shape_type="cylinder", parameters={"diameter": 150, ...}`` got the
+    shape's DEFAULT radius (5.0mm) instead, with no error and nothing in the
+    response signaling the request wasn't honored: a "150mm turntable"
+    silently became a 10mm pin. An unrecognized ``shape_type`` (not in
+    ``_SHAPE_DEFAULTS``) is left untouched here -- ``_build_shape``'s own
+    "Unsupported shape type" error is the more relevant one for that case.
+    """
+    if shape_type not in _SHAPE_DEFAULTS:
+        return dict(parameters)
+    accepted = set(_SHAPE_DEFAULTS[shape_type])
+    resolved = dict(parameters)
+    if "diameter" in resolved and shape_type in _DIAMETER_ALIAS_SHAPES and "radius" not in resolved:
+        resolved["radius"] = resolved.pop("diameter") / 2
+    unknown = set(resolved) - accepted
+    if unknown:
+        hint = (
+            ". 'diameter' is only accepted for shapes parameterized by a plain "
+            "'radius' (cylinder, sphere); did you mean 'radius' (diameter / 2)?"
+            if "diameter" in unknown
+            else ""
+        )
+        raise ValueError(
+            f"create_parametric: unknown parameter(s) {sorted(unknown)} for "
+            f"shape_type '{shape_type}' -- accepted: {sorted(accepted)}{hint}"
+        )
+    return resolved
+
 
 class FreecadOperations:
     """Core FreeCAD CAD operations.
@@ -377,11 +421,13 @@ class FreecadOperations:
                 output_path = os.path.join(self.work_dir, f"{shape_type}.step")
             self._ensure_output_dir(output_path)
 
-            # Merge defaults with provided parameters
+            # Merge defaults with provided parameters (FORGE-96: rejects an
+            # unrecognized key instead of silently dropping it).
             defaults = _SHAPE_DEFAULTS.get(shape_type, {})
-            merged = {**defaults, **parameters}
 
             try:
+                resolved_parameters = _resolve_parameters(shape_type, parameters)
+                merged = {**defaults, **resolved_parameters}
                 shape = self._build_shape(shape_type, merged)
             except Exception as exc:
                 span.record_exception(exc)
@@ -789,7 +835,9 @@ class FreecadOperations:
         """Add a parametric Part primitive (box/cylinder/sphere/cone/torus)."""
         self._require_freecad()
         defaults = _SHAPE_DEFAULTS.get(kind, {})
-        merged = {**defaults, **params}
+        # FORGE-96: same unknown-key rejection as create_parametric -- this is
+        # the stateful session path's own equivalent, same silent-fallback risk.
+        merged = {**defaults, **_resolve_parameters(kind, params)}
         if kind == "box":
             obj = document.addObject("Part::Box", "Box")
             obj.Length, obj.Width, obj.Height = (
