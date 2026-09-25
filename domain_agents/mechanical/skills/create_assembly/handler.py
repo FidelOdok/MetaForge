@@ -146,7 +146,7 @@ class CreateAssemblyHandler(SkillBase[CreateAssemblyInput, CreateAssemblyOutput]
                 committed, twin_node_id, model_url, commit_error = await commit_geometry(
                     self.context.mcp,
                     cad_file=assembly_file,
-                    name=f"Assembly ({input_data.material})",
+                    name=input_data.name,
                     project_id=input_data.project_id,
                 )
                 span.set_attribute("committed", committed)

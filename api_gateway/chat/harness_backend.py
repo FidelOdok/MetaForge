@@ -26,7 +26,7 @@ import structlog
 from api_gateway.chat.backend import ChatBackend
 from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
-from api_gateway.chat.skill_tools import skill_tools_from_registry
+from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
 from api_gateway.chat.tool_approvals import get_approval_store
 from observability.metrics import MetricsCollector
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
@@ -154,11 +154,12 @@ def make_set_project_scope_tool(thread_id: str, backend: ChatBackend) -> NativeT
 
 # Three-tier permissions, "ask" (production-harness audit follow-up): a
 # starter, conservative set of tool ids that mutate persistent state outside
-# the ephemeral adapter workspace. Everything else stays auto-allow. Deliberately
-# narrow for v1 -- expanding tier assignment to more tools (or to skill-layer
-# tools, which currently bypass this since they call twin.commit_geometry
-# internally rather than as a separately model-callable step) is flagged as
-# a real, known gap, not silently dropped.
+# the ephemeral adapter workspace. Everything else stays auto-allow.
+# Deliberately narrow for v1 -- expanding tier assignment to more tools is a
+# call-site change here. Skill-layer tools (which call twin.commit_geometry
+# internally rather than as a separately model-callable step, so a name-based
+# list here could never cover them) get the same "ask" tier a different way --
+# see skill_tools.py's _tool_for_registration (FORGE-97).
 _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
     {
         "twin.commit_geometry",
@@ -175,7 +176,9 @@ _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
 # ``ToolRegistry.invoke`` -> ``GateBlockedError``) and nothing ever declared a
 # gate, so the mechanism was dead code and "read-only by default" described the
 # MCP sidecar's CLI flag only -- chat itself could always write.
-GATE_TWIN_WRITE = "twin_write"
+# GATE_TWIN_WRITE's canonical definition lives in skill_tools.py (FORGE-97) --
+# that module needs it too and this one already imports from it, so defining
+# it there and importing it here avoids a circular import.
 GATE_PROJECT_WRITE = "project_write"
 
 _GATED_TOOL_IDS: dict[str, tuple[str, ...]] = {

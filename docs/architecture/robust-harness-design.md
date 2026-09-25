@@ -431,6 +431,22 @@ ephemeral workspace. The gate is a static precondition; the per-call human
 decision for the same tools remains the separate "ask" tier
 (`requires_approval`).
 
+**Skill-layer tools too (FORGE-97).** A skill like `generate_cad` persists a
+work product into the Twin internally — via
+`domain_agents.shared.commit_geometry.commit_geometry`, a direct
+`McpBridge.invoke("twin.commit_geometry", ...)` call — not as a separately
+model-callable step, so the model calling `twin.commit_geometry` directly
+paused for approval while calling `skill_mechanical_generate_cad`, which
+commits the exact same kind of node, never did. `api_gateway/chat/skill_tools.
+py`'s `_tool_for_registration` now gates any skill whose Pydantic input model
+declares a `commit` field the same way — `required_gates=(GATE_TWIN_WRITE,)`,
+`requires_approval=True` — schema-driven rather than a per-skill name list,
+matching FORGE-81/82's `_declares_project_id` precedent, so
+`generate_enclosure`/`create_assembly`/`generate_cad_ir` (today) and any
+future commit-capable skill are covered automatically. Deliberately static,
+like every other gate here: a call that happens to pass `commit=False` still
+pauses — a false-positive prompt is a minor cost, not a silent bypass.
+
 ### Approval UI for the "ask" tier (FORGE-33)
 
 `requires_approval` (`twin.commit_geometry`, `twin.record_decision`,

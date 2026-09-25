@@ -25,6 +25,16 @@ class GenerateCadInput(BaseModel):
     work_product_id: UUID | None = Field(
         default=None, description="Twin work_product ID (optional for new generation)"
     )
+    name: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Part name for this geometry (e.g. 'Shoulder Yoke', 'J1 Turntable') -- "
+            "used as the Twin work product's display name. Required and must be "
+            "specific to what this part actually is, never a generic placeholder "
+            "like the shape type or material alone."
+        ),
+    )
     shape_type: str = Field(
         ...,
         description="Parametric shape type: bracket, plate, enclosure, cylinder",
