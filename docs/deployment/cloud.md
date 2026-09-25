@@ -112,6 +112,69 @@ unreachable would tell users their credentials are bad when the fault is ours.
 If a previously-fetched JWKS document is cached, a provider blip degrades to
 serving slightly stale keys rather than failing every request.
 
+## The control plane
+
+Accounts live in Supabase, not in the gateway's Postgres. The migration is
+`supabase/migrations/20260925090000_control_plane.sql`, applied with the
+Supabase CLI:
+
+```bash
+supabase link --project-ref <ref>
+supabase db push
+```
+
+Four tables, holding broker state only — no design data:
+
+| Table | Holds |
+|---|---|
+| `accounts` | Ownership root, personal or org |
+| `account_members` | User ↔ account, with role |
+| `cloud_projects` | Account-scoped project, pointing at a gateway-side project id |
+| `gateway_connections` | Where an account's gateway is, and a Vault reference to the proxy credential |
+
+**Row-level security is the isolation boundary**, not application filtering.
+Every table has RLS `ENABLE`d *and* `FORCE`d — without `FORCE`, the table owner
+bypasses its own policies, so anything connecting as that role reads across
+every tenant. Membership is resolved through two `SECURITY DEFINER` helpers
+with a pinned `search_path`, which is what stops a policy on `account_members`
+recursing into itself.
+
+Signing up fires a trigger that creates a personal account and an owner
+membership. Without it a new user belongs to nothing, every policy denies them,
+and the dashboard is an empty shell with no way forward.
+
+`gateway_project_id` is a deliberate, explicit pointer. MetaForge already
+represents a project in three uncoordinated places; this is a fourth, in a
+different database, so the two are mapped rather than assumed to agree.
+
+### Verifying isolation
+
+Against a live database, not by inspection:
+
+```sql
+set role authenticated;
+set request.jwt.claim.sub = '<user-a-uuid>';
+select name from public.cloud_projects;   -- only user A's rows
+```
+
+With no claim set, the same query must return nothing.
+
+## Dashboard
+
+The dashboard is one static build serving both deployments, so Supabase config
+is optional and whether it is *needed* is decided at runtime by reading
+`auth_mode` from the gateway's `/health`.
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `VITE_SUPABASE_URL` | for cloud | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | for cloud | Anon/publishable key. Safe to ship — RLS is the boundary |
+| `VITE_GATEWAY_URL` | no | Default gateway when the user has not set one in Settings |
+
+A local build sets none of them and shows no sign-in. If it is pointed at a
+gateway that *does* require auth, the dashboard says so explicitly rather than
+looping on 401s.
+
 ## Not yet covered
 
 Authentication is not authorisation. This release verifies *who* is calling; it

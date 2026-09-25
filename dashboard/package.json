@@ -28,6 +28,7 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
+    "@supabase/supabase-js": "^2.117.2",
     "@tanstack/react-query": "^5.62.0",
     "@xyflow/react": "^12.10.2",
     "axios": "^1.7.9",

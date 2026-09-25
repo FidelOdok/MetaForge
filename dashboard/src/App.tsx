@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthGate } from './auth/AuthGate';
+import { AuthProvider } from './auth/AuthProvider';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from './components/ui/Toast';
@@ -25,9 +27,13 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
+      {/* AuthProvider sits inside the query client because AuthGate asks the
+          gateway (via useHealth) whether a session is needed at all. */}
+      <AuthProvider>
+        <AuthGate>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/projects" />} />
             <Route
               path="projects"
@@ -141,10 +147,12 @@ export function App() {
                 </ErrorBoundary>
               }
             />
-          </Route>
-        </Routes>
-        <Toaster />
-      </BrowserRouter>
+              </Route>
+            </Routes>
+            <Toaster />
+          </BrowserRouter>
+        </AuthGate>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
