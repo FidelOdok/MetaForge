@@ -51,8 +51,10 @@ from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
 from orchestrator.harness.providers.registry import (
     ANTHROPIC,
     OPENAI,
+    InvalidModelError,
     get_profile,
     max_tools_for,
+    validate_model,
 )
 from orchestrator.harness.react import ReActStep, run_react
 from orchestrator.harness.runtime import OnApprovalRequest
@@ -719,6 +721,26 @@ def provider_config_from_env(
     prov = resolve_active_provider(provider)
     # Only take the selection's model when it belongs to the active provider.
     sel_model = selection.model if (selection and sel_provider == prov) else None
+    if sel_model:
+        # FORGE-93: PUT /v1/harness/selection rejects a new invalid pairing
+        # (e.g. openai-codex + a slashed OpenRouter-style slug), but a
+        # pairing stored *before* that validation existed stays durable and
+        # silently 400s+falls-back on every single default-provider call
+        # forever. Re-validating the already-stored selection on every read
+        # is what actually stops that -- a one-off startup check wouldn't
+        # catch a store written by a still-running older gateway process or
+        # edited out-of-band, and this is no more expensive than the
+        # provider-config build already happening per turn.
+        try:
+            validate_model(prov, sel_model)
+        except InvalidModelError as exc:
+            logger.warning(
+                "harness_stored_selection_invalid_model_ignored",
+                provider=prov,
+                model=sel_model,
+                error=str(exc),
+            )
+            sel_model = None
     default_model = (os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
     mdl = (model or sel_model or default_model).strip()
 
