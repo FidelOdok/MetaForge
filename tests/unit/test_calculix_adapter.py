@@ -133,6 +133,21 @@ class TestCalculixServer:
         s = CalculixServer(config=cfg)
         assert s.config.max_solve_time == 120
 
+    @pytest.mark.parametrize(
+        "tool_id", ["calculix.run_fea", "calculix.run_thermal", "calculix.validate_mesh"]
+    )
+    def test_mesh_file_schema_tells_the_model_work_product_id_is_not_accepted(
+        self, server: CalculixServer, tool_id: str
+    ) -> None:
+        """FORGE-223: same gap as freecad.generate_mesh -- this adapter has
+        no Twin access either, and a model that only has a work_product_id
+        needs to be told to stage it first, not left guessing after a bare
+        'mesh_file is required' rejection."""
+        schema = server._tools[tool_id].manifest.input_schema
+        description = schema["properties"]["mesh_file"]["description"]
+        assert "work_product_id" in description
+        assert "twin.stage_work_product_file" in description
+
 
 # ---------------------------------------------------------------------------
 # TestRunFea

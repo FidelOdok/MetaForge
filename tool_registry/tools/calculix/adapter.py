@@ -17,6 +17,21 @@ from tool_registry.tools.calculix.solver import run_fea as solver_run_fea
 logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.tools.calculix.adapter")
 
+# FORGE-223: this adapter has no Twin access and none of its tools accept a
+# work_product_id -- a mesh_file must already be a path on the shared adapter
+# workspace, e.g. freecad.generate_mesh's own 'mesh_file' result. A model that
+# only has a work_product_id must call twin.stage_work_product_file first and
+# pass its returned file_path here instead; without this hint the schema gave
+# no clue why a work_product_id argument kept getting rejected as "missing
+# required property mesh_file" (re-test 2026-09-25: 11 identical rejected
+# retries across two sessions).
+_MESH_FILE_DESCRIPTION = (
+    "Path to a .inp mesh file already on the shared adapter workspace "
+    "(e.g. freecad.generate_mesh's own 'mesh_file' result). Does NOT accept "
+    "a work_product_id -- call twin.stage_work_product_file first if you "
+    "only have one, and pass its returned file_path here."
+)
+
 
 class CalculixServer(McpToolServer):
     """CalculiX FEA tool adapter.
@@ -47,7 +62,7 @@ class CalculixServer(McpToolServer):
                     "properties": {
                         "mesh_file": {
                             "type": "string",
-                            "description": "Path to .inp mesh file",
+                            "description": _MESH_FILE_DESCRIPTION,
                         },
                         "load_case": {
                             "type": "string",
@@ -90,7 +105,7 @@ class CalculixServer(McpToolServer):
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "mesh_file": {"type": "string"},
+                        "mesh_file": {"type": "string", "description": _MESH_FILE_DESCRIPTION},
                         "boundary_conditions": {"type": "object"},
                         "analysis_mode": {
                             "type": "string",
@@ -124,7 +139,7 @@ class CalculixServer(McpToolServer):
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "mesh_file": {"type": "string"},
+                        "mesh_file": {"type": "string", "description": _MESH_FILE_DESCRIPTION},
                         "max_aspect_ratio": {"type": "number", "default": 10.0},
                     },
                     "required": ["mesh_file"],
