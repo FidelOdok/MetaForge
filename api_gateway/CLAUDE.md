@@ -14,7 +14,13 @@ HTTP/WebSocket API server -- the "front door" for MetaForge. Built with FastAPI 
 
 - `server.py` -- `create_app()` FastAPI application factory
 - `health.py` -- Health check endpoint
-- `auth/` -- Authentication and authorization
+- `auth/` -- Authentication (MetaForge Cloud). Two modes via
+  `METAFORGE_AUTH_MODE`: `off` (default, local single-user, no middleware
+  installed) and `supabase` (verify a bearer JWT on every route bar a short
+  public allow-list). Enforcement is `AuthMiddleware`, **not** a per-route
+  dependency, so a new route is protected without its author opting in.
+  Misconfigured cloud auth is fatal at startup — it never downgrades to open.
+  See [`docs/deployment/cloud.md`](../docs/deployment/cloud.md).
 - `middleware/` -- Request/response middleware (CORS, logging, etc.)
 - `routes/` -- General API routes
 - `assistant/` -- Assistant-mode endpoints (approval workflow)

@@ -176,6 +176,13 @@ gateway = [
     # only in [knowledge], leaving the built gateway image unable to
     # import ``minio`` — MinIOKBStorage silently fell back / errored.
     "minio>=7.2",
+    # MetaForge Cloud: verifying Supabase access tokens in
+    # ``api_gateway.auth``. The [crypto] extra pulls ``cryptography``, which
+    # RS256/ES256 need — without it PyJWT silently supports only HMAC, and a
+    # gateway configured for asymmetric keys would fail at the first request
+    # rather than at import. Present transitively today; pinned explicitly
+    # because the gateway now depends on it directly.
+    "pyjwt[crypto]>=2.8",
 ]
 
 [tool.pytest.ini_options]

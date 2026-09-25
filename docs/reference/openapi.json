@@ -63,6 +63,49 @@
         "title": "ApprovalRequest",
         "type": "object"
       },
+      "ApproveSketchRequest": {
+        "description": "Human sign-off on a design_sketch work product (follow-up to MET-740/747).",
+        "properties": {
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identifier of the human approving this sketch.",
+            "title": "Approved By"
+          }
+        },
+        "title": "ApproveSketchRequest",
+        "type": "object"
+      },
+      "ApproveSketchResponse": {
+        "description": "Result of approving a design_sketch \u2014 the gate's new state.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "approved_at": {
+            "title": "Approved At",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "approved",
+          "approved_at"
+        ],
+        "title": "ApproveSketchResponse",
+        "type": "object"
+      },
       "AssemblyPart": {
         "description": "One primitive component of an assembly.",
         "properties": {
@@ -1692,6 +1735,11 @@
       "HealthResponse": {
         "description": "Top-level response from ``GET /health``.",
         "properties": {
+          "auth_mode": {
+            "default": "off",
+            "title": "Auth Mode",
+            "type": "string"
+          },
           "components": {
             "default": [],
             "items": {
@@ -2865,6 +2913,23 @@
       "PartRef": {
         "description": "One part of an assembly, referencing a Twin STEP work product.",
         "properties": {
+          "color_rgba": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[r, g, b, a], each 0-1. Attaches a <material><color> to this link's visual geometry in the exported URDF (SDF/USD requests ignore it \u2014 not yet wired to those formats). Authored design color, not a renderer-invented palette.",
+            "title": "Color Rgba"
+          },
           "density_kg_m3": {
             "anyOf": [
               {
@@ -4978,6 +5043,19 @@
             "title": "Joints",
             "type": "array"
           },
+          "mesh_angular_tolerance": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Max angle (radians) between adjacent facet normals. Omit for OCCT's default.",
+            "title": "Mesh Angular Tolerance"
+          },
           "mesh_format": {
             "default": "stl",
             "enum": [
@@ -4986,6 +5064,19 @@
             ],
             "title": "Mesh Format",
             "type": "string"
+          },
+          "mesh_tolerance": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Max linear deviation (mm) between the tessellated mesh and the true CAD surface, applied to every part \u2014 smaller means more triangles on curves/fillets and less visible faceting. Omit to keep OCCT's default.",
+            "title": "Mesh Tolerance"
           },
           "mesh_uri_prefix": {
             "default": "",
@@ -9379,6 +9470,60 @@
           }
         },
         "summary": "Get Twin Node",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/approve-sketch": {
+      "post": {
+        "description": "Human sign-off on a design_sketch work product (follow-up to MET-740/747).\n\nThe forge/agent side creates a sketch as unapproved (twin.commit_design_sketch);\nthis is the dashboard's side of the gate \u2014 a human explicitly approving it\nbefore the calling agent is expected to proceed to real CAD/build work.",
+        "operationId": "approve_design_sketch_v1_twin_nodes__node_id__approve_sketch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveSketchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveSketchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Design Sketch",
         "tags": [
           "twin"
         ]

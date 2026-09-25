@@ -81,6 +81,17 @@ class MetricsRegistry:
         description="Active user sessions",
         labels=["status"],
     )
+    # MetaForge Cloud. ``outcome`` is one of: allowed, public, rejected,
+    # unavailable. Watch "unavailable" in particular — it means the identity
+    # provider could not be reached, which looks like an auth outage to users
+    # but is not a credential problem, and it is the signal that distinguishes
+    # the two.
+    GATEWAY_AUTH_TOTAL = MetricDefinition(
+        name="metaforge_gateway_auth_total",
+        type="counter",
+        description="Gateway authentication decisions",
+        labels=["mode", "outcome"],
+    )
 
     # ── Agent metrics (MET-107) ────────────────────────────────────────
     AGENT_EXECUTION_DURATION = MetricDefinition(

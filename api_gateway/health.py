@@ -56,6 +56,16 @@ class HealthResponse(BaseModel):
     components: list[ComponentHealth] = []
     timestamp: datetime
 
+    #: Which authentication mode this gateway is *actually* running with
+    #: (``off`` or ``supabase``).
+    #:
+    #: Reported here because "is this gateway authenticated?" must be
+    #: answerable by asking the running process, not by reading the config
+    #: someone believes they deployed. A gateway that was meant to be protected
+    #: and silently is not is the failure this field exists to expose, and
+    #: ``/health`` is deliberately public so a probe can check it.
+    auth_mode: str = "off"
+
 
 # ---------------------------------------------------------------------------
 # Health checker
@@ -139,6 +149,23 @@ def set_health_checker(checker: HealthChecker) -> None:
     _health_checker = checker
 
 
+# The auth mode is resolved by ``create_app`` and published here rather than
+# imported the other way round, which would make ``health`` depend on
+# ``server`` and close an import cycle.
+_reported_auth_mode: str = "off"
+
+
+def set_reported_auth_mode(mode: str) -> None:
+    """Record the resolved auth mode for ``GET /health`` to report."""
+    global _reported_auth_mode  # noqa: PLW0603
+    _reported_auth_mode = mode
+
+
+def get_reported_auth_mode() -> str:
+    """The auth mode ``GET /health`` currently reports."""
+    return _reported_auth_mode
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -151,4 +178,5 @@ async def health_check(
     checker: HealthChecker = Depends(get_health_checker),
 ) -> HealthResponse:
     """Return the aggregated health of the gateway and its dependencies."""
-    return await checker.check_all()
+    response = await checker.check_all()
+    return response.model_copy(update={"auth_mode": get_reported_auth_mode()})
