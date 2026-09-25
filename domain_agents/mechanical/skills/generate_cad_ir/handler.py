@@ -26,6 +26,7 @@ from domain_agents.shared.freecad_lowering import (
 )
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 from twin_core.design_ir import DesignIR
 
 from .schema import BoundingBox, GenerateCadIrInput, GenerateCadIrOutput
@@ -146,10 +147,27 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             model_url: str | None = None
             commit_error: str | None = None
             if input_data.commit:
+                # FORGE-100: same canonical measured keys as
+                # generate_cad/generate_enclosure/create_assembly, computed
+                # directly from what the lowering pass already measured --
+                # this skill doesn't route through commit_geometry() (see
+                # _commit_geometry's own docstring for why), so it can't
+                # reuse measured_metadata_from_cad_result() unmodified, but
+                # writes the exact same key names.
+                extra_metadata: dict[str, Any] = {
+                    "volume_mm3": result.volume_mm3,
+                    "surface_area_mm2": result.surface_area_mm2,
+                    "bbox_mm": result.bounding_box,
+                }
+                if input_data.material:
+                    density = resolve_density_kg_m3(input_data.material)
+                    extra_metadata["mass_kg"] = round(result.volume_mm3 * 1e-9 * density, 6)
+
                 committed, twin_node_id, model_url, commit_error = await self._commit_geometry(
                     step_bytes=result.step_bytes,
-                    material=input_data.material,
+                    name=input_data.name,
                     project_id=input_data.project_id,
+                    extra_metadata=extra_metadata,
                 )
                 span.set_attribute("committed", committed)
 
@@ -169,7 +187,12 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             )
 
     async def _commit_geometry(
-        self, *, step_bytes: bytes, material: str, project_id: str | None
+        self,
+        *,
+        step_bytes: bytes,
+        name: str,
+        project_id: str | None,
+        extra_metadata: dict[str, Any],
     ) -> tuple[bool, str | None, str | None, str | None]:
         """Best-effort persist the STEP bytes via twin.commit_geometry.
 
@@ -184,13 +207,15 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             return False, None, None, "twin.commit_geometry tool is not available"
 
         arguments: dict[str, Any] = {
-            "name": f"design_ir ({material})",
+            "name": name,
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
             "domain": "mechanical",
             "format": "step",
         }
         if project_id:
             arguments["project_id"] = project_id
+        if extra_metadata:
+            arguments["extra_metadata"] = extra_metadata
 
         try:
             result = await self.context.mcp.invoke("twin.commit_geometry", arguments, timeout=60)
