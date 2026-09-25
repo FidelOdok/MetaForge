@@ -130,7 +130,11 @@ class FreecadServer(McpToolServer):
                 tool_id="freecad.generate_mesh",
                 adapter_id="freecad",
                 name="Generate Mesh",
-                description="Generate finite element mesh from CAD geometry",
+                description=(
+                    "Generate a volumetric finite-element mesh (real C3D4 "
+                    "tetrahedra, via gmsh) from a STEP file -- for output_format="
+                    "'inp' this is what calculix.validate_mesh/run_fea consume."
+                ),
                 capability="mesh_generation",
                 input_schema={
                     "type": "object",
@@ -147,7 +151,13 @@ class FreecadServer(McpToolServer):
                         "algorithm": {
                             "type": "string",
                             "enum": ["netgen", "gmsh", "mefisto"],
-                            "description": "Meshing algorithm",
+                            "description": (
+                                "Meshing algorithm. This adapter only has gmsh "
+                                "available (no separate netgen/mefisto backend) "
+                                "-- any value runs gmsh's own 3D algorithm; a "
+                                "non-'gmsh' choice is accepted but not honored "
+                                "as a distinct backend."
+                            ),
                         },
                         "output_format": {
                             "type": "string",
