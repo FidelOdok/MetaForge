@@ -1,10 +1,11 @@
-"""TwinConsistencyGateChecker: real G3/G4/G5/G8 status for design-flow gates
-(FORGE-73).
+"""TwinConsistencyGateChecker: real G3-G8 status for design-flow gates
+(FORGE-73/91).
 
-Only four gate_ids are mapped -- see Gate.gate_id's own docstring for why
-G6/G7 aren't (yet). InMemoryTwinAPI throughout since evaluate_g3_feasibility/
-evaluate_g4_architecture/evaluate_g5_concept_selection/evaluate_g8_release
-do real graph reads, not something worth faking.
+Six gate_ids (G3-G8) are mapped -- see Gate.gate_id's own docstring.
+InMemoryTwinAPI throughout since evaluate_g3_feasibility/
+evaluate_g4_architecture/evaluate_g5_concept_selection/
+evaluate_g6_design_sketch/evaluate_g7_verification_readiness/
+evaluate_g8_release do real graph reads, not something worth faking.
 """
 
 from __future__ import annotations
@@ -34,12 +35,13 @@ def checker(twin):
 
 
 class TestUnmappedGateIds:
-    async def test_g6_is_unmapped(self, checker, project_id):
-        report = await checker.check("G6", str(project_id))
-        assert report == ConsistencyGateReport(checked=False)
-
     async def test_unknown_gate_id_is_unmapped(self, checker, project_id):
         report = await checker.check("G99", str(project_id))
+        assert report == ConsistencyGateReport(checked=False)
+
+    async def test_g0_is_unmapped(self, checker, project_id):
+        """G0-G2 have no dedicated evaluator module yet."""
+        report = await checker.check("G0", str(project_id))
         assert report == ConsistencyGateReport(checked=False)
 
 
@@ -150,6 +152,36 @@ class TestG5ConceptSelection:
         )
         report = await checker.check("G5", str(project_id))
         assert report.evaluation.status.value != "failed"
+
+
+class TestG6DesignSketch:
+    async def test_real_evaluation_comes_back(self, checker, project_id):
+        report = await checker.check("G6", str(project_id))
+        assert report.checked is True
+        assert report.evaluation is not None
+        assert report.evaluation.gate_id == "G6"
+        assert len(report.evaluation.checks) > 0
+
+    async def test_no_design_sketch_is_not_evaluated_not_a_silent_pass(self, checker, project_id):
+        report = await checker.check("G6", str(project_id))
+        check = next(c for c in report.evaluation.checks if c.id == "geometry_layout")
+        assert check.status.value == "not_evaluated"
+
+
+class TestG7VerificationReadiness:
+    async def test_real_evaluation_comes_back(self, checker, project_id):
+        report = await checker.check("G7", str(project_id))
+        assert report.checked is True
+        assert report.evaluation is not None
+        assert report.evaluation.gate_id == "G7"
+        assert len(report.evaluation.checks) > 0
+
+    async def test_no_critical_requirements_is_not_evaluated_not_a_silent_pass(
+        self, checker, project_id
+    ):
+        report = await checker.check("G7", str(project_id))
+        check = next(c for c in report.evaluation.checks if c.id == "requirements:none-critical")
+        assert check.status.value == "not_evaluated"
 
 
 class TestG8Release:

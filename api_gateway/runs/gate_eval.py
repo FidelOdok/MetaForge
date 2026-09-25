@@ -22,6 +22,8 @@ from twin_core.consistency import (
     evaluate_g3_feasibility,
     evaluate_g4_architecture,
     evaluate_g5_concept_selection,
+    evaluate_g6_design_sketch,
+    evaluate_g7_verification_readiness,
     evaluate_g8_release,
 )
 
@@ -202,10 +204,12 @@ class TwinConstraintChecker:
 
 class TwinConsistencyGateChecker:
     """`ConsistencyGateChecker` backed by `twin_core.consistency.gates`
-    (FORGE-73). Only four ``gate_id``s are mapped today -- see
-    :class:`~orchestrator.design_flow.spec.Gate`'s own docstring for why
-    G6/G7 aren't (yet). Purely informational: the executor never fails a
-    gate on this checker's result (no ``enforce_*`` flag exists for it).
+    (FORGE-73/91). Six ``gate_id``s (G3-G8) are mapped; G0-G2 have no
+    dedicated evaluator module yet. Purely informational: the executor
+    never fails a gate on this checker's result (no ``enforce_*`` flag
+    exists for it). G6/G7 don't inject a ``traceability_coverage``
+    accessor -- same posture as every other gate here, none do -- so their
+    requirement-coverage check stays ``NOT_EVALUATED`` until that's wired.
     """
 
     def __init__(self, twin: Any) -> None:
@@ -225,6 +229,10 @@ class TwinConsistencyGateChecker:
             evaluation = await evaluate_g4_architecture(self._twin, pid)
         elif gate_id == "G5":
             evaluation = await evaluate_g5_concept_selection(self._twin, pid)
+        elif gate_id == "G6":
+            evaluation = await evaluate_g6_design_sketch(self._twin, pid)
+        elif gate_id == "G7":
+            evaluation = await evaluate_g7_verification_readiness(self._twin, pid)
         elif gate_id == "G8":
             evaluation = await evaluate_g8_release(self._twin, pid)
         else:
