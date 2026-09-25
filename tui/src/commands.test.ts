@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs, resolveLoginMethod } from "./commands.js";
 
 test("splits positionals from long and short flags", () => {
@@ -69,4 +72,39 @@ test("resolveLoginMethod defaults non-codex providers to api-key", () => {
 test("resolveLoginMethod: an explicit --method always wins", () => {
   assert.equal(resolveLoginMethod("api-key", "openai-codex", "openai-codex"), "api-key");
   assert.equal(resolveLoginMethod("oauth", "openai", "openai"), "oauth");
+});
+
+// FORGE-92: a bare `process.exit()` right after `process.stdout.write()`
+// truncates output once it exceeds the pipe buffer -- writes to a pipe are
+// async in Node/Bun, and exit() doesn't wait for them to drain (observed:
+// forge twin list --json | wc -c silently cut at exactly 131072 bytes,
+// while redirecting to a file -- a synchronous write -- hid the bug
+// entirely). exitAfterFlush must deliver every byte through a real pipe.
+test("exitAfterFlush drains output larger than the pipe buffer before exiting", async () => {
+  const HERE = path.dirname(fileURLToPath(import.meta.url));
+  const commandsPath = path.join(HERE, "commands.ts");
+  const size = 1_500_000; // well past the observed 128 KiB pipe-buffer cliff
+  // Generate the payload *inside* the spawned process rather than embedding
+  // it as a literal in the script text -- passed as an argv string it blows
+  // past the OS's ARG_MAX (spawn fails with E2BIG well under 1.5 MB).
+  const script = [
+    `import { exitAfterFlush } from ${JSON.stringify(commandsPath)};`,
+    `process.stdout.write("x".repeat(${size}));`,
+    `exitAfterFlush(0);`,
+  ].join("\n");
+
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", script],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const chunks: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+  const code: number = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (c) => resolve(c ?? -1));
+  });
+
+  assert.equal(code, 0);
+  assert.equal(Buffer.concat(chunks).length, size);
 });
