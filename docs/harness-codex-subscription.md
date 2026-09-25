@@ -73,3 +73,12 @@ credentials from `~/.codex/auth.json` and calls the Responses API.
 - **HTTP 400/401** — the subscription is the subsidy; ensure the logged-in
   account has an active ChatGPT Plus/Pro plan, and that the token refreshed
   (delete `~/.codex/auth.json` and re-login if it's stale/revoked).
+- **Model must be a bare slug, never `vendor/model`** (FORGE-93) — Codex uses
+  its own model ids (`gpt-5.5`, `gpt-5-codex`, ...), not OpenRouter-style
+  `vendor/model` slugs like `openai/gpt-4o`. `PUT /v1/harness/selection`
+  (and therefore `forge auth use openai-codex --model ...` /
+  `forge auth login --provider openai-codex --model ...`) rejects a slashed
+  model for this provider with a 400 before it can become the durable active
+  selection — previously an invalid pairing like `openai-codex` +
+  `openai/gpt-4o` silently 400'd on every call and fell back to a different
+  provider, with `forge auth list` still reporting Codex as active.
