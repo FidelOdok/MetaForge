@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -32,15 +34,6 @@ except ImportError:
     Import = None  # type: ignore[assignment]
     Part = None  # type: ignore[assignment]
     HAS_FREECAD = False
-
-# Conditional Mesh import (FEM workbench)
-try:
-    import Mesh  # type: ignore[import-untyped]
-
-    HAS_MESH = True
-except ImportError:
-    Mesh = None  # type: ignore[assignment]
-    HAS_MESH = False
 
 # Importing the Sketcher + PartDesign workbench modules registers their object
 # types (``Sketcher::SketchObject``, ``PartDesign::Body`` / ``Pad`` / ``Pocket``
@@ -295,6 +288,63 @@ class FreecadNotAvailableError(RuntimeError):
                 "Run inside the FreeCAD Docker container or install FreeCAD with Python support."
             )
         )
+
+
+# FORGE-99: gmsh CLI has its own real 3D meshing algorithm but no mode
+# literally named "netgen"/"mefisto" (those are separate, unrelated
+# programs) -- so the schema's algorithm choices don't map to distinct real
+# backends here. Kept as a recognized-but-not-fully-honored input rather
+# than silently dropped: an unrecognized value still 400s, a recognized one
+# just gets logged when it isn't "gmsh" (see generate_mesh below).
+_MESH_ALGORITHMS = ("gmsh", "netgen", "mefisto")
+
+_MESH_TIMEOUT_SECONDS = 180
+
+# CalculiX/Abaqus element-type prefixes that are real *volumetric* solid
+# elements (what a structural FEA solve actually needs) -- distinct from the
+# lower-dimensional boundary elements (T3D2 edges, CPS3/CPS4 surface facets)
+# gmsh also emits by default as named element sets per STEP entity, which
+# ARE useful (free node-set groups for applying loads/BCs to specific faces)
+# but aren't themselves solvable volume elements.
+_VOLUME_ELEMENT_PREFIXES = ("C3D",)
+
+
+def _parse_inp_mesh_counts(inp_path: str) -> tuple[int, dict[str, int]]:
+    """Count nodes and elements-by-type in a CalculiX/Abaqus ``.inp`` mesh.
+
+    Mirrors ``calculix.adapter._validate_mesh_file``'s own ``*NODE``/
+    ``*ELEMENT`` block-scanning approach (same file format, same convention)
+    but also tracks each ``*ELEMENT, type=X`` block's element type, so a
+    caller can tell a real volumetric mesh (``C3D4``/``C3D10``/...) from a
+    surface-only one, instead of a single opaque total.
+    """
+    node_count = 0
+    counts_by_type: dict[str, int] = {}
+    current_type: str | None = None
+    in_nodes = False
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.upper().startswith("*NODE"):
+                current_type = None
+                in_nodes = True
+            elif stripped.upper().startswith("*ELEMENT"):
+                in_nodes = False
+                current_type = "UNKNOWN"
+                for part in stripped.split(","):
+                    key, _, value = part.strip().partition("=")
+                    if key.strip().upper() == "TYPE":
+                        current_type = value.strip()
+            elif stripped.startswith("*"):
+                in_nodes = False
+                current_type = None
+            elif in_nodes:
+                node_count += 1
+            elif current_type is not None:
+                counts_by_type[current_type] = counts_by_type.get(current_type, 0) + 1
+    return node_count, counts_by_type
 
 
 # Shape dimension defaults per shape type
@@ -636,18 +686,61 @@ class FreecadOperations:
         algorithm: str = "netgen",
         output_format: str = "inp",
     ) -> dict[str, Any]:
-        """Generate a finite element mesh from a CAD file.
+        """Generate a volumetric finite-element mesh from a CAD file (FORGE-99).
+
+        FreeCAD's ``Mesh`` module (the previous implementation) can only
+        produce a surface triangulation (``Shape.tessellate()`` returns
+        (points, facet-index-triples), which ``Mesh.addFacets()`` doesn't
+        even accept the shape of -- it failed on every input with
+        ``TypeError: expect a sequence of floats or Vector``) -- not the
+        volumetric solid elements (C3D4/C3D10 tetrahedra) CalculiX needs to
+        solve a stress analysis on a solid part. This shells out to the
+        ``gmsh`` CLI (bundled in this adapter's image alongside FreeCAD)
+        instead, which meshes a STEP file directly into real tetrahedra and
+        writes CalculiX/Abaqus ``.inp`` format natively -- verified against
+        a real STEP box: a ``*ELEMENT, type=C3D4`` block with real
+        tetrahedra, plus free ``*ELSET`` groups per original STEP face/edge
+        (``Surface1``, ``Line1``, ...) useful for applying loads/BCs to a
+        specific face later.
 
         Args:
-            input_file: Path to the source CAD file.
-            element_size: Target element size for meshing.
-            algorithm: Meshing algorithm (netgen, gmsh, mefisto).
-            output_format: Output format (inp, unv, stl).
+            input_file: Path to the source CAD file (STEP).
+            element_size: Target element size for meshing (gmsh ``-clmax``).
+            algorithm: Meshing algorithm. gmsh has no backend literally named
+                "netgen"/"mefisto" (those are separate, unrelated programs) --
+                any of the three schema-declared values runs gmsh's own 3D
+                algorithm; a non-"gmsh" value is honored as a recognized
+                request but logged loudly, never silently substituted without
+                a trace.
+            output_format: Output format (inp, unv, stl) -- gmsh infers the
+                writer from ``output_path``'s extension.
 
         Returns:
-            Dict with mesh file path, node/element counts, and quality metrics.
+            Dict with mesh file path, node/element counts (total and by
+            CalculiX element type), and quality metrics.
         """
         self._require_freecad()
+
+        if algorithm not in _MESH_ALGORITHMS:
+            raise ValueError(
+                f"Unsupported meshing algorithm '{algorithm}' -- accepted: "
+                f"{', '.join(_MESH_ALGORITHMS)}"
+            )
+        if algorithm != "gmsh":
+            logger.warning(
+                "freecad_mesh_algorithm_not_honored",
+                requested=algorithm,
+                actual="gmsh",
+                reason="gmsh is the only meshing backend this adapter has -- "
+                "there is no separate netgen/mefisto integration",
+            )
+
+        gmsh_binary = shutil.which("gmsh")
+        if gmsh_binary is None:
+            raise RuntimeError("gmsh binary is not available on PATH")
+
+        if not Path(input_file).exists():
+            raise FileNotFoundError(f"CAD file not found: {input_file}")
 
         with tracer.start_as_current_span("freecad.mesh") as span:
             span.set_attribute("input.file", input_file)
@@ -660,62 +753,95 @@ class FreecadOperations:
             output_path = os.path.join(self.work_dir, f"{stem}.{output_format}")
             self._ensure_output_dir(output_path)
 
+            cmd = [
+                gmsh_binary,
+                input_file,
+                "-3",
+                "-clmax",
+                str(element_size),
+                "-o",
+                output_path,
+            ]
             try:
-                # See export_step()'s comment above -- input_file is a STEP
-                # file, not a native .FCStd project, so it must be loaded via
-                # Import.insert() into a fresh document, not openDocument()
-                # (FORGE-83).
-                doc = FreeCAD.newDocument()
-                Import.insert(input_file, doc.Name)
+                result = subprocess.run(  # noqa: S603 — fixed binary, no shell, args are file paths/numbers
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=_MESH_TIMEOUT_SECONDS,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                err = RuntimeError(f"gmsh meshing timed out after {_MESH_TIMEOUT_SECONDS}s")
+                span.record_exception(err)
+                raise err from exc
 
-                # Find the first shape object
-                shape = None
-                for obj in doc.Objects:
-                    if hasattr(obj, "Shape"):
-                        shape = obj.Shape
-                        break
+            if result.returncode != 0:
+                err = RuntimeError(
+                    f"gmsh meshing failed (exit {result.returncode}): "
+                    f"{result.stderr.strip()[-2000:] or result.stdout.strip()[-2000:]}"
+                )
+                span.record_exception(err)
+                raise err
 
-                if shape is None:
-                    raise ValueError(f"No shapes found in {input_file}")
+            if not Path(output_path).exists():
+                err = RuntimeError(
+                    f"gmsh exited 0 but did not produce {output_path} -- stderr: "
+                    f"{result.stderr.strip()[-500:]}"
+                )
+                span.record_exception(err)
+                raise err
 
-                # Use Mesh module for meshing
-                if not HAS_MESH:
-                    raise RuntimeError("FreeCAD Mesh module is not available")
+            # Node/element counts are only meaningful for the CalculiX/Abaqus
+            # .inp format this system's FEA pipeline actually consumes
+            # (calculix.validate_mesh / calculix.run_fea both require .inp) --
+            # .unv/.stl use different, unparsed formats here.
+            if output_format == "inp":
+                num_nodes, counts_by_type = _parse_inp_mesh_counts(output_path)
+            else:
+                num_nodes, counts_by_type = 0, {}
 
-                mesh_obj = Mesh.Mesh()
-                mesh_obj.addFacets(shape.tessellate(element_size)[1])
-
-                # Export
-                mesh_obj.write(output_path)
-
-                num_points = mesh_obj.CountPoints
-                num_facets = mesh_obj.CountFacets
-
-                FreeCAD.closeDocument(doc.Name)
-            except Exception as exc:
-                span.record_exception(exc)
-                raise
+            num_volume_elements = sum(
+                n
+                for etype, n in counts_by_type.items()
+                if etype.startswith(_VOLUME_ELEMENT_PREFIXES)
+            )
+            if output_format == "inp" and num_volume_elements == 0:
+                logger.warning(
+                    "freecad_mesh_no_volume_elements",
+                    input_file=input_file,
+                    output_path=output_path,
+                    counts_by_type=counts_by_type,
+                    reason="no C3D* (volumetric) elements in the mesh -- a "
+                    "structural FEA solve needs solid elements, not just "
+                    "surface/edge ones",
+                )
 
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
+            span.set_attribute("mesh.num_nodes", num_nodes)
+            span.set_attribute("mesh.num_volume_elements", num_volume_elements)
 
             logger.info(
                 "Generated mesh",
                 input_file=input_file,
                 output_path=output_path,
-                num_nodes=num_points,
-                num_elements=num_facets,
+                num_nodes=num_nodes,
+                num_elements=sum(counts_by_type.values()),
+                num_volume_elements=num_volume_elements,
+                element_counts_by_type=counts_by_type,
                 duration_s=round(elapsed, 3),
             )
 
             return {
                 "mesh_file": output_path,
-                "num_nodes": num_points,
-                "num_elements": num_facets,
-                "element_types": ["triangle"],
+                "num_nodes": num_nodes,
+                "num_elements": sum(counts_by_type.values()),
+                "element_types": sorted(counts_by_type),
                 "quality_metrics": {
                     "element_size": element_size,
-                    "algorithm": algorithm,
+                    "algorithm": "gmsh",
+                    "num_volume_elements": num_volume_elements,
+                    "element_counts_by_type": counts_by_type,
                 },
             }
 
