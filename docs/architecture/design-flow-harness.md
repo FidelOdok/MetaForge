@@ -29,8 +29,8 @@ mechanical phases for reliable geometry):
 |-------|------------------------|------|
 | **Requirements** | Functional requirements, constraints, primary load/use case → twin | Requirements sign-off |
 | **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
-| **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review |
-| **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off |
+| **Detailed Design** | Author the critical subsystem geometry/schematic + rationale → twin | Design review (G6) |
+| **Simulation & V&V** | Run FEA / ERC-DRC, extract the key result, record a verdict → twin | V&V sign-off (G7) |
 
 **`hardware_v1`** — the full hardware/robotics lifecycle. Every phase is driven
 by a **goal-driven deterministic handler** (see below) so each phase reliably
@@ -42,10 +42,10 @@ lands its real, typed deliverable in the twin:
 | **Preliminary Feasibility** | Mass/cost/power budgets, first-order structural/thermal/geometry feasibility, major risks → twin | Preliminary Feasibility Gate (G3) |
 | **System Architecture** | Subsystem decomposition, interfaces, mass/power/compute/cost budgets, actuation/sensing/compute/power selection → twin | Architecture Gate (G4) |
 | **Concept Selection** | Trade study: propose 2-3 concepts satisfying the architecture, select one with alternatives + rationale → twin | Concept Selection Gate (G5) |
-| **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review |
+| **Mechanical Design** | Author + commit the load-bearing/motion-critical geometry, material + dimensions → twin | Mechanical design review (G6) |
 | **Electronics Design** | Power budget, schematic topology, component selection, ERC → twin | Electronics review |
 | **Firmware & Control** | Control loop, task/RTOS structure, pin map + drivers → twin | Firmware review |
-| **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off |
+| **Simulation & V&V** | FEA / kinematics / ERC-DRC / thermal, pass-fail verdicts vs requirements → twin | V&V sign-off (G7) |
 | **Manufacturing Prep** | BOM + cost, fabrication outputs, assembly + bring-up plan → twin | Manufacturing readiness / Release Gate (G8) |
 
 The Preliminary Feasibility gate's mass/cost/power and risk criteria are
@@ -70,20 +70,25 @@ declarations that only count once approved via
 `twin.approve_engineering_entity` (see
 [Waiver / release model](#waiver-release-model-forge-73) below), plus
 "required verification complete" via the same injected
-`traceability_coverage` accessor G6 uses. Two more gate evaluators exist but
-have no phase of their own in any flow yet: `evaluate_g6_design_sketch` (G6,
+`traceability_coverage` accessor G6 uses. `evaluate_g6_design_sketch` (G6,
 Preliminary Design / Design Sketch — reads the existing `design_sketch` work
 product + its `approve-sketch` REST endpoint, and the `system_architecture`
 work product's component/interface counts, rather than inventing a parallel
 checkpoint; its "requirement coverage" criterion is likewise real when a
-caller supplies a `traceability_coverage` accessor, FORGE-73) and
-`evaluate_g7_verification_readiness` (G7 — per-critical-requirement
-verification-method/ownership checks, reusing the same `metadata
-["verification_method"]`/`Constraint.source` conventions `TraceabilityAgent`
-already established). See `twin_core/consistency/gates.py`'s module
-docstring for exactly which checks each evaluates today vs. still advisory
-pending Phase 6 (Evidence Integration, FORGE-41) or a not-yet-built phase
-for that gate.
+caller supplies a `traceability_coverage` accessor, FORGE-73) is now mapped
+onto each flow's `design`/"Mechanical Design"/"Detailed Design" phase gate
+(FORGE-91) — the natural preliminary-design checkpoint right after Concept
+Selection (G5). `evaluate_g7_verification_readiness` (G7 —
+per-critical-requirement verification-method/ownership checks, reusing the
+same `metadata["verification_method"]`/`Constraint.source` conventions
+`TraceabilityAgent` already established) is likewise now mapped onto each
+flow's `simulation`/"Simulation & V&V" phase gate (FORGE-91), the checkpoint
+right before Manufacturing / Release (G8). Neither injects a
+`traceability_coverage` accessor from this checker (same as every other
+gate here — none do today), so their requirement-coverage check stays
+`NOT_EVALUATED` until that's wired. See `twin_core/consistency/gates.py`'s
+module docstring for exactly which checks each evaluates today vs. still
+advisory pending Phase 6 (Evidence Integration, FORGE-41).
 
 Select a flow with the `flow` id in the run request (`"flow": "hardware_v1"`).
 A full `hardware_v1` run now commits **nine real, typed work products** —
@@ -269,28 +274,30 @@ the project's own constraint data. The structured constraint-creation tool
 (MET-582) is what fills that data from the Requirements phase; decision-derived
 phase applicability (MET-585) is the planned complement.
 
-## Consistency-gate status (FORGE-73)
+## Consistency-gate status (FORGE-73/91)
 
-Two gates carry a real spec G-number in `Gate.gate_id` — the Preliminary
-Feasibility Gate (`"G3"`, `design_v1`/`mech_v1`'s `feasibility` phase) and the
-Architecture Gate (`"G4"`, `hardware_v1`'s `architecture` phase). At those
-two gates, `TwinConsistencyGateChecker` (`api_gateway/runs/gate_eval.py`)
-calls the matching `twin_core.consistency.gates.evaluate_gN_*` evaluator and
-appends its real status to the approval reason — e.g. `G3:
-ready_for_review (2 pass, 1 fail, 6 not evaluated)`.
+Six gates carry a real spec G-number in `Gate.gate_id` — the Preliminary
+Feasibility Gate (`"G3"`, `design_v1`/`hardware_v1`/`mech_v1`'s
+`feasibility` phase), the Architecture Gate (`"G4"`, `hardware_v1`'s
+`architecture` phase), the Concept Selection Gate (`"G5"`, `hardware_v1`'s
+`concept_selection` phase), the Design review Gate (`"G6"`, every flow's
+`design` phase), the V&V sign-off Gate (`"G7"`, every flow's `simulation`
+phase), and the Manufacturing readiness / Release Gate (`"G8"`,
+`hardware_v1`'s `manufacturing` phase). At those gates,
+`TwinConsistencyGateChecker` (`api_gateway/runs/gate_eval.py`) calls the
+matching `twin_core.consistency.gates.evaluate_gN_*` evaluator and appends
+its real status to the approval reason — e.g. `G3: ready_for_review (2
+pass, 1 fail, 6 not evaluated)`.
 
 This is **purely informational**, unlike `enforce_constraints` above: there is
 no `enforce_consistency_gate` flag, so a gate never fails automatically on
 this checker's result — even a `failed` G-number status still just pauses for
-ordinary human review, same as before this existed. Every other gate has no
-`gate_id` at all, so the checker is never even consulted for them.
-
-The remaining G-numbers (G6 Design Sketch, G7 Verification Readiness, G8
-Release) don't yet correspond to any Phase's gate — G6 deliberately
-formalizes the separate `design_sketch`/`approve-sketch` mechanism instead
-of a Phase gate, and G7/G8 have no mapping decided. Wiring them in (and
-deciding whether any of G3-G8 should ever gain real enforcement) is
-separate, later work.
+ordinary human review, same as before this existed. Every other gate (the
+shared Intent/Needs phases, Requirements, Electronics, Firmware) has no
+`gate_id` at all, so the checker is never even consulted for them. G0-G2
+have no dedicated evaluator module yet — wiring those in, and deciding
+whether any of G3-G8 should ever gain real enforcement, is separate, later
+work.
 
 ### Budget/invariant persistence (FORGE-73)
 

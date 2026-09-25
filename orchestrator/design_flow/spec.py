@@ -35,14 +35,14 @@ class Gate:
     so the human reviewer sees real data, not just prose. This keeps the gate
     skeleton hardcoded while the criteria come from the project itself.
 
-    ``gate_id`` (FORGE-73): the spec's own G-number ("G3", "G4", "G5", "G8")
-    when this gate corresponds to a real ``twin_core.consistency.gates``
-    evaluator -- ``None`` for gates that don't (most of them; G6/G7 have no
-    Phase mapping decided yet, see ``executor.py``'s ``ConsistencyGateChecker``).
-    Purely informational today: a mapped gate's real evaluation status is
-    surfaced in the human-facing gate reason, same as ``enforce_constraints``
-    already does for constraint state, but nothing here makes it block a
-    transition -- that's a deliberate, separate decision, not made here.
+    ``gate_id`` (FORGE-73/91): the spec's own G-number ("G3" .. "G8") when
+    this gate corresponds to a real ``twin_core.consistency.gates`` evaluator
+    -- ``None`` for gates that don't (G0-G2 have no dedicated evaluator
+    module yet). Purely informational today: a mapped gate's real evaluation
+    status is surfaced in the human-facing gate reason, same as
+    ``enforce_constraints`` already does for constraint state, but nothing
+    here makes it block a transition -- that's a deliberate, separate
+    decision, not made here.
     """
 
     name: str
@@ -242,7 +242,8 @@ DESIGN_V1 = FlowDefinition(
             required_deliverables=("cad_model",),
             disciplines=("mechanical",),
             gate=Gate(
-                name="Design review",
+                name="Design review (G6)",
+                gate_id="G6",
                 criteria=(
                     "Critical subsystem geometry/schematic authored",
                     "Material + key dimensions chosen with rationale",
@@ -266,7 +267,8 @@ DESIGN_V1 = FlowDefinition(
             required_deliverables=("design_decision",),
             disciplines=("simulation",),
             gate=Gate(
-                name="V&V sign-off",
+                name="V&V sign-off (G7)",
+                gate_id="G7",
                 enforce_constraints=True,
                 criteria=(
                     "Analysis executed on the critical subsystem",
@@ -416,7 +418,8 @@ HARDWARE_V1 = FlowDefinition(
             required_deliverables=("cad_model",),
             disciplines=("mechanical",),
             gate=Gate(
-                name="Mechanical design review",
+                name="Mechanical design review (G6)",
+                gate_id="G6",
                 criteria=(
                     "Critical geometry authored and committed to the twin",
                     "Material and key dimensions chosen with rationale",
@@ -483,7 +486,8 @@ HARDWARE_V1 = FlowDefinition(
             required_deliverables=("design_decision",),
             disciplines=("simulation",),
             gate=Gate(
-                name="V&V sign-off",
+                name="V&V sign-off (G7)",
+                gate_id="G7",
                 criteria=(
                     "Analysis executed on the critical subsystem",
                     "Key results extracted (stress / safety factor / torque / violations)",
@@ -589,7 +593,8 @@ MECH_V1 = FlowDefinition(
             required_deliverables=("cad_model",),
             disciplines=("mechanical",),
             gate=Gate(
-                name="Mechanical design review",
+                name="Mechanical design review (G6)",
+                gate_id="G6",
                 criteria=(
                     "The committed geometry is the part the goal asked for",
                     "Sized to the requirements; material chosen with rationale",
@@ -610,7 +615,8 @@ MECH_V1 = FlowDefinition(
             required_deliverables=("design_decision",),
             disciplines=("simulation",),
             gate=Gate(
-                name="V&V sign-off",
+                name="V&V sign-off (G7)",
+                gate_id="G7",
                 enforce_constraints=True,
                 criteria=(
                     "FEA executed on the committed geometry",

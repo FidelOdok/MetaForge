@@ -359,8 +359,8 @@ class DesignFlowExecutor:
                 self._store.fail(run_id, msg)
                 return
 
-            # FORGE-73: real G3/G4 status, purely informational (see
-            # Gate.gate_id's docstring for why this never fails a gate).
+            # FORGE-73/91: real G-number status (G3-G8), purely informational
+            # (see Gate.gate_id's docstring for why this never fails a gate).
             consistency = await self._consistency(gate.gate_id, ctx)
 
             # Register the waiter BEFORE moving to awaiting_approval so a fast
