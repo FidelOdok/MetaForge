@@ -283,6 +283,16 @@ is exactly backwards. Instead:
 
 - every **native** tool is kept (few, curated, session-critical — e.g.
   `chat.set_project_scope` and the skill layer);
+- two more classes are protected the same way (FORGE-94), before the
+  round-robin runs: any tool `search_tools` has **pinned**
+  (`ToolRegistry.pin`/`pinned_names`), and any tool whose name ends
+  `_open_session` — a structural dependency for every other tool its own
+  adapter registers, so dropping just the session opener while keeping its
+  siblings is actively harmful in a way dropping any other single tool
+  isn't (this is what let FreeCAD's whole stateful authoring surface —
+  `open_session`, `pad_sketch`, `pocket_sketch`, `revolve_sketch`, ... — go
+  uncallable in practice: a large adapter's own alphabetical tail is
+  exactly where the round-robin's global budget ran out);
 - the remaining budget is filled **round-robin across MCP origins**, so each
   adapter keeps a share and no capability vanishes wholesale;
 - the drop is **loud** — `tool_schemas_truncated` logs the limit, counts, and
@@ -317,6 +327,19 @@ next step. Its handler is built before `build_agent_runtime` constructs the
 `ToolRegistry` it registers into, so it reads the live runtime out of a
 mutable cell (`runtime_cell["runtime"]`, populated right after
 `build_agent_runtime` returns) rather than closing over it directly.
+
+**"Registered" isn't the same as "in the schema" (FORGE-94).** A tool
+already present in the `ToolRegistry` — because an earlier `search_tools`
+call added it, or it was in scope all along — is only reported as "already
+available," never re-registered. But *registered* and *sent to the
+provider this turn* are two different questions: `_select_tools` truncates
+the outgoing schema array separately, per call, against the provider's
+tools-array cap, and a merely-registered tool has no special protection
+from that round-robin. Without pinning, `search_tools` could report a tool
+as available on one turn and have the very next turn's cap silently drop it
+again — a promise the model has no way to detect is false. The handler now
+calls `runtime.tools.pin(full_name)` for every match, registered or
+already-known, so the promise is actually kept.
 
 ## Surfacing turn failures
 

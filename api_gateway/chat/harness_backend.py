@@ -418,6 +418,16 @@ def make_search_tools_tool(
                 continue
             full_name = ToolRegistry.mcp_name(server, tdef.name)
             if full_name in known:
+                # FORGE-94: "registered" only means present in the
+                # ToolRegistry, NOT present in the schema array a provider
+                # actually receives -- `_select_tools` (native_tools.py)
+                # truncates that array separately, per turn, against the
+                # provider's tools-array cap. A tool reported here as
+                # "already available" that the round-robin then drops again
+                # next turn is a promise the model has no way to detect is
+                # false. Pinning closes the gap: once pinned, `_select_tools`
+                # keeps it unconditionally, so the promise is actually true.
+                runtime.tools.pin(full_name)
                 already.append(full_name)
                 continue
             if len(registered) >= _MAX_TOOL_SEARCH_RESULTS:
@@ -433,8 +443,10 @@ def make_search_tools_tool(
                     requires_approval=tdef.requires_approval,
                 )
             except DuplicateToolError:
+                runtime.tools.pin(full_name)
                 already.append(full_name)
                 continue
+            runtime.tools.pin(full_name)
             registered.append(full_name)
             known.add(full_name)
         if not registered and not already:

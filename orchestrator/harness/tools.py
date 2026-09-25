@@ -108,6 +108,20 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        # FORGE-94: names `_select_tools` (native_tools.py) must never drop
+        # from the outgoing schema regardless of the provider's tools-array
+        # cap, even though they're registered like any other tool. Populated
+        # by `search_tools`'s handler -- a tool it reports as "available" has
+        # to actually stay in every subsequent schema, or the promise is a
+        # lie the model has no way to detect.
+        self._pinned: set[str] = set()
+
+    def pin(self, name: str) -> None:
+        """Guarantee ``name`` survives tool-array truncation from now on."""
+        self._pinned.add(name)
+
+    def pinned_names(self) -> frozenset[str]:
+        return frozenset(self._pinned)
 
     @staticmethod
     def mcp_name(server: str, tool: str) -> str:

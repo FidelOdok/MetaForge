@@ -228,6 +228,28 @@ class TestSearchToolsMetaTool:
         assert "mcp_twin_get_node" in result["already_available"]
 
     @pytest.mark.asyncio
+    async def test_newly_registered_matches_are_pinned(self) -> None:
+        """FORGE-94: a tool this call registers must survive a later turn's
+        tool-array truncation, or 'registered — call it directly' is a
+        promise the model has no way to verify."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        ctx = await _build_context("thread-1", CredentialStore(), bridge, domains=("mechanical",))
+        await ctx.runtime.call_tool("search_tools", {"query": "kicad"})
+        assert "mcp_kicad_run_drc" in ctx.runtime.tools.pinned_names()
+
+    @pytest.mark.asyncio
+    async def test_already_available_matches_are_also_pinned(self) -> None:
+        """The same gap existed for the 'already available' branch: a tool
+        merely present in the registry can still be truncated out of the
+        NEXT turn's schema by _select_tools -- pin it too."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.get_node", capability="twin_inspect")
+        ctx = await _build_context("thread-1", CredentialStore(), bridge, domains=("mechanical",))
+        await ctx.runtime.call_tool("search_tools", {"query": "get_node"})
+        assert "mcp_twin_get_node" in ctx.runtime.tools.pinned_names()
+
+    @pytest.mark.asyncio
     async def test_empty_query_is_rejected(self) -> None:
         bridge = InMemoryMcpBridge()
         ctx = await _build_context("thread-1", CredentialStore(), bridge)
