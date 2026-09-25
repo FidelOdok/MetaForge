@@ -362,3 +362,86 @@ class TestStructuredErrors:
 
         assert payload["error"] == "invalid_arguments"
         assert payload["validation_errors"] == ["missing 'x'"]
+
+
+class TestSkillReportedFailureMarkedAsStepError:
+    """FORGE-225: a skill tool that catches its own error and returns a
+    normal {"success": False, ...} result (skill_registry.skill_base's own
+    convention, no exception raised) used to leave ReActStep.error unset --
+    the TUI's ✓/✗ tick reads that field, so 13 rejected Design IR documents
+    in a real re-test all rendered as green checkmarks."""
+
+    @pytest.mark.asyncio
+    async def test_a_success_false_result_is_marked_as_a_step_error(self):
+        async def rejects(arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"success": False, "errors": ["Invalid Design IR document: 3 errors"]}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad_ir",
+            description="s",
+            input_schema={"type": "object"},
+            handler=rejects,
+        )
+
+        invoke, _ = _scripted([[_call("skill_mechanical_generate_cad_ir", {}, "1")]])
+        result = await run_native_tools(_runtime(registry), "build it", invoke=invoke)
+
+        assert result.steps[0].error is not None
+        assert "Invalid Design IR document" in result.steps[0].error
+        # The model still sees the full payload -- only the trace's own
+        # error flag was missing, not the information itself.
+        assert result.steps[0].observation == {
+            "success": False,
+            "errors": ["Invalid Design IR document: 3 errors"],
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_success_true_result_is_not_marked_as_an_error(self):
+        async def ok(arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"success": True, "cad_file": "output/part.step"}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad",
+            description="s",
+            input_schema={"type": "object"},
+            handler=ok,
+        )
+
+        invoke, _ = _scripted([[_call("skill_mechanical_generate_cad", {}, "1")]])
+        result = await run_native_tools(_runtime(registry), "build it", invoke=invoke)
+
+        assert result.steps[0].error is None
+
+    @pytest.mark.asyncio
+    async def test_a_duplicate_call_of_a_reported_failure_stays_marked_as_an_error(self):
+        """The dedup ("already tried, don't re-run") path reads the cached
+        raw observation, not just the wrapper -- a repeated invalid IR call
+        must not suddenly look like it succeeded on the second attempt."""
+        calls = 0
+
+        async def rejects(arguments: dict[str, Any]) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            return {"success": False, "errors": ["bad op"]}
+
+        registry = ToolRegistry()
+        registry.register_native(
+            "skill_mechanical_generate_cad_ir",
+            description="s",
+            input_schema={"type": "object"},
+            handler=rejects,
+        )
+
+        invoke, _ = _scripted(
+            [
+                [_call("skill_mechanical_generate_cad_ir", {"x": 1}, "1")],
+                [_call("skill_mechanical_generate_cad_ir", {"x": 1}, "2")],
+            ]
+        )
+        result = await run_native_tools(_runtime(registry), "build it", invoke=invoke)
+
+        assert calls == 1  # deduplicated, not re-executed
+        assert result.steps[0].error is not None
+        assert result.steps[1].error is not None

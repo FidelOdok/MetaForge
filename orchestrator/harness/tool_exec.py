@@ -53,6 +53,32 @@ def dedup_key(name: str, arguments: dict[str, Any]) -> str:
         return f"{name}:{arguments!r}"
 
 
+def observation_failure_reason(observation: Any) -> str | None:
+    """FORGE-225: a tool call can transport-succeed (no exception) while its
+    own payload reports failure -- a skill handler that catches its own
+    ValueError returns ``{"success": False, "errors": [...]}`` as a normal
+    result, not an exception (``skill_registry.skill_base.SkillBase.run``).
+    Transport success alone doesn't mean the call did anything; this is what
+    the trace -- and the TUI's per-step ✓/✗ (``ReActStep.error``) -- must
+    actually reflect, not only a raised exception.
+
+    Deliberately narrow: only the conventions this codebase's own tool/skill
+    result shapes actually use (``success: false`` + ``errors``/``error``, or
+    ``status: "error"`` + ``error``), never a heuristic guess at arbitrary
+    adapter payload shapes.
+    """
+    if not isinstance(observation, dict):
+        return None
+    if observation.get("success") is False:
+        errors = observation.get("errors")
+        if isinstance(errors, list) and errors:
+            return "; ".join(str(e) for e in errors)
+        return str(observation.get("error") or "tool reported failure")
+    if observation.get("status") == "error":
+        return str(observation.get("error") or "tool reported failure")
+    return None
+
+
 def cached_view(observation: Any) -> dict[str, Any]:
     """The envelope a reused result is presented as.
 
