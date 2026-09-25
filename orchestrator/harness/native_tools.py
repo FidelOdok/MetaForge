@@ -40,6 +40,7 @@ from orchestrator.harness.tool_exec import (
     cached_view,
     dedup_key,
     error_content,
+    observation_failure_reason,
 )
 from orchestrator.harness.tools import NATIVE
 
@@ -327,7 +328,10 @@ async def _execute_calls(
                 continue
             cache.put(key, observation)
             step = ReActStep(
-                thought=thought, tool_call=ToolCall(name, args), observation=observation
+                thought=thought,
+                tool_call=ToolCall(name, args),
+                observation=observation,
+                error=observation_failure_reason(observation),
             )
             results.append((step, _json_safe(observation), cid))
             continue
@@ -352,7 +356,12 @@ async def _execute_calls(
         # invisible to every observer and unassertable in the eval suite.
         view = cached_view(cache.get(key))
         logger.info("native_tool_call_deduplicated", tool=name)
-        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=view)
+        step = ReActStep(
+            thought=thought,
+            tool_call=ToolCall(name, args),
+            observation=view,
+            error=observation_failure_reason(cache.get(key)),
+        )
         results.append((step, _json_safe(view), cid))
     return results
 
