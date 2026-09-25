@@ -49,6 +49,22 @@ export function parseArgs(argv: string[]): Parsed {
   return { _, flags };
 }
 
+/**
+ * FORGE-92: `process.stdout.write()` is asynchronous when stdout is a pipe
+ * (Node/Bun), and a bare `process.exit()` kills the process before buffered
+ * output drains -- truncating any `--json` output larger than the pipe
+ * buffer (observed: silently cut at exactly 128 KiB; redirecting to a file
+ * hid the bug because file writes are synchronous). Writing an empty chunk
+ * with a callback rides the same FIFO write queue as every real write before
+ * it, so the callback only fires once all of it has actually flushed to the
+ * OS -- a reliable "wait for stdout to drain" that still forces a real exit
+ * (unlike switching to `process.exitCode` and letting the loop idle out,
+ * which would hang on the API client's open undici keep-alive Agent).
+ */
+export function exitAfterFlush(code: number): void {
+  process.stdout.write("", () => process.exit(code));
+}
+
 const out = (x: unknown): void => {
   process.stdout.write(`${JSON.stringify(x, null, 2)}\n`);
 };
