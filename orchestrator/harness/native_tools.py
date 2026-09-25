@@ -68,24 +68,47 @@ NATIVE_SYSTEM = (
 )
 
 
-def _select_tools(specs: list[Any], max_tools: int) -> tuple[list[Any], list[str]]:
+def _select_tools(
+    specs: list[Any], max_tools: int, *, pinned: frozenset[str] = frozenset()
+) -> tuple[list[Any], list[str]]:
     """Choose at most ``max_tools`` specs -> (kept, dropped names).
 
     Naive truncation is not acceptable here. ``all_tools()`` returns specs
     sorted by name, so slicing the tail deletes whole adapters alphabetically
     — ``twin.*`` and ``web.*`` go first, which is precisely backwards.
 
-    Policy instead: keep every native tool (few, curated, session-critical —
-    ``chat.set_project_scope`` and the skill layer), then fill the remaining
-    budget round-robin across MCP origins so each adapter keeps a share and
-    no capability disappears wholesale.
+    Policy: keep every native tool (few, curated, session-critical —
+    ``chat.set_project_scope`` and the skill layer) plus two more protected
+    classes (FORGE-94), then fill the remaining budget round-robin across MCP
+    origins so each adapter keeps a share and no capability disappears
+    wholesale:
+
+    - ``pinned`` — names ``search_tools``'s handler has already promised the
+      model are available (``ToolRegistry.pin``). A round-robin cap that
+      drops one of these on a *later* turn would make that promise a lie the
+      model has no way to detect.
+    - any tool whose name ends ``_open_session`` — a structural dependency
+      for every OTHER tool its own adapter registers: an agent that can't
+      open a session can't use any of that adapter's stateful tools at all,
+      so dropping just the session opener while keeping its siblings is
+      actively harmful in a way dropping any other single tool isn't. (This
+      is what let FreeCAD's whole stateful authoring surface — pad/pocket/
+      revolve included — go uncallable in practice: the round-robin's
+      one-per-adapter-per-round pass exhausts the global budget partway
+      through FreeCAD's large, alphabetically-ordered queue, and
+      ``open_session`` and the sketch verbs it gates all happen to sort into
+      that dropped tail.)
     """
     natives = [s for s in specs if s.origin == NATIVE]
-    mcp = [s for s in specs if s.origin != NATIVE]
+    rest = [s for s in specs if s.origin != NATIVE]
+    protected_mcp = [s for s in rest if s.name in pinned or s.name.endswith("_open_session")]
+    protected_ids = {id(s) for s in protected_mcp}
+    mcp = [s for s in rest if id(s) not in protected_ids]
 
-    if len(natives) >= max_tools:
+    always_kept = natives + protected_mcp
+    if len(always_kept) >= max_tools:
         # Pathological, but never silently send an over-long array.
-        kept = natives[:max_tools]
+        kept = always_kept[:max_tools]
         dropped = [s.name for s in specs if s not in kept]
         return kept, dropped
 
@@ -93,7 +116,7 @@ def _select_tools(specs: list[Any], max_tools: int) -> tuple[list[Any], list[str
     for spec in mcp:
         by_origin.setdefault(spec.origin, []).append(spec)
 
-    budget = max_tools - len(natives)
+    budget = max_tools - len(always_kept)
     chosen: list[Any] = []
     queues = list(by_origin.values())
     while budget > 0 and any(queues):
@@ -105,7 +128,7 @@ def _select_tools(specs: list[Any], max_tools: int) -> tuple[list[Any], list[str
             if budget == 0:
                 break
 
-    kept_set = {id(s) for s in natives} | {id(s) for s in chosen}
+    kept_set = {id(s) for s in always_kept} | {id(s) for s in chosen}
     kept = [s for s in specs if id(s) in kept_set]
     dropped = [s.name for s in specs if id(s) not in kept_set]
     return kept, dropped
@@ -122,7 +145,7 @@ def _tool_schemas(runtime: HarnessRuntime, max_tools: int | None = None) -> list
     specs = runtime.tools.all_tools()
     dropped: list[str] = []
     if max_tools is not None and len(specs) > max_tools:
-        specs, dropped = _select_tools(specs, max_tools)
+        specs, dropped = _select_tools(specs, max_tools, pinned=runtime.tools.pinned_names())
         logger.warning(
             "tool_schemas_truncated",
             limit=max_tools,
