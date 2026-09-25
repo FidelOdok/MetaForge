@@ -774,6 +774,19 @@ A stash **miss** leaves a supplied `step_base64` untouched — geometry produced
 some other way (a raw CadQuery script, an upload) has no export to reference and
 must still commit.
 
+**Stateless tools** (`freecad.create_parametric`, `cadquery.create_parametric`/
+`execute_script`/`generate_enclosure`, ...) have no `session_id`/`obj_id` at
+all — they just return a `cad_file` path on the shared adapter workspace both
+the gateway process and the adapter container mount. For these, pass that same
+path as `twin.commit_geometry`'s `file_path` argument instead: the server reads
+it directly off disk and base64-encodes it itself (FORGE-224), mirroring
+`domain_agents.shared.commit_geometry.commit_geometry`'s own relative-path
+resolution (against `ADAPTER_WORKSPACE_DIR`, default `/workspace`) that the
+skill layer already used internally — this just makes the same ergonomics
+available to a model calling `twin.commit_geometry` directly. `step_base64`
+still wins when given alongside `file_path`, same precedence as the
+session/obj_id path.
+
 ### KiCad Adapter (`tool_registry/tools/kicad/`)
 
 | Property | Details |

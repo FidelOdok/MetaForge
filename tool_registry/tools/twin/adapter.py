@@ -12,6 +12,9 @@ shape it answers in plain English so the LLM can match intent fast.
 
 from __future__ import annotations
 
+import base64
+import os
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -1539,11 +1542,17 @@ class TwinServer(McpToolServer):
                     "together on every call, including retries — obj_id alone is "
                     "NOT unique (it's a per-session counter, not a global id), so "
                     "omitting session_id will not match your prior export even "
-                    "though obj_id is correct. (Passing step_base64 directly also "
-                    "works and needs neither id — but when it names an export "
-                    "the server already holds, the server's copy is used, "
-                    "because a copied 30,000-character blob can only be equal "
-                    "or damaged.)"
+                    "though obj_id is correct. For a STATELESS tool's output "
+                    "(freecad.create_parametric / cadquery.create_parametric / "
+                    "cadquery.execute_script / cadquery.generate_enclosure — none "
+                    "of which use a session), pass that tool's own 'cad_file' "
+                    "return value as file_path instead: the server reads it "
+                    "directly from the shared workspace (FORGE-224), no base64 "
+                    "and no session needed. (Passing step_base64 directly also "
+                    "works and needs neither id nor file_path — but when it "
+                    "names an export the server already holds, the server's "
+                    "copy is used, because a copied 30,000-character blob can "
+                    "only be equal or damaged.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -1569,6 +1578,18 @@ class TwinServer(McpToolServer):
                                 "Base64 STEP. Omit when passing session_id + obj_id: "
                                 "the server substitutes its own copy of that export "
                                 "anyway (MET-684)."
+                            ),
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Commit-by-reference for a STATELESS tool's output (no "
+                                "session_id/obj_id) — pass the 'cad_file' path that tool's "
+                                "own result already gave you (e.g. "
+                                "'output/bracket_None.step'), unchanged. The server reads "
+                                "it from the shared adapter workspace and base64-encodes "
+                                "it itself; ignored when step_base64 or a resolvable "
+                                "session_id+obj_id is also given (FORGE-224)."
                             ),
                         },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
@@ -1631,6 +1652,30 @@ class TwinServer(McpToolServer):
     async def commit_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
+        # FORGE-224: a STATELESS tool (freecad.create_parametric,
+        # cadquery.create_parametric/execute_script/generate_enclosure, ...)
+        # has no session_id/obj_id -- its result is just a 'cad_file' path on
+        # the adapter workspace both this gateway process and the adapter
+        # container mount. Read it server-side, mirroring
+        # domain_agents.shared.commit_geometry.commit_geometry's own relative-
+        # path resolution (FORGE-79) so a model calling this tool DIRECTLY
+        # (not through a skill) gets the same commit-by-reference ergonomics
+        # session_id+obj_id already has, instead of hand-copying a base64 blob
+        # it was never given in the first place.
+        file_path = arguments.get("file_path")
+        has_step_base64 = bool(step_base64) and isinstance(step_base64, str)
+        if not has_step_base64 and isinstance(file_path, str) and file_path:
+            resolved_path = Path(file_path)
+            if not resolved_path.is_absolute():
+                workspace_root = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+                resolved_path = workspace_root / file_path
+            try:
+                step_base64 = base64.b64encode(resolved_path.read_bytes()).decode("ascii")
+            except OSError as exc:
+                raise ValueError(
+                    f"twin.commit_geometry: could not read file_path {file_path!r} "
+                    f"(resolved to {resolved_path}): {exc}"
+                ) from exc
         if not step_base64 or not isinstance(step_base64, str):
             # MET-642 S4 finding: reproduced live TWICE with the identical
             # mechanism -- the model retried commit_geometry with obj_id but
