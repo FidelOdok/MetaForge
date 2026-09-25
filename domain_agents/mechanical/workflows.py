@@ -82,6 +82,7 @@ class DesignWorkflowParams:
     branch: str = "main"
 
     # CAD generation
+    name: str = ""
     shape_type: str = "bracket"
     dimensions: dict[str, float] = field(default_factory=dict)
     material: str = "aluminum_6061"
@@ -206,6 +207,12 @@ class MechanicalDesignWorkflow:
             ctx = self._create_skill_context(params)
 
             skill_input = GenerateCadInput(
+                # FORGE-97: name is now required on the skill's own input;
+                # this workflow's params predate that and don't always have
+                # one, so fall back to the same synthetic pattern the skill
+                # itself used to hardcode -- only for THIS non-chat caller,
+                # not a regression on the chat-driven bug the ticket reported.
+                name=params.name or f"{params.shape_type} ({params.material})",
                 work_product_id=params.work_product_id,
                 shape_type=params.shape_type,
                 dimensions=params.dimensions,

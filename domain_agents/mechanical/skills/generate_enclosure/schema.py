@@ -55,6 +55,16 @@ class GenerateEnclosureInput(BaseModel):
             "CAD_MODEL work product when omitted, same as generate_cad."
         ),
     )
+    name: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Part name for this enclosure (e.g. 'Base Housing', 'Sensor Pod Cover') "
+            "-- used as the Twin work product's display name. Required and must be "
+            "specific to what this enclosure actually is, never a generic "
+            "placeholder like the material alone."
+        ),
+    )
     pcb_length: float = Field(..., gt=0, description="PCB length in mm")
     pcb_width: float = Field(..., gt=0, description="PCB width in mm")
     pcb_thickness: float = Field(default=1.6, gt=0, description="PCB thickness in mm")

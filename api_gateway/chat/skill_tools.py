@@ -31,6 +31,12 @@ from skill_registry.skill_base import SkillContext
 
 logger = structlog.get_logger(__name__)
 
+# FORGE-97: canonical home for this gate id -- harness_backend.py imports it
+# from here (rather than the reverse) since that module already imports
+# skill_tools_from_registry and a harness_backend -> skill_tools import would
+# be circular. See _tool_for_registration below for why it's needed here.
+GATE_TWIN_WRITE = "twin_write"
+
 _registry: SkillRegistry | None = None
 
 
@@ -76,11 +82,32 @@ def _tool_for_registration(
         data = result.data.model_dump(mode="json") if result.data is not None else {}
         return {"success": True, **data}
 
+    # FORGE-97: a skill whose input schema declares a `commit` field can
+    # persist a work product into the Twin internally (via
+    # domain_agents.shared.commit_geometry.commit_geometry -> a direct
+    # McpBridge.invoke("twin.commit_geometry", ...) call), completely
+    # bypassing the "ask" tier that raw twin.commit_geometry tool calls go
+    # through -- the model calling twin.commit_geometry directly pauses for
+    # human approval, but calling skill_mechanical_generate_cad, which
+    # commits the exact same kind of node, never did (a real, previously
+    # flagged gap -- see the old comment this replaces on
+    # _REQUIRES_APPROVAL_TOOL_IDS in harness_backend.py). Schema-driven, not
+    # a per-skill name list, so any current or future commit-capable skill
+    # (generate_cad, generate_enclosure, create_assembly, generate_cad_ir
+    # today) is covered automatically. Deliberately static per the same
+    # design every other gated tool here uses: a call that happens to pass
+    # commit=False still pauses -- a false-positive prompt is a minor cost,
+    # not a silent bypass.
+    input_schema = reg.input_schema.model_json_schema()
+    commits_to_twin = "commit" in input_schema.get("properties", {})
+
     return NativeToolDef(
         name=f"skill_{reg.domain}_{reg.name}",
         description=reg.description,
-        input_schema=reg.input_schema.model_json_schema(),
+        input_schema=input_schema,
         handler=handler,
+        required_gates=(GATE_TWIN_WRITE,) if commits_to_twin else (),
+        requires_approval=commits_to_twin,
     )
 
 

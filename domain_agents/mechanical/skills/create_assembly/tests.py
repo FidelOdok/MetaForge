@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 import structlog
+from pydantic import ValidationError
 
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.skill_base import SkillContext
@@ -65,6 +66,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -93,6 +95,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -108,6 +111,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -136,6 +140,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
             )
@@ -148,6 +153,7 @@ class TestCreateAssemblyHandler:
 
         result = await handler.run(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[
                     AssemblyPart(name="base", file="parts/base.step"),
@@ -171,12 +177,16 @@ class TestCreateAssemblyHandler:
         _ctx, handler, _work_product = await _make_ctx_and_handler()
 
         errors = await handler.validate_preconditions(
-            CreateAssemblyInput(parts=[AssemblyPart(name="base", file="parts/base.step")])
+            CreateAssemblyInput(
+                name="Test Assembly", parts=[AssemblyPart(name="base", file="parts/base.step")]
+            )
         )
         assert errors == []
 
         output = await handler.execute(
-            CreateAssemblyInput(parts=[AssemblyPart(name="base", file="parts/base.step")])
+            CreateAssemblyInput(
+                name="Test Assembly", parts=[AssemblyPart(name="base", file="parts/base.step")]
+            )
         )
         assert output.work_product_id is None
 
@@ -196,6 +206,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", node_id="abc-123")],
             )
@@ -210,6 +221,7 @@ class TestCreateAssemblyHandler:
 
         errors = await handler.validate_preconditions(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", node_id="abc-123")],
             )
@@ -224,6 +236,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
             )
@@ -250,6 +263,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
                 project_id="13d60463-433b-4735-af07-690cbf8e07b9",
@@ -261,6 +275,34 @@ class TestCreateAssemblyHandler:
         assert output.model_url == "https://twin.local/models/node-789"
         assert output.commit_error is None
 
+    async def test_commit_uses_the_caller_supplied_name_not_a_generic_one(self, tmp_path):
+        """FORGE-97: never the old synthetic "Assembly (material)" pattern."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "assembly.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_assembly", {**ASSEMBLY_RESULT, "assembly_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            CreateAssemblyInput(
+                name="Gripper Assembly",
+                work_product_id=work_product.id,
+                parts=[AssemblyPart(name="base", file="parts/base.step")],
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["name"] == "Gripper Assembly"
+
+    def test_name_is_required_and_non_empty(self):
+        with pytest.raises(ValidationError):
+            CreateAssemblyInput(parts=[AssemblyPart(name="base", file="parts/base.step")])
+        with pytest.raises(ValidationError):
+            CreateAssemblyInput(name="", parts=[AssemblyPart(name="base", file="parts/base.step")])
+
     async def test_commit_false_skips_persistence(self):
         """FORGE-85: commit=False never attempts to persist."""
         _ctx, handler, work_product = await _make_ctx_and_handler()
@@ -269,6 +311,7 @@ class TestCreateAssemblyHandler:
 
         output = await handler.execute(
             CreateAssemblyInput(
+                name="Test Assembly",
                 work_product_id=work_product.id,
                 parts=[AssemblyPart(name="base", file="parts/base.step")],
                 commit=False,
