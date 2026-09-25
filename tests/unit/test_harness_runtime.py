@@ -9,6 +9,7 @@ from orchestrator.harness import HarnessRuntime
 from orchestrator.harness.providers import ProviderSpec, load_provider_config
 from orchestrator.harness.runs import ApprovalDecision, InMemoryRunStore, RunStatus
 from orchestrator.harness.tools import ApprovalDeniedError, GateBlockedError, ToolRegistry
+from orchestrator.harness.validation import ToolValidationError
 
 CONFIG = load_provider_config(
     {"roles": {"generator": [{"provider": "anthropic", "model": "claude-opus-4-8"}]}}
@@ -341,3 +342,40 @@ class TestThreeTierApproval:
         tools.register_native("echo", description="d", input_schema={}, handler=_echo)
         rt = HarnessRuntime.build(tools=tools)
         assert await rt.call_tool("echo", {"x": 1}) == {"echo": {"x": 1}}
+
+    @pytest.mark.asyncio
+    async def test_invalid_arguments_are_rejected_before_the_approval_prompt(self) -> None:
+        """FORGE-222: a human used to be asked to approve a call that was
+        going to be rejected as invalid the moment it actually ran --
+        live-observed asking a human to approve 13 large Design IR documents,
+        most of which then failed validation. Validation must run BEFORE the
+        approval pause, not after, so an invalid call never reaches a human
+        at all."""
+        tools = ToolRegistry()
+        calls = {"n": 0}
+
+        async def _mutate(args: dict[str, object]) -> dict[str, object]:
+            calls["n"] += 1
+            return {"done": True}
+
+        tools.register_native(
+            "commit",
+            description="d",
+            input_schema={"type": "object", "required": ["name"]},
+            handler=_mutate,
+            requires_approval=True,
+        )
+        runs = InMemoryRunStore()
+        notified: list[tuple[str, str, dict[str, object]]] = []
+
+        async def on_request(run_id: str, tool: str, arguments: dict[str, object]) -> None:
+            notified.append((run_id, tool, arguments))
+
+        rt = HarnessRuntime.build(tools=tools, runs=runs, on_approval_request=on_request)
+
+        with pytest.raises(ToolValidationError):
+            await rt.call_tool("commit", {})  # missing required 'name'
+
+        assert calls["n"] == 0
+        assert notified == []  # no human was ever asked
+        assert runs.list() == []  # no run was even created

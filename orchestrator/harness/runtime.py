@@ -44,6 +44,7 @@ from orchestrator.harness.runs import (
     RunStatus,
 )
 from orchestrator.harness.tools import ApprovalDeniedError, GateCheck, ToolRegistry, ToolSpec
+from orchestrator.harness.validation import validate_arguments
 from twin_core.policy.engine import PolicyEngine
 
 logger = structlog.get_logger(__name__)
@@ -239,6 +240,17 @@ class HarnessRuntime:
             span.set_attribute("tool.name", name)
             try:
                 spec = self.tools.get(name)
+                # FORGE-222: validate BEFORE pausing for approval, not after.
+                # A gated tool used to show the human an approval prompt for
+                # arguments that were going to be rejected anyway the moment
+                # the call actually ran (ToolRegistry.invoke below re-checks
+                # this same schema) -- live-observed asking a human to approve
+                # 13 large Design IR documents, most of which then failed
+                # validation, burning both the approval AND the retry. Raises
+                # the identical ToolValidationError either loop's existing
+                # error path already surfaces to the model -- this only moves
+                # *when* that check runs, not what it checks.
+                validate_arguments(name, spec.input_schema, arguments)
                 if spec.requires_approval:
                     await self._await_approval(spec, arguments)
                 # FORGE-71: actor/state are deliberately minimal here -- a
