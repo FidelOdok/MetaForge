@@ -268,6 +268,16 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   Before this, the only mention was a soft how-to clause in the brief;
   a full session could generate a CAD model and never persist it as a
   work product without the agent — or the user — noticing.
+- **Design-flow discoverability nudge (FORGE-90)** — `run.start_design_flow`
+  (MET-587) was real and callable but only mentioned itself, via its own
+  tool description, when the user's phrasing already matched "start/run
+  the full design process" closely. A user who just stated a broad
+  product goal ("design a weather station") got ad-hoc single-skill work
+  instead. When the `run` tool family is registered on the runtime, the
+  system prompt now tells the agent to proactively suggest
+  `run.start_design_flow` for that shape of ask rather than waiting for
+  matching phrasing — the tool already gates every phase on human
+  approval, so surfacing it costs nothing if the user declines.
 - **Telemetry** — `context.stats` gains a `retrieved_context`
   component; the `project_brief` component is now computed from the
   explicit brief text rather than sniffing the history pair.

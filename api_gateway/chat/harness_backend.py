@@ -792,6 +792,30 @@ def _public_url_notice() -> str:
     )
 
 
+def _design_flow_nudge(families: list[str]) -> str:
+    """Proactively surface run.start_design_flow for full-project asks (FORGE-90).
+
+    Gap-analysis finding: the tool (MET-587) is real and works, but its own
+    schema description only catches the model's attention when the user says
+    "start/run the full design process" in close to those exact words. A user
+    who instead just states a broad product goal ("design a weather station",
+    "I need a drone flight controller") got ad-hoc single-skill work instead
+    of the gated, multi-phase lifecycle that exists for exactly that ask —
+    the tool was reachable, just never discoverable from intent alone.
+    """
+    if "run" not in families:
+        return ""
+    return (
+        "When the user describes a broad, multi-part hardware/product goal "
+        '(e.g. "design a X", "build me a Y") rather than asking for one '
+        "specific document, model, or calculation, proactively suggest "
+        "starting a full design-flow run with run.start_design_flow — don't "
+        'wait for the user to literally say "start the full design process." '
+        "It pauses for human approval at every phase gate, so offering it "
+        "costs nothing; if the user prefers ad-hoc work instead, respect that."
+    )
+
+
 def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> str:
     """Layered system prompt for the native path (MET-566).
 
@@ -814,6 +838,9 @@ def build_system_prompt(runtime: Any, *, project_brief: str | None = None) -> st
         sections.append(
             "You have tools from these families available: " + ", ".join(families) + "."
         )
+        nudge = _design_flow_nudge(families)
+        if nudge:
+            sections.append(nudge)
     if project_brief:
         sections.append(f"[project context]\n{project_brief}")
     sections.append(
