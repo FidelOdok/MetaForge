@@ -400,9 +400,31 @@
       "BomComponentResponse": {
         "description": "One BOM line item, in the dashboard's camelCase shape.",
         "properties": {
+          "cadModelUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadmodelurl"
+          },
           "category": {
             "title": "Category",
             "type": "string"
+          },
+          "datasheetUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasheeturl"
           },
           "description": {
             "title": "Description",
@@ -412,9 +434,31 @@
             "title": "Designator",
             "type": "string"
           },
+          "footprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Footprint"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "imageUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imageurl"
           },
           "manufacturer": {
             "title": "Manufacturer",
@@ -424,9 +468,24 @@
             "title": "Partnumber",
             "type": "string"
           },
+          "priceCurrency": {
+            "title": "Pricecurrency",
+            "type": "string"
+          },
           "projectId": {
             "title": "Projectid",
             "type": "string"
+          },
+          "purchaseUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchaseurl"
           },
           "quantity": {
             "title": "Quantity",
@@ -455,6 +514,7 @@
           "manufacturer",
           "quantity",
           "unitPrice",
+          "priceCurrency",
           "status",
           "category",
           "projectId"
