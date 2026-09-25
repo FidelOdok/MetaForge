@@ -19,6 +19,13 @@ import structlog
 
 from observability.tracing import get_tracer
 
+# FORGE-100: shared, adapter-agnostic pure-data density lookup -- no cadquery
+# runtime dependency (materials.py imports nothing cadquery-specific), so
+# reusing it here is a same-layer (tool_registry) data import, not a
+# cross-adapter runtime one. Single source of truth for "material name ->
+# density" rather than a second table drifting from cadquery's own.
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
+
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.freecad.operations")
 
@@ -494,15 +501,26 @@ class FreecadOperations:
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
 
+            # FORGE-100: mass is the one measured property this tool computed
+            # a value for (geometric volume) but never converted to something
+            # a constraint expression (e.g. `moving_mass_kg <= 4.5`) could
+            # actually read -- reuses cadquery's own density table/conversion
+            # (materials.py, already established for export_urdf/export_sdf),
+            # not a second computation path.
+            mass_kg = (
+                round(volume * 1e-9 * resolve_density_kg_m3(material), 6) if material else None
+            )
+
             logger.info(
                 "Created parametric shape",
                 shape_type=shape_type,
                 output_path=output_path,
                 volume_mm3=round(volume, 2),
+                mass_kg=mass_kg,
                 duration_s=round(elapsed, 3),
             )
 
-            return {
+            result: dict[str, Any] = {
                 "cad_file": output_path,
                 "volume_mm3": round(volume, 2),
                 "surface_area_mm2": round(area, 2),
@@ -517,6 +535,9 @@ class FreecadOperations:
                 "parameters_used": merged,
                 "material": material,
             }
+            if mass_kg is not None:
+                result["mass_kg"] = mass_kg
+            return result
 
     def _build_shape(self, shape_type: str, params: dict[str, Any]) -> Any:
         """Build a FreeCAD Part shape from type and parameters."""

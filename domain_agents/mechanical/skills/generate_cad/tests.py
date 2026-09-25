@@ -379,6 +379,39 @@ class TestGenerateCadHandler:
         commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
         assert commit_call[1]["name"] == "Shoulder Yoke"
 
+    async def test_commit_threads_measured_properties_as_extra_metadata(self, tmp_path):
+        """FORGE-100: a constraint like `moving_mass_kg <= 4.5` must be able
+        to read a REAL value off the committed node -- the tool's own
+        already-computed volume/area/bbox (and mass, when there's a
+        material) must land as top-level metadata, not get dropped."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "bracket_test.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_parametric",
+            {**CADQUERY_CAD_RESULT, "cad_file": str(step_file), "mass_kg": 0.03375},
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-123"})
+
+        await handler.execute(
+            GenerateCadInput(
+                name="Shoulder Yoke",
+                work_product_id=work_product.id,
+                shape_type="bracket",
+                dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
+                material="aluminum_6061",
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["extra_metadata"] == {
+            "volume_mm3": 12500.0,
+            "surface_area_mm2": 8400.0,
+            "mass_kg": 0.03375,
+            "bbox_mm": CADQUERY_CAD_RESULT["bounding_box"],
+        }
+
     def test_name_is_required_and_non_empty(self):
         with pytest.raises(ValidationError):
             GenerateCadInput(

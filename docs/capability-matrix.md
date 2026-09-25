@@ -130,7 +130,7 @@ one of these tags, no skill code changes required.
 
 | Capability | `cadquery` tool | `freecad` tool | Guaranteed fields (both backends) | Backend-only extras |
 |---|---|---|---|---|
-| `cad_generation` | `create_parametric` | `create_parametric` | `shape_type` ∈ {bracket, plate, enclosure, cylinder}, `parameters`, `material`, `output_path` → `cad_file`, `volume_mm3`, `surface_area_mm2`, `bounding_box`, `parameters_used` | — (field-for-field identical) |
+| `cad_generation` | `create_parametric` | `create_parametric` | `shape_type` ∈ {bracket, plate, enclosure, cylinder}, `parameters`, `material`, `output_path` → `cad_file`, `volume_mm3`, `surface_area_mm2`, `bounding_box`, `parameters_used` | Both backends add `mass_kg` (volume × `materials.py` density) when `material` is given; omitted, never defaulted to 0, when it isn't (FORGE-100) |
 | `cad_operations` | `boolean_operation` | `boolean_operation` | `input_file_a`, `input_file_b`, `operation` ∈ {union, subtract, intersect}, `output_path` → `output_file`, `result_volume`, `result_area` | — (field-for-field identical) |
 | `cad_analysis` | `get_properties` | `get_properties` | `input_file` → `volume`, `area`, `center_of_mass`, `bounding_box` | CadQuery adds `inertia`; FreeCAD's does not return it |
 | `cad_export` | `export_geometry` | `export_geometry` | `input_file`, `output_format`, `output_path` → `output_file`, `file_size_bytes`, `format` | CadQuery supports `step/stl/obj/brep/amf/svg`; FreeCAD supports only `step/stl/obj/brep` (no `amf`/`svg`), and errors on non-STEP today. Both include `step_base64` when the export is STEP (MET-489) — pass it to `twin.commit_geometry`'s `step_base64` argument to persist the result to MinIO + a `WorkProduct` node; without that follow-up call the file only exists in the adapter container and is lost on redeploy. |
@@ -150,6 +150,22 @@ automatically. Capabilities outside this table (FreeCAD's `PartDesign`/
 `create_assembly`/`generate_enclosure`) are intentionally kernel-specific and
 not part of this uniform contract — FreeCAD's session/feature-tree model is a
 categorically different, stateful capability CadQuery cannot replicate.
+`create_assembly` and `generate_enclosure` also return `volume_mm3` and
+(when a `material` is given) `mass_kg`, computed the same way as
+`create_parametric` above — for `create_assembly` this is a first-order
+estimate (summed part volume × one material's density), not per-part-accurate,
+since `AssemblyPart` doesn't carry a per-part material (FORGE-100).
+
+**Measured properties reach the Twin, not just the tool response**: the three
+mechanical skills that commit CAD geometry (`generate_cad`,
+`generate_enclosure`, `create_assembly`) pass whichever of `volume_mm3`,
+`surface_area_mm2`, `mass_kg`, and `bounding_box` (as `bbox_mm`) the tool
+actually returned to `commit_geometry`'s `extra_metadata` argument
+(`domain_agents/shared/commit_geometry.py`'s `measured_metadata_from_cad_result`),
+which flattens them onto the committed work product's top-level `metadata`.
+This is what lets a constraint expression like
+`wp.metadata.get('mass_kg', 0) <= 4.5` read a real measured value instead of
+always the vacuous-pass default (FORGE-100).
 
 ## Dashboard routes (11)
 
