@@ -745,6 +745,16 @@ class CadqueryOperations:
                 raise
 
             props = self._get_shape_properties(workplane)
+            # FORGE-100: mass is the one measured property this tool computed
+            # a value for (geometric volume) but never converted to something
+            # a constraint expression (e.g. `moving_mass_kg <= 4.5`) could
+            # actually read -- reuses the exact density table/conversion
+            # export_urdf/export_sdf already established (materials.py),
+            # not a second computation path.
+            if material:
+                props["mass_kg"] = round(
+                    props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
+                )
             cq.exporters.export(workplane, output_path)
 
             elapsed = time.monotonic() - start
@@ -755,6 +765,7 @@ class CadqueryOperations:
                 shape_type=shape_type,
                 output_path=output_path,
                 volume_mm3=props["volume_mm3"],
+                mass_kg=props.get("mass_kg"),
                 duration_s=round(elapsed, 3),
             )
 
@@ -1917,6 +1928,7 @@ class CadqueryOperations:
         parts: list[dict[str, Any]],
         constraints: list[dict[str, Any]] | None = None,
         output_path: str = "",
+        material: str = "",
     ) -> dict[str, Any]:
         """Create a multi-part assembly from STEP files.
 
@@ -1970,20 +1982,35 @@ class CadqueryOperations:
             elapsed = time.monotonic() - start
             span.set_attribute("operation.duration_s", round(elapsed, 3))
 
+            # FORGE-100: total_volume was never exposed under the canonical
+            # "volume_mm3" key measured_metadata_from_cad_result() reads,
+            # and nothing converted it to mass at all. Per-part materials
+            # aren't tracked here (AssemblyPart has no material field), so
+            # this is a first-order estimate from ONE material applied to
+            # the summed volume -- honest as a rough estimate, not a
+            # per-part-accurate mass, and only computed when the caller
+            # actually supplies one (never fabricated).
+            result: dict[str, Any] = {
+                "assembly_file": output_path,
+                "part_count": len(parts),
+                "total_volume": round(total_volume, 2),
+                "volume_mm3": round(total_volume, 2),
+                "interference_check_passed": True,
+            }
+            if material:
+                density = resolve_density_kg_m3(material)
+                result["mass_kg"] = round(total_volume * _MM3_TO_M3 * density, 6)
+
             logger.info(
                 "Assembly created",
                 part_count=len(parts),
                 output_path=output_path,
                 total_volume_mm3=round(total_volume, 2),
+                mass_kg=result.get("mass_kg"),
                 duration_s=round(elapsed, 3),
             )
 
-            return {
-                "assembly_file": output_path,
-                "part_count": len(parts),
-                "total_volume": round(total_volume, 2),
-                "interference_check_passed": True,
-            }
+            return result
 
     def generate_enclosure(
         self,
@@ -2087,6 +2114,13 @@ class CadqueryOperations:
                     )
 
             props = self._get_shape_properties(enclosure)
+            # FORGE-100: same mass_kg computation as create_parametric --
+            # nothing previously converted this tool's own volume into
+            # something a `moving_mass_kg <= X` constraint could read.
+            if material:
+                props["mass_kg"] = round(
+                    props["volume_mm3"] * _MM3_TO_M3 * resolve_density_kg_m3(material), 6
+                )
             cq.exporters.export(enclosure, output_path)
 
             elapsed = time.monotonic() - start
@@ -2096,6 +2130,7 @@ class CadqueryOperations:
                 "Enclosure generated",
                 pcb_size=f"{pcb_length}x{pcb_width}",
                 output_path=output_path,
+                mass_kg=props.get("mass_kg"),
                 duration_s=round(elapsed, 3),
             )
 

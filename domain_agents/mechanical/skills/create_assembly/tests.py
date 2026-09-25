@@ -22,6 +22,11 @@ ASSEMBLY_RESULT = {
     "part_count": 3,
     "total_volume": 45000.0,
     "interference_check_passed": True,
+    # Real cadquery.create_assembly also returns these (FORGE-100): a
+    # volume_mm3 alias of total_volume, and a first-order mass_kg estimate
+    # (summed volume x one material's density -- not per-part-accurate).
+    "volume_mm3": 45000.0,
+    "mass_kg": 0.1215,
 }
 
 
@@ -296,6 +301,32 @@ class TestCreateAssemblyHandler:
 
         commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
         assert commit_call[1]["name"] == "Gripper Assembly"
+
+    async def test_commit_threads_measured_properties_as_extra_metadata(self, tmp_path):
+        """FORGE-100: measured properties from the tool result reach the Twin
+        as top-level work-product metadata."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "assembly.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_assembly", {**ASSEMBLY_RESULT, "assembly_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            CreateAssemblyInput(
+                name="Gripper Assembly",
+                work_product_id=work_product.id,
+                parts=[AssemblyPart(name="base", file="parts/base.step")],
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["extra_metadata"] == {
+            "volume_mm3": 45000.0,
+            "mass_kg": 0.1215,
+        }
 
     def test_name_is_required_and_non_empty(self):
         with pytest.raises(ValidationError):

@@ -101,6 +101,60 @@ class TestResolveParameters:
 
 
 # ---------------------------------------------------------------------------
+# 1c. create_parametric computes mass_kg from volume + material density
+#     (FORGE-100) -- previously a constraint like `moving_mass_kg <= 4.5`
+#     always read the default 0 because nothing ever wrote this key.
+# ---------------------------------------------------------------------------
+
+
+class _FakeParamBoundBox:
+    XMin = YMin = ZMin = 0.0
+    XMax, YMax, ZMax = 100.0, 50.0, 20.0
+
+
+class _FakeParamShape:
+    Volume = 100_000.0  # mm^3 = 1e-4 m^3
+    Area = 10_000.0
+    BoundBox = _FakeParamBoundBox()
+
+    def exportStep(self, path: str) -> None:  # noqa: N802
+        Path(path).write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+
+class _FakePartForCreateParametric:
+    @staticmethod
+    def makeBox(length: float, width: float, height: float) -> _FakeParamShape:  # noqa: N802
+        return _FakeParamShape()
+
+
+class TestCreateParametricMassKg:
+    def test_mass_kg_uses_material_density(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Part", _FakePartForCreateParametric()),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.create_parametric(
+                "box", {"length": 100, "width": 50, "height": 20}, material="aluminum_6061"
+            )
+
+        # volume 100,000 mm^3 = 1e-4 m^3; aluminum_6061 = 2700 kg/m^3
+        assert result["mass_kg"] == pytest.approx(0.27)
+
+    def test_mass_kg_omitted_when_no_material_given(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Part", _FakePartForCreateParametric()),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.create_parametric("box", {"length": 100, "width": 50, "height": 20})
+
+        assert "mass_kg" not in result
+
+
+# ---------------------------------------------------------------------------
 # 2. FreecadOperations requires FreeCAD
 # ---------------------------------------------------------------------------
 
