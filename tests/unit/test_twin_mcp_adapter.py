@@ -841,6 +841,106 @@ class TestCommitGeometryFilePath:
 
 
 # ---------------------------------------------------------------------------
+# twin.commit_geometry -- flatten 'properties' onto top-level metadata (FORGE-100)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryPropertiesFlattening:
+    """Re-test 2026-09-25: a node committed by session_id+obj_id still had no
+    measured keys -- 'properties' was always accepted but only ever nested
+    under metadata.geometry_features.properties, never the top-level keys a
+    constraint expression (wp.metadata.get('mass_kg', 0)) actually reads."""
+
+    async def test_canonical_keys_in_properties_are_also_passed_as_extra_metadata(
+        self,
+    ) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "properties": {
+                        "volume_mm3": 1800.0,
+                        "surface_area_mm2": 900.0,
+                        "mass_kg": 4.86,
+                        "bounding_box": {"min_x": 0.0, "max_x": 30.0},
+                        "some_other_measurement": "kept in geometry_features only",
+                    },
+                },
+            )
+        )
+
+        # The pre-existing nested structure is untouched (back-compat).
+        assert received["properties"]["some_other_measurement"] == (
+            "kept in geometry_features only"
+        )
+        # The canonical keys are ALSO flattened for the constraint engine.
+        assert received["extra_metadata"] == {
+            "volume_mm3": 1800.0,
+            "surface_area_mm2": 900.0,
+            "mass_kg": 4.86,
+            "bbox_mm": {"min_x": 0.0, "max_x": 30.0},
+        }
+
+    async def test_no_extra_metadata_key_when_properties_has_no_canonical_measurements(
+        self,
+    ) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "properties": {"note": "no measured keys here"},
+                },
+            )
+        )
+
+        assert "extra_metadata" not in received
+
+    async def test_no_properties_at_all_omits_extra_metadata(self) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert "extra_metadata" not in received
+
+
+# ---------------------------------------------------------------------------
 # Subgraph serialisation helper
 # ---------------------------------------------------------------------------
 
