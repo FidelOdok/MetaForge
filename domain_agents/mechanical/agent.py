@@ -1025,11 +1025,17 @@ class MechanicalAgent:
                 errors=["Missing required parameter: dimensions"],
             )
 
+        material = request.parameters.get("material", "aluminum_6061")
         skill_input = GenerateCadInput(
+            # FORGE-97: name is now required on the skill's own input; this
+            # generic TaskRequest interface predates that, so fall back to
+            # the same synthetic pattern the skill itself used to hardcode
+            # when the caller doesn't supply one.
+            name=request.parameters.get("name") or f"{shape_type} ({material})",
             work_product_id=request.work_product_id,
             shape_type=shape_type,
             dimensions=dimensions,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=material,
             output_path=request.parameters.get("output_path", ""),
             constraints=request.parameters.get("constraints", {}),
             backend=request.parameters.get("backend", "cadquery"),

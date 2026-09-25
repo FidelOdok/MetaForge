@@ -369,6 +369,7 @@ def create_mechanical_agent(
         ctx: RunContext[MechanicalAgentDeps],
         shape_type: str,
         dimensions: dict[str, Any],
+        name: str = "",
         material: str = "aluminum_6061",
         output_path: str = "",
     ) -> dict[str, Any]:
@@ -377,6 +378,9 @@ def create_mechanical_agent(
         Args:
             shape_type: Type of shape to generate (e.g. 'box', 'cylinder').
             dimensions: Dimension parameters for the shape.
+            name: Part name for this geometry (e.g. 'Shoulder Yoke') -- be
+                specific, never a generic placeholder like the shape type
+                alone.
             material: Material identifier.
             output_path: Output file path for the CAD file.
         """
@@ -394,6 +398,10 @@ def create_mechanical_agent(
 
             _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = GenerateCadInput(
+                # FORGE-97: name is now required on the skill's own input;
+                # fall back to the same synthetic pattern the skill itself
+                # used to hardcode when the model doesn't supply one.
+                name=name or f"{shape_type} ({material})",
                 work_product_id=_wp_id,
                 shape_type=shape_type,
                 dimensions=dimensions,
