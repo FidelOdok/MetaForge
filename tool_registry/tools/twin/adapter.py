@@ -1613,9 +1613,14 @@ class TwinServer(McpToolServer):
                         "properties": {
                             "type": "object",
                             "description": (
-                                "Derived geometric measurements (volume_mm3, bounding_box, "
-                                "mass properties, etc.) — stored on the node as queryable "
-                                "metadata alongside 'parameters'."
+                                "Derived geometric measurements — pass the result of a prior "
+                                "freecad.measure/cadquery get_properties call here directly. "
+                                "volume_mm3, surface_area_mm2, mass_kg, and bounding_box are "
+                                "ALSO flattened onto the node's top-level metadata (FORGE-100) "
+                                "so a constraint expression (e.g. mass_kg <= 4.5) reads a real "
+                                "measured value instead of a missing-key default — omitting "
+                                "this when you have the measurement leaves that constraint "
+                                "unable to ever genuinely pass or fail."
                             ),
                         },
                         "source_tool": {
@@ -1725,6 +1730,26 @@ class TwinServer(McpToolServer):
         # stored script belongs to.
         source_tool = arguments.get("source_tool")
         source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
+        # FORGE-100 remainder: 'properties' already accepted measured values
+        # (volume_mm3, mass_kg, ...), but the recorder only ever nested them
+        # under metadata.geometry_features.properties -- never the top-level
+        # keys a constraint expression actually reads
+        # (wp.metadata.get('mass_kg', 0)). Re-test 2026-09-25 confirmed a
+        # node committed by session_id+obj_id still had no measured keys.
+        # Flatten the same canonical keys measured_metadata_from_cad_result()
+        # (domain_agents/shared/commit_geometry.py) uses for the skill paths,
+        # in ADDITION to the existing nested structure kept for back-compat.
+        extra_metadata: dict[str, Any] | None = None
+        if isinstance(properties, dict):
+            flattened = {
+                key: properties[key]
+                for key in ("volume_mm3", "surface_area_mm2", "mass_kg")
+                if key in properties
+            }
+            bbox = properties.get("bounding_box")
+            if isinstance(bbox, dict):
+                flattened["bbox_mm"] = bbox
+            extra_metadata = flattened or None
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -1736,6 +1761,7 @@ class TwinServer(McpToolServer):
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
             **({"source_tool": source_tool} if source_tool else {}),
+            **({"extra_metadata": extra_metadata} if extra_metadata else {}),
         )
 
     # ------------------------------------------------------------------
