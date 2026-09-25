@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { render } from "ink";
 import { App } from "./App.js";
-import { exitAfterFlush, runCommand } from "./commands.js";
+import { runCommand } from "./commands.js";
 import { decideInvocation } from "./lib/invocation.js";
 
 /**
@@ -10,6 +10,13 @@ import { decideInvocation } from "./lib/invocation.js";
  *   - bare (or `ui`), optionally with --project/--debug + a TTY → the Ink TUI
  *   - a subcommand / --help / any other flag → run it non-interactively
  *   - bare + piped (no TTY) → print a hint (can't render a UI without a TTY)
+ *
+ * FORGE-92: every write `runCommand` makes goes through commands.ts's
+ * synchronous `writeAllSync` now, so nothing is left buffered by the time
+ * its promise resolves -- a plain `process.exit(code)` right after is safe
+ * and correct (an async drain-then-exit wrapper was tried first and turned
+ * out not to be reliable across runtimes; see commands.ts's writeAllSync
+ * docstring for what actually happened).
  */
 const rawArgv = process.argv.slice(2);
 const { mode, initialProject, continueLatest, debug } = decideInvocation(rawArgv);
@@ -19,15 +26,15 @@ if (debug) process.env.FORGE_LOG ??= "1";
 const argv = rawArgv.filter((a) => a !== "--debug");
 
 if (mode === "version") {
-  void runCommand(["version"]).then(exitAfterFlush);
+  void runCommand(["version"]).then((code) => process.exit(code));
 } else if (mode === "tui") {
   if (process.stdout.isTTY && process.stdin.isTTY) {
     render(<App initialProject={initialProject} continueLatest={continueLatest} />);
   } else {
     process.stderr.write("forge: no TTY — the interactive UI needs a terminal.\n");
     process.stderr.write("Use a command instead, e.g. `forge runs list` or `forge --help`.\n");
-    exitAfterFlush(0);
+    process.exit(0);
   }
 } else {
-  void runCommand(argv).then(exitAfterFlush);
+  void runCommand(argv).then((code) => process.exit(code));
 }
