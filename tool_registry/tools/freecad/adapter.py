@@ -141,7 +141,15 @@ class FreecadServer(McpToolServer):
                     "properties": {
                         "input_file": {
                             "type": "string",
-                            "description": "Path to CAD file",
+                            "description": (
+                                "Path to a STEP file already on the shared adapter "
+                                "workspace, e.g. the 'cad_file'/'step_file' result of "
+                                "an earlier freecad.export_model/create_parametric call. "
+                                "This tool has no Twin access and does NOT accept a "
+                                "work_product_id (FORGE-223) -- if you only have one, "
+                                "call twin.stage_work_product_file first to materialize "
+                                "it and pass its returned file_path here instead."
+                            ),
                         },
                         "element_size": {
                             "type": "number",

@@ -322,6 +322,20 @@ class TestGenerateMesh:
                 {"input_file": "/models/bracket.step", "algorithm": "tetgen"}
             )
 
+    def test_input_file_schema_tells_the_model_work_product_id_is_not_accepted(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        """FORGE-223: re-test 2026-09-25 found the model retried
+        freecad.generate_mesh with work_product_id instead of input_file 11
+        times across two sessions -- the schema never mentioned
+        work_product_id at all, giving no clue what to do differently. This
+        adapter has no Twin access to resolve one itself, so the fix is a
+        self-documenting schema pointing at twin.stage_work_product_file."""
+        schema = server_with_mocks._tools["freecad.generate_mesh"].manifest.input_schema
+        description = schema["properties"]["input_file"]["description"]
+        assert "work_product_id" in description
+        assert "twin.stage_work_product_file" in description
+
 
 # ---------------------------------------------------------------------------
 # TestBooleanOperation
