@@ -22,8 +22,9 @@ This is the structured path FR-1 describes (agents emit Design IR, never adapter
 
 ## Input
 
+- `name` -- **required.** Name for the generated part (e.g. `"Shoulder Yoke"`), used as the Twin work product's display name; must be specific, never a generic placeholder like the material alone (FORGE-97)
 - `work_product_id` -- UUID of the CAD model work_product in the Digital Twin (optional)
-- `entities` -- list of Design IR entity dicts (requirements doc §6.2); rejected with a clear error if malformed, not a crash
+- `entities` -- list of Design IR entities (requirements doc §6.2), typed as a real discriminated union on `op` (`twin_core.design_ir.IREntity`) -- the exact required fields per op are part of this skill's own MCP `input_schema`, not just prose here (FORGE-222); rejected with a clear error if malformed, not a crash
 - `adapter` -- `"freecad"` (default, full v1 op coverage) or `"cadquery"` (real compiler, narrower v1 op subset -- see `cadquery_lowering.py`'s module docstring)
 - `material` -- material name for metadata (default: aluminum_6061)
 - `project_id` -- optional project UUID to link the committed work product to
@@ -34,7 +35,7 @@ This is the structured path FR-1 describes (agents emit Design IR, never adapter
 - `cad_file` -- path to the exported STEP file
 - `entity_count`, `volume_mm3`, `surface_area_mm2`, `bounding_box` -- of the terminal entity
 - `obj_id_map` -- Design IR entity id -> the lowering pass's own per-entity handle, for diagnostics (FreeCAD `obj_id`, or CadQuery's generated script variable name)
-- `committed` / `twin_node_id` / `model_url` / `commit_error` -- persistence outcome
+- `committed` / `twin_node_id` / `model_url` / `commit_error` -- persistence outcome. When committed, the work product's metadata also carries `volume_mm3` / `surface_area_mm2` / `bbox_mm` / `mass_kg` (when `material` is given) as top-level canonical measured-property keys, the same convention `generate_cad`/`generate_enclosure`/`create_assembly` use (FORGE-100), so a constraint expression can read a real measured value.
 
 ## Limitations (v1 -- see each lowering module's own docstring for the authoritative list)
 

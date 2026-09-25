@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from twin_core.design_ir import IREntity
 
 
 class BoundingBox(BaseModel):
@@ -25,15 +27,27 @@ class GenerateCadIrInput(BaseModel):
     work_product_id: UUID | None = Field(
         default=None, description="Twin work_product ID (optional for new generation)"
     )
-    entities: list[dict[str, Any]] = Field(
+    name: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Name for the generated part (e.g. 'Shoulder Yoke', 'Base Housing') -- "
+            "used as the Twin work product's display name. Required and must be "
+            "specific to what this part actually is, never a generic placeholder "
+            "like the material alone."
+        ),
+    )
+    entities: list[IREntity] = Field(
         ...,
         min_length=1,
         description=(
             "Design IR entities (requirements doc §6.2), e.g. "
             '[{"id": "body1", "op": "create_body"}, '
             '{"id": "sk1", "op": "sketch", "body_ref": "body1", ...}, ...]. '
-            "Validated into a real DesignIR document before anything runs; "
-            "malformed entities are rejected with a clear error, not a crash."
+            "Each entity's exact required fields are given by its own `op` "
+            "(a discriminated union -- see the op enum values and each "
+            "variant's schema below). Malformed entities are rejected with a "
+            "clear error, not a crash."
         ),
     )
     adapter: Literal["freecad", "cadquery"] = Field(

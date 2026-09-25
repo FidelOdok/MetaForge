@@ -436,6 +436,7 @@ def _get_or_create_pydantic_agent() -> Any:
         ctx: RunContext[AgentDependencies],
         entities: list[dict[str, Any]],
         material: str = "aluminum_6061",
+        name: str = "",
     ) -> dict[str, Any]:
         """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
 
@@ -466,6 +467,7 @@ def _get_or_create_pydantic_agent() -> Any:
             entities: The Design IR entity list, ordered so every ``*_ref``
                 points to an entity earlier in this same list.
             material: Material name for metadata.
+            name: Name for the generated part (e.g. "Shoulder Yoke").
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -475,7 +477,15 @@ def _get_or_create_pydantic_agent() -> Any:
             branch=ctx.deps.branch,
         )
 
-        skill_input = GenerateCadIrInput(entities=entities, material=material)
+        skill_input = GenerateCadIrInput(
+            # FORGE-97/100: name is now required on the skill's own input;
+            # this legacy pydantic-ai tool predates that, so fall back to
+            # the same synthetic pattern the skill itself used to hardcode
+            # when the caller doesn't supply one.
+            name=name or f"design_ir ({material})",
+            entities=entities,
+            material=material,
+        )
 
         handler = GenerateCadIrHandler(skill_ctx)
         result = await handler.run(skill_input)
@@ -1208,10 +1218,16 @@ class MechanicalAgent:
                 errors=["Missing required parameter: entities"],
             )
 
+        material = request.parameters.get("material", "aluminum_6061")
         skill_input = GenerateCadIrInput(
+            # FORGE-97/100: name is now required on the skill's own input;
+            # this generic TaskRequest interface predates that, so fall back
+            # to the same synthetic pattern the skill itself used to
+            # hardcode when the caller doesn't supply one.
+            name=request.parameters.get("name") or f"design_ir ({material})",
             work_product_id=request.work_product_id,
             entities=entities,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=material,
             project_id=request.parameters.get("project_id"),
         )
 

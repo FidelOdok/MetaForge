@@ -513,6 +513,7 @@ def create_mechanical_agent(
         ctx: RunContext[MechanicalAgentDeps],
         entities: list[dict[str, Any]],
         material: str = "aluminum_6061",
+        name: str = "",
     ) -> dict[str, Any]:
         """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
 
@@ -543,6 +544,7 @@ def create_mechanical_agent(
             entities: The Design IR entity list, ordered so every ``*_ref``
                 points to an entity earlier in this same list.
             material: Material name for metadata.
+            name: Name for the generated part (e.g. "Shoulder Yoke").
         """
         with tracer.start_as_current_span("tool.generate_cad_ir") as span:
             span.set_attribute("entity_count", len(entities))
@@ -558,7 +560,14 @@ def create_mechanical_agent(
 
             _wp_id = UUID(ctx.deps.work_product_id) if ctx.deps.work_product_id else None
             skill_input = GenerateCadIrInput(
-                work_product_id=_wp_id, entities=entities, material=material
+                # FORGE-97/100: name is now required on the skill's own
+                # input; this legacy pydantic-ai tool predates that, so fall
+                # back to the same synthetic pattern the skill itself used
+                # to hardcode when the caller doesn't supply one.
+                name=name or f"design_ir ({material})",
+                work_product_id=_wp_id,
+                entities=entities,
+                material=material,
             )
 
             handler = GenerateCadIrHandler(skill_ctx)
