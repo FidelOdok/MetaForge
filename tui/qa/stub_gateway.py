@@ -42,6 +42,17 @@ DROP_DONE = "__drop_done__"
 # into scrollback on every repaint.
 LONG_TURN = "__long_turn__"
 REPLY_TOKENS = ["Hello", "! ", "This ", "is ", "the ", "QA ", "stub ", "reply."]
+# FORGE-101: script a real provider-failure `error` SSE event -- the exact
+# AllProvidersFailedError shape (orchestrator/harness/providers/pipeline.py)
+# a real openrouter 402 produces, account id and key-management URL included,
+# so QA can assert the TUI summarizes it and clears the banner on the next turn.
+PROVIDER_ERROR = "__provider_error__"
+PROVIDER_ERROR_RAW = (
+    "all providers failed for role 'generator': openrouter:openai/gpt-4o -> "
+    "Error code: 402 - {'error': {'message': 'This request requires more "
+    "credits, see https://openrouter.ai/settings/keys for your account "
+    "details.', 'code': 402}, 'user_id': 'user_9f2a1c7e8b3d4a5f'}"
+)
 
 # Per-thread queues bridge POST /messages -> the open GET /stream (like the real
 # gateway's pub/sub). A posted message's content lands here; the stream drains it.
@@ -131,6 +142,11 @@ class Handler(BaseHTTPRequestHandler):
                     if not self._emit("message.delta", {"agent_id": "agent"}, tid):
                         return
                     time.sleep(0.05)
+            elif PROVIDER_ERROR in content:
+                # No message.delta at all -- a real provider failure ends the
+                # turn on the `error` event alone (see test_chat_error_surfacing.py).
+                if not self._emit("error", {"error": PROVIDER_ERROR_RAW}, tid):
+                    return
             else:
                 for tok in REPLY_TOKENS:
                     if not self._emit("message.delta", {"delta": tok, "agent_id": "agent"}, tid):
