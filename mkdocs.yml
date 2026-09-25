@@ -87,6 +87,7 @@ nav:
       - Troubleshooting: troubleshooting.md
   - Deployment:
       - Vercel (dashboard + marketing): deployment/vercel.md
+      - Gateway authentication (Cloud): deployment/cloud.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
       - Codex: integrations/codex.md

@@ -16,6 +16,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api_gateway.assistant.routes import router as assistant_router
+from api_gateway.auth import (
+    AuthConfigurationError,
+    AuthMiddleware,
+    AuthSettings,
+    TokenVerifier,
+    load_auth_settings,
+)
 from api_gateway.bom.routes import router as bom_router
 from api_gateway.cad.routes import router as cad_router
 from api_gateway.cad_export.routes import router as cad_export_router
@@ -25,7 +32,7 @@ from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.harness import router as harness_router
-from api_gateway.health import health_router
+from api_gateway.health import health_router, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
@@ -1204,6 +1211,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     shutdown_observability(_otel_state)
 
 
+def _resolve_cors_origins(explicit: list[str] | None, auth_settings: AuthSettings) -> list[str]:
+    """Decide the CORS allow-list, refusing the one unsafe combination.
+
+    The gateway historically defaulted to ``["*"]`` with ``allow_credentials``.
+    That was inert while nothing was authenticated — there were no credentials
+    to leak. Once a bearer token exists it is a real hole, so a wildcard is
+    rejected outright when auth is on.
+
+    Precedence: an explicit argument (tests), then ``METAFORGE_CORS_ORIGINS`` as
+    a comma-separated list, then the historical wildcard for local use.
+    """
+    if explicit is not None:
+        origins = explicit
+    else:
+        raw = os.environ.get("METAFORGE_CORS_ORIGINS", "").strip()
+        origins = [o.strip() for o in raw.split(",") if o.strip()] if raw else ["*"]
+
+    if auth_settings.enabled and "*" in origins:
+        raise AuthConfigurationError(
+            "CORS is set to '*' while METAFORGE_AUTH_MODE is enabled. A wildcard "
+            "origin combined with credentialed requests would let any site call this "
+            "gateway with a user's token. Set METAFORGE_CORS_ORIGINS to the exact "
+            "dashboard origin(s), e.g. 'https://app.metaforge.uk'."
+        )
+    return origins
+
+
 def create_app(
     *,
     cors_origins: list[str] | None = None,
@@ -1240,8 +1274,26 @@ def create_app(
     if scheduler is not None:
         app.state.scheduler = scheduler
 
+    # -- Authentication (MetaForge Cloud) ----------------------------------
+    #
+    # ``load_auth_settings`` raises rather than returning a downgraded result,
+    # so a gateway configured for cloud auth that cannot verify tokens fails to
+    # start here instead of coming up silently open.
+    auth_settings = load_auth_settings()
+    app.state.auth_settings = auth_settings
+    set_reported_auth_mode(auth_settings.mode.value)
+
+    origins = _resolve_cors_origins(cors_origins, auth_settings)
+
+    # Middleware nesting is decided by call order: the LAST added is outermost.
+    # Auth must sit inside CORS so that a 401 travels back out through the CORS
+    # layer and arrives at the browser with its headers, as a readable error
+    # rather than an opaque network failure.
+    if auth_settings.enabled:
+        app.state.token_verifier = TokenVerifier(auth_settings)
+        app.add_middleware(AuthMiddleware, verifier=app.state.token_verifier)
+
     # -- CORS --------------------------------------------------------------
-    origins = cors_origins if cors_origins is not None else ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
