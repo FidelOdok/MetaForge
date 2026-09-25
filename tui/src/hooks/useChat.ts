@@ -6,7 +6,12 @@ import {
   type ContextStats,
   type ToolApprovalRequested,
 } from "../api/chat.js";
-import { describeEmptyTurn, newTurnStats, type TurnStats } from "../chat-diagnostics.js";
+import {
+  describeEmptyTurn,
+  newTurnStats,
+  summarizeProviderError,
+  type TurnStats,
+} from "../chat-diagnostics.js";
 import { assistantScope, scopeKey, type ChatScope } from "../lib/project.js";
 import { log } from "../log.js";
 
@@ -402,12 +407,18 @@ export function useChat(
               case "agent.done":
                 finalizeTurn();
                 break;
-              case "error":
+              case "error": {
+                // FORGE-101: the raw error can run to a full JSON body (a
+                // provider's key-management URL, account user_id, ...) — log
+                // it in full, but only the short summary reaches the screen
+                // and the "(no reply — stream error: ...)" fallback text.
+                const summary = summarizeProviderError(ev.error);
                 statsRef.current.errored = true;
-                statsRef.current.errorMsg = ev.error;
+                statsRef.current.errorMsg = summary;
                 log.error("chat.stream_error_event", { threadId, error: ev.error });
-                setError(ev.error);
+                setError(summary);
                 break;
+              }
               default:
                 break;
             }
@@ -460,7 +471,7 @@ export function useChat(
         },
         (e: Error) => {
           log.error("chat.tool_approval_failed", { runId: approval.run_id, error: e.message });
-          setError(`approval: ${e.message}`);
+          setError(`approval: ${summarizeProviderError(e.message)}`);
           setApprovalBusy(false);
         },
       );
@@ -482,6 +493,10 @@ export function useChat(
       pokeIdle(); // arm the idle watchdog for this turn
       setPending({ text: "", steps: [], thinking: "", startedAction: "" });
       setStatus("thinking");
+      // FORGE-101: a previous turn's provider error must not stay pinned
+      // above the input once a new turn (possibly against a switched model)
+      // is underway -- it read as "your current model is still failing".
+      setError(null);
       log.info("chat.send", { threadId, chars: content.length, model, provider });
 
       // Fallback terminal signal so a lost `agent.done` can't wedge the chat.
@@ -511,8 +526,9 @@ export function useChat(
         (e: Error) => {
           log.error("chat.send_failed", { threadId, error: e.message });
           if (turnSeq.current === myTurn && thinkingRef.current) {
-            setError(`send: ${e.message}`);
-            armFallback(`request failed: ${e.message}`);
+            const summary = summarizeProviderError(e.message);
+            setError(`send: ${summary}`);
+            armFallback(`request failed: ${summary}`);
           }
         },
       );
