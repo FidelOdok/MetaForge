@@ -141,8 +141,15 @@ test("writeAllSync (Bun) delivers output larger than the pipe buffer before exit
     assert.equal(code, 0);
     assert.equal(bytes, size);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-      t.skip("bun not found on PATH -- this is the runtime the shipped binary actually uses");
+    // ENOENT: not on PATH at all. EACCES: resolvable but not executable in
+    // this environment (observed on the self-hosted CI runner's "check" job
+    // -- the "binary" job's own setup-bun install evidently isn't usable
+    // here). Either way this is a bonus check, not a hard requirement: the
+    // "binary" CI job already builds with a real, guaranteed-usable bun and
+    // runs its own smoke check against the compiled artifact.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT" || code === "EACCES") {
+      t.skip(`bun not usable on PATH here (${code}) -- the runtime the shipped binary uses`);
       return;
     }
     throw err;
