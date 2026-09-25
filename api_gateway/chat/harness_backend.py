@@ -54,7 +54,7 @@ from orchestrator.harness.providers.registry import (
     get_profile,
     max_tools_for,
 )
-from orchestrator.harness.react import run_react
+from orchestrator.harness.react import ReActStep, run_react
 from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import DuplicateToolError, Handler, ToolRegistry
 from skill_registry.mcp_bridge import McpBridge
@@ -994,6 +994,58 @@ async def _build_context(
     return ctx
 
 
+# FORGE-98: a chat agent can claim a design action was performed ("Assembled
+# the available parts... Added revolute joints...") with ZERO tool calls that
+# turn -- confirmed live (a T6 turn made no tool calls, no tool events in the
+# gateway log, yet reported a fully assembled 6-component robot). Nothing in
+# the harness flagged this; the TUI showed a confident assistant message and
+# the user had to cross-check the tool trace themselves to find out it was
+# false. For a hardware design tool this is the worst failure mode: a user
+# who trusts the summary moves on believing work exists that doesn't.
+#
+# This is a deterministic, provider-agnostic heuristic, not a formal claim
+# checker -- promoting evals/judge.py's own LLM-graded "grounding" dimension
+# into a live per-turn check (this ticket's other suggested direction) is a
+# separate, heavier change (an extra judged model call on every turn), not
+# folded in here.
+_COMPLETION_CLAIM_VERBS = (
+    "assembled",
+    "created",
+    "committed",
+    "recorded",
+    "generated",
+    "built",
+    "added",
+    "designed",
+    "exported",
+)
+
+
+def _has_successful_tool_call(steps: list[ReActStep]) -> bool:
+    return any(s.tool_call is not None and s.error is None for s in steps)
+
+
+def _flag_if_unfounded_completion_claim(answer: str, steps: list[ReActStep]) -> str:
+    """Prepend a visible warning when ``answer`` claims a completed design
+    action but the turn made no successful tool call at all.
+
+    A false positive here (the reply happens to use one of these verbs in an
+    unrelated, non-claim sense) costs the user one extra banner line; a false
+    negative is the actual bug this fixes -- a fabricated claim rendered with
+    the same confidence as a real one. That asymmetry is why this leans
+    toward over-flagging rather than trying to parse intent.
+    """
+    if not answer or _has_successful_tool_call(steps):
+        return answer
+    lowered = answer.lower()
+    if not any(verb in lowered for verb in _COMPLETION_CLAIM_VERBS):
+        return answer
+    return (
+        "⚠ No tool calls were made this turn — the actions described below "
+        "were NOT actually performed; treat this reply as unverified.\n\n" + answer
+    )
+
+
 async def run_chat_turn(
     user_content: str,
     *,
@@ -1117,7 +1169,10 @@ async def run_chat_turn(
         except Exception:  # noqa: BLE001 - metrics must never break a turn
             pass
     if result.output:
-        answer = str(result.output)
+        # FORGE-98: only the model's own final text can fabricate a claim --
+        # summarize_trajectory/_FALLBACK_ANSWER below are generated FROM the
+        # step trace itself, so they're inherently grounded.
+        answer = _flag_if_unfounded_completion_claim(str(result.output), result.steps)
     elif result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
         answer = summarize_trajectory(result.steps)
     else:
@@ -1649,6 +1704,10 @@ async def run_chat_turn_streaming(
         await _record_turn_experience(answer)
         await on_delta(answer)
         return answer
+    # FORGE-98: only the model's own final text can fabricate a claim -- the
+    # empty-answer branch above is generated FROM the step trace itself, so
+    # it's inherently grounded.
+    answer = _flag_if_unfounded_completion_claim(answer, result.steps)
     await _record_turn_experience(answer)
     # Emit the loop's own answer as chunked deltas. This used to re-generate
     # the final text with a second, context-free model call (no history, no

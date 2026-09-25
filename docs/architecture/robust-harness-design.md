@@ -483,3 +483,37 @@ restored `awaiting_approval` row is marked `failed` with an
 `"orphaned: gateway restarted while this approval was pending"` error
 instead of `awaiting_approval` — the record persists for audit/history, but
 nothing implies it is still actionable.
+
+### Post-turn grounding guard (FORGE-98)
+
+A chat agent can claim a design action was performed with **zero tool
+calls** that turn — confirmed live: a turn made no tool calls at all (no
+tool events in the gateway log), yet its final reply read "Assembled the
+available parts... Added revolute joints J1 to J6... Part Count: 6
+components." Nothing existed. `NATIVE_SYSTEM`
+(`orchestrator/harness/native_tools.py`) already instructed the model
+"Never claim an action was performed unless one of your tool calls actually
+performed it" — that alone wasn't reliable enough with a weaker model
+(`openai/gpt-4o` via OpenRouter in the repro) to prevent this, which is
+exactly why a deterministic backstop exists alongside the prompt rule, not
+instead of it.
+
+`harness_backend._flag_if_unfounded_completion_claim(answer, steps)` runs on
+the model's own final text (never on `summarize_trajectory`/the fallback
+string, which are generated *from* the step trace and are inherently
+grounded) in both `run_chat_turn` and `run_chat_turn_streaming`: if the reply
+contains a completion verb (`assembled`, `created`, `committed`, `recorded`,
+`generated`, `built`, `added`, `designed`, `exported`) and the turn made no
+*successful* tool call (`ReActStep.tool_call is not None and error is None`),
+it prepends a visible `⚠ No tool calls were made this turn...` warning. A
+false positive costs one extra banner line; a false negative is the actual
+bug this fixes — that asymmetry is why it leans toward over-flagging rather
+than trying to parse intent. This is a cheap, provider-agnostic heuristic,
+not a real claim-vs-evidence checker — it can't catch a turn that called a
+tool but then reports the *wrong* numbers from it (also part of the same live
+repro: a `create_parametric` call returned a default 1570.8 mm³ pin, and the
+agent reported "150mm x 150mm x 20mm... created with the specified
+features" anyway). Promoting `evals/judge.py`'s own LLM-graded `grounding`
+transcript dimension into a live per-turn check would catch that class too,
+at the cost of an extra judged model call per turn — tracked separately
+(FORGE-104), not folded in here.

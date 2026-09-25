@@ -7,6 +7,7 @@ import pytest
 from api_gateway.chat.backend import InMemoryChatBackend
 from api_gateway.chat.harness_backend import (
     _build_context,
+    _flag_if_unfounded_completion_claim,
     chat_harness_enabled,
     make_set_project_scope_tool,
     provider_config_from_env,
@@ -14,6 +15,7 @@ from api_gateway.chat.harness_backend import (
 )
 from api_gateway.projects.schemas import ProjectResponse
 from orchestrator.harness.providers import CredentialStore, ProviderSpec
+from orchestrator.harness.react import ReActStep, ToolCall
 
 
 def test_flag_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,6 +48,86 @@ def test_provider_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("METAFORGE_LLM_BASE_URL", "https://openrouter.ai/api/v1")
     spec = provider_config_from_env().slots.candidates("generator")[0]
     assert spec.name == "openrouter" and spec.base_url == "https://openrouter.ai/api/v1"
+
+
+# --- FORGE-98: post-turn grounding guard ------------------------------------
+# Live repro: a turn made ZERO tool calls (no tool events in the gateway log)
+# yet the final reply claimed "Assembled the available parts... Added
+# revolute joints J1 to J6... Part Count: 6 components." Nothing existed.
+
+
+def _step_with_successful_tool_call() -> ReActStep:
+    return ReActStep(
+        thought="calling a tool",
+        tool_call=ToolCall(name="twin.commit_geometry", arguments={}),
+        observation={"ok": True},
+        error=None,
+    )
+
+
+def _step_with_failed_tool_call() -> ReActStep:
+    return ReActStep(
+        thought="calling a tool",
+        tool_call=ToolCall(name="twin.commit_geometry", arguments={}),
+        observation=None,
+        error="boom",
+    )
+
+
+def _step_with_no_tool_call() -> ReActStep:
+    return ReActStep(thought="just reasoning", tool_call=None)
+
+
+class TestFlagUnfoundedCompletionClaim:
+    def test_flags_a_completion_claim_with_zero_tool_calls(self) -> None:
+        answer = "Assembled the available parts and added revolute joints J1 to J6."
+        flagged = _flag_if_unfounded_completion_claim(answer, [])
+        assert flagged.startswith("⚠")
+        assert answer in flagged
+
+    def test_flags_when_every_tool_call_this_turn_failed(self) -> None:
+        answer = "Created the bracket and committed it to the twin."
+        flagged = _flag_if_unfounded_completion_claim(answer, [_step_with_failed_tool_call()])
+        assert flagged.startswith("⚠")
+
+    def test_does_not_flag_when_a_tool_call_succeeded(self) -> None:
+        answer = "Created the bracket and committed it to the twin."
+        flagged = _flag_if_unfounded_completion_claim(answer, [_step_with_successful_tool_call()])
+        assert flagged == answer
+
+    def test_does_not_flag_plain_conversational_replies(self) -> None:
+        answer = "The safety factor formula is yield strength divided by max stress."
+        flagged = _flag_if_unfounded_completion_claim(answer, [_step_with_no_tool_call()])
+        assert flagged == answer
+
+    def test_empty_answer_is_never_flagged(self) -> None:
+        assert _flag_if_unfounded_completion_claim("", []) == ""
+
+    def test_a_reasoning_only_step_does_not_count_as_a_tool_call(self) -> None:
+        answer = "Generated the enclosure geometry."
+        flagged = _flag_if_unfounded_completion_claim(answer, [_step_with_no_tool_call()])
+        assert flagged.startswith("⚠")
+
+
+@pytest.mark.asyncio
+async def test_run_chat_turn_flags_a_zero_tool_call_completion_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # ReAct JSON-final path
+
+    async def fake_invoke(spec: ProviderSpec, request: object) -> dict:
+        return {
+            "text": (
+                '{"thought": "done", "final": '
+                '"Assembled the gripper and committed it to the twin."}'
+            ),
+            "model": spec.model,
+        }
+
+    out = await run_chat_turn("assemble the gripper", invoke=fake_invoke)
+    assert out.startswith("⚠")
+    assert "Assembled the gripper" in out
 
 
 @pytest.mark.asyncio

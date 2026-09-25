@@ -78,6 +78,37 @@ async def test_empty_answer_falls_back(tmp_path: Path, monkeypatch: pytest.Monke
     assert text.strip()
 
 
+@pytest.mark.asyncio
+async def test_flags_a_zero_tool_call_completion_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FORGE-98: the streamed answer itself must carry the warning too — a
+    client rendering deltas as they arrive never sees an unflagged version."""
+    monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")
+
+    async def claim_invoke(spec: ProviderSpec, request: object) -> dict:
+        return {
+            "text": '{"thought": "done", "final": "Created and committed the bracket."}',
+            "model": spec.model,
+        }
+
+    deltas: list[str] = []
+
+    async def on_delta(d: str) -> None:
+        deltas.append(d)
+
+    text = await run_chat_turn_streaming(
+        "make a bracket",
+        on_delta=on_delta,
+        invoke=claim_invoke,
+        stream_invoke=_forbidden_stream,
+        credentials=CredentialStore(tmp_path / "c.json"),
+    )
+    assert text.startswith("⚠")
+    assert "".join(deltas) == text
+
+
 def test_chunk_text_is_lossless() -> None:
     text = "word " * 100 + "\n\nfinal   line with  spacing"
     assert "".join(_chunk_text(text)) == text
