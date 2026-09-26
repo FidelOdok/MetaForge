@@ -1,25 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
+import { useGatewayForm } from '../hooks/use-gateway-form';
 import { useHarnessModels, useHarnessProviders } from '../hooks/use-harness';
 import {
   removeProviderKey,
   saveProviderKey,
   selectProviderModel,
 } from '../api/endpoints/harness-credentials';
-import { probeGateway } from '../api/endpoints/health';
-import {
-  GatewayUrlError,
-  apiBase,
-  describeMixedContent,
-  getGatewayBase,
-  isGatewayUserConfigured,
-  joinAddressPort,
-  setGatewayBase,
-  splitGatewayBase,
-  subscribeGatewayBase,
-} from '../lib/gatewayConfig';
+import { apiBase, getGatewayBase, subscribeGatewayBase } from '../lib/gatewayConfig';
 
 const C = {
   onSurface: 'var(--mf-c-e2e2eb)',
@@ -58,12 +48,6 @@ const FIELD_LABEL: React.CSSProperties = {
   color: C.onSurfaceVariant,
   letterSpacing: '0.04em',
 };
-
-type TestState =
-  | { kind: 'idle' }
-  | { kind: 'testing' }
-  | { kind: 'ok'; latencyMs: number; detail: string }
-  | { kind: 'fail'; message: string };
 
 type ProviderAction = 'save' | 'remove' | 'select';
 
@@ -327,75 +311,34 @@ function ProvidersPanel() {
 
 export function SettingsPage() {
   const toast = useToast();
-  const queryClient = useQueryClient();
-  const [inUse, setInUse] = useState(getGatewayBase);
-  const [address, setAddress] = useState(() => splitGatewayBase(getGatewayBase()).address);
-  const [port, setPort] = useState(() => splitGatewayBase(getGatewayBase()).port);
-  const [test, setTest] = useState<TestState>({ kind: 'idle' });
-  const [overridden, setOverridden] = useState(isGatewayUserConfigured);
+  // Shared with the first-run onboarding screen so the two forms cannot
+  // drift on what counts as a valid address (see use-gateway-form.ts).
+  const gateway = useGatewayForm();
+  const {
+    address,
+    setAddress,
+    port,
+    setPort,
+    inUse,
+    overridden,
+    candidate,
+    dirty,
+    test,
+  } = gateway;
+  const warning = gateway.mixedContentWarning;
 
-  useEffect(
-    () =>
-      subscribeGatewayBase(() => {
-        const base = getGatewayBase();
-        setInUse(base);
-        setOverridden(isGatewayUserConfigured());
-        const parts = splitGatewayBase(base);
-        setAddress(parts.address);
-        setPort(parts.port);
-      }),
-    [],
-  );
-
-  const parsed = useMemo<{ base: string } | { error: string }>(() => {
-    try {
-      return { base: joinAddressPort(address, port) };
-    } catch (err) {
-      return { error: err instanceof GatewayUrlError ? err.message : String(err) };
-    }
-  }, [address, port]);
-
-  const candidate = 'base' in parsed ? parsed.base : null;
-  const dirty = candidate !== null && candidate !== inUse;
-  const warning = candidate ? describeMixedContent(candidate) : null;
-
-  const handleTest = useCallback(async () => {
-    if (candidate === null) return;
-    setTest({ kind: 'testing' });
-    try {
-      const { latencyMs, status } = await probeGateway(candidate);
-      const detail = [status?.status, status?.version].filter(Boolean).join(' · ') || 'healthy';
-      setTest({ kind: 'ok', latencyMs, detail });
-    } catch (err) {
-      setTest({ kind: 'fail', message: err instanceof Error ? err.message : String(err) });
-    }
-  }, [candidate]);
+  const handleTest = gateway.runTest;
 
   const handleSave = useCallback(() => {
-    if (candidate === null) return;
-    try {
-      setGatewayBase(candidate);
-      setInUse(getGatewayBase());
-      setOverridden(isGatewayUserConfigured());
-      queryClient.clear();
-      toast.success(candidate ? `Gateway set to ${candidate}` : 'Gateway reset to this origin');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }, [candidate, queryClient, toast]);
+    const saved = gateway.save();
+    if (saved === null) return;
+    toast.success(saved ? `Gateway set to ${saved}` : 'Gateway reset to this origin');
+  }, [gateway, toast]);
 
   const handleReset = useCallback(() => {
-    setGatewayBase(null);
-    const base = getGatewayBase();
-    setInUse(base);
-    setOverridden(false);
-    const parts = splitGatewayBase(base);
-    setAddress(parts.address);
-    setPort(parts.port);
-    setTest({ kind: 'idle' });
-    queryClient.clear();
+    gateway.reset();
     toast.info('Gateway override cleared');
-  }, [queryClient, toast]);
+  }, [gateway, toast]);
 
   const inUseLabel = inUse || `${window.location.origin} (same origin, via proxy)`;
 
@@ -434,7 +377,6 @@ export function SettingsPage() {
               value={address}
               onChange={(e) => {
                 setAddress(e.target.value);
-                setTest({ kind: 'idle' });
               }}
               placeholder="https://gateway.tailnet.ts.net"
               spellCheck={false}
@@ -449,7 +391,6 @@ export function SettingsPage() {
               value={port}
               onChange={(e) => {
                 setPort(e.target.value);
-                setTest({ kind: 'idle' });
               }}
               placeholder="8000"
               inputMode="numeric"
@@ -458,8 +399,8 @@ export function SettingsPage() {
           </label>
         </div>
 
-        {'error' in parsed && (
-          <p style={{ marginTop: 10, fontSize: 14, color: C.error }}>{parsed.error}</p>
+        {gateway.error && (
+          <p style={{ marginTop: 10, fontSize: 14, color: C.error }}>{gateway.error}</p>
         )}
         {warning && (
           <p

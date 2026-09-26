@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthGate } from './auth/AuthGate';
 import { AuthProvider } from './auth/AuthProvider';
+import { OnboardingGate } from './onboarding/OnboardingGate';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from './components/ui/Toast';
@@ -60,44 +61,48 @@ export function App() {
           whether a session is needed at all. */}
       <AuthProvider>
         <AuthGate>
-          <BrowserRouter>
-            <Suspense
-              fallback={
-                <div className="workspace-empty" role="status">
-                  Loading workspace…
-                </div>
-              }
-            >
-              <Routes>
-                <Route element={<AppLayout />}>
-                  <Route index element={<Navigate to="/projects" replace />} />
-                  {ROUTES.map(([path, Page]) => (
-                    <Route
-                      key={path}
-                      path={path}
-                      element={
-                        <ErrorBoundary>
-                          <Page />
-                        </ErrorBoundary>
-                      }
-                    />
-                  ))}
-                </Route>
-                <Route
-                  path="*"
-                  element={
-                    <div className="workspace-empty">
-                      <h1>Page not found</h1>
-                      <a className="text-action" href="/projects">
-                        Return to projects
-                      </a>
-                    </div>
-                  }
-                />
-              </Routes>
-            </Suspense>
-            <Toaster />
-          </BrowserRouter>
+          {/* Inside AuthGate: with no reachable gateway there is no auth_mode
+              to honour, so setup has to come after that question is asked. */}
+          <OnboardingGate>
+            <BrowserRouter>
+              <Suspense
+                fallback={
+                  <div className="workspace-empty" role="status">
+                    Loading workspace…
+                  </div>
+                }
+              >
+                <Routes>
+                  <Route element={<AppLayout />}>
+                    <Route index element={<Navigate to="/projects" replace />} />
+                    {ROUTES.map(([path, Page]) => (
+                      <Route
+                        key={path}
+                        path={path}
+                        element={
+                          <ErrorBoundary>
+                            <Page />
+                          </ErrorBoundary>
+                        }
+                      />
+                    ))}
+                  </Route>
+                  <Route
+                    path="*"
+                    element={
+                      <div className="workspace-empty">
+                        <h1>Page not found</h1>
+                        <a className="text-action" href="/projects">
+                          Return to projects
+                        </a>
+                      </div>
+                    }
+                  />
+                </Routes>
+              </Suspense>
+              <Toaster />
+            </BrowserRouter>
+          </OnboardingGate>
         </AuthGate>
       </AuthProvider>
     </QueryClientProvider>
