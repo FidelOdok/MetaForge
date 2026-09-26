@@ -358,6 +358,10 @@ class TestExecutionEngine:
                 "mesh_file": "/models/bracket.inp",
                 "load_case": "gravity_1g",
                 "analysis_type": "static_stress",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
+                "load_node_set": "Surface2",
+                "load_force_n": [0.0, 0.0, -100.0],
             },
         )
 
@@ -398,6 +402,10 @@ class TestExecutionEngine:
                     "mesh_file": "/models/bracket.inp",
                     "load_case": "lc1",
                     "analysis_type": "static_stress",
+                    "material": {"name": "steel"},
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             )
 
@@ -428,6 +436,10 @@ class TestExecutionEngine:
                 "mesh_file": "/models/bracket.inp",
                 "load_case": "lc1",
                 "analysis_type": "static_stress",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
+                "load_node_set": "Surface2",
+                "load_force_n": [0.0, 0.0, -100.0],
             },
         )
 
@@ -473,6 +485,10 @@ class TestExecutionEngine:
                     "mesh_file": "/models/bracket.inp",
                     "load_case": "gravity_1g",
                     "analysis_type": "static_stress",
+                    "material": {"name": "steel"},
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             ),
             ToolCallRequest(

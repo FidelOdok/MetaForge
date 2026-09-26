@@ -10,7 +10,10 @@ import structlog
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
+from tool_registry.tools.cadquery.materials import resolve_elastic_properties
 from tool_registry.tools.calculix.config import CalculixConfig
+from tool_registry.tools.calculix.deck_builder import build_static_stress_deck
+from tool_registry.tools.calculix.inp_mesh import parse_mesh_inp
 from tool_registry.tools.calculix.result_parser import extract_results, parse_frd_file
 from tool_registry.tools.calculix.solver import SolverError
 from tool_registry.tools.calculix.solver import run_fea as solver_run_fea
@@ -67,12 +70,61 @@ class CalculixServer(McpToolServer):
                         },
                         "load_case": {
                             "type": "string",
-                            "description": "Load case identifier",
+                            "description": "Load case label (for logging/naming only).",
                         },
                         "analysis_type": {
                             "type": "string",
                             "enum": ["static_stress", "modal"],
-                            "description": "Type of analysis",
+                            "description": (
+                                "Type of analysis. FORGE-234: material/fixed_node_set/"
+                                "load_node_set/load_force_n below build a complete, "
+                                "solvable deck for 'static_stress' only -- 'modal' still "
+                                "invokes the mesh directly with no deck construction."
+                            ),
+                        },
+                        "material": {
+                            "type": "object",
+                            "description": (
+                                "Required for 'static_stress'. Either {'name': "
+                                "<materials.py name, e.g. 'steel'/'aluminum_6061'>} or "
+                                "explicit {'youngs_modulus_mpa': ..., 'poissons_ratio': ...}. "
+                                "MPa (N/mm^2), NOT Pa -- mesh coordinates are in "
+                                "millimeters, and mixing unit systems silently understates "
+                                "stiffness by 1e6."
+                            ),
+                            "properties": {
+                                "name": {"type": "string"},
+                                "youngs_modulus_mpa": {"type": "number"},
+                                "poissons_ratio": {"type": "number"},
+                            },
+                        },
+                        "fixed_node_set": {
+                            "type": "string",
+                            "description": (
+                                "Required for 'static_stress'. Element set name from "
+                                "freecad.generate_mesh's own mesh (e.g. 'Surface1', gmsh's "
+                                "per-STEP-face group) to fully constrain (all 3 "
+                                "translational DOFs) -- use generate_mesh's own 'faces' "
+                                "response to identify which named face is which by its "
+                                "bounding box."
+                            ),
+                        },
+                        "load_node_set": {
+                            "type": "string",
+                            "description": (
+                                "Required for 'static_stress'. Element set name to apply "
+                                "load_force_n to."
+                            ),
+                        },
+                        "load_force_n": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": (
+                                "Required for 'static_stress'. [Fx, Fy, Fz] TOTAL force in "
+                                "Newtons, distributed evenly across load_node_set's nodes."
+                            ),
                         },
                     },
                     "required": ["mesh_file", "load_case", "analysis_type"],
@@ -214,14 +266,63 @@ class CalculixServer(McpToolServer):
         if analysis_type not in ("static_stress", "modal"):
             raise ValueError(f"Unsupported analysis type: {analysis_type}")
 
+        # FORGE-234: 'static_stress' needs a real, structured load case to
+        # build a complete deck around -- there is no meaningful default
+        # material/boundary-condition/load, so these are all required here
+        # (not in the JSON schema's own 'required' list, since they're only
+        # required for THIS analysis_type, not 'modal').
+        deck_spec: dict[str, Any] | None = None
+        if analysis_type == "static_stress":
+            material = arguments.get("material")
+            fixed_node_set = arguments.get("fixed_node_set")
+            load_node_set = arguments.get("load_node_set")
+            load_force_n = arguments.get("load_force_n")
+            missing = [
+                name
+                for name, value in (
+                    ("material", material),
+                    ("fixed_node_set", fixed_node_set),
+                    ("load_node_set", load_node_set),
+                    ("load_force_n", load_force_n),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"calculix.run_fea: {', '.join(missing)} required for "
+                    "analysis_type='static_stress' -- there is no default material or "
+                    "boundary condition/load to build a real analysis deck around."
+                )
+            if not isinstance(material, dict):
+                raise ValueError("calculix.run_fea: 'material' must be an object")
+            youngs_modulus_mpa, poissons_ratio = resolve_elastic_properties(
+                material=material.get("name"),
+                youngs_modulus_mpa=material.get("youngs_modulus_mpa"),
+                poissons_ratio=material.get("poissons_ratio"),
+            )
+            if not (isinstance(load_force_n, list) and len(load_force_n) == 3):
+                raise ValueError("calculix.run_fea: 'load_force_n' must be [Fx, Fy, Fz]")
+            deck_spec = {
+                "youngs_modulus_mpa": youngs_modulus_mpa,
+                "poissons_ratio": poissons_ratio,
+                "fixed_node_set": fixed_node_set,
+                "load_node_set": load_node_set,
+                "load_force_n": (
+                    float(load_force_n[0]),
+                    float(load_force_n[1]),
+                    float(load_force_n[2]),
+                ),
+            }
+
         logger.info(
             "Running FEA analysis",
             mesh_file=mesh_file,
             load_case=load_case,
             analysis_type=analysis_type,
+            deck_spec=deck_spec,
         )
 
-        result = await self._execute_solver(mesh_file, analysis_type)
+        result = await self._execute_solver(mesh_file, analysis_type, deck_spec)
         return result
 
     async def handle_extract_results(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -272,19 +373,39 @@ class CalculixServer(McpToolServer):
         result = await self._validate_mesh_file(mesh_file, max_aspect_ratio)
         return result
 
-    async def _execute_solver(self, mesh_file: str, analysis_type: str) -> dict[str, Any]:
+    async def _execute_solver(
+        self, mesh_file: str, analysis_type: str, deck_spec: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Execute CalculiX solver via subprocess.
 
         This method is designed to be easily mockable in tests.
         In production, it invokes the ccx binary and parses the results.
+
+        FORGE-234: when ``deck_spec`` is given (always true for
+        ``analysis_type='static_stress'`` -- see ``run_fea``), ``mesh_file``
+        is treated as mesh-only topology (nodes + elements, no analysis
+        cards -- exactly what freecad.generate_mesh produces) and a
+        complete, solvable deck is built around it first (only the volume
+        elements, real material/section/boundary/load/output-request cards
+        -- see ``deck_builder.build_static_stress_deck``), written to a new
+        ``<stem>_solved.inp`` file, and THAT is what actually gets solved.
         """
         with tracer.start_as_current_span("calculix.execute_solver") as span:
             span.set_attribute("calculix.mesh_file", mesh_file)
             span.set_attribute("calculix.analysis_type", analysis_type)
 
             try:
+                solved_file = mesh_file
+                if deck_spec is not None:
+                    mesh = parse_mesh_inp(mesh_file)
+                    deck_text = build_static_stress_deck(mesh, **deck_spec)
+                    solved_path = Path(mesh_file).with_name(f"{Path(mesh_file).stem}_solved.inp")
+                    solved_path.write_text(deck_text, encoding="utf-8")
+                    solved_file = str(solved_path)
+                    span.set_attribute("calculix.solved_file", solved_file)
+
                 solver_result = await solver_run_fea(
-                    mesh_file=mesh_file,
+                    mesh_file=solved_file,
                     load_case="default",
                     analysis_type=analysis_type,
                     timeout=self.config.max_solve_time,
