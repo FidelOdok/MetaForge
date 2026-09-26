@@ -12,6 +12,7 @@ from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.calculix.config import CalculixConfig
 from tool_registry.tools.calculix.result_parser import extract_results, parse_frd_file
+from tool_registry.tools.calculix.solver import SolverError
 from tool_registry.tools.calculix.solver import run_fea as solver_run_fea
 
 logger = structlog.get_logger()
@@ -291,26 +292,28 @@ class CalculixServer(McpToolServer):
                     work_dir=self.config.work_dir,
                 )
 
-                # Parse results from .frd file if available
+                # FORGE-232: ccx exiting 0 with no .frd at all is just as
+                # empty a "result" as a .frd with node_count == 0 (parse_frd_
+                # file below already raises for that case) -- both mean the
+                # solver ran against an incomplete deck. Never report success
+                # on either.
                 frd_files = [f for f in solver_result.get("result_files", []) if f.endswith(".frd")]
-                if frd_files:
-                    parsed = parse_frd_file(frd_files[0])
-                    return {
-                        "max_von_mises": {
-                            "global": parsed.get("stress", {}).get("max", 0.0),
-                        },
-                        "solver_time": solver_result["solver_time_s"],
-                        "mesh_elements": parsed.get("node_count", 0),
-                        "result_files": solver_result["result_files"],
-                        "stress": parsed.get("stress", {}),
-                        "displacement": parsed.get("displacement", {}),
-                    }
-
+                if not frd_files:
+                    raise SolverError(
+                        "CalculiX exited successfully but produced no .frd result file -- "
+                        "nothing was actually solved (check the deck has a *STEP with real "
+                        "loads/boundary conditions and *NODE FILE/*EL FILE output requests)."
+                    )
+                parsed = parse_frd_file(frd_files[0])
                 return {
-                    "max_von_mises": {},
+                    "max_von_mises": {
+                        "global": parsed.get("stress", {}).get("max", 0.0),
+                    },
                     "solver_time": solver_result["solver_time_s"],
-                    "mesh_elements": 0,
+                    "mesh_elements": parsed.get("node_count", 0),
                     "result_files": solver_result["result_files"],
+                    "stress": parsed.get("stress", {}),
+                    "displacement": parsed.get("displacement", {}),
                 }
 
             except Exception as exc:
@@ -342,23 +345,20 @@ class CalculixServer(McpToolServer):
                     work_dir=self.config.work_dir,
                 )
 
-                # Parse nodal temperature (NDTEMP) results from .frd if available
+                # Parse nodal temperature (NDTEMP) results from .frd (FORGE-232:
+                # same "no result at all" cases as _execute_solver above).
                 frd_files = [f for f in solver_result.get("result_files", []) if f.endswith(".frd")]
-                if frd_files:
-                    parsed = parse_frd_file(frd_files[0])
-                    temperature = parsed.get("temperature", {})
-                    return {
-                        "max_temperature": temperature.get("max", 0.0),
-                        "min_temperature": temperature.get("min", 0.0),
-                        "temperature_distribution": temperature.get("nodes", {}),
-                        "solver_time": solver_result["solver_time_s"],
-                        "result_files": solver_result["result_files"],
-                    }
-
+                if not frd_files:
+                    raise SolverError(
+                        "CalculiX exited successfully but produced no .frd result file -- "
+                        "nothing was actually solved."
+                    )
+                parsed = parse_frd_file(frd_files[0])
+                temperature = parsed.get("temperature", {})
                 return {
-                    "max_temperature": 0.0,
-                    "min_temperature": 0.0,
-                    "temperature_distribution": {},
+                    "max_temperature": temperature.get("max", 0.0),
+                    "min_temperature": temperature.get("min", 0.0),
+                    "temperature_distribution": temperature.get("nodes", {}),
                     "solver_time": solver_result["solver_time_s"],
                     "result_files": solver_result["result_files"],
                 }

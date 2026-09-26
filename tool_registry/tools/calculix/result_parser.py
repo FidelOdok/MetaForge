@@ -66,6 +66,29 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
         )
         span.set_attribute("calculix.node_count", node_count)
 
+        if node_count == 0:
+            # FORGE-232: a mesh-only deck (no *STEP/*STATIC/*BOUNDARY/*CLOAD,
+            # or no *NODE FILE/*EL FILE output request) makes CalculiX "solve"
+            # an empty analysis and exit 0 in a fraction of a second -- the
+            # .frd it writes parses fine, it's just genuinely empty. Returning
+            # that as a normal, successful result (as this used to) is worse
+            # than an ordinary parse failure: every caller reports "success"
+            # on a stress/displacement finding that was never actually
+            # computed. Fail loudly instead of silently reporting nothing.
+            span.set_attribute("calculix.empty_result", True)
+            logger.error(
+                "FRD file has no result data for any node",
+                frd_file=frd_path,
+                file_size_bytes=path.stat().st_size,
+            )
+            raise FrdParseError(
+                f"{frd_path}: no stress/displacement/temperature data for any node "
+                "(node_count == 0). This means the solver ran against an empty or "
+                "incomplete analysis deck -- no *STEP/*STATIC/*BOUNDARY/*CLOAD, or no "
+                "*NODE FILE/*EL FILE output request -- not a genuine, if uninteresting, "
+                "result. Treat this as a solver failure, not a successful analysis."
+            )
+
         result: dict[str, Any] = {
             "stress": stress_data,
             "displacement": displacement_data,
