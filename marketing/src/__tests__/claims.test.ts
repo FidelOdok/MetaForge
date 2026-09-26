@@ -108,3 +108,31 @@ describe('shipped artefacts', () => {
     expect(() => readFileSync(join(PUBLIC, 'og-card.png'))).not.toThrow();
   });
 });
+
+describe('routes to the product', () => {
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf-8');
+
+  it('links to the dashboard', () => {
+    // The site shipped with no route to the app at all: every outbound link
+    // went to GitHub. A landing page that cannot reach the product is the
+    // one failure a marketing test should catch.
+    expect(html).toMatch(/href="https:\/\/app\.metaforge\.uk"/);
+  });
+
+  it('offers the dashboard in the header, not only buried at the bottom', () => {
+    const header = html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? '';
+    expect(header).toMatch(/app\.metaforge\.uk/);
+  });
+
+  it('never points a dashboard link at the docs', () => {
+    // The previous React site derived its CTA as
+    // `VITE_DASHBOARD_URL || DOCS_URL`, so an unset variable silently sent
+    // every "Open the dashboard" button to the documentation instead.
+    const ctas = [...html.matchAll(/<a[^>]*href="([^"]+)"[^>]*>(\s*Open the dashboard[^<]*)</gi)];
+    expect(ctas.length).toBeGreaterThan(0);
+    for (const [, href, label] of ctas) {
+      expect(href, `"${label?.trim()}" points at docs`).not.toMatch(/docs|github/i);
+    }
+  });
+
+});
