@@ -2,7 +2,7 @@ import { context as otelContext, propagation } from '@opentelemetry/api';
 import axios from 'axios';
 import { getAccessToken } from '../auth/accessToken';
 import { logger } from '../lib/logger';
-import { apiBase } from '../lib/gatewayConfig';
+import { apiBase, getGatewayBase } from '../lib/gatewayConfig';
 import { installSampleAdapter } from '../lib/sample-workspace';
 
 /**
@@ -67,6 +67,35 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * A 200 carrying HTML is never a valid API response — it means something in
+ * front of the gateway answered instead of the gateway.
+ *
+ * This is how `app.metaforge.uk` came up broken: the Vercel SPA catch-all
+ * rewrite matched `/api/v1/projects` and served `index.html` with a 200, so
+ * axios handed the page its own shell as JSON, `data.projects` was undefined,
+ * and `.map` threw into the ErrorBoundary. The user saw "Something went
+ * wrong", which named neither the cause nor the fix.
+ *
+ * The rewrite is corrected in `vercel.json`, but that only fixes one host.
+ * Any reverse proxy, captive portal or tunnel can do the same thing, so the
+ * client refuses the response here too, with a message that says what to do.
+ */
+function rejectIfHtml(response: { status: number; headers: unknown; config: { url?: string } }) {
+  const headers = response.headers as { 'content-type'?: string } | undefined;
+  const contentType = headers?.['content-type'] ?? '';
+  if (!contentType.includes('text/html')) return;
+
+  const base = getGatewayBase();
+  throw new Error(
+    base
+      ? `The gateway at ${base} returned an HTML page instead of data. That address is ` +
+        `probably serving a website rather than a MetaForge gateway — check it in Settings.`
+      : 'No gateway is configured, so this request was answered by the dashboard itself. ' +
+        'Set your gateway address in Settings → Gateway.',
+  );
+}
+
 // -- Response interceptor: log success/error ------------------------------
 apiClient.interceptors.response.use(
   (response) => {
@@ -74,6 +103,7 @@ apiClient.interceptors.response.use(
       status: response.status,
       url: response.config.url,
     });
+    rejectIfHtml(response);
     return response;
   },
   (error) => {
