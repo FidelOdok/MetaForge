@@ -20,6 +20,44 @@ from tool_registry.tools.freecad.operations import (
 )
 
 # ---------------------------------------------------------------------------
+# 1a2. _sketch_point / _sketch_scalar -- FORGE-227: create_sketch elements must
+#     accept both this tool's flat-key convention (cx/cy/r, x1/y1/x2/y2) and
+#     the Design IR's grouped-point convention (center/radius, start/end),
+#     with a clear error (not a bare KeyError) when neither is satisfied.
+#     Pure dict/tuple parsing -- no FreeCAD needed, runs regardless of
+#     HAS_FREECAD.
+# ---------------------------------------------------------------------------
+
+
+class TestSketchPoint:
+    def test_flat_keys(self) -> None:
+        assert FreecadOperations._sketch_point(
+            {"type": "circle", "cx": 1.0, "cy": 2.0}, flat=("cx", "cy"), grouped="center"
+        ) == (1.0, 2.0)
+
+    def test_grouped_key(self) -> None:
+        assert FreecadOperations._sketch_point(
+            {"type": "circle", "center": [3.0, 4.0]}, flat=("cx", "cy"), grouped="center"
+        ) == (3.0, 4.0)
+
+    def test_neither_convention_raises_with_keys_listed(self) -> None:
+        with pytest.raises(ValueError, match=r"'cx' and 'cy'.*'center'.*x1"):
+            FreecadOperations._sketch_point(
+                {"type": "circle", "x1": 1.0}, flat=("cx", "cy"), grouped="center"
+            )
+
+
+class TestSketchScalar:
+    def test_first_matching_name(self) -> None:
+        assert FreecadOperations._sketch_scalar({"r": 5.0}, "r", "radius") == 5.0
+        assert FreecadOperations._sketch_scalar({"radius": 5.0}, "r", "radius") == 5.0
+
+    def test_missing_raises_with_names_listed(self) -> None:
+        with pytest.raises(ValueError, match=r"'r' or 'radius'"):
+            FreecadOperations._sketch_scalar({"cx": 1.0}, "r", "radius")
+
+
+# ---------------------------------------------------------------------------
 # 1. Shape defaults are well-formed
 # ---------------------------------------------------------------------------
 
