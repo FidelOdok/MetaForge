@@ -892,9 +892,13 @@ class TestCommitGeometryPropertiesFlattening:
             "bbox_mm": {"min_x": 0.0, "max_x": 30.0},
         }
 
-    async def test_no_extra_metadata_key_when_properties_has_no_canonical_measurements(
+    async def test_no_canonical_measurements_flags_missing_on_a_session_commit(
         self,
     ) -> None:
+        """FORGE-100 (re-test 2026-09-26): 'properties' was given but carried
+        no measured keys -- on a commit-by-reference (session_id+obj_id) call
+        this must be flagged, not silently omitted, so a constraint evaluator
+        can tell "never measured" apart from a genuine 0."""
         received: dict[str, Any] = {}
 
         async def recorder(**kwargs: Any) -> dict[str, Any]:
@@ -915,9 +919,12 @@ class TestCommitGeometryPropertiesFlattening:
             )
         )
 
-        assert "extra_metadata" not in received
+        assert received["extra_metadata"] == {"measured_properties_missing": True}
 
-    async def test_no_properties_at_all_omits_extra_metadata(self) -> None:
+    async def test_no_properties_at_all_flags_missing_on_a_session_commit(self) -> None:
+        """Same as above, but properties omitted entirely -- this is the
+        exact shape of the live re-test failure: the chat agent calling
+        commit-by-reference without ever passing measured properties."""
         received: dict[str, Any] = {}
 
         async def recorder(**kwargs: Any) -> dict[str, Any]:
@@ -931,6 +938,30 @@ class TestCommitGeometryPropertiesFlattening:
                 {
                     "session_id": "s1",
                     "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert received["extra_metadata"] == {"measured_properties_missing": True}
+
+    async def test_no_session_id_does_not_flag_missing(self) -> None:
+        """A stateless (file-based) commit has no session/obj_id to flag
+        against -- the missing-measurement signal is scoped to the
+        commit-by-reference path this ticket is actually about, not every
+        commit that happens to omit properties."""
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
                     "name": "Upper Arm Link",
                     "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
                 },

@@ -1613,14 +1613,21 @@ class TwinServer(McpToolServer):
                         "properties": {
                             "type": "object",
                             "description": (
-                                "Derived geometric measurements — pass the result of a prior "
-                                "freecad.measure/cadquery get_properties call here directly. "
-                                "volume_mm3, surface_area_mm2, mass_kg, and bounding_box are "
-                                "ALSO flattened onto the node's top-level metadata (FORGE-100) "
-                                "so a constraint expression (e.g. mass_kg <= 4.5) reads a real "
-                                "measured value instead of a missing-key default — omitting "
-                                "this when you have the measurement leaves that constraint "
-                                "unable to ever genuinely pass or fail."
+                                "REQUIRED for any constraint to be meaningful — this tool "
+                                "cannot measure the geometry itself. Pass the result of a "
+                                "prior freecad.measure/freecad.export_model/cadquery "
+                                "get_properties call here directly (export_model's own "
+                                "response already carries volume_mm3/surface_area_mm2/"
+                                "bounding_box — reuse it, or call freecad.measure first if "
+                                "you don't have it). volume_mm3, surface_area_mm2, mass_kg, "
+                                "and bounding_box are ALSO flattened onto the node's "
+                                "top-level metadata (FORGE-100) so a constraint expression "
+                                "(e.g. mass_kg <= 4.5) reads a real measured value instead of "
+                                "a missing-key default. Omitting this when you have the "
+                                "measurement leaves that constraint unable to ever genuinely "
+                                "pass or fail — it will be flagged "
+                                "measured_properties_missing=true rather than silently "
+                                "trusted."
                             ),
                         },
                         "source_tool": {
@@ -1750,6 +1757,28 @@ class TwinServer(McpToolServer):
             if isinstance(bbox, dict):
                 flattened["bbox_mm"] = bbox
             extra_metadata = flattened or None
+        # FORGE-100 (re-test 2026-09-26): the model still doesn't reliably
+        # pass 'properties' on a commit-by-reference call, even though
+        # freecad.export_model's own response already carried the measured
+        # values moments earlier -- so constraints on chat-authored parts
+        # keep reading defaults. Deriving them here server-side (calling
+        # freecad.measure at commit time) would be the real fix, but this
+        # handler has no path to another adapter -- api_gateway/server.py
+        # builds geometry_recorder_fn (make_geometry_recorder) BEFORE the
+        # ToolRegistry/RegistryMcpBridge it would need to reach freecad even
+        # exist yet (circular: the bridge is built FROM the registry that
+        # bootstrap_tool_registry constructs, and geometry_recorder is one of
+        # bootstrap_tool_registry's OWN inputs) -- resolving that ordering is
+        # a real, separately-riskable change, not a contained bug fix. Until
+        # then, make the gap visible instead of silent: flag it so a
+        # constraint evaluator (or a dashboard) can tell "never measured"
+        # apart from a genuine 0 -- the same "unobserved, not vacuous" ask
+        # this ticket's own fix direction lists, tracked at the evaluator
+        # level by FORGE-105.
+        if extra_metadata is None and isinstance(session_id, str) and session_id:
+            obj_id = arguments.get("obj_id")
+            if isinstance(obj_id, str) and obj_id:
+                extra_metadata = {"measured_properties_missing": True}
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
