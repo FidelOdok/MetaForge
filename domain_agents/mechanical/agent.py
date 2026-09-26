@@ -144,7 +144,8 @@ tolerance stack-up analysis, mesh generation, and manufacturing processes.
 You have access to the following tools:
 
 - **validate_stress**: Run FEA stress validation on a meshed CAD model using \
-CalculiX. Provide mesh_file_path, load_case, and stress constraints.
+CalculiX. Provide mesh_file_path, load_case, stress constraints, material_name, \
+fixed_node_set, load_node_set, and load_force_n.
 - **generate_mesh**: Generate a finite element mesh from a CAD file using \
 FreeCAD/Netgen. Provide cad_file path and meshing parameters.
 - **check_tolerance**: Check dimensional tolerances against manufacturing \
@@ -216,6 +217,10 @@ def _get_or_create_pydantic_agent() -> Any:
         mesh_file_path: str,
         load_case: str,
         constraints: list[dict[str, Any]],
+        material_name: str,
+        fixed_node_set: str,
+        load_node_set: str,
+        load_force_n: list[float],
     ) -> dict[str, Any]:
         """Run FEA stress validation using CalculiX.
 
@@ -224,6 +229,12 @@ def _get_or_create_pydantic_agent() -> Any:
             load_case: Load case identifier (e.g. 'gravity', 'thermal').
             constraints: List of stress constraints, each with
                 max_von_mises_mpa (float) and safety_factor (float).
+            material_name: Material name for FEA elastic properties (e.g.
+                'steel', 'aluminum_6061').
+            fixed_node_set: Mesh element set name to fully constrain (e.g.
+                'Surface1', gmsh's own per-STEP-face group).
+            load_node_set: Mesh element set name to apply load_force_n to.
+            load_force_n: [Fx, Fy, Fz] total applied force in Newtons.
         """
         fea_result = await ctx.deps.mcp_bridge.invoke(
             "calculix.run_fea",
@@ -231,6 +242,10 @@ def _get_or_create_pydantic_agent() -> Any:
                 "mesh_file": mesh_file_path,
                 "load_case": load_case,
                 "analysis_type": "static_stress",
+                "material": {"name": material_name},
+                "fixed_node_set": fixed_node_set,
+                "load_node_set": load_node_set,
+                "load_force_n": load_force_n,
             },
         )
 
@@ -779,7 +794,12 @@ class MechanicalAgent:
             "constraints": request.parameters.get("constraints", []),
         }
 
-        # Invoke via MCP bridge (CalculiX FEA)
+        # Invoke via MCP bridge (CalculiX FEA). FORGE-234: run_fea builds a
+        # complete, solvable deck around the mesh -- material/fixed_node_set/
+        # load_node_set/load_force_n are required for 'static_stress', with
+        # Surface1/Surface2 (gmsh's own default per-STEP-face ELSET names)
+        # as reasonable defaults when the caller doesn't know the real face
+        # names yet.
         try:
             fea_result = await self.mcp.invoke(
                 "calculix.run_fea",
@@ -787,6 +807,12 @@ class MechanicalAgent:
                     "mesh_file": skill_input_data["mesh_file_path"],
                     "load_case": skill_input_data["load_case"],
                     "analysis_type": "static_stress",
+                    "material": {"name": request.parameters.get("material_name", "aluminum_6061")},
+                    "fixed_node_set": request.parameters.get("fixed_node_set", "Surface1"),
+                    "load_node_set": request.parameters.get("load_node_set", "Surface2"),
+                    "load_force_n": list(
+                        request.parameters.get("load_force_n", (0.0, 0.0, -100.0))
+                    ),
                 },
             )
         except Exception as exc:
@@ -1374,6 +1400,9 @@ class MechanicalAgent:
             output_format=request.parameters.get("output_format", "inp"),
             load_case=request.parameters.get("load_case", "default"),
             stress_constraints=request.parameters.get("stress_constraints", []),
+            fixed_node_set=request.parameters.get("fixed_node_set", "Surface1"),
+            load_node_set=request.parameters.get("load_node_set", "Surface2"),
+            load_force_n=tuple(request.parameters.get("load_force_n", (0.0, 0.0, -100.0))),
         )
 
         workflow = MechanicalDesignWorkflow(

@@ -14,6 +14,60 @@ from tool_registry.tools.calculix.config import CalculixConfig
 from tool_registry.tools.calculix.result_parser import FrdParseError
 from tool_registry.tools.calculix.solver import SolverError
 
+# Same real ccx 2.20 static-stress .frd capture as
+# test_calculix_result_parser.py's REAL_CCX_FRD (a single C3D8 cube, 8 nodes,
+# nodes 1-4 fixed, nodes 5-8 loaded) -- duplicated here rather than imported
+# so this file's fixtures stay self-contained.
+REAL_CCX_FRD = """\
+    1C
+    1UMAT    1STEEL
+    2C                             8                                     1
+ -1         1 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         2 1.00000E+01 0.00000E+00 0.00000E+00
+ -1         3 1.00000E+01 1.00000E+01 0.00000E+00
+ -1         4 0.00000E+00 1.00000E+01 0.00000E+00
+ -1         5 0.00000E+00 0.00000E+00 1.00000E+01
+ -1         6 1.00000E+01 0.00000E+00 1.00000E+01
+ -1         7 1.00000E+01 1.00000E+01 1.00000E+01
+ -1         8 0.00000E+00 1.00000E+01 1.00000E+01
+ -3
+    1PSTEP                         1           1           1
+  100CL  101 1.000000000           8                     0    1           1
+ -4  DISP        4    1
+ -5  D1          1    2    1    0
+ -5  D2          1    2    2    0
+ -5  D3          1    2    3    0
+ -5  ALL         1    2    0    0    1ALL
+ -1         1 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         2 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         3 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         4 0.00000E+00 0.00000E+00 0.00000E+00
+ -1         5-3.71429E-04-3.71429E-04-1.73333E-03
+ -1         6 3.71429E-04-3.71429E-04-1.73333E-03
+ -1         7 3.71429E-04 3.71429E-04-1.73333E-03
+ -1         8-3.71429E-04 3.71429E-04-1.73333E-03
+ -3
+    1PSTEP                         2           1           1
+  100CL  101 1.000000000           8                     0    1           1
+ -4  STRESS      6    1
+ -5  SXX         1    4    1    1
+ -5  SYY         1    4    2    2
+ -5  SZZ         1    4    3    3
+ -5  SXY         1    4    1    2
+ -5  SYZ         1    4    2    3
+ -5  SZX         1    4    3    1
+ -1         1-2.09997E+01-2.09997E+01-4.89983E+01 1.48489E-16-2.99998E+00-2.99998E+00
+ -1         2-2.09997E+01-2.09997E+01-4.89983E+01-3.23572E-17-2.99998E+00 2.99998E+00
+ -1         3-2.09997E+01-2.09997E+01-4.89983E+01 7.29624E-17 2.99998E+00 2.99998E+00
+ -1         4-2.09997E+01-2.09997E+01-4.89983E+01 2.84439E-17 2.99998E+00-2.99998E+00
+ -1         5 9.00015E+00 9.00015E+00-3.09985E+01 1.32215E-16-2.99998E+00-2.99998E+00
+ -1         6 9.00015E+00 9.00015E+00-3.09985E+01 3.05009E-15-2.99998E+00 2.99998E+00
+ -1         7 9.00015E+00 9.00015E+00-3.09985E+01 4.05887E-15 2.99998E+00 2.99998E+00
+ -1         8 9.00015E+00 9.00015E+00-3.09985E+01 1.98207E-15 2.99998E+00-2.99998E+00
+ -3
+ 9999
+"""
+
 REAL_CCX_THERMAL_FRD = """\
     1C
     1UMAT    1STEEL
@@ -163,6 +217,10 @@ class TestRunFea:
                 "mesh_file": "/models/bracket.inp",
                 "load_case": "gravity_1g",
                 "analysis_type": "static_stress",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
+                "load_node_set": "Surface2",
+                "load_force_n": [0.0, 0.0, -100.0],
             }
         )
         assert result["max_von_mises"]["bracket_body"] == 145.2
@@ -210,6 +268,85 @@ class TestRunFea:
                     "analysis_type": "buckling",
                 }
             )
+
+
+# ---------------------------------------------------------------------------
+# TestRunFeaStaticStressValidation (FORGE-234)
+# ---------------------------------------------------------------------------
+
+
+_BASE_STATIC_STRESS_ARGS: dict[str, Any] = {
+    "mesh_file": "/models/bracket.inp",
+    "load_case": "gravity_1g",
+    "analysis_type": "static_stress",
+    "material": {"name": "steel"},
+    "fixed_node_set": "Surface1",
+    "load_node_set": "Surface2",
+    "load_force_n": [0.0, 0.0, -100.0],
+}
+
+
+class TestRunFeaStaticStressValidation:
+    """'static_stress' has no meaningful default material/boundary-condition/
+    load -- run_fea must reject an incomplete request with a clear error
+    instead of building a nonsense (or silently-wrong-unit) deck."""
+
+    @pytest.mark.parametrize(
+        "missing_field", ["material", "fixed_node_set", "load_node_set", "load_force_n"]
+    )
+    async def test_missing_required_field_raises_naming_it(
+        self, server_with_mocks: CalculixServer, missing_field: str
+    ) -> None:
+        args = {**_BASE_STATIC_STRESS_ARGS, missing_field: None}
+        with pytest.raises(ValueError, match=missing_field):
+            await server_with_mocks.run_fea(args)
+
+    async def test_material_must_be_an_object(self, server_with_mocks: CalculixServer) -> None:
+        args = {**_BASE_STATIC_STRESS_ARGS, "material": "steel"}
+        with pytest.raises(ValueError, match="'material' must be an object"):
+            await server_with_mocks.run_fea(args)
+
+    async def test_unknown_material_name_raises(self, server_with_mocks: CalculixServer) -> None:
+        args = {**_BASE_STATIC_STRESS_ARGS, "material": {"name": "unobtainium"}}
+        with pytest.raises(ValueError, match="unobtainium"):
+            await server_with_mocks.run_fea(args)
+
+    async def test_load_force_n_must_have_three_components(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        args = {**_BASE_STATIC_STRESS_ARGS, "load_force_n": [0.0, -100.0]}
+        with pytest.raises(ValueError, match="load_force_n"):
+            await server_with_mocks.run_fea(args)
+
+    async def test_valid_request_passes_a_deck_spec_to_execute_solver(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        await server_with_mocks.run_fea(dict(_BASE_STATIC_STRESS_ARGS))
+        call_args = server_with_mocks._execute_solver.call_args  # type: ignore[attr-defined]
+        mesh_file, analysis_type, deck_spec = call_args[0]
+        assert mesh_file == "/models/bracket.inp"
+        assert analysis_type == "static_stress"
+        assert deck_spec == {
+            "youngs_modulus_mpa": pytest.approx(200000.0),
+            "poissons_ratio": pytest.approx(0.30),
+            "fixed_node_set": "Surface1",
+            "load_node_set": "Surface2",
+            "load_force_n": (0.0, 0.0, -100.0),
+        }
+
+    async def test_modal_analysis_needs_none_of_this(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        """'modal' still invokes the mesh directly -- no deck_spec required."""
+        await server_with_mocks.run_fea(
+            {
+                "mesh_file": "/models/bracket.inp",
+                "load_case": "vibration",
+                "analysis_type": "modal",
+            }
+        )
+        call_args = server_with_mocks._execute_solver.call_args  # type: ignore[attr-defined]
+        assert call_args[0][2] is None
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +509,85 @@ class TestEmptyResultIsNeverReportedAsSuccess:
             )
 
 
+class TestExecuteSolverBuildsDeckForStaticStress:
+    """FORGE-234: when a deck_spec is given, _execute_solver must build a
+    real, solvable deck around the mesh-only .inp file and solve THAT
+    (`<stem>_solved.inp`), not the original mesh_file -- the original has no
+    *MATERIAL/*STEP/*BOUNDARY/*CLOAD/*NODE FILE/*EL FILE cards at all."""
+
+    _MESH_INP = """\
+*Heading
+ /workspace/box.inp
+*NODE
+1, 0, 0, 0
+2, 0, 0, 10
+3, 0, 20, 0
+4, 0, 20, 10
+5, 100, 0, 0
+6, 100, 0, 10
+7, 100, 20, 0
+8, 100, 20, 10
+9, 50, 10, 5
+10, 50, 10, 6
+*ELEMENT, type=CPS3, ELSET=Surface1
+201, 1, 2, 3
+202, 2, 4, 3
+*ELEMENT, type=CPS3, ELSET=Surface2
+203, 5, 6, 7
+204, 6, 8, 7
+*ELEMENT, type=C3D4, ELSET=Volume1
+301, 1, 2, 3, 9
+302, 5, 6, 7, 9
+303, 3, 4, 9, 10
+304, 6, 8, 9, 10
+"""
+
+    async def test_builds_and_solves_a_deck_file_not_the_original_mesh(
+        self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mesh_path = tmp_path / "box.inp"
+        mesh_path.write_text(self._MESH_INP, encoding="utf-8")
+        frd_path = tmp_path / "box_solved.frd"
+        frd_path.write_text(REAL_CCX_FRD, encoding="utf-8")
+
+        captured_kwargs: dict[str, Any] = {}
+
+        async def _fake_solver_run_fea(**kwargs: Any) -> dict[str, Any]:
+            captured_kwargs.update(kwargs)
+            return {"solver_time_s": 1.23, "result_files": [str(frd_path)]}
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        result = await server._execute_solver(
+            str(mesh_path),
+            "static_stress",
+            {
+                "youngs_modulus_mpa": 200000.0,
+                "poissons_ratio": 0.30,
+                "fixed_node_set": "Surface1",
+                "load_node_set": "Surface2",
+                "load_force_n": (0.0, 0.0, -100.0),
+            },
+        )
+
+        solved_path = tmp_path / "box_solved.inp"
+        assert solved_path.exists(), "the built deck must be written to <stem>_solved.inp"
+        solved_text = solved_path.read_text(encoding="utf-8")
+        assert "*MATERIAL, NAME=MAT1" in solved_text
+        assert "*CLOAD" in solved_text
+        assert "TYPE=CPS3" not in solved_text  # surface elements dropped, see deck_builder
+
+        # solver_run_fea must have been called with the SOLVED file's path,
+        # never the original mesh-only mesh_file.
+        assert captured_kwargs["mesh_file"] == str(solved_path)
+        assert captured_kwargs["mesh_file"] != str(mesh_path)
+
+        assert result["solver_time"] == 1.23
+        assert result["mesh_elements"] == 8  # node_count from REAL_CCX_FRD
+
+
 class TestUnmockedSolverRaisesOnMissingFiles:
     """Verify that calling solver methods without mocks raises on missing files."""
 
@@ -439,6 +655,10 @@ class TestJsonRpcIntegration:
                     "mesh_file": "/models/bracket.inp",
                     "load_case": "gravity_1g",
                     "analysis_type": "static_stress",
+                    "material": {"name": "steel"},
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             },
         )

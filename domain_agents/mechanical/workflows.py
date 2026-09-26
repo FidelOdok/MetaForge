@@ -93,9 +93,18 @@ class DesignWorkflowParams:
     mesh_algorithm: str = "netgen"
     output_format: str = "inp"
 
-    # Stress validation
+    # Stress validation. FORGE-234: calculix.run_fea builds a complete,
+    # solvable deck around the mesh instead of invoking it directly, so it
+    # needs a fixed/loaded face and a load to build that deck around --
+    # fixed_node_set/load_node_set default to gmsh's own first two
+    # per-STEP-face ELSET names (Surface1/Surface2), since this pipeline
+    # generates its own mesh and has no other way to know which face is
+    # which without inspecting the geometry first.
     load_case: str = "default"
     stress_constraints: list[dict[str, Any]] = field(default_factory=list)
+    fixed_node_set: str = "Surface1"
+    load_node_set: str = "Surface2"
+    load_force_n: tuple[float, float, float] = (0.0, 0.0, -100.0)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +404,10 @@ class MechanicalDesignWorkflow:
                         "mesh_file": mesh_file,
                         "load_case": params.load_case,
                         "analysis_type": "static_stress",
+                        "material": {"name": params.material},
+                        "fixed_node_set": params.fixed_node_set,
+                        "load_node_set": params.load_node_set,
+                        "load_force_n": list(params.load_force_n),
                     },
                 )
             except Exception as exc:

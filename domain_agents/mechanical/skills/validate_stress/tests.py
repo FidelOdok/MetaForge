@@ -43,6 +43,10 @@ def sample_input() -> ValidateStressInput:
                 material="aluminum_6061",
             )
         ],
+        material_name="aluminum_6061",
+        fixed_node_set="Surface1",
+        load_node_set="Surface2",
+        load_force_n=(0.0, 0.0, -100.0),
     )
 
 

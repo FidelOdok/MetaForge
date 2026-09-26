@@ -51,3 +51,66 @@ def resolve_density_kg_m3(material: str, density_kg_m3: float | None = None) -> 
         return density_kg_m3
     key = material.strip().lower().replace(" ", "_").replace("-", "_")
     return MATERIAL_DENSITY_KG_M3.get(key, DEFAULT_DENSITY_KG_M3)
+
+
+# FORGE-234: linear-elastic properties for CalculiX static stress analysis.
+# (Young's modulus in MPa == N/mm^2, Poisson's ratio, dimensionless) --
+# MPa, not Pa, because every FreeCAD/gmsh-generated mesh's node coordinates
+# are in millimeters, and a consistent CalculiX unit system needs
+# Length=mm + Force=N + Stress=MPa together. Mixing E in Pa with mm-scale
+# geometry would silently understate stiffness by 1e6 -- displacement and
+# stress wrong by six orders of magnitude, not a rounding error. Room-
+# temperature nominal values, not a certified materials database -- same
+# caveat as MATERIAL_DENSITY_KG_M3 above. carbon_fiber is an isotropic
+# approximation (real carbon fiber is strongly anisotropic); good enough
+# for an order-of-magnitude structural check, not a composite layup design.
+MATERIAL_ELASTIC_MPA: dict[str, tuple[float, float]] = {
+    "aluminum_6061": (68900.0, 0.33),
+    "aluminum": (69000.0, 0.33),
+    "steel": (200000.0, 0.30),
+    "stainless_steel": (193000.0, 0.29),
+    "titanium": (114000.0, 0.34),
+    "brass": (100000.0, 0.34),
+    "copper": (110000.0, 0.34),
+    "abs": (2300.0, 0.35),
+    "pla": (3500.0, 0.36),
+    "petg": (2100.0, 0.40),
+    "nylon": (2500.0, 0.39),
+    "polycarbonate": (2400.0, 0.37),
+    "acrylic": (3200.0, 0.37),
+    "carbon_fiber": (135000.0, 0.30),
+    "rubber": (5.0, 0.49),
+}
+
+
+def resolve_elastic_properties(
+    material: str | None = None,
+    youngs_modulus_mpa: float | None = None,
+    poissons_ratio: float | None = None,
+) -> tuple[float, float]:
+    """Resolve ``(youngs_modulus_mpa, poissons_ratio)`` for a static FEA solve.
+
+    An explicit ``(youngs_modulus_mpa, poissons_ratio)`` pair always wins.
+    Otherwise looks up ``material`` (same name normalization as
+    :func:`resolve_density_kg_m3`). Unlike density, an unrecognized or
+    missing material RAISES rather than silently defaulting: a wrong
+    elastic modulus feeds directly into a stress/displacement number an
+    engineer might trust as real, so guessing "steel" for an unrecognized
+    plastic would be a silent, potentially unsafe wrong answer -- not a
+    harmless inertial estimate the way an approximate mass is.
+    """
+    if youngs_modulus_mpa is not None and poissons_ratio is not None:
+        return youngs_modulus_mpa, poissons_ratio
+    if not material:
+        raise ValueError(
+            "resolve_elastic_properties: provide either a recognized material name, "
+            "or both youngs_modulus_mpa and poissons_ratio explicitly."
+        )
+    key = material.strip().lower().replace(" ", "_").replace("-", "_")
+    if key not in MATERIAL_ELASTIC_MPA:
+        raise ValueError(
+            f"resolve_elastic_properties: unknown material {material!r} -- accepted: "
+            f"{sorted(MATERIAL_ELASTIC_MPA)}, or pass youngs_modulus_mpa + "
+            "poissons_ratio explicitly."
+        )
+    return MATERIAL_ELASTIC_MPA[key]
