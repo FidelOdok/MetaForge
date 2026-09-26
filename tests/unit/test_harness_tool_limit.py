@@ -213,6 +213,79 @@ def test_session_critical_verbs_survive_even_deep_in_a_large_alphabetical_tail()
         assert name not in dropped
 
 
+_SESSION_ID_SCHEMA = {
+    "type": "object",
+    "properties": {"session_id": {"type": "string"}, "x": {"type": "number"}},
+    "required": ["session_id"],
+}
+
+
+def test_any_session_id_requiring_tool_survives_without_being_named() -> None:
+    """FORGE-94 remainder (re-test 2026-09-26): curating verb names is the
+    same whack-a-mole class of fix _open_session-only protection already
+    needed replacing once -- it just moves the gap (measure, set_expression,
+    linear_pattern, ... still sorted into the dropped tail, and any BRAND
+    NEW stateful tool starts out unprotected until someone remembers to name
+    it here, e.g. FORGE-231's own import_step). Any tool whose schema
+    requires session_id is structurally the same class -- it can only be
+    called inside an already-open session -- and must survive without ever
+    being named in _SESSION_CRITICAL_VERBS."""
+    reg = ToolRegistry()
+    for i in range(150):
+        reg.register_mcp(
+            "freecad", f"m{i:03d}_tool", description="d", input_schema=SCHEMA, handler=_echo
+        )
+    # None of these are in _SESSION_CRITICAL_VERBS -- they must survive on
+    # the schema check alone.
+    for tool in ("measure", "set_expression", "linear_pattern", "import_step", "shell_solid"):
+        reg.register_mcp(
+            "freecad", tool, description="d", input_schema=_SESSION_ID_SCHEMA, handler=_echo
+        )
+    for s in range(5):
+        for i in range(30):
+            reg.register_mcp(
+                f"server{s}", f"t{i:03d}", description="d", input_schema=SCHEMA, handler=_echo
+            )
+
+    kept, dropped = _select_tools(reg.all_tools(), 128)
+    kept_names = {s.name for s in kept}
+    for tool in ("measure", "set_expression", "linear_pattern", "import_step", "shell_solid"):
+        name = f"mcp_freecad_{tool}"
+        assert name in kept_names, f"{name} was dropped"
+        assert name not in dropped
+
+
+def test_a_tool_without_session_id_required_is_not_protected_by_the_schema_check() -> None:
+    """The schema check must not accidentally protect everything -- a tool
+    that merely HAS a session_id property, optional or absent, is unaffected
+    and can still be round-robin-dropped like any ordinary tool."""
+    reg = ToolRegistry()
+    optional_session_id_schema = {
+        "type": "object",
+        "properties": {"session_id": {"type": "string"}},
+        "required": [],
+    }
+    for i in range(150):
+        reg.register_mcp(
+            "freecad",
+            f"m{i:03d}_tool",
+            description="d",
+            input_schema=optional_session_id_schema,
+            handler=_echo,
+        )
+    for s in range(5):
+        for i in range(30):
+            reg.register_mcp(
+                f"server{s}", f"t{i:03d}", description="d", input_schema=SCHEMA, handler=_echo
+            )
+
+    kept, dropped = _select_tools(reg.all_tools(), 128)
+    # Some of freecad's 150 tools must have been dropped -- the schema check
+    # doesn't blanket-protect an adapter just because session_id is a
+    # possible (not required) property.
+    assert any(name.startswith("mcp_freecad_") for name in dropped)
+
+
 def test_pinned_tools_survive_the_round_robin() -> None:
     reg = ToolRegistry()
     for s in range(10):
