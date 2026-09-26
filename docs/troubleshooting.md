@@ -197,6 +197,57 @@ docker compose up gateway dashboard
 You'll also need `pip install -e ".[knowledge]"` so the LightRAG /
 asyncpg deps are present.
 
+## Vite: `Failed to resolve import "<package>"` in `dashboard-dev`
+
+**Symptom:** The dev dashboard shows a full-screen Vite overlay after
+someone adds a dependency:
+
+```
+[plugin:vite:import-analysis] Failed to resolve import
+"@supabase/supabase-js" from "src/lib/supabase.ts". Does the file exist?
+/app/src/lib/supabase.ts:1:50
+```
+
+The file plainly does exist, which is what makes the message misleading.
+
+**Cause:** `dashboard-dev` mounts the source as a bind mount but
+`node_modules` as a named volume, and runs `npm install` **only at
+container start** (`docker-compose.override.yml`). With
+`restart: unless-stopped` the container can stay up for days. So a
+`git pull` that brings a new dependency updates the source Vite reads
+instantly, while the volume keeps whatever was installed the day the
+container last started. Vite then sees an import with nothing behind it.
+
+The tell is in the source vs the volume disagreeing:
+
+```bash
+grep '"@supabase/supabase-js"' dashboard/package.json        # present
+docker exec <project>-dashboard-dev-1 ls /app/node_modules/@supabase
+# ls: /app/node_modules/@supabase: No such file or directory
+```
+
+**Fix:** restart the container, which re-runs `npm install`:
+
+```bash
+docker restart <project>-dashboard-dev-1
+docker logs -f <project>-dashboard-dev-1   # wait for "ready in ..."
+```
+
+Vite confirms it picked the change up with
+`Re-optimizing dependencies because lockfile has changed`.
+
+If a restart isn't enough — a half-written install, or a lockfile
+conflict — drop the volume and let it rebuild from scratch:
+
+```bash
+docker compose down dashboard-dev
+docker volume rm <project>_dashboard-node-modules
+docker compose up -d dashboard-dev
+```
+
+**Rule of thumb:** any commit touching `dashboard/package.json` needs a
+`dashboard-dev` restart. Pulling alone will not do it.
+
 ## "Adapter X dropped silently at startup"
 
 **Symptom:** `cadquery.*` or `freecad.*` tools don't show up in
