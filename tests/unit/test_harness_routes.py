@@ -39,6 +39,29 @@ def test_list_providers_reports_active_and_configured(
     assert body["providers"][0]["configured"] is True
 
 
+def test_active_model_hides_an_invalid_stored_selection(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """FORGE-93 (re-test 2026-09-26): a pairing stored BEFORE PUT
+    /v1/harness/selection's own validation existed stays durable in the
+    store. provider_config_from_env already re-validates it for the real
+    chat-turn path (confirmed live against fidel-dev's actual store) -- but
+    this read-only status endpoint reported the raw, un-revalidated stored
+    value regardless, so `forge auth list`/the dashboard kept advertising
+    openai-codex + openai/gpt-4o (an invalid pairing -- Codex expects a bare
+    slug like 'gpt-5.5') as "active" forever."""
+    auth_path = tmp_path / "harness-auth.json"
+    auth_path.write_text(
+        '{"selection": {"provider": "openai-codex", "model": "openai/gpt-4o"}, "credentials": {}}'
+    )
+    monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(auth_path))
+    monkeypatch.delenv("METAFORGE_LLM_MODEL", raising=False)
+
+    body = client.get("/v1/harness/providers").json()
+    assert body["active_provider"] == "openai-codex"
+    assert body["active_model"] != "openai/gpt-4o"
+
+
 def test_active_provider_configured_via_metaforge_llm_key(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

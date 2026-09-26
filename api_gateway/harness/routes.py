@@ -110,11 +110,26 @@ async def list_providers() -> ProvidersResponse:
     active_provider = (
         sel.provider if sel else (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip() or None
     )
-    active_model = (
-        (sel.model if sel and sel.model else None)
-        or (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
-        or None
-    )
+    stored_model = sel.model if sel and sel.model else None
+    # FORGE-93: a pairing stored BEFORE PUT /v1/harness/selection's own
+    # validation existed stays durable in the store -- provider_config_from_
+    # env (harness_backend.py) already re-validates it on every read for the
+    # actual chat-turn path, but this read-only status endpoint reported the
+    # raw stored value regardless, so `forge auth list`/the dashboard kept
+    # advertising an invalid pairing as "active" even after the turn path had
+    # already stopped using it. Same re-validation here, for the same reason.
+    if stored_model and active_provider:
+        try:
+            registry.validate_model(active_provider, stored_model)
+        except registry.InvalidModelError as exc:
+            logger.warning(
+                "harness_stored_selection_invalid_model_ignored",
+                provider=active_provider,
+                model=stored_model,
+                error=str(exc),
+            )
+            stored_model = None
+    active_model = stored_model or (os.environ.get("METAFORGE_LLM_MODEL") or "").strip() or None
     return ProvidersResponse(
         active_provider=active_provider, active_model=active_model, providers=infos
     )
