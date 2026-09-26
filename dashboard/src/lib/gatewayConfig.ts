@@ -269,6 +269,31 @@ export function resolveGatewayHref(url: string): string {
  * Explain the mixed-content trap if the given base would hit it, else null.
  * Chrome exempts loopback; Firefox and Safari do not.
  */
+/**
+ * Explain that the address points at this dashboard rather than a gateway.
+ *
+ * A real mistake with a confusing symptom. The dev dashboard runs on :3000
+ * and the gateway on :8000, so typing the address you are already looking at
+ * is an easy slip -- and the dev server proxies `/health` through to the
+ * gateway, so a probe can even *succeed* while every API call afterwards is
+ * answered by the SPA. Better to name it than to let someone debug a
+ * "working" gateway that is actually a web page.
+ */
+export function describeSelfTarget(base: string = getGatewayBase()): string | null {
+  if (!base || typeof window === 'undefined' || !window.location) return null;
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return null;
+  }
+  if (url.origin !== window.location.origin) return null;
+  return (
+    `${url.origin} is this dashboard, not a gateway. The dashboard and the gateway are ` +
+    'separate services on different ports — in the default setup the gateway is on 8000.'
+  );
+}
+
 export function describeMixedContent(base: string = getGatewayBase()): string | null {
   if (!base || !pageIsHttps()) return null;
   let url: URL;

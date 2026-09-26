@@ -4,6 +4,7 @@ import { probeGateway } from '../api/endpoints/health';
 import {
   GatewayUrlError,
   describeMixedContent,
+  describeSelfTarget,
   getGatewayBase,
   isGatewayUserConfigured,
   joinAddressPort,
@@ -51,6 +52,8 @@ export interface GatewayForm {
   dirty: boolean;
   /** Mixed-content explanation for the candidate, when it applies. */
   mixedContentWarning: string | null;
+  /** Set when the address points at this dashboard rather than a gateway. */
+  selfTargetWarning: string | null;
 
   test: GatewayTestState;
   runTest: () => Promise<void>;
@@ -142,6 +145,7 @@ export function useGatewayForm(): GatewayForm {
     error,
     dirty: candidate !== null && candidate !== inUse,
     mixedContentWarning: candidate ? describeMixedContent(candidate) : null,
+    selfTargetWarning: candidate ? describeSelfTarget(candidate) : null,
     test,
     runTest,
     save,
