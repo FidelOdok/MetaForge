@@ -51,12 +51,20 @@ export function SignInPage({ gatewayLabel }: { gatewayLabel?: string }) {
       <div className="w-full max-w-sm">
         <div className="mb-8 flex items-center gap-2.5">
           <img
-            src="/logo/metaforge-mark-dark.svg"
+            className="brand-logo-dark h-7 w-auto"
+            src="/metaforge-symbol-dark.svg"
             alt=""
             aria-hidden="true"
             width={28}
             height={28}
-            className="h-7 w-auto"
+          />
+          <img
+            className="brand-logo-light h-7 w-auto"
+            src="/metaforge-symbol-light.svg"
+            alt=""
+            aria-hidden="true"
+            width={28}
+            height={28}
           />
           <span className="text-[15px] font-semibold tracking-tight text-on-surface">
             MetaForge
