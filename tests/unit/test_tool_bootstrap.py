@@ -213,11 +213,12 @@ class TestBootstrapToolRegistry:
         validate_world, extract_results) for 75. MET-635/636 adds the
         Isaac Sim adapter's 2 tools (run_physics, render_scene) for 77.
         MET-740 Phase 2 adds cadquery.validate_physics_stability for 78.
+        FORGE-231 adds freecad.import_step for 79.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 78
+        assert len(tools) == 79
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
