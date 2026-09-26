@@ -186,6 +186,33 @@ def test_adapter_open_session_survives_even_deep_in_a_large_alphabetical_tail() 
     assert "mcp_freecad_open_session" not in dropped
 
 
+def test_session_critical_verbs_survive_even_deep_in_a_large_alphabetical_tail() -> None:
+    """FORGE-94 remainder (re-test 2026-09-25): protecting open_session alone
+    wasn't enough -- pad_sketch/pocket_sketch/revolve_sketch/list_joints still
+    sorted into the dropped tail of a large FreeCAD-shaped registry, leaving
+    an agent that opened a session unable to turn a sketch into a feature or
+    inspect the joints it just added."""
+    reg = ToolRegistry()
+    for i in range(150):
+        reg.register_mcp(
+            "freecad", f"m{i:03d}_tool", description="d", input_schema=SCHEMA, handler=_echo
+        )
+    for tool in ("open_session", "pad_sketch", "pocket_sketch", "revolve_sketch", "list_joints"):
+        reg.register_mcp("freecad", tool, description="d", input_schema=SCHEMA, handler=_echo)
+    for s in range(5):
+        for i in range(30):
+            reg.register_mcp(
+                f"server{s}", f"t{i:03d}", description="d", input_schema=SCHEMA, handler=_echo
+            )
+
+    kept, dropped = _select_tools(reg.all_tools(), 128)
+    kept_names = {s.name for s in kept}
+    for tool in ("open_session", "pad_sketch", "pocket_sketch", "revolve_sketch", "list_joints"):
+        name = f"mcp_freecad_{tool}"
+        assert name in kept_names, f"{name} was dropped"
+        assert name not in dropped
+
+
 def test_pinned_tools_survive_the_round_robin() -> None:
     reg = ToolRegistry()
     for s in range(10):

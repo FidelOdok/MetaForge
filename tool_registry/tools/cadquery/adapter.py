@@ -977,6 +977,16 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": "Output STEP file path",
                         },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Material name for a first-order mass estimate "
+                                "(summed volume x this ONE material's density -- "
+                                "per-part materials aren't tracked, so this is a "
+                                "rough estimate, not per-part-accurate). Omit to "
+                                "skip mass_kg entirely rather than guess."
+                            ),
+                        },
                     },
                     "required": ["parts"],
                 },
@@ -986,6 +996,8 @@ class CadqueryServer(McpToolServer):
                         "assembly_file": {"type": "string"},
                         "part_count": {"type": "integer"},
                         "total_volume": {"type": "number"},
+                        "volume_mm3": {"type": "number"},
+                        "mass_kg": {"type": "number"},
                         "interference_check_passed": {"type": "boolean"},
                     },
                 },
@@ -1477,6 +1489,7 @@ class CadqueryServer(McpToolServer):
         parts = arguments.get("parts", [])
         constraints = arguments.get("constraints")
         output_path = arguments.get("output_path", "")
+        material = arguments.get("material", "")
 
         if not parts:
             raise ValueError("parts list is required and must not be empty")
@@ -1495,7 +1508,7 @@ class CadqueryServer(McpToolServer):
             work_dir=self.config.work_dir,
             timeout=self.config.max_operation_time,
         )
-        return ops.create_assembly(parts, constraints, output_path)
+        return ops.create_assembly(parts, constraints, output_path, material)
 
     async def generate_enclosure(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Generate PCB enclosure from board dimensions and connector cutouts."""

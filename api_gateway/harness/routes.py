@@ -110,11 +110,39 @@ async def list_providers() -> ProvidersResponse:
     active_provider = (
         sel.provider if sel else (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip() or None
     )
-    active_model = (
-        (sel.model if sel and sel.model else None)
-        or (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
-        or None
-    )
+    stored_model = sel.model if sel and sel.model else None
+    # FORGE-93: a pairing stored BEFORE PUT /v1/harness/selection's own
+    # validation existed stays durable in the store -- provider_config_from_
+    # env (harness_backend.py) already re-validates it on every read for the
+    # actual chat-turn path, but this read-only status endpoint reported the
+    # raw stored value regardless, so `forge auth list`/the dashboard kept
+    # advertising an invalid pairing as "active" even after the turn path had
+    # already stopped using it. Same re-validation here, for the same reason.
+    if stored_model and active_provider:
+        try:
+            registry.validate_model(active_provider, stored_model)
+        except registry.InvalidModelError as exc:
+            logger.warning(
+                "harness_stored_selection_invalid_model_ignored",
+                provider=active_provider,
+                model=stored_model,
+                error=str(exc),
+            )
+            stored_model = None
+    # FORGE-93 (re-test 2026-09-26, confirmed live against fidel-dev's real
+    # env + store): METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    # METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o) -- when the
+    # store overrides the provider (e.g. to openai-codex) while carrying no
+    # model of its own, stored_model is already None here, and this fell
+    # through to the env's model default regardless of which provider it was
+    # actually configured for -- silently reporting openai-codex + an
+    # OpenRouter-style slug as "active" (same mismatch fixed in
+    # provider_config_from_env, harness_backend.py). Only trust the env model
+    # default when the active provider IS the one env vars describe.
+    env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+    env_model = (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
+    trust_env_model = not env_provider or (active_provider or "").strip().lower() == env_provider
+    active_model = stored_model or (env_model if trust_env_model else None) or None
     return ProvidersResponse(
         active_provider=active_provider, active_model=active_model, providers=infos
     )

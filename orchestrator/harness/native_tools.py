@@ -40,6 +40,7 @@ from orchestrator.harness.tool_exec import (
     cached_view,
     dedup_key,
     error_content,
+    observation_failure_reason,
 )
 from orchestrator.harness.tools import NATIVE
 
@@ -73,6 +74,29 @@ NATIVE_SYSTEM = (
 )
 
 
+# FORGE-94 remainder (re-test 2026-09-25): protecting only ``_open_session``
+# stopped the session opener itself from being dropped, but the round-robin
+# still exhausted the global budget partway through FreeCAD's large,
+# alphabetically-ordered queue before ever reaching these -- an agent could
+# open a session and create a sketch, then find every tool that actually
+# turns a sketch into a feature (or inspects the joints it just added) still
+# uncallable. Each name here is a *sketch-to-feature* verb -- the exact class
+# the original _open_session reasoning already argued for, just incomplete --
+# plus list_joints, which pairs with add_assembly_joint the same way
+# close_session pairs with open_session: needed to verify what an earlier
+# call in the same session actually did.
+_SESSION_CRITICAL_VERBS = frozenset(
+    {
+        "pad_sketch",
+        "pocket_sketch",
+        "revolve_sketch",
+        "loft_sketches",
+        "sweep_sketch",
+        "list_joints",
+    }
+)
+
+
 def _select_tools(
     specs: list[Any], max_tools: int, *, pinned: frozenset[str] = frozenset()
 ) -> tuple[list[Any], list[str]]:
@@ -83,7 +107,7 @@ def _select_tools(
     — ``twin.*`` and ``web.*`` go first, which is precisely backwards.
 
     Policy: keep every native tool (few, curated, session-critical —
-    ``chat.set_project_scope`` and the skill layer) plus two more protected
+    ``chat.set_project_scope`` and the skill layer) plus three more protected
     classes (FORGE-94), then fill the remaining budget round-robin across MCP
     origins so each adapter keeps a share and no capability disappears
     wholesale:
@@ -103,10 +127,22 @@ def _select_tools(
       through FreeCAD's large, alphabetically-ordered queue, and
       ``open_session`` and the sketch verbs it gates all happen to sort into
       that dropped tail.)
+    - any tool whose name ends one of ``_SESSION_CRITICAL_VERBS`` — protecting
+      ``open_session`` alone wasn't enough (re-test 2026-09-25): the verbs
+      that actually turn an open session's sketch into geometry, and the one
+      that inspects joints just added, still sorted into the dropped tail.
     """
+
+    def _protected(name: str) -> bool:
+        return (
+            name in pinned
+            or name.endswith("_open_session")
+            or any(name.endswith(f"_{verb}") for verb in _SESSION_CRITICAL_VERBS)
+        )
+
     natives = [s for s in specs if s.origin == NATIVE]
     rest = [s for s in specs if s.origin != NATIVE]
-    protected_mcp = [s for s in rest if s.name in pinned or s.name.endswith("_open_session")]
+    protected_mcp = [s for s in rest if _protected(s.name)]
     protected_ids = {id(s) for s in protected_mcp}
     mcp = [s for s in rest if id(s) not in protected_ids]
 
@@ -327,7 +363,10 @@ async def _execute_calls(
                 continue
             cache.put(key, observation)
             step = ReActStep(
-                thought=thought, tool_call=ToolCall(name, args), observation=observation
+                thought=thought,
+                tool_call=ToolCall(name, args),
+                observation=observation,
+                error=observation_failure_reason(observation),
             )
             results.append((step, _json_safe(observation), cid))
             continue
@@ -352,7 +391,12 @@ async def _execute_calls(
         # invisible to every observer and unassertable in the eval suite.
         view = cached_view(cache.get(key))
         logger.info("native_tool_call_deduplicated", tool=name)
-        step = ReActStep(thought=thought, tool_call=ToolCall(name, args), observation=view)
+        step = ReActStep(
+            thought=thought,
+            tool_call=ToolCall(name, args),
+            observation=view,
+            error=observation_failure_reason(cache.get(key)),
+        )
         results.append((step, _json_safe(view), cid))
     return results
 

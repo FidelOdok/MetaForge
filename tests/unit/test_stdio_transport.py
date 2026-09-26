@@ -81,3 +81,38 @@ async def test_subprocess_exit_breaks_send() -> None:
             await transport.send("anything")
     finally:
         await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_read_stderr_recovers_crash_diagnostic() -> None:
+    """FORGE-221: a crashed child's stderr (e.g. a faulthandler dump) must
+    still be recoverable after send() reports the process died."""
+    transport = StdioTransport(
+        command=[
+            sys.executable,
+            "-u",
+            "-c",
+            "import sys; sys.stderr.write('boom: simulated crash\\n'); sys.stderr.flush();"
+            " sys.exit(0)",
+        ],
+    )
+    await transport.connect()
+    try:
+        with pytest.raises(RuntimeError, match="closed stdout"):
+            await transport.send("anything")
+        stderr = await transport.read_stderr()
+        assert b"boom: simulated crash" in stderr
+    finally:
+        await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_read_stderr_empty_when_nothing_buffered() -> None:
+    transport = StdioTransport(
+        command=[sys.executable, "-u", "-c", _ECHO_LINES],
+    )
+    await transport.connect()
+    try:
+        assert await transport.read_stderr() == b""
+    finally:
+        await transport.disconnect()

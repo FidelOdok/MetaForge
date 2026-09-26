@@ -46,6 +46,21 @@ class FreecadConfig(BaseModel):
             "least-recently-used session is evicted (LRU capacity eviction). "
             "Env-overridable (FREECAD_MAX_SESSIONS). Each live document has a "
             "non-trivial memory footprint -- see MET-643 (adapter container "
-            "restart under memory pressure, root cause unconfirmed)."
+            "restart under memory pressure, root cause unconfirmed). Applies "
+            "to the in-process FreecadSessionStore path only (worker_pool=None) "
+            "-- see max_workers for the pooled (crash-isolated) path."
+        ),
+    )
+    max_workers: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Cap on concurrent live FreeCAD worker subprocesses in pooled "
+            "(crash-isolated) mode (FORGE-221). Each worker is a full separate "
+            "Python+FreeCAD process, not just an in-memory Document, so this "
+            "is deliberately smaller than max_sessions -- fidel-dev has "
+            "already OOM'd once building this same adapter's image (MET-643); "
+            "live-validate real memory headroom before raising this. "
+            "Env-overridable (FREECAD_MAX_WORKERS)."
         ),
     )

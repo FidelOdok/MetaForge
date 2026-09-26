@@ -12,6 +12,9 @@ shape it answers in plain English so the LLM can match intent fast.
 
 from __future__ import annotations
 
+import base64
+import os
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -1539,11 +1542,17 @@ class TwinServer(McpToolServer):
                     "together on every call, including retries — obj_id alone is "
                     "NOT unique (it's a per-session counter, not a global id), so "
                     "omitting session_id will not match your prior export even "
-                    "though obj_id is correct. (Passing step_base64 directly also "
-                    "works and needs neither id — but when it names an export "
-                    "the server already holds, the server's copy is used, "
-                    "because a copied 30,000-character blob can only be equal "
-                    "or damaged.)"
+                    "though obj_id is correct. For a STATELESS tool's output "
+                    "(freecad.create_parametric / cadquery.create_parametric / "
+                    "cadquery.execute_script / cadquery.generate_enclosure — none "
+                    "of which use a session), pass that tool's own 'cad_file' "
+                    "return value as file_path instead: the server reads it "
+                    "directly from the shared workspace (FORGE-224), no base64 "
+                    "and no session needed. (Passing step_base64 directly also "
+                    "works and needs neither id nor file_path — but when it "
+                    "names an export the server already holds, the server's "
+                    "copy is used, because a copied 30,000-character blob can "
+                    "only be equal or damaged.)"
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -1571,6 +1580,18 @@ class TwinServer(McpToolServer):
                                 "anyway (MET-684)."
                             ),
                         },
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Commit-by-reference for a STATELESS tool's output (no "
+                                "session_id/obj_id) — pass the 'cad_file' path that tool's "
+                                "own result already gave you (e.g. "
+                                "'output/bracket_None.step'), unchanged. The server reads "
+                                "it from the shared adapter workspace and base64-encodes "
+                                "it itself; ignored when step_base64 or a resolvable "
+                                "session_id+obj_id is also given (FORGE-224)."
+                            ),
+                        },
                         "domain": {"type": "string", "description": "Discipline (def mech)."},
                         "format": {"type": "string", "description": "Format (def step)."},
                         "script_source": {
@@ -1592,9 +1613,21 @@ class TwinServer(McpToolServer):
                         "properties": {
                             "type": "object",
                             "description": (
-                                "Derived geometric measurements (volume_mm3, bounding_box, "
-                                "mass properties, etc.) — stored on the node as queryable "
-                                "metadata alongside 'parameters'."
+                                "REQUIRED for any constraint to be meaningful — this tool "
+                                "cannot measure the geometry itself. Pass the result of a "
+                                "prior freecad.measure/freecad.export_model/cadquery "
+                                "get_properties call here directly (export_model's own "
+                                "response already carries volume_mm3/surface_area_mm2/"
+                                "bounding_box — reuse it, or call freecad.measure first if "
+                                "you don't have it). volume_mm3, surface_area_mm2, mass_kg, "
+                                "and bounding_box are ALSO flattened onto the node's "
+                                "top-level metadata (FORGE-100) so a constraint expression "
+                                "(e.g. mass_kg <= 4.5) reads a real measured value instead of "
+                                "a missing-key default. Omitting this when you have the "
+                                "measurement leaves that constraint unable to ever genuinely "
+                                "pass or fail — it will be flagged "
+                                "measured_properties_missing=true rather than silently "
+                                "trusted."
                             ),
                         },
                         "source_tool": {
@@ -1631,6 +1664,30 @@ class TwinServer(McpToolServer):
     async def commit_geometry(self, arguments: dict[str, Any]) -> dict[str, Any]:
         step_base64 = arguments.get("step_base64")
         name = arguments.get("name")
+        # FORGE-224: a STATELESS tool (freecad.create_parametric,
+        # cadquery.create_parametric/execute_script/generate_enclosure, ...)
+        # has no session_id/obj_id -- its result is just a 'cad_file' path on
+        # the adapter workspace both this gateway process and the adapter
+        # container mount. Read it server-side, mirroring
+        # domain_agents.shared.commit_geometry.commit_geometry's own relative-
+        # path resolution (FORGE-79) so a model calling this tool DIRECTLY
+        # (not through a skill) gets the same commit-by-reference ergonomics
+        # session_id+obj_id already has, instead of hand-copying a base64 blob
+        # it was never given in the first place.
+        file_path = arguments.get("file_path")
+        has_step_base64 = bool(step_base64) and isinstance(step_base64, str)
+        if not has_step_base64 and isinstance(file_path, str) and file_path:
+            resolved_path = Path(file_path)
+            if not resolved_path.is_absolute():
+                workspace_root = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace"))
+                resolved_path = workspace_root / file_path
+            try:
+                step_base64 = base64.b64encode(resolved_path.read_bytes()).decode("ascii")
+            except OSError as exc:
+                raise ValueError(
+                    f"twin.commit_geometry: could not read file_path {file_path!r} "
+                    f"(resolved to {resolved_path}): {exc}"
+                ) from exc
         if not step_base64 or not isinstance(step_base64, str):
             # MET-642 S4 finding: reproduced live TWICE with the identical
             # mechanism -- the model retried commit_geometry with obj_id but
@@ -1680,6 +1737,48 @@ class TwinServer(McpToolServer):
         # stored script belongs to.
         source_tool = arguments.get("source_tool")
         source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
+        # FORGE-100 remainder: 'properties' already accepted measured values
+        # (volume_mm3, mass_kg, ...), but the recorder only ever nested them
+        # under metadata.geometry_features.properties -- never the top-level
+        # keys a constraint expression actually reads
+        # (wp.metadata.get('mass_kg', 0)). Re-test 2026-09-25 confirmed a
+        # node committed by session_id+obj_id still had no measured keys.
+        # Flatten the same canonical keys measured_metadata_from_cad_result()
+        # (domain_agents/shared/commit_geometry.py) uses for the skill paths,
+        # in ADDITION to the existing nested structure kept for back-compat.
+        extra_metadata: dict[str, Any] | None = None
+        if isinstance(properties, dict):
+            flattened = {
+                key: properties[key]
+                for key in ("volume_mm3", "surface_area_mm2", "mass_kg")
+                if key in properties
+            }
+            bbox = properties.get("bounding_box")
+            if isinstance(bbox, dict):
+                flattened["bbox_mm"] = bbox
+            extra_metadata = flattened or None
+        # FORGE-100 (re-test 2026-09-26): the model still doesn't reliably
+        # pass 'properties' on a commit-by-reference call, even though
+        # freecad.export_model's own response already carried the measured
+        # values moments earlier -- so constraints on chat-authored parts
+        # keep reading defaults. Deriving them here server-side (calling
+        # freecad.measure at commit time) would be the real fix, but this
+        # handler has no path to another adapter -- api_gateway/server.py
+        # builds geometry_recorder_fn (make_geometry_recorder) BEFORE the
+        # ToolRegistry/RegistryMcpBridge it would need to reach freecad even
+        # exist yet (circular: the bridge is built FROM the registry that
+        # bootstrap_tool_registry constructs, and geometry_recorder is one of
+        # bootstrap_tool_registry's OWN inputs) -- resolving that ordering is
+        # a real, separately-riskable change, not a contained bug fix. Until
+        # then, make the gap visible instead of silent: flag it so a
+        # constraint evaluator (or a dashboard) can tell "never measured"
+        # apart from a genuine 0 -- the same "unobserved, not vacuous" ask
+        # this ticket's own fix direction lists, tracked at the evaluator
+        # level by FORGE-105.
+        if extra_metadata is None and isinstance(session_id, str) and session_id:
+            obj_id = arguments.get("obj_id")
+            if isinstance(obj_id, str) and obj_id:
+                extra_metadata = {"measured_properties_missing": True}
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -1691,6 +1790,7 @@ class TwinServer(McpToolServer):
             parameters=parameters if isinstance(parameters, dict) else None,
             properties=properties if isinstance(properties, dict) else None,
             **({"source_tool": source_tool} if source_tool else {}),
+            **({"extra_metadata": extra_metadata} if extra_metadata else {}),
         )
 
     # ------------------------------------------------------------------

@@ -215,9 +215,26 @@ async def lower_design_ir_freecad(mcp: McpBridge, doc: DesignIR) -> FreecadLower
                 {"session_id": session_id, "obj_id": terminal_obj_id},
                 timeout=60,
             )
+            # FORGE-97: when the terminal entity is a PartDesign feature
+            # (has a body_ref -- pad/pocket/revolve/fillet/pattern/...),
+            # export the BODY it belongs to, not the tip feature itself. The
+            # tip's own Label is whatever the last operation happened to be
+            # named ("PolarPattern", "fillet_edges", ...), and Import.export
+            # uses the exported OBJECT's Label as the STEP PRODUCT name -- so
+            # exporting the tip mislabels every IR-built PartDesign part. A
+            # PartDesign::Body's .Shape mirrors its Tip feature's shape (same
+            # geometry either way) but its own .Label is the part name
+            # requested at create_body time -- exactly how the
+            # already-correct non-IR (session-commit) path exports today.
+            # A terminal entity with no body_ref (a bare create_primitive,
+            # already correctly named at creation -- MET-534/535; or a
+            # boolean/transform/place result) is unaffected: it keeps
+            # exporting its own object exactly as before.
+            body_ref = getattr(terminal, "body_ref", None)
+            export_obj_id = obj_ids[body_ref] if body_ref is not None else terminal_obj_id
             export_result = await mcp.invoke(
                 "freecad.export_model",
-                {"session_id": session_id, "obj_id": terminal_obj_id},
+                {"session_id": session_id, "obj_id": export_obj_id},
                 timeout=120,
             )
             step_b64 = export_result.get("step_base64")

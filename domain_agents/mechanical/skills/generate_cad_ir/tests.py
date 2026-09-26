@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 from uuid import uuid4
 
+import pytest
 import structlog
+from pydantic import ValidationError
 
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from skill_registry.skill_base import SkillContext
@@ -136,7 +138,9 @@ class TestGenerateCadIrHandler:
         _ctx, handler, work_product = await _make_ctx_and_handler()
 
         output = await handler.execute(
-            GenerateCadIrInput(work_product_id=work_product.id, entities=_BRACKET_ENTITIES)
+            GenerateCadIrInput(
+                name="Test Part", work_product_id=work_product.id, entities=_BRACKET_ENTITIES
+            )
         )
 
         assert output.entity_count == 4
@@ -152,6 +156,7 @@ class TestGenerateCadIrHandler:
         try:
             await handler.execute(
                 GenerateCadIrInput(
+                    name="Test Part",
                     work_product_id=work_product.id,
                     entities=[
                         {
@@ -177,6 +182,7 @@ class TestGenerateCadIrHandler:
         try:
             await handler.execute(
                 GenerateCadIrInput(
+                    name="Test Part",
                     work_product_id=work_product.id,
                     entities=[{"id": "p1", "op": "create_parametric", "shape_type": "bracket"}],
                 )
@@ -202,7 +208,9 @@ class TestGenerateCadIrHandler:
         handler = GenerateCadIrHandler(ctx)
 
         errors = await handler.validate_preconditions(
-            GenerateCadIrInput(work_product_id=work_product.id, entities=_BRACKET_ENTITIES)
+            GenerateCadIrInput(
+                name="Test Part", work_product_id=work_product.id, entities=_BRACKET_ENTITIES
+            )
         )
         assert any("FreeCAD session API" in e for e in errors)
 
@@ -210,7 +218,9 @@ class TestGenerateCadIrHandler:
         _ctx, handler, _wp = await _make_ctx_and_handler()
 
         errors = await handler.validate_preconditions(
-            GenerateCadIrInput(work_product_id=uuid4(), entities=_BRACKET_ENTITIES)
+            GenerateCadIrInput(
+                name="Test Part", work_product_id=uuid4(), entities=_BRACKET_ENTITIES
+            )
         )
         assert any("not found" in e for e in errors)
 
@@ -219,7 +229,9 @@ class TestGenerateCadIrHandler:
         _ctx, handler, work_product = await _make_ctx_and_handler()
 
         output = await handler.execute(
-            GenerateCadIrInput(work_product_id=work_product.id, entities=_BRACKET_ENTITIES)
+            GenerateCadIrInput(
+                name="Test Part", work_product_id=work_product.id, entities=_BRACKET_ENTITIES
+            )
         )
 
         assert output.committed is False
@@ -236,6 +248,7 @@ class TestGenerateCadIrHandler:
 
         output = await handler.execute(
             GenerateCadIrInput(
+                name="Test Part",
                 work_product_id=work_product.id,
                 entities=_BRACKET_ENTITIES,
                 project_id="13d60463-433b-4735-af07-690cbf8e07b9",
@@ -247,6 +260,93 @@ class TestGenerateCadIrHandler:
         assert output.model_url == "https://twin.local/models/node-456"
         assert output.commit_error is None
 
+    def test_name_is_required_and_non_empty(self):
+        with pytest.raises(ValidationError):
+            GenerateCadIrInput(entities=_BRACKET_ENTITIES)
+        with pytest.raises(ValidationError):
+            GenerateCadIrInput(name="", entities=_BRACKET_ENTITIES)
+
+    async def test_commit_uses_the_caller_supplied_name_not_a_generic_one(
+        self, tmp_path, monkeypatch
+    ):
+        """FORGE-97: never the old synthetic "design_ir (material)" pattern."""
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-456"})
+
+        await handler.execute(
+            GenerateCadIrInput(
+                name="Shoulder Yoke", work_product_id=work_product.id, entities=_BRACKET_ENTITIES
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["name"] == "Shoulder Yoke"
+
+    async def test_commit_threads_measured_properties_as_extra_metadata(
+        self, tmp_path, monkeypatch
+    ):
+        """FORGE-100: the lowering pass's own measured volume/area/bbox (and a
+        density-derived mass_kg) reach the Twin as top-level work-product
+        metadata, not just the skill's own output fields."""
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-456"})
+
+        await handler.execute(
+            GenerateCadIrInput(
+                name="Shoulder Yoke",
+                work_product_id=work_product.id,
+                entities=_BRACKET_ENTITIES,
+                material="aluminum_6061",
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        extra = commit_call[1]["extra_metadata"]
+        assert extra["volume_mm3"] == 7800.0
+        assert extra["surface_area_mm2"] == 2500.0
+        assert extra["bbox_mm"]["max_x"] == 40.0
+        assert extra["mass_kg"] == pytest.approx(7800.0 * 1e-9 * 2700.0)
+
+    async def test_commit_omits_mass_kg_without_material(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-456"})
+
+        await handler.execute(
+            GenerateCadIrInput(
+                name="Shoulder Yoke",
+                work_product_id=work_product.id,
+                entities=_BRACKET_ENTITIES,
+                material="",
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert "mass_kg" not in commit_call[1]["extra_metadata"]
+
+    def test_input_schema_exposes_real_op_names_to_the_model(self):
+        """FORGE-222: entities used to be typed list[dict[str, Any]], so the
+        MCP tool schema a model sees carried no hint of valid `op` values or
+        their required fields -- the model had to guess (11/13 calls in the
+        reported re-test guessed wrong: extrude/cut/hollow/... instead of the
+        real pad/pocket/shell/... op names). entities is now list[IREntity],
+        a real discriminated union, so its JSON schema must show the actual
+        op literals."""
+        schema = GenerateCadIrInput.model_json_schema()
+        # Discriminated unions land in $defs; flatten every literal "op"
+        # value across the whole schema document (defs are nested under
+        # different keys across pydantic versions -- just scan everything).
+        blob = str(schema)
+        for real_op in ("pad", "pocket", "shell", "boolean", "polar_pattern", "fillet_edges"):
+            assert real_op in blob, f"schema doesn't mention op {real_op!r}"
+        for guessed_op in ("extrude", "cut", "hollow", "cylinder_cut", "circle_pattern"):
+            assert guessed_op not in blob, f"schema shouldn't mention bogus op {guessed_op!r}"
+
     async def test_commit_false_skips_persistence(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         ctx, handler, work_product = await _make_ctx_and_handler()
@@ -255,7 +355,10 @@ class TestGenerateCadIrHandler:
 
         output = await handler.execute(
             GenerateCadIrInput(
-                work_product_id=work_product.id, entities=_BRACKET_ENTITIES, commit=False
+                name="Test Part",
+                work_product_id=work_product.id,
+                entities=_BRACKET_ENTITIES,
+                commit=False,
             )
         )
 
@@ -267,7 +370,9 @@ class TestGenerateCadIrHandler:
         _ctx, handler, work_product = await _make_ctx_and_handler()
 
         result = await handler.run(
-            GenerateCadIrInput(work_product_id=work_product.id, entities=_BRACKET_ENTITIES)
+            GenerateCadIrInput(
+                name="Test Part", work_product_id=work_product.id, entities=_BRACKET_ENTITIES
+            )
         )
 
         assert result.success is True
@@ -314,7 +419,10 @@ class TestCadqueryAdapter:
 
         output = await handler.execute(
             GenerateCadIrInput(
-                work_product_id=work_product.id, entities=_BOX_ENTITY, adapter="cadquery"
+                name="Test Part",
+                work_product_id=work_product.id,
+                entities=_BOX_ENTITY,
+                adapter="cadquery",
             )
         )
 
@@ -339,7 +447,10 @@ class TestCadqueryAdapter:
 
         errors = await handler.validate_preconditions(
             GenerateCadIrInput(
-                work_product_id=work_product.id, entities=_BOX_ENTITY, adapter="cadquery"
+                name="Test Part",
+                work_product_id=work_product.id,
+                entities=_BOX_ENTITY,
+                adapter="cadquery",
             )
         )
         assert any("CadQuery script API" in e for e in errors)
@@ -361,7 +472,10 @@ class TestCadqueryAdapter:
 
         errors = await handler.validate_preconditions(
             GenerateCadIrInput(
-                work_product_id=work_product.id, entities=_BOX_ENTITY, adapter="cadquery"
+                name="Test Part",
+                work_product_id=work_product.id,
+                entities=_BOX_ENTITY,
+                adapter="cadquery",
             )
         )
         assert errors == []
@@ -383,6 +497,7 @@ class TestCadqueryAdapter:
         try:
             await handler.execute(
                 GenerateCadIrInput(
+                    name="Test Part",
                     work_product_id=work_product.id,
                     entities=[{"id": "p1", "op": "create_parametric", "shape_type": "bracket"}],
                     adapter="cadquery",

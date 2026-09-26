@@ -7,7 +7,7 @@ from typing import Any
 
 import structlog
 
-from domain_agents.shared.commit_geometry import commit_geometry
+from domain_agents.shared.commit_geometry import commit_geometry, measured_metadata_from_cad_result
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -115,6 +115,12 @@ class CreateAssemblyHandler(SkillBase[CreateAssemblyInput, CreateAssemblyOutput]
                         "parts": parts_dicts,
                         "constraints": constraints_dicts,
                         "output_path": output_path,
+                        # FORGE-100: a first-order mass estimate (summed
+                        # volume x this one material) -- per-part materials
+                        # aren't tracked, so this is deliberately not
+                        # per-part-accurate; omit rather than guess when the
+                        # caller didn't state one either.
+                        "material": input_data.material,
                     },
                     timeout=600,
                 )
@@ -148,6 +154,7 @@ class CreateAssemblyHandler(SkillBase[CreateAssemblyInput, CreateAssemblyOutput]
                     cad_file=assembly_file,
                     name=input_data.name,
                     project_id=input_data.project_id,
+                    extra_metadata=measured_metadata_from_cad_result(result),
                 )
                 span.set_attribute("committed", committed)
 

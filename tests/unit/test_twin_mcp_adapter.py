@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -735,6 +736,239 @@ class TestApproveEngineeringEntity:
         srv = TwinServer(twin=_FakeTwin(), engineering_entity_approver=approver)
         raw = await srv.handle_request(_request("twin.approve_engineering_entity", {}))
         assert "error" in json.loads(raw)
+
+
+# ---------------------------------------------------------------------------
+# twin.commit_geometry -- file_path commit-by-reference (FORGE-224)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryFilePath:
+    """A stateless tool (freecad.create_parametric, cadquery.create_parametric/
+    execute_script/generate_enclosure, ...) has no session_id/obj_id -- its
+    result is just a 'cad_file' path on the shared adapter workspace. Before
+    this, a model calling twin.commit_geometry directly (not through a skill)
+    had no way to reference that output and had to hand-copy a base64 blob it
+    was never actually given."""
+
+    async def test_relative_file_path_is_resolved_against_the_workspace_root(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+        (tmp_path / "output").mkdir()
+        (tmp_path / "output" / "bracket_None.step").write_bytes(b"ISO-10303-21;")
+
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1", "model_url": "https://twin.local/models/node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        resp = json.loads(
+            await srv.handle_request(
+                _request(
+                    "twin.commit_geometry",
+                    {"file_path": "output/bracket_None.step", "name": "Bracket"},
+                )
+            )
+        )
+
+        assert "error" not in resp, resp
+        assert received["step_base64"] == base64.b64encode(b"ISO-10303-21;").decode("ascii")
+        assert resp["result"]["data"]["node_id"] == "node-1"
+
+    async def test_absolute_file_path_is_read_as_given(self, tmp_path, monkeypatch) -> None:
+        step_file = tmp_path / "box.step"
+        step_file.write_bytes(b"ISO-10303-21;HEADER;")
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-2"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request("twin.commit_geometry", {"file_path": str(step_file), "name": "Box"})
+        )
+
+        assert received["step_base64"] == base64.b64encode(b"ISO-10303-21;HEADER;").decode("ascii")
+
+    async def test_step_base64_wins_over_file_path_when_both_given(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+        (tmp_path / "part.step").write_bytes(b"ON-DISK-BYTES")
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-3"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        explicit = base64.b64encode(b"EXPLICIT-BYTES").decode("ascii")
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {"file_path": "part.step", "name": "Part", "step_base64": explicit},
+            )
+        )
+
+        assert received["step_base64"] == explicit
+
+    async def test_a_missing_file_is_a_clear_error_not_a_silent_empty_commit(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ADAPTER_WORKSPACE_DIR", str(tmp_path))
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "node-4"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        resp = json.loads(
+            await srv.handle_request(
+                _request(
+                    "twin.commit_geometry",
+                    {"file_path": "does/not/exist.step", "name": "Ghost"},
+                )
+            )
+        )
+
+        # The framework flattens a handler ValueError to a generic
+        # client-facing message (the real detail is logged server-side) --
+        # same convention every other error case in this file asserts on.
+        assert "error" in resp
+
+
+# ---------------------------------------------------------------------------
+# twin.commit_geometry -- flatten 'properties' onto top-level metadata (FORGE-100)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryPropertiesFlattening:
+    """Re-test 2026-09-25: a node committed by session_id+obj_id still had no
+    measured keys -- 'properties' was always accepted but only ever nested
+    under metadata.geometry_features.properties, never the top-level keys a
+    constraint expression (wp.metadata.get('mass_kg', 0)) actually reads."""
+
+    async def test_canonical_keys_in_properties_are_also_passed_as_extra_metadata(
+        self,
+    ) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "properties": {
+                        "volume_mm3": 1800.0,
+                        "surface_area_mm2": 900.0,
+                        "mass_kg": 4.86,
+                        "bounding_box": {"min_x": 0.0, "max_x": 30.0},
+                        "some_other_measurement": "kept in geometry_features only",
+                    },
+                },
+            )
+        )
+
+        # The pre-existing nested structure is untouched (back-compat).
+        assert received["properties"]["some_other_measurement"] == (
+            "kept in geometry_features only"
+        )
+        # The canonical keys are ALSO flattened for the constraint engine.
+        assert received["extra_metadata"] == {
+            "volume_mm3": 1800.0,
+            "surface_area_mm2": 900.0,
+            "mass_kg": 4.86,
+            "bbox_mm": {"min_x": 0.0, "max_x": 30.0},
+        }
+
+    async def test_no_canonical_measurements_flags_missing_on_a_session_commit(
+        self,
+    ) -> None:
+        """FORGE-100 (re-test 2026-09-26): 'properties' was given but carried
+        no measured keys -- on a commit-by-reference (session_id+obj_id) call
+        this must be flagged, not silently omitted, so a constraint evaluator
+        can tell "never measured" apart from a genuine 0."""
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "properties": {"note": "no measured keys here"},
+                },
+            )
+        )
+
+        assert received["extra_metadata"] == {"measured_properties_missing": True}
+
+    async def test_no_properties_at_all_flags_missing_on_a_session_commit(self) -> None:
+        """Same as above, but properties omitted entirely -- this is the
+        exact shape of the live re-test failure: the chat agent calling
+        commit-by-reference without ever passing measured properties."""
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert received["extra_metadata"] == {"measured_properties_missing": True}
+
+    async def test_no_session_id_does_not_flag_missing(self) -> None:
+        """A stateless (file-based) commit has no session/obj_id to flag
+        against -- the missing-measurement signal is scoped to the
+        commit-by-reference path this ticket is actually about, not every
+        commit that happens to omit properties."""
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert "extra_metadata" not in received
 
 
 # ---------------------------------------------------------------------------

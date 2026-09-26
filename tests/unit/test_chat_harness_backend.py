@@ -15,6 +15,7 @@ from api_gateway.chat.harness_backend import (
 )
 from api_gateway.projects.schemas import ProjectResponse
 from orchestrator.harness.providers import CredentialStore, ProviderSpec
+from orchestrator.harness.providers.auth_store import AuthStore, Selection
 from orchestrator.harness.react import ReActStep, ToolCall
 
 
@@ -48,6 +49,65 @@ def test_provider_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("METAFORGE_LLM_BASE_URL", "https://openrouter.ai/api/v1")
     spec = provider_config_from_env().slots.candidates("generator")[0]
     assert spec.name == "openrouter" and spec.base_url == "https://openrouter.ai/api/v1"
+
+
+def test_a_stored_selection_predating_validation_is_ignored_not_resent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """FORGE-93 re-test: PUT /v1/harness/selection now rejects a new invalid
+    openai-codex + slashed-model pairing, but a pairing stored *before* that
+    validation existed stayed durable -- every default-provider call kept
+    400ing then silently falling back to OpenRouter forever. The stored
+    selection must be re-validated on read, not just on write."""
+    monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(tmp_path / "harness-auth.json"))
+    for k in ("METAFORGE_LLM_PROVIDER", "METAFORGE_LLM_MODEL", "METAFORGE_LLM_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    # Bypass set_selection's own (now-fixed) validation -- write the invalid
+    # pairing directly, exactly as it would already sit in an old store.
+    store = AuthStore()
+    store._selection = Selection(provider="openai-codex", model="openai/gpt-4o")
+    store._save()
+
+    cfg = provider_config_from_env()
+    spec = cfg.slots.candidates("generator")[0]
+    assert spec.model != "openai/gpt-4o"
+
+
+def test_a_stored_selection_with_a_valid_model_is_still_honored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(tmp_path / "harness-auth.json"))
+    for k in ("METAFORGE_LLM_PROVIDER", "METAFORGE_LLM_MODEL", "METAFORGE_LLM_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    AuthStore().set_selection("openai-codex", "gpt-5.5")
+
+    cfg = provider_config_from_env()
+    spec = cfg.slots.candidates("generator")[0]
+    assert spec.model == "gpt-5.5"
+
+
+def test_env_model_default_is_ignored_for_a_store_overridden_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """FORGE-93 remainder, found live on fidel-dev: the REAL stored selection
+    there is provider='openai-codex', model=None -- no model override at all.
+    METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o), but the env
+    model fallback applied regardless of which provider it was actually
+    configured for, silently pairing the store-overridden openai-codex
+    provider with an OpenRouter-style model slug on every single
+    default-provider turn."""
+    monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(tmp_path / "harness-auth.json"))
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_LLM_MODEL", "openai/gpt-4o")
+    monkeypatch.delenv("METAFORGE_LLM_BASE_URL", raising=False)
+    store = AuthStore()
+    store._selection = Selection(provider="openai-codex", model=None)
+    store._save()
+
+    cfg = provider_config_from_env()
+    spec = cfg.slots.candidates("generator")[0]
+    assert spec.model != "openai/gpt-4o"
 
 
 # --- FORGE-98: post-turn grounding guard ------------------------------------

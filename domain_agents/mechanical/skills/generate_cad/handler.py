@@ -8,7 +8,7 @@ from typing import Any
 import structlog
 
 from domain_agents.shared.cad_backend import resolve_cad_backend
-from domain_agents.shared.commit_geometry import commit_geometry
+from domain_agents.shared.commit_geometry import commit_geometry, measured_metadata_from_cad_result
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
 
@@ -146,6 +146,10 @@ class GenerateCadHandler(SkillBase[GenerateCadInput, GenerateCadOutput]):
                     cad_file=cad_file,
                     name=input_data.name,
                     project_id=input_data.project_id,
+                    # FORGE-100: thread the tool's own already-computed
+                    # measurements onto the committed node so a constraint
+                    # referencing e.g. mass_kg reads a real value.
+                    extra_metadata=measured_metadata_from_cad_result(result),
                 )
                 span.set_attribute("committed", committed)
 

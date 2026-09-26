@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 from tool_registry.tools.cadquery.operations import (
     _BLOCKED_NAMES,
     _SAFE_BUILTINS,
@@ -143,6 +144,18 @@ class TestCadqueryOperationsWithCadquery:
         assert result["surface_area_mm2"] > 0
         assert result["material"] == "aluminum"
         assert "bounding_box" in result
+        # FORGE-100: a constraint like `moving_mass_kg <= 4.5` always read
+        # the default 0 because nothing ever converted volume -> mass.
+        assert result["mass_kg"] == pytest.approx(result["volume_mm3"] * 1e-9 * 2700.0)
+
+    def test_create_parametric_omits_mass_kg_without_material(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        result = ops.create_parametric(
+            shape_type="box",
+            parameters={"length": 20.0, "width": 10.0, "height": 5.0},
+            output_path=str(tmp_path / "box.step"),
+        )
+        assert "mass_kg" not in result
 
     def test_create_parametric_cylinder(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path))
@@ -237,6 +250,54 @@ class TestCadqueryOperationsWithCadquery:
         assert "volume_mm3" in result["properties"]
         assert "surface_area_mm2" in result["properties"]
         assert "bounding_box" in result["properties"]
+
+    def test_generate_enclosure_computes_mass_kg(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+
+        result = ops.generate_enclosure(
+            pcb_length=80.0,
+            pcb_width=50.0,
+            output_path=str(tmp_path / "enclosure.step"),
+        )
+
+        assert result["volume_mm3"] > 0
+        # FORGE-100: material defaults to "ABS", so mass_kg is always present.
+        assert result["mass_kg"] == pytest.approx(
+            result["volume_mm3"] * 1e-9 * resolve_density_kg_m3("ABS")
+        )
+
+    def test_create_assembly_computes_mass_kg_from_summed_volume(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+
+        part_path = str(tmp_path / "part.step")
+        ops.create_parametric(
+            "box", {"length": 20.0, "width": 10.0, "height": 5.0}, output_path=part_path
+        )
+
+        result = ops.create_assembly(
+            parts=[{"name": "base", "file": part_path}],
+            output_path=str(tmp_path / "assembly.step"),
+            material="aluminum",
+        )
+
+        assert result["part_count"] == 1
+        assert result["volume_mm3"] == pytest.approx(result["total_volume"])
+        assert result["mass_kg"] == pytest.approx(result["volume_mm3"] * 1e-9 * 2700.0)
+
+    def test_create_assembly_omits_mass_kg_without_material(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+
+        part_path = str(tmp_path / "part.step")
+        ops.create_parametric(
+            "box", {"length": 20.0, "width": 10.0, "height": 5.0}, output_path=part_path
+        )
+
+        result = ops.create_assembly(
+            parts=[{"name": "base", "file": part_path}],
+            output_path=str(tmp_path / "assembly.step"),
+        )
+
+        assert "mass_kg" not in result
 
 
 class _FakeBoundBox:
