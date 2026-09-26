@@ -92,6 +92,20 @@ class TestHappyPath:
             "sol2": "fillet_1",
         }
 
+    async def test_export_uses_the_body_not_the_tip_feature(self):
+        """FORGE-97 regression: the STEP PRODUCT label comes from whichever
+        object export_model is called against. Exporting the tip feature
+        (fillet_1) mislabels the part as 'fillet_edges'/'PolarPattern'
+        instead of the body's own requested name -- export must target the
+        body (body_1), not the terminal entity's own obj_id (fillet_1),
+        even though measure still reports on the terminal feature's shape."""
+        mcp = _bracket_bridge()
+        await lower_design_ir_freecad(mcp, _bracket_doc())
+
+        calls = dict(mcp.calls)
+        assert calls["freecad.export_model"]["obj_id"] == "body_1"
+        assert calls["freecad.measure"]["obj_id"] == "fillet_1"
+
     async def test_calls_are_in_document_order_and_session_always_closed(self):
         mcp = _bracket_bridge()
         await lower_design_ir_freecad(mcp, _bracket_doc())
