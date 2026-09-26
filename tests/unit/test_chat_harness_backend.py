@@ -86,6 +86,30 @@ def test_a_stored_selection_with_a_valid_model_is_still_honored(
     assert spec.model == "gpt-5.5"
 
 
+def test_env_model_default_is_ignored_for_a_store_overridden_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """FORGE-93 remainder, found live on fidel-dev: the REAL stored selection
+    there is provider='openai-codex', model=None -- no model override at all.
+    METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o), but the env
+    model fallback applied regardless of which provider it was actually
+    configured for, silently pairing the store-overridden openai-codex
+    provider with an OpenRouter-style model slug on every single
+    default-provider turn."""
+    monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(tmp_path / "harness-auth.json"))
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_LLM_MODEL", "openai/gpt-4o")
+    monkeypatch.delenv("METAFORGE_LLM_BASE_URL", raising=False)
+    store = AuthStore()
+    store._selection = Selection(provider="openai-codex", model=None)
+    store._save()
+
+    cfg = provider_config_from_env()
+    spec = cfg.slots.candidates("generator")[0]
+    assert spec.model != "openai/gpt-4o"
+
+
 # --- FORGE-98: post-turn grounding guard ------------------------------------
 # Live repro: a turn made ZERO tool calls (no tool events in the gateway log)
 # yet the final reply claimed "Assembled the available parts... Added
