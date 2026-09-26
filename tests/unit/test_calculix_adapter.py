@@ -11,6 +11,8 @@ import pytest
 
 from tool_registry.tools.calculix.adapter import CalculixServer
 from tool_registry.tools.calculix.config import CalculixConfig
+from tool_registry.tools.calculix.result_parser import FrdParseError
+from tool_registry.tools.calculix.solver import SolverError
 
 REAL_CCX_THERMAL_FRD = """\
     1C
@@ -315,6 +317,59 @@ class TestExecuteThermalSolverParsesRealResults:
         assert result["max_temperature"] == pytest.approx(100.0)
         assert result["min_temperature"] == pytest.approx(20.0)
         assert result["temperature_distribution"], "must contain real per-node data"
+
+
+class TestEmptyResultIsNeverReportedAsSuccess:
+    """FORGE-232: CalculiX solving a mesh-only deck (no *STEP/*STATIC/
+    *BOUNDARY/*CLOAD, or no *NODE FILE/*EL FILE output request) exits 0 in a
+    fraction of a second and produces either no .frd at all, or one with no
+    result data for any node. Both used to come back as a normal, successful
+    (if hollow) result -- every caller reported success on a stress finding
+    that was never actually computed."""
+
+    async def test_run_fea_raises_when_solver_produces_no_frd_at_all(
+        self, server: CalculixServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
+            return {"solver_time_s": 0.11, "result_files": []}  # no .frd produced
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        with pytest.raises(SolverError, match="no .frd result file"):
+            await server._execute_solver("/models/test.inp", "static_stress")
+
+    async def test_run_fea_raises_when_frd_has_no_node_data(
+        self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        empty_frd = tmp_path / "empty.frd"
+        empty_frd.write_text(" 9999\n", encoding="utf-8")  # real ccx "empty" shape
+
+        async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
+            return {"solver_time_s": 0.11, "result_files": [str(empty_frd)]}
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        with pytest.raises(FrdParseError, match="node_count == 0"):
+            await server._execute_solver("/models/test.inp", "static_stress")
+
+    async def test_run_thermal_raises_when_solver_produces_no_frd_at_all(
+        self, server: CalculixServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
+            return {"solver_time_s": 0.11, "result_files": []}
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        with pytest.raises(SolverError, match="no .frd result file"):
+            await server._execute_thermal_solver(
+                "/models/test.inp", {"ambient_temp": 20.0}, "steady_state"
+            )
 
 
 class TestUnmockedSolverRaisesOnMissingFiles:

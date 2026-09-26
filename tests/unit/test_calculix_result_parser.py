@@ -228,14 +228,16 @@ class TestParseFrdFileErrors:
         with pytest.raises(FileNotFoundError):
             parse_frd_file("/nonexistent/path.frd")
 
-    def test_empty_file_yields_empty_results_not_an_error(self, tmp_path: Path) -> None:
+    def test_empty_file_raises_instead_of_silently_reporting_success(self, tmp_path: Path) -> None:
+        """FORGE-232: this used to return a "successful" empty result --
+        exactly the class of bug the ticket reported (CalculiX solving an
+        empty deck and every caller reporting success on nothing). node_count
+        == 0 must be a loud failure, not a quiet one."""
         path = tmp_path / "empty.frd"
         path.write_text("", encoding="utf-8")
 
-        result = parse_frd_file(str(path))
-        assert result["node_count"] == 0
-        assert result["stress"]["nodes"] == {}
-        assert result["displacement"]["nodes"] == {}
+        with pytest.raises(FrdParseError, match="node_count == 0"):
+            parse_frd_file(str(path))
 
     def test_unreadable_file_raises_frd_parse_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
