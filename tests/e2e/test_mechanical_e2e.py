@@ -156,6 +156,10 @@ class TestMechanicalAgentE2E:
                             "material": "Al6061-T6",
                         }
                     ],
+                    "material_name": "aluminum_6061",
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             )
         )
@@ -167,9 +171,10 @@ class TestMechanicalAgentE2E:
         assert result.errors == []
 
         # Verify the CalculiX solver was actually called through the full stack
-        s["server"]._execute_solver.assert_awaited_once_with(
-            "models/motor_mount_bracket.inp", "static_stress"
-        )
+        s["server"]._execute_solver.assert_awaited_once()
+        call_args = s["server"]._execute_solver.call_args
+        assert call_args[0][0] == "models/motor_mount_bracket.inp"
+        assert call_args[0][1] == "static_stress"
 
     async def test_validate_stress_fails_tight_constraint(self, stack):
         """Stress validation fails when constraint is too tight for the fillet region."""
@@ -188,6 +193,10 @@ class TestMechanicalAgentE2E:
                             "material": "Al6061-T6",
                         }
                     ],
+                    "material_name": "aluminum_6061",
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             )
         )
@@ -231,6 +240,10 @@ class TestMechanicalAgentE2E:
                             "material": "Al6061-T6",
                         }
                     ],
+                    "material_name": "aluminum_6061",
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             )
         )
@@ -300,6 +313,10 @@ class TestValidateStressSkillE2E:
                         material="Al6061-T6",
                     )
                 ],
+                material_name="aluminum_6061",
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
             )
         )
 
@@ -331,6 +348,10 @@ class TestValidateStressSkillE2E:
                         material="Al6061-T6",
                     )
                 ],
+                material_name="aluminum_6061",
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
             )
         )
 
@@ -354,6 +375,10 @@ class TestValidateStressSkillE2E:
                         material="Al6061-T6",
                     )
                 ],
+                material_name="aluminum_6061",
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
             )
         )
 
@@ -371,6 +396,10 @@ class TestValidateStressSkillE2E:
                 mesh_file_path="models/missing.inp",
                 load_case="lc1",
                 constraints=[StressConstraint(max_von_mises_mpa=276.0, material="Al6061-T6")],
+                material_name="aluminum_6061",
+                fixed_node_set="Surface1",
+                load_node_set="Surface2",
+                load_force_n=(0.0, 0.0, -100.0),
             )
         )
 
@@ -413,6 +442,10 @@ class TestMcpProtocolE2E:
                 "mesh_file": "test.inp",
                 "load_case": "lc1",
                 "analysis_type": "static_stress",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
+                "load_node_set": "Surface2",
+                "load_force_n": [0.0, 0.0, -100.0],
             },
         )
 
@@ -477,6 +510,10 @@ class TestTwinIntegrationE2E:
                             "material": "Al6061-T6",
                         }
                     ],
+                    "material_name": "aluminum_6061",
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             )
         )
@@ -529,6 +566,10 @@ class TestTwinIntegrationE2E:
                             "material": "Al6061-T6",
                         }
                     ],
+                    "material_name": "aluminum_6061",
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0.0, 0.0, -100.0],
                 },
             )
         )

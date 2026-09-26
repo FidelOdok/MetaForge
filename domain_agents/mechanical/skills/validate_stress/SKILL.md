@@ -19,6 +19,10 @@ Validates stress analysis results against design constraints using CalculiX FEA.
 - `mesh_file_path` -- Path to the .inp mesh file
 - `load_case` -- Load case identifier
 - `constraints` -- List of stress constraints (max_von_mises_mpa, safety_factor, material)
+- `material_name` -- Material name for FEA elastic properties (e.g. `"steel"`, `"aluminum_6061"`)
+- `fixed_node_set` -- Mesh element set name to fully constrain (fixed support)
+- `load_node_set` -- Mesh element set name to apply `load_force_n` to
+- `load_force_n` -- `[Fx, Fy, Fz]` total applied force in Newtons
 
 ## Output
 

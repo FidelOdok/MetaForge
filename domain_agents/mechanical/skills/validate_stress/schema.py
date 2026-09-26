@@ -26,6 +26,24 @@ class ValidateStressInput(BaseModel):
     constraints: list[StressConstraint] = Field(
         ..., min_length=1, description="Stress constraints to check"
     )
+    # FORGE-234: calculix.run_fea now builds a complete, solvable deck around
+    # the mesh instead of invoking it directly -- it has no default material
+    # or boundary condition/load to build that deck around, so this skill
+    # must supply them too. material_name is a single top-level property (not
+    # per-StressConstraint) because only one FEA solve backs every constraint
+    # check below.
+    material_name: str = Field(
+        ..., min_length=1, description="Material name for FEA elastic properties (e.g. 'steel')"
+    )
+    fixed_node_set: str = Field(
+        ..., min_length=1, description="Mesh element set name to fully constrain (fixed support)"
+    )
+    load_node_set: str = Field(
+        ..., min_length=1, description="Mesh element set name to apply load_force_n to"
+    )
+    load_force_n: tuple[float, float, float] = Field(
+        ..., description="[Fx, Fy, Fz] total applied force in Newtons"
+    )
 
 
 class StressResult(BaseModel):

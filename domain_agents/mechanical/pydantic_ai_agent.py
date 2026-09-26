@@ -133,7 +133,8 @@ tolerance stack-up analysis, mesh generation, and manufacturing processes.
 You have access to the following tools:
 
 - **validate_stress**: Run FEA stress validation on a meshed CAD model using \
-CalculiX. Provide mesh_file_path, load_case, and stress constraints.
+CalculiX. Provide mesh_file_path, load_case, stress constraints, material_name, \
+fixed_node_set, load_node_set, and load_force_n.
 - **generate_mesh**: Generate a finite element mesh from a CAD file using \
 FreeCAD/Netgen. Provide cad_file path and meshing parameters.
 - **check_tolerance**: Check dimensional tolerances against manufacturing \
@@ -200,6 +201,10 @@ def create_mechanical_agent(
         mesh_file_path: str,
         load_case: str,
         constraints: list[dict[str, Any]],
+        material_name: str,
+        fixed_node_set: str,
+        load_node_set: str,
+        load_force_n: list[float],
     ) -> dict[str, Any]:
         """Run FEA stress validation using CalculiX.
 
@@ -208,6 +213,12 @@ def create_mechanical_agent(
             load_case: Load case identifier (e.g. 'gravity', 'thermal').
             constraints: List of stress constraints, each with
                 max_von_mises_mpa (float) and safety_factor (float).
+            material_name: Material name for FEA elastic properties (e.g.
+                'steel', 'aluminum_6061').
+            fixed_node_set: Mesh element set name to fully constrain (e.g.
+                'Surface1', gmsh's own per-STEP-face group).
+            load_node_set: Mesh element set name to apply load_force_n to.
+            load_force_n: [Fx, Fy, Fz] total applied force in Newtons.
         """
         with tracer.start_as_current_span("tool.validate_stress") as span:
             span.set_attribute("mesh_file", mesh_file_path)
@@ -224,6 +235,10 @@ def create_mechanical_agent(
                     "mesh_file": mesh_file_path,
                     "load_case": load_case,
                     "analysis_type": "static_stress",
+                    "material": {"name": material_name},
+                    "fixed_node_set": fixed_node_set,
+                    "load_node_set": load_node_set,
+                    "load_force_n": load_force_n,
                 },
             )
 

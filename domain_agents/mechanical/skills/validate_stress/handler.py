@@ -40,13 +40,19 @@ class ValidateStressHandler(SkillBase[ValidateStressInput, ValidateStressOutput]
             load_case=input_data.load_case,
         )
 
-        # Invoke CalculiX FEA via MCP
+        # Invoke CalculiX FEA via MCP. FORGE-234: run_fea builds a complete,
+        # solvable deck around the mesh -- material/fixed_node_set/
+        # load_node_set/load_force_n are required for 'static_stress'.
         fea_result = await self.context.mcp.invoke(
             "calculix.run_fea",
             {
                 "mesh_file": input_data.mesh_file_path,
                 "load_case": input_data.load_case,
                 "analysis_type": "static_stress",
+                "material": {"name": input_data.material_name},
+                "fixed_node_set": input_data.fixed_node_set,
+                "load_node_set": input_data.load_node_set,
+                "load_force_n": list(input_data.load_force_n),
             },
             timeout=300,
         )
