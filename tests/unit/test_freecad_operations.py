@@ -447,6 +447,9 @@ class _FakeDoc:
         self.Name = name
         self.Objects: list[_FakeDocObject] = []
 
+    def recompute(self) -> None:
+        pass
+
 
 class _FakeFreeCADMulti:
     """Fakes the two FreeCAD entry points describe_step_file needs."""
@@ -523,6 +526,82 @@ class TestDescribeStepFile:
         with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
             with pytest.raises(FreecadNotAvailableError):
                 ops.describe_step_file("/workspace/part.step")
+
+
+class TestImportStep:
+    """freecad.import_step — loads a STEP file into a LIVE session document
+    (FORGE-231). Committed/staged parts (e.g. via
+    twin.stage_work_product_file) had no way back into a session:
+    open_session only takes a name, and every assembly tool needs a
+    session-registered obj_id."""
+
+    def test_returns_only_solid_bearing_top_level_objects(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDoc("session-doc")
+        tabletop = _FakeDocObject("Tabletop", _FakeShape())
+        tabletop.Shape.Solids = [object()]
+        leg_a = _FakeDocObject("LegA", _FakeShape())
+        leg_a.Shape.Solids = [object()]
+        origin = _FakeDocObject("Origin")  # no Shape at all -- must be skipped
+
+        freecad = _FakeFreeCADMulti()
+        freecad.doc = doc  # pretend this document is already open (a live session)
+        fake_import = _FakeImport(freecad, [tabletop, leg_a, origin])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            result = ops.import_step(doc, "/workspace/_staged_work_products/part.step")
+
+        assert [obj.Label for obj in result] == ["Tabletop", "LegA"]
+
+    def test_only_newly_inserted_objects_are_considered(self) -> None:
+        """A session document can already hold objects from earlier authoring
+        in the same session -- only what Import.insert just added should come
+        back, never pre-existing session objects."""
+        ops = FreecadOperations()
+        doc = _FakeDoc("session-doc")
+        pre_existing = _FakeDocObject("EarlierPrimitive", _FakeShape())
+        pre_existing.Shape.Solids = [object()]
+        doc.Objects.append(pre_existing)
+
+        imported_part = _FakeDocObject("ImportedPart", _FakeShape())
+        imported_part.Shape.Solids = [object()]
+
+        freecad = _FakeFreeCADMulti()
+        freecad.doc = doc
+        fake_import = _FakeImport(freecad, [imported_part])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            result = ops.import_step(doc, "/workspace/part.step")
+
+        assert [obj.Label for obj in result] == ["ImportedPart"]
+
+    def test_raises_a_clear_error_when_nothing_imported_has_solids(self) -> None:
+        ops = FreecadOperations()
+        doc = _FakeDoc("session-doc")
+        wireframe_only = _FakeDocObject("JustCurves")  # no Shape at all
+
+        freecad = _FakeFreeCADMulti()
+        freecad.doc = doc
+        fake_import = _FakeImport(freecad, [wireframe_only])
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch("tool_registry.tools.freecad.operations.Import", fake_import),
+        ):
+            with pytest.raises(ValueError, match="nothing usable for assembly"):
+                ops.import_step(doc, "/workspace/wireframe.step")
+
+    def test_raises_when_unavailable(self) -> None:
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            with pytest.raises(FreecadNotAvailableError):
+                ops.import_step(_FakeDoc("d"), "/workspace/part.step")
 
 
 class TestExecuteCodeSandbox:

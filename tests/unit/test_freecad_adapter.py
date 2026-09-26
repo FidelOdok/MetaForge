@@ -189,8 +189,9 @@ class TestFreecadServer:
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
         # 6 stateless (incl. describe_step_file, MET-629) + 8 auth + 8 feature
-        # + 4 asm + 2 inspect + 2 param + script + 7 skills = 44.
-        assert len(server.tool_ids) == 44
+        # + 4 asm + 2 inspect + 2 param + script + 7 skills + import_step
+        # (FORGE-231) = 45.
+        assert len(server.tool_ids) == 45
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
@@ -207,6 +208,7 @@ class TestFreecadServer:
             "freecad.describe_session",
             "freecad.create_primitive",
             "freecad.create_body",
+            "freecad.import_step",
             "freecad.create_sketch",
             "freecad.pad_sketch",
             "freecad.pocket_sketch",
@@ -516,8 +518,9 @@ class TestUnmockedMethodsDegrade:
 class _FakeObj:
     """Stand-in for a live FreeCAD object."""
 
-    def __init__(self, tag: str) -> None:
+    def __init__(self, tag: str, label: str | None = None) -> None:
         self.tag = tag
+        self.Label = label if label is not None else tag
 
 
 class TestStatefulAuthoring:
@@ -568,6 +571,7 @@ class TestStatefulAuthoring:
         ops.thread_insert.return_value = _FakeObj("body")
         ops.generate_gear.return_value = _FakeObj("gear")
         ops.lattice_perforation.return_value = (_FakeObj("body"), 9)
+        ops.import_step.return_value = [_FakeObj("part", label="Turntable Disc")]
         s._ops = ops  # type: ignore[assignment]
         return s
 
@@ -604,6 +608,68 @@ class TestStatefulAuthoring:
         # describe_session lists the three objects in creation order.
         desc = await s.describe_session({"session_id": sid})
         assert [o["obj_id"] for o in desc["objects"]] == ["body_1", "sketch_2", "feature_3"]
+
+    async def test_import_step_registers_each_component_by_its_step_label(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-231: a staged/committed part had no way back into a session --
+        import_step loads it and hands back a real obj_id, usable by
+        add_part_to_assembly, keyed by the STEP file's own Label."""
+        s = authoring_server
+        sid = (await s.open_session({"name": "assembly"}))["session_id"]
+
+        result = await s.import_step(
+            {"session_id": sid, "file_path": "/workspace/_staged_work_products/disc.step"}
+        )
+
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Turntable Disc"}]
+        assert result["obj_ids"] == ["part_1"]
+        s._ops.import_step.assert_called_once_with(
+            s._sessions.get(sid).document, "/workspace/_staged_work_products/disc.step"
+        )
+
+        # The registered obj_id is real and usable downstream (e.g. by
+        # add_part_to_assembly, which only needs a session-registered obj_id).
+        desc = await s.describe_session({"session_id": sid})
+        assert desc["objects"][0]["obj_id"] == "part_1"
+        assert desc["objects"][0]["name"] == "Turntable Disc"
+
+    async def test_import_step_rename_hint_applies_only_to_a_single_part(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({"name": "assembly"}))["session_id"]
+
+        result = await s.import_step(
+            {
+                "session_id": sid,
+                "file_path": "/workspace/disc.step",
+                "name": "Renamed Disc",
+            }
+        )
+
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Renamed Disc"}]
+
+    async def test_import_step_multipart_keeps_each_step_label_ignoring_rename_hint(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """A rename hint can't cover several parts, so a multipart STEP keeps
+        each component's own STEP-authored label instead of applying it."""
+        s = authoring_server
+        s._ops.import_step.return_value = [
+            _FakeObj("part", label="LegA"),
+            _FakeObj("part", label="LegB"),
+        ]
+        sid = (await s.open_session({"name": "assembly"}))["session_id"]
+
+        result = await s.import_step(
+            {"session_id": sid, "file_path": "/workspace/legs.step", "name": "Ignored"}
+        )
+
+        assert result["parts"] == [
+            {"obj_id": "part_1", "name": "LegA"},
+            {"obj_id": "part_2", "name": "LegB"},
+        ]
 
     async def test_export_model_returns_base64_step(self, authoring_server: FreecadServer) -> None:
         import base64
@@ -1127,7 +1193,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 44
+        assert len(response["result"]["tools"]) == 45
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1174,7 +1240,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 44
+        assert response["result"]["tools_available"] == 45
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

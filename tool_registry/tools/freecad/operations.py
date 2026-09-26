@@ -1015,6 +1015,43 @@ class FreecadOperations:
         document.recompute()
         return obj
 
+    def import_step(self, document: Any, file_path: str) -> list[Any]:
+        """Import a STEP file into a LIVE session document (FORGE-231).
+
+        Committed/staged parts (e.g. via ``twin.stage_work_product_file``)
+        had no way back into a FreeCAD session -- ``open_session`` only takes
+        a ``name``, and every assembly tool needs a session-registered
+        ``obj_id``. This loads the file the same Label-preserving way
+        ``describe_step_file`` already does (``Import.insert``, MET-534/535/
+        616), but into THIS document rather than a throwaway one, so the
+        returned objects are live and assembly-ready.
+
+        Returns each top-level solid component (same filter
+        ``describe_step_file`` uses: real ``Shape.Solids``, so a
+        multipart STEP's per-part objects come back, not just the
+        whole-assembly compound) -- the caller registers each one and hands
+        back its own obj_id.
+        """
+        self._require_freecad()
+        with tracer.start_as_current_span("freecad.import_step"):
+            before = set(document.Objects)
+            Import.insert(file_path, document.Name)
+            document.recompute()
+            imported = [obj for obj in document.Objects if obj not in before]
+            components = []
+            for obj in imported:
+                shape = getattr(obj, "Shape", None)
+                if shape is None or not shape.Solids:
+                    continue
+                components.append(obj)
+            if not components:
+                raise ValueError(
+                    f"freecad.import_step: {file_path!r} imported {len(imported)} object(s) "
+                    "but none had solid geometry (Shape.Solids) -- nothing usable for assembly. "
+                    "Check the file actually contains solids, not just curves/surfaces/a wireframe."
+                )
+            return components
+
     def create_body(self, document: Any, name: str = "Body") -> Any:
         """Create a PartDesign Body for parametric (sketch-based) modelling."""
         self._require_partdesign()
