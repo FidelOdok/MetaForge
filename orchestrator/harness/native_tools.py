@@ -190,13 +190,26 @@ def _select_tools(
     return kept, dropped
 
 
-def _tool_schemas(runtime: HarnessRuntime, max_tools: int | None = None) -> list[dict[str, Any]]:
+def _tool_schemas(
+    runtime: HarnessRuntime,
+    max_tools: int | None = None,
+    *,
+    on_truncate: Callable[[list[str]], None] | None = None,
+) -> list[dict[str, Any]]:
     """Build OpenAI-style function schemas from the runtime's registered tools.
 
     ``max_tools`` enforces the provider's hard cap on the ``tools`` array
     (see ``providers.registry.max_tools_for``). Exceeding it is a 400 that
     kills the turn before the model sees a token, so the cap is applied here
     — loudly, never as a silent slice.
+
+    ``on_truncate`` (FORGE-94 remainder), when given, is called with the
+    dropped tool names whenever truncation actually happens this round --
+    the native loop uses it to tell the MODEL (not just the structured log)
+    that some tools are missing this turn, so it knows to reach for
+    ``search_tools`` instead of silently assuming a capability doesn't
+    exist. A no-op default keeps every existing caller (including the ones
+    that only check the returned schema list) unaffected.
     """
     specs = runtime.tools.all_tools()
     dropped: list[str] = []
@@ -213,6 +226,8 @@ def _tool_schemas(runtime: HarnessRuntime, max_tools: int | None = None) -> list
                 "this turn — narrow the enabled tool set to choose deliberately"
             ),
         )
+        if on_truncate is not None:
+            on_truncate(dropped)
 
     schemas: list[dict[str, Any]] = []
     for t in specs:
@@ -470,6 +485,10 @@ async def run_native_tools(
     (``providers.registry.max_tools_for``). Without it, a runtime holding
     more tools than the provider accepts fails every turn with a 400 before
     the model reads a token — see ``_select_tools`` for which tools survive.
+    A round that actually truncates gets a one-round system-prompt note
+    telling the model to use ``search_tools`` for anything missing (FORGE-94
+    remainder) rather than silently treating the gap as a real capability
+    limit.
     """
     messages: list[dict[str, Any]] = [*(history or []), {"role": "user", "content": goal}]
     steps: list[ReActStep] = []
@@ -559,8 +578,27 @@ async def run_native_tools(
             # re-applied on every recompute too, since a mid-turn
             # registration can just as easily push the live count back over
             # the provider's cap (#747).
-            tools = _tool_schemas(runtime, max_tools=max_tools)
-            resp = await _model_call({"system": system, "messages": messages, "tools": tools})
+            dropped_this_round: list[str] = []
+            tools = _tool_schemas(
+                runtime, max_tools=max_tools, on_truncate=dropped_this_round.extend
+            )
+            # FORGE-94 remainder: the structured log already records a
+            # truncation, but the MODEL never saw it -- it just found a tool
+            # missing with no explanation, indistinguishable from "this
+            # capability doesn't exist." A one-round system-prompt note (not
+            # a permanent addition -- only present on rounds that actually
+            # truncated) tells it the omission is provider-cap noise, not a
+            # real gap, and to reach for ``search_tools`` instead of quietly
+            # working around it or telling the user something isn't possible.
+            turn_system = system
+            if dropped_this_round:
+                turn_system = (
+                    f"{system}\n\nNOTE: {len(dropped_this_round)} tool(s) were omitted from "
+                    "your tool list this turn because the provider's tools-array cap was "
+                    "exceeded. If a capability you need isn't in your list, call "
+                    "search_tools with a relevant keyword before assuming it doesn't exist."
+                )
+            resp = await _model_call({"system": turn_system, "messages": messages, "tools": tools})
             _tally(resp)
             text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
             calls = resp.get("tool_calls") if isinstance(resp, dict) else None
