@@ -741,7 +741,22 @@ def provider_config_from_env(
                 error=str(exc),
             )
             sel_model = None
-    default_model = (os.environ.get("METAFORGE_LLM_MODEL") or "claude-opus-4-8").strip()
+    # FORGE-93 (re-test 2026-09-26, confirmed live against fidel-dev's real
+    # env + store): METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    # METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o) -- but when the
+    # store overrides the provider (e.g. to openai-codex) while carrying NO
+    # model override of its own, sel_model above is already None, and this
+    # fell through to the env's model default regardless of which provider it
+    # was actually configured for -- silently pairing openai-codex with an
+    # OpenRouter-style slug forever. That pairing was never re-validated: the
+    # #830 fix only re-checks sel_model, and this case never sets sel_model
+    # at all. Only trust the env model default when the resolved provider IS
+    # the one env vars describe (same condition _is_env_default below uses
+    # for API key selection); otherwise fall back to a provider-neutral
+    # default that isn't tied to some other provider's own configuration.
+    env_model = (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
+    default_model = env_model if (prov == env_provider or not env_provider) else ""
+    default_model = default_model or "claude-opus-4-8"
     mdl = (model or sel_model or default_model).strip()
 
     def _is_env_default(name: str) -> bool:

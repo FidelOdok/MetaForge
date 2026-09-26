@@ -129,7 +129,20 @@ async def list_providers() -> ProvidersResponse:
                 error=str(exc),
             )
             stored_model = None
-    active_model = stored_model or (os.environ.get("METAFORGE_LLM_MODEL") or "").strip() or None
+    # FORGE-93 (re-test 2026-09-26, confirmed live against fidel-dev's real
+    # env + store): METAFORGE_LLM_MODEL is configured as a matched PAIR with
+    # METAFORGE_LLM_PROVIDER (e.g. openrouter + openai/gpt-4o) -- when the
+    # store overrides the provider (e.g. to openai-codex) while carrying no
+    # model of its own, stored_model is already None here, and this fell
+    # through to the env's model default regardless of which provider it was
+    # actually configured for -- silently reporting openai-codex + an
+    # OpenRouter-style slug as "active" (same mismatch fixed in
+    # provider_config_from_env, harness_backend.py). Only trust the env model
+    # default when the active provider IS the one env vars describe.
+    env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
+    env_model = (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
+    trust_env_model = not env_provider or (active_provider or "").strip().lower() == env_provider
+    active_model = stored_model or (env_model if trust_env_model else None) or None
     return ProvidersResponse(
         active_provider=active_provider, active_model=active_model, providers=infos
     )

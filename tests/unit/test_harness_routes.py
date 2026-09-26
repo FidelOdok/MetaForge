@@ -62,6 +62,26 @@ def test_active_model_hides_an_invalid_stored_selection(
     assert body["active_model"] != "openai/gpt-4o"
 
 
+def test_active_model_ignores_env_default_meant_for_a_different_provider(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """FORGE-93 remainder, found live on fidel-dev: the REAL stored selection
+    there is provider='openai-codex', model=None (no model override at all) --
+    the invalid 'openai/gpt-4o' active_model was never coming from the store,
+    it was METAFORGE_LLM_MODEL (configured as a pair with
+    METAFORGE_LLM_PROVIDER=openrouter) leaking through as a fallback for a
+    completely different, store-overridden provider."""
+    auth_path = tmp_path / "harness-auth.json"
+    auth_path.write_text('{"selection": {"provider": "openai-codex", "model": null}}')
+    monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(auth_path))
+    monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("METAFORGE_LLM_MODEL", "openai/gpt-4o")
+
+    body = client.get("/v1/harness/providers").json()
+    assert body["active_provider"] == "openai-codex"
+    assert body["active_model"] != "openai/gpt-4o"
+
+
 def test_active_provider_configured_via_metaforge_llm_key(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
