@@ -161,3 +161,141 @@ class TestRegistryEnforcement:
 
         with pytest.raises(ToolValidationError):
             await registry.invoke("twin_record_decision", {}, gate_check=lambda _g: False)
+
+
+# ---------------------------------------------------------------------------
+# FORGE-229: discriminated-union oneOf/anyOf failures report the ONE branch
+# the instance's own discriminator names, not a whole-instance dump with no
+# field-level detail. Self-contained schema (not Design IR's own, which can
+# evolve independently) shaped exactly like Pydantic's discriminated-union
+# JSON Schema rendering: {"discriminator": {"propertyName", "mapping"},
+# "oneOf": [...]}, refs resolved against the schema's own "$defs".
+# ---------------------------------------------------------------------------
+
+_SHAPE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "shapes": {
+            "type": "array",
+            "items": {
+                "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {
+                        "circle": "#/$defs/Circle",
+                        "rectangle": "#/$defs/Rectangle",
+                    },
+                },
+                "oneOf": [{"$ref": "#/$defs/Circle"}, {"$ref": "#/$defs/Rectangle"}],
+            },
+        }
+    },
+    "required": ["shapes"],
+    "$defs": {
+        "Circle": {
+            "type": "object",
+            "properties": {"kind": {"const": "circle"}, "radius": {"type": "number"}},
+            "required": ["kind", "radius"],
+        },
+        "Rectangle": {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "rectangle"},
+                "width": {"type": "number"},
+                "height": {"type": "number"},
+            },
+            "required": ["kind", "width", "height"],
+        },
+    },
+}
+
+
+class TestDiscriminatedUnionErrors:
+    def test_missing_field_on_the_named_branch_is_reported_precisely(self):
+        errors = validation_errors(_SHAPE_SCHEMA, {"shapes": [{"kind": "circle"}]})
+        assert errors == ["shapes.0: 'radius' is a required property"]
+
+    def test_multiple_missing_fields_are_all_reported(self):
+        errors = validation_errors(_SHAPE_SCHEMA, {"shapes": [{"kind": "rectangle"}]})
+        assert set(errors) == {
+            "shapes.0: 'width' is a required property",
+            "shapes.0: 'height' is a required property",
+        }
+
+    def test_unrecognized_discriminator_value_falls_back_to_the_generic_message(self):
+        errors = validation_errors(_SHAPE_SCHEMA, {"shapes": [{"kind": "triangle"}]})
+        assert len(errors) == 1
+        assert errors[0].startswith("shapes.0:")
+        assert "not valid under any of the given schemas" in errors[0]
+
+    def test_valid_instance_on_either_branch_has_no_errors(self):
+        assert validation_errors(_SHAPE_SCHEMA, {"shapes": [{"kind": "circle", "radius": 5}]}) == []
+        assert (
+            validation_errors(
+                _SHAPE_SCHEMA, {"shapes": [{"kind": "rectangle", "width": 1, "height": 2}]}
+            )
+            == []
+        )
+
+    def test_a_nested_discriminated_union_resolves_to_the_real_leaf(self):
+        """FORGE-227/229: Design IR's own shape -- an entity's discriminated
+        'op' union, where one op variant (sketch) itself holds a discriminated
+        'elements' union -- must bottom out at the true leaf mistake, not stop
+        one level too shallow."""
+        nested_schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "entities": {
+                    "type": "array",
+                    "items": {
+                        "discriminator": {
+                            "propertyName": "op",
+                            "mapping": {"sketch": "#/$defs/Sketch"},
+                        },
+                        "oneOf": [{"$ref": "#/$defs/Sketch"}],
+                    },
+                }
+            },
+            "required": ["entities"],
+            "$defs": {
+                "Sketch": {
+                    "type": "object",
+                    "properties": {
+                        "op": {"const": "sketch"},
+                        "elements": _SHAPE_SCHEMA["properties"]["shapes"],
+                    },
+                    "required": ["op", "elements"],
+                },
+                **_SHAPE_SCHEMA["$defs"],
+            },
+        }
+        errors = validation_errors(
+            nested_schema, {"entities": [{"op": "sketch", "elements": [{"kind": "circle"}]}]}
+        )
+        assert errors == ["entities.0.elements.0: 'radius' is a required property"]
+
+    def test_real_design_ir_schema_sharpens_the_ticket_repro(self):
+        """Direct regression for the ticket's own repro: a rectangle sketch
+        element built the wrong way (Design IR wants origin/width/height) used
+        to report only 'is not valid under any of the given schemas' for the
+        WHOLE entity -- with no way to tell which field was wrong."""
+        from domain_agents.mechanical.skills.generate_cad_ir.schema import GenerateCadIrInput
+
+        schema = GenerateCadIrInput.model_json_schema()
+        args = {
+            "name": "Shoulder Yoke",
+            "entities": [
+                {"id": "body1", "op": "create_body"},
+                {
+                    "id": "sketch_base",
+                    "op": "sketch",
+                    "body_ref": "body1",
+                    "plane": "XY",
+                    "elements": [{"type": "rectangle", "parameters": {"dx": 110, "dy": 60}}],
+                },
+            ],
+        }
+        errors = validation_errors(schema, args)
+        assert any(
+            e.startswith("entities.1.elements.0:") and "required property" in e for e in errors
+        )
+        assert not any("is not valid under any of the given schemas" in e for e in errors)
