@@ -20,9 +20,13 @@ no new handler logic — only the container the existing logic runs in.
 
 A crash in one worker (segfault, kills that one OS process) never touches
 any other session's worker: they're separate processes with their own
-transport and lock. :meth:`FreecadWorkerPool.call` detects the crash via
-:class:`~mcp_core.transports.StdioTransport`'s existing "subprocess closed
-stdout" ``RuntimeError``, recovers whatever diagnostic landed on the dead
+transport and lock. :meth:`FreecadWorkerPool.call` detects the crash two
+ways -- :class:`~mcp_core.transports.StdioTransport`'s "subprocess closed
+stdout" ``RuntimeError`` (the worker died between our write and its
+response) and ``ConnectionResetError``/``BrokenPipeError`` (the worker was
+*already* dead when we tried to write to it -- confirmed live: killing a
+worker between calls raises asyncio's own "Connection lost", not
+``RuntimeError``) -- recovers whatever diagnostic landed on the dead
 worker's stderr (a ``faulthandler`` dump, if the crash was a trapped signal —
 armed in ``entrypoint.py``), logs it, drops the session, and raises a clear,
 structured :class:`FreecadWorkerCrashedError` — replacing the previous
@@ -250,7 +254,7 @@ class FreecadWorkerPool:
                 stderr=stderr.decode("utf-8", errors="replace")[-_STDERR_LOG_TAIL:],
             )
             raise FreecadWorkerCrashedError(session_id, tool_id) from exc
-        except RuntimeError as exc:
+        except (RuntimeError, ConnectionResetError, BrokenPipeError) as exc:
             stderr = await transport.read_stderr()
             logger.error(
                 "freecad_worker_crashed",
