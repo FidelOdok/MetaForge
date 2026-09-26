@@ -255,3 +255,51 @@ class TestModuleLevelApp:
         from api_gateway.server import main
 
         assert callable(main)
+
+
+class TestLazyBridgeMeasure:
+    """FORGE-233: measure_tool has to be constructed before the real MCP
+    bridge exists (bootstrap_tool_registry needs it as an input; the bridge
+    is built FROM the registry that call constructs) -- verify the lazy
+    binding actually works: empty until set, reads the bridge at CALL time
+    not construction time, never raises even when the bridge call fails."""
+
+    async def test_returns_empty_dict_before_bridge_is_set(self):
+        from api_gateway.server import _LazyBridgeMeasure
+
+        measure = _LazyBridgeMeasure()
+        assert await measure("sess-1", "part_1") == {}
+
+    async def test_invokes_freecad_measure_once_bridge_is_set(self):
+        from api_gateway.server import _LazyBridgeMeasure
+
+        class _FakeBridge:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            async def invoke(self, tool_id: str, params: dict) -> dict:
+                self.calls.append((tool_id, params))
+                return {"volume_mm3": 1234.0}
+
+        measure = _LazyBridgeMeasure()
+        fake_bridge = _FakeBridge()
+        measure.bridge = fake_bridge  # set lazily, exactly as server.py does
+
+        result = await measure("sess-1", "part_1")
+
+        assert result == {"volume_mm3": 1234.0}
+        assert fake_bridge.calls == [
+            ("freecad.measure", {"session_id": "sess-1", "obj_id": "part_1"})
+        ]
+
+    async def test_a_failed_bridge_call_returns_empty_not_raises(self):
+        from api_gateway.server import _LazyBridgeMeasure
+
+        class _BoomBridge:
+            async def invoke(self, tool_id: str, params: dict) -> dict:
+                raise RuntimeError("adapter unreachable")
+
+        measure = _LazyBridgeMeasure()
+        measure.bridge = _BoomBridge()
+
+        assert await measure("sess-1", "part_1") == {}

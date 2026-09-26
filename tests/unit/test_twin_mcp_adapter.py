@@ -971,6 +971,141 @@ class TestCommitGeometryPropertiesFlattening:
         assert "extra_metadata" not in received
 
 
+class TestCommitGeometryMeasureToolDerivation:
+    """FORGE-233: when a measure_tool is wired in, commit_geometry derives
+    measured properties server-side (calling it, mirroring freecad.measure)
+    instead of falling back to just flagging the gap -- the real fix
+    FORGE-100's re-test asked for, unblocked by resolving the bootstrap
+    circular dependency that used to make this impossible."""
+
+    async def test_derives_and_flattens_measured_properties_when_missing(self) -> None:
+        received: dict[str, Any] = {}
+        measure_calls: list[tuple[str, str]] = []
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def measure_tool(session_id: str, obj_id: str) -> dict[str, Any]:
+            measure_calls.append((session_id, obj_id))
+            return {
+                "volume_mm3": 1800.0,
+                "surface_area_mm2": 900.0,
+                "bounding_box": {"min_x": 0.0, "max_x": 30.0},
+            }
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder, measure_tool=measure_tool)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert measure_calls == [("s1", "assembly_4")]
+        assert received["extra_metadata"] == {
+            "volume_mm3": 1800.0,
+            "surface_area_mm2": 900.0,
+            "bbox_mm": {"min_x": 0.0, "max_x": 30.0},
+        }
+        # mass_kg is never derivable this way (measure() takes no material
+        # argument) -- confirm it's simply absent, not fabricated as 0.
+        assert "mass_kg" not in received["extra_metadata"]
+
+    async def test_explicit_properties_still_win_over_measure_tool(self) -> None:
+        """The caller's own properties (when actually given) must not be
+        overridden by a fresh measure_tool call -- measure_tool only fills
+        a gap, it never second-guesses an explicit answer."""
+        received: dict[str, Any] = {}
+        measure_calls: list[tuple[str, str]] = []
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def measure_tool(session_id: str, obj_id: str) -> dict[str, Any]:
+            measure_calls.append((session_id, obj_id))
+            return {"volume_mm3": 999999.0}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder, measure_tool=measure_tool)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "properties": {"volume_mm3": 1800.0},
+                },
+            )
+        )
+
+        assert measure_calls == []
+        assert received["extra_metadata"] == {"volume_mm3": 1800.0}
+
+    async def test_falls_back_to_missing_flag_when_measure_tool_finds_nothing(self) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def measure_tool(session_id: str, obj_id: str) -> dict[str, Any]:
+            return {}  # bridge unavailable, or freecad.measure itself failed
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder, measure_tool=measure_tool)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert received["extra_metadata"] == {"measured_properties_missing": True}
+
+    async def test_a_raising_measure_tool_still_falls_back_to_missing_flag(self) -> None:
+        """measure_tool is a caller-supplied callable -- commit_geometry must
+        not let it turn an ordinary "couldn't measure" case into a hard
+        commit failure. (_LazyBridgeMeasure itself already never raises, but
+        commit_geometry's own call site must be defensive regardless of who
+        supplies measure_tool.)"""
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def measure_tool(session_id: str, obj_id: str) -> dict[str, Any]:
+            raise RuntimeError("adapter unreachable")
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder, measure_tool=measure_tool)
+        result = await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Upper Arm Link",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert json.loads(result)["result"]["data"]["node_id"] == "node-1"
+        assert received["extra_metadata"] == {"measured_properties_missing": True}
+
+
 # ---------------------------------------------------------------------------
 # Subgraph serialisation helper
 # ---------------------------------------------------------------------------
