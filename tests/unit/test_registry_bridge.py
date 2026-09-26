@@ -41,11 +41,12 @@ class TestRegistryMcpBridge:
         3 tools, bringing it to 72. MET-633 adds Gazebo's 3 tools
         (run_simulation, validate_world, extract_results) for 75.
         MET-635/636 adds the Isaac Sim adapter's 2 tools for 77. MET-740
-        Phase 2 adds cadquery.validate_physics_stability for 78.
+        Phase 2 adds cadquery.validate_physics_stability for 78. FORGE-231
+        adds freecad.import_step for 79.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 78
+        assert len(tools) == 79
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

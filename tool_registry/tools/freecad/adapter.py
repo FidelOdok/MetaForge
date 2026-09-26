@@ -730,6 +730,37 @@ class FreecadServer(McpToolServer):
                 self.create_body,
             ),
             (
+                "import_step",
+                "Load a STEP file into this session so it can be assembled (add_part_to_"
+                "assembly / add_assembly_joint) -- e.g. a part previously committed and "
+                "staged via twin.stage_work_product_file. Returns one obj_id per top-level "
+                "solid component the file contains (a multipart STEP yields several).",
+                "cad_author",
+                obj_schema(
+                    {
+                        "session_id": sid,
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to a STEP file already on the shared adapter workspace "
+                                "-- e.g. twin.stage_work_product_file's returned file_path."
+                            ),
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "Rename hint applied ONLY when the file contains exactly one "
+                                "solid component -- a multipart STEP keeps each part's own "
+                                "STEP-authored label (MET-534/535), since one name can't cover "
+                                "several parts."
+                            ),
+                        },
+                    },
+                    ["session_id", "file_path"],
+                ),
+                self.import_step,
+            ),
+            (
                 "create_sketch",
                 "Create a sketch on a body's plane (offset along normal) with 2D geometry",
                 "cad_author",
@@ -1339,6 +1370,22 @@ class FreecadServer(McpToolServer):
             session_id, body, "body", arguments.get("name", "Body")
         )
         return {"obj_id": obj_id, "kind": "body"}
+
+    async def import_step(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        session_id = self._require(arguments, "session_id")
+        file_path = self._require(arguments, "file_path")
+        session = self._sessions.get(session_id)
+        components = self._ops.import_step(session.document, file_path)
+        # A rename hint only makes sense when it's unambiguous which part it
+        # names -- a multipart STEP keeps each component's own STEP-authored
+        # label instead (see the tool's own schema description).
+        override_name = arguments.get("name") if len(components) == 1 else None
+        parts = []
+        for obj in components:
+            name = override_name or obj.Label
+            obj_id = self._sessions.register_object(session_id, obj, "part", name)
+            parts.append({"obj_id": obj_id, "name": name})
+        return {"obj_ids": [p["obj_id"] for p in parts], "parts": parts}
 
     async def create_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
