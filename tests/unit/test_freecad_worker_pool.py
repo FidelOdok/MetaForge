@@ -16,7 +16,11 @@ import pytest
 
 from tool_registry.tools.freecad.config import FreecadConfig
 from tool_registry.tools.freecad.session import SessionNotFoundError
-from tool_registry.tools.freecad.worker_pool import FreecadWorkerCrashedError, FreecadWorkerPool
+from tool_registry.tools.freecad.worker_pool import (
+    FreecadWorkerCrashedError,
+    FreecadWorkerPool,
+    _Worker,
+)
 
 _FAKE_WORKER_SRC = """
 import sys, json, os
@@ -149,6 +153,37 @@ async def test_idle_ttl_eviction() -> None:
     finally:
         for sid in pool.session_ids():
             await pool.close_session(sid)
+
+
+class _DeadTransport:
+    """A transport whose worker process is already gone by the time we try
+    to use it -- writing to a dead child's stdin raises asyncio's own
+    ConnectionResetError("Connection lost"), NOT StdioTransport's "closed
+    stdout" RuntimeError. Confirmed live on fidel-dev: killing a worker
+    between calls (rather than mid-call) hits this exact path."""
+
+    async def send(self, message: str) -> str:
+        raise ConnectionResetError("Connection lost")
+
+    async def read_stderr(self, max_bytes: int = 4096) -> bytes:
+        return b""
+
+    async def disconnect(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_call_treats_connection_reset_as_a_crash_too() -> None:
+    """FORGE-221 regression: ConnectionResetError/BrokenPipeError (a worker
+    that died before this call, not during it) must be treated exactly like
+    StdioTransport's RuntimeError -- surfaced as FreecadWorkerCrashedError,
+    and the session dropped from the pool -- not left as a raw, unhandled
+    exception (and a permanently leaked pool entry)."""
+    pool = _make_pool()
+    pool._workers["already-dead"] = _Worker(transport=_DeadTransport())  # type: ignore[arg-type]
+    with pytest.raises(FreecadWorkerCrashedError):
+        await pool.call("already-dead", "echo", {"session_id": "already-dead"})
+    assert "already-dead" not in pool.session_ids()
 
 
 @pytest.mark.asyncio
