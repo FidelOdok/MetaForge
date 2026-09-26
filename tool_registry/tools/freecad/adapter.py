@@ -588,6 +588,96 @@ class FreecadServer(McpToolServer):
 
         sid = {"type": "string", "description": "Session id from freecad.open_session"}
 
+        def _xy(desc: str) -> dict[str, Any]:
+            return {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 2,
+                "maxItems": 2,
+                "description": desc,
+            }
+
+        # FORGE-227: was a schemaless `{"type": "object"}` catchall, so a bad
+        # element key (the model reached for the Design IR's own convention,
+        # e.g. `center`/`radius`, on this tool's `cx`/`cy`/`r` circles) passed
+        # pre-approval validation only to KeyError deep inside operations.py.
+        # Each branch below accepts BOTH this tool's flat-key convention and
+        # the Design IR's grouped-point convention (see
+        # `FreecadOperations._sketch_point`/`_sketch_scalar`, which do the
+        # actual runtime alias resolution and raise a clear, key-listing
+        # error if neither convention is satisfied).
+        sketch_elements_schema = {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "description": "line: x1/y1/x2/y2, or start=[x,y] + end=[x,y]",
+                        "properties": {
+                            "type": {"const": "line"},
+                            "x1": {"type": "number"},
+                            "y1": {"type": "number"},
+                            "x2": {"type": "number"},
+                            "y2": {"type": "number"},
+                            "start": _xy("[x, y] start point"),
+                            "end": _xy("[x, y] end point"),
+                        },
+                        "required": ["type"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "description": "circle: cx/cy + r, or center=[x,y] + radius",
+                        "properties": {
+                            "type": {"const": "circle"},
+                            "cx": {"type": "number"},
+                            "cy": {"type": "number"},
+                            "r": {"type": "number"},
+                            "center": _xy("[x, y] centre point"),
+                            "radius": {"type": "number"},
+                        },
+                        "required": ["type"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "description": (
+                            "rectangle: x/y (default 0,0) or origin=[x,y], plus width+height"
+                        ),
+                        "properties": {
+                            "type": {"const": "rectangle"},
+                            "x": {"type": "number"},
+                            "y": {"type": "number"},
+                            "origin": _xy("[x, y] corner point"),
+                            "width": {"type": "number"},
+                            "height": {"type": "number"},
+                        },
+                        "required": ["type", "width", "height"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "description": (
+                            "arc: cx/cy + r, or center=[x,y] + radius, "
+                            "plus start_angle/end_angle (degrees)"
+                        ),
+                        "properties": {
+                            "type": {"const": "arc"},
+                            "cx": {"type": "number"},
+                            "cy": {"type": "number"},
+                            "r": {"type": "number"},
+                            "center": _xy("[x, y] centre point"),
+                            "radius": {"type": "number"},
+                            "start_angle": {"type": "number"},
+                            "end_angle": {"type": "number"},
+                        },
+                        "required": ["type", "start_angle", "end_angle"],
+                        "additionalProperties": False,
+                    },
+                ]
+            },
+        }
+
         specs: list[tuple[str, str, str, dict[str, Any], Any]] = [
             (
                 "open_session",
@@ -648,7 +738,7 @@ class FreecadServer(McpToolServer):
                         "session_id": sid,
                         "body_id": {"type": "string"},
                         "plane": {"type": "string", "enum": ["XY", "XZ", "YZ"]},
-                        "elements": {"type": "array", "items": {"type": "object"}},
+                        "elements": sketch_elements_schema,
                         "offset": {"type": "number"},
                     },
                     ["session_id", "body_id"],

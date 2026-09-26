@@ -8,6 +8,7 @@ can be imported and tested without a real FreeCAD installation.
 from __future__ import annotations
 
 import base64
+import math
 import os
 import shutil
 import subprocess
@@ -1074,13 +1075,44 @@ class FreecadOperations:
         document.recompute()
         return sweep
 
+    @staticmethod
+    def _sketch_point(
+        el: dict[str, Any], *, flat: tuple[str, str], grouped: str
+    ) -> tuple[float, float]:
+        """Read a 2D point, accepting either two flat keys (this tool's own
+        convention, e.g. ``cx``/``cy``) or one ``[x, y]``-valued key (the
+        Design IR's convention, e.g. ``center``) -- FORGE-227: the model
+        naturally reaches for whichever convention it saw last, and there is
+        no reason to make it guess which one a given call site wants."""
+        fx, fy = flat
+        if fx in el and fy in el:
+            return float(el[fx]), float(el[fy])
+        if grouped in el:
+            point = el[grouped]
+            return float(point[0]), float(point[1])
+        raise ValueError(
+            f"sketch element {el.get('type')!r} needs {fx!r} and {fy!r}, or "
+            f"{grouped!r}: [x, y] -- got keys {sorted(el)}"
+        )
+
+    @staticmethod
+    def _sketch_scalar(el: dict[str, Any], *names: str) -> float:
+        for name in names:
+            if name in el:
+                return float(el[name])
+        required = " or ".join(repr(n) for n in names)
+        raise ValueError(
+            f"sketch element {el.get('type')!r} needs {required} -- got keys {sorted(el)}"
+        )
+
     def _add_sketch_element(self, sketch: Any, el: dict[str, Any]) -> None:
         import FreeCAD as FC  # type: ignore[import-untyped]
 
         kind = el.get("type")
         if kind == "rectangle":
-            x, y = float(el.get("x", 0.0)), float(el.get("y", 0.0))
-            w, h = float(el["width"]), float(el["height"])
+            x, y = self._sketch_point(el, flat=("x", "y"), grouped="origin")
+            w = self._sketch_scalar(el, "width")
+            h = self._sketch_scalar(el, "height")
             pts = [
                 (x, y),
                 (x + w, y),
@@ -1092,14 +1124,33 @@ class FreecadOperations:
                 b = FC.Vector(*pts[(i + 1) % 4], 0)
                 sketch.addGeometry(Part.LineSegment(a, b), False)
         elif kind == "circle":
-            cx, cy, r = float(el["cx"]), float(el["cy"]), float(el["r"])
+            cx, cy = self._sketch_point(el, flat=("cx", "cy"), grouped="center")
+            r = self._sketch_scalar(el, "r", "radius")
             sketch.addGeometry(Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r), False)
         elif kind == "line":
-            a = FC.Vector(float(el["x1"]), float(el["y1"]), 0)
-            b = FC.Vector(float(el["x2"]), float(el["y2"]), 0)
+            x1, y1 = self._sketch_point(el, flat=("x1", "y1"), grouped="start")
+            x2, y2 = self._sketch_point(el, flat=("x2", "y2"), grouped="end")
+            a = FC.Vector(x1, y1, 0)
+            b = FC.Vector(x2, y2, 0)
             sketch.addGeometry(Part.LineSegment(a, b), False)
+        elif kind == "arc":
+            # FORGE-227: not previously supported at all by this tool, only
+            # by the Design IR -- added so the tool schemas can genuinely
+            # match (oneOf line/circle/rectangle/arc) instead of the IR
+            # silently accepting a shape this tool would reject.
+            cx, cy = self._sketch_point(el, flat=("cx", "cy"), grouped="center")
+            r = self._sketch_scalar(el, "r", "radius")
+            start_deg = self._sketch_scalar(el, "start_angle")
+            end_deg = self._sketch_scalar(el, "end_angle")
+            circle = Part.Circle(FC.Vector(cx, cy, 0), FC.Vector(0, 0, 1), r)
+            sketch.addGeometry(
+                Part.ArcOfCircle(circle, math.radians(start_deg), math.radians(end_deg)), False
+            )
         else:
-            raise ValueError(f"Unsupported sketch element: {kind!r}")
+            raise ValueError(
+                f"Unsupported sketch element type {kind!r} -- expected one of "
+                "'line', 'circle', 'rectangle', 'arc'"
+            )
 
     def pad_sketch(
         self,
@@ -1412,6 +1463,21 @@ class FreecadOperations:
                 name: getattr(math, name) for name in _MATH_CONVENIENCE_NAMES if hasattr(math, name)
             },
         }
+        # FORGE-228: `FreeCAD.Base` (`Base.Vector`, `Base.Placement`, ...) is
+        # the spelling used throughout FreeCAD's own docs/examples -- the
+        # sandbox already flattens its members onto the namespace directly
+        # (`_SANDBOX_CONVENIENCE_NAMES` above) but never bound the module name
+        # itself, so a script written the documented way fails with
+        # "name 'Base' is not defined" (same bug class as MET-645/649/688/704:
+        # `_strip_sandbox_imports` removes `from FreeCAD import Base` but
+        # nothing rebinds it). Also expose Sketcher/PartDesign when this
+        # image has them (HAS_PARTDESIGN), so a sandboxed script can build a
+        # parametric sketch/pad in the session, not just Part-level shapes.
+        if hasattr(FreeCAD, "Base"):
+            namespace["Base"] = FreeCAD.Base
+        if HAS_PARTDESIGN:
+            namespace["Sketcher"] = Sketcher
+            namespace["PartDesign"] = PartDesign
 
         is_main = threading.current_thread() is threading.main_thread()
         old_handler = None
@@ -1939,7 +2005,13 @@ class FreecadOperations:
         """Full geometric measurement of an object's shape."""
         self._require_freecad()
         shape = self._resolve_shape(obj)
-        com = shape.CenterOfMass
+        # FORGE-230: ``CenterOfMass`` only exists on ``Part.Solid`` -- it
+        # AttributeErrors on a ``Part.Compound`` (a pattern/pocket result, or
+        # any body whose tip shape is a compound), discarding an otherwise-
+        # successful build. ``CenterOfGravity`` is the shape-level equivalent
+        # FreeCAD computes on any shape (volume-weighted centroid across every
+        # solid) -- same fix already applied to ``get_properties`` above.
+        com = shape.CenterOfGravity
         return {
             "volume_mm3": round(shape.Volume, 2),
             "surface_area_mm2": round(shape.Area, 2),
