@@ -2,11 +2,6 @@
 // migration (MET-732). The `"lint": "eslint ."` script had no eslint in the
 // dependencies and no config file, so it could not run at all.
 //
-// Evidence it *used* to run: src/components/viewer/R3FViewer.tsx carries a
-// rule-specific `// eslint-disable-next-line react-hooks/exhaustive-deps`.
-// Someone wrote that against a working setup, which is why react-hooks is
-// included below rather than left out.
-//
 // Deliberately the `recommended` tier, not `recommendedTypeChecked`. The
 // type-checked tier needs project-wide type information and finds a great deal
 // more; adopting it is a separate decision, and `tsc --noEmit` already runs in
@@ -17,7 +12,6 @@
 // itself on its first run, which is the argument for having it.
 
 import js from '@eslint/js';
-import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -26,6 +20,12 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       'node_modules/**',
+      // public/ is the shipped static site: hand-written browser scripts and
+      // a 44 KB stylesheet that came with the design, not source authored to
+      // this project's conventions. Linting them produces 87 no-undef errors
+      // for `window` and `document` and would gain nothing -- they are
+      // copied verbatim to dist/ and never transformed.
+      'public/**',
       'coverage/**',
       'playwright-report/**',
       'test-results/**',
@@ -42,9 +42,7 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.browser, ...globals.es2022 },
     },
-    plugins: { 'react-hooks': reactHooks },
     rules: {
-      ...reactHooks.configs.recommended.rules,
     },
   },
   {

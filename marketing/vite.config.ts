@@ -1,13 +1,19 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
-import path from 'path';
 
+/**
+ * The marketing site is static HTML, CSS and classic scripts — no framework.
+ *
+ * Everything the browser loads lives in `public/` rather than being imported
+ * from `index.html`, which is deliberate: the four scripts are classic
+ * `<script src>` tags that share state through `window` (see
+ * `cross-visuals.js` reading `window.refreshCrossVisuals`). Bundling them as
+ * ES modules would scope those globals away and break the page silently.
+ * Vite copies `public/` verbatim, so they ship exactly as written.
+ *
+ * Vite is kept for the dev server and for `npm run build` producing the
+ * `dist/` that vercel.json expects — not for transforming anything.
+ */
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
-  },
   server: {
     port: 5174, // 5173 belongs to the dashboard dev server
     watch: {
