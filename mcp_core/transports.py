@@ -225,6 +225,21 @@ class StdioTransport(Transport):
             raise RuntimeError("Subprocess closed stdout (process likely exited)")
         return response_line.decode("utf-8").rstrip("\n")
 
+    async def read_stderr(self, max_bytes: int = 4096) -> bytes:
+        """Best-effort read of whatever's buffered on the child's stderr.
+
+        Used to recover a crash diagnostic (e.g. a ``faulthandler`` dump)
+        after ``send()`` reports the process died -- a native crash writes
+        its traceback to stderr, not stdout, so it's otherwise lost the
+        moment the caller moves on from the dead transport (FORGE-221).
+        """
+        if self._proc is None or self._proc.stderr is None:
+            return b""
+        try:
+            return await asyncio.wait_for(self._proc.stderr.read(max_bytes), timeout=1.0)
+        except TimeoutError:
+            return b""
+
     async def disconnect(self) -> None:
         """Close stdin so the subprocess exits, then await teardown."""
         if self._proc is None:

@@ -15,11 +15,12 @@ from typing import Any
 
 import structlog
 
-from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+from tool_registry.mcp_server.handlers import ResourceLimits, ToolHandler, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.freecad.config import FreecadConfig
 from tool_registry.tools.freecad.operations import FreecadOperations
 from tool_registry.tools.freecad.session import FreecadSessionStore
+from tool_registry.tools.freecad.worker_pool import FreecadWorkerPool
 
 logger = structlog.get_logger()
 
@@ -55,7 +56,9 @@ class FreecadServer(McpToolServer):
     thread_insert, generate_gear, lattice_perforation.
     """
 
-    def __init__(self, config: FreecadConfig | None = None) -> None:
+    def __init__(
+        self, config: FreecadConfig | None = None, *, worker_pool: FreecadWorkerPool | None = None
+    ) -> None:
         super().__init__(adapter_id="freecad", version="0.2.0")
         self.config = config or FreecadConfig()
         self._ops = FreecadOperations(
@@ -65,6 +68,13 @@ class FreecadServer(McpToolServer):
             ttl_seconds=self.config.session_ttl_seconds,
             max_sessions=self.config.max_sessions,
         )
+        # FORGE-221: None (the default -- every existing test, and every
+        # worker this pool itself spawns via entrypoint.py's stdio mode)
+        # keeps every stateful handler running its real body in-process,
+        # unchanged. A real pool (wired in by entrypoint.py's HTTP/gateway
+        # mode) makes every stateful handler forward to a per-session
+        # subprocess instead -- see _route below.
+        self._pool = worker_pool
         self._register_tools()
         self._register_authoring_tools()
 
@@ -1165,6 +1175,12 @@ class FreecadServer(McpToolServer):
         ]
 
         for name, description, capability, input_schema, handler in specs:
+            # FORGE-221: close_session tears the worker subprocess itself down
+            # (FreecadWorkerPool.close_session) -- it must NOT go through the
+            # generic per-session _route forwarding below, which would just
+            # ask the worker to close its own internal (single-session) store
+            # entry and leak the subprocess + its pool bookkeeping forever.
+            routed_handler = handler if name == "close_session" else self._route(name, handler)
             self.register_tool(
                 manifest=ToolManifest(
                     tool_id=f"freecad.{name}",
@@ -1176,15 +1192,40 @@ class FreecadServer(McpToolServer):
                     phase=2,
                     resource_limits=limits,
                 ),
-                handler=handler,
+                handler=routed_handler,
             )
 
+    def _route(self, name: str, local: ToolHandler) -> ToolHandler:
+        """FORGE-221: forward a stateful call to its session's worker.
+
+        ``self._pool is None`` (the default, and every worker's own
+        in-process server) runs ``local`` unchanged -- this is the fallback
+        every existing test relies on. A pooled server forwards by
+        ``session_id`` instead, so a crash in one session's worker can never
+        touch this process or any other session's.
+        """
+
+        async def wrapper(arguments: dict[str, Any]) -> dict[str, Any]:
+            if self._pool is None:
+                return await local(arguments)
+            session_id = arguments.get("session_id")
+            if not session_id:
+                # Let the original body raise its own "session_id required".
+                return await local(arguments)
+            return await self._pool.call(session_id, name, arguments)
+
+        return wrapper
+
     async def open_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self._pool is not None:
+            return await self._pool.open_session(arguments.get("name", ""))
         session_id = self._sessions.open_session(name=arguments.get("name", ""))
         return {"session_id": session_id}
 
     async def close_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
+        if self._pool is not None:
+            return {"closed": await self._pool.close_session(session_id)}
         return {"closed": self._sessions.close_session(session_id)}
 
     async def describe_session(self, arguments: dict[str, Any]) -> dict[str, Any]:
