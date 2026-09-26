@@ -32,6 +32,19 @@ async def main() -> None:
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
 
+    stdio_mode = os.environ.get("FREECAD_TRANSPORT", "http").lower() == "stdio"
+    if stdio_mode:
+        # FORGE-221: in stdio mode, stdout IS the JSON-RPC wire channel --
+        # FreecadWorkerPool's StdioTransport reads every response off it.
+        # structlog is never explicitly configured anywhere in this codebase's
+        # tool_registry, so it falls back to its own default PrintLogger,
+        # which also targets stdout -- and FreecadServer.__init__ alone emits
+        # ~40 "Registered tool" log lines. Left alone, those lines corrupt (or
+        # entirely replace) the first real response a caller tries to read.
+        # Route logging to stderr instead; HTTP-mode's own stdout is not a
+        # protocol channel, so it's left on the (stdout) default.
+        structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=sys.stderr))
+
     # Import here to ensure PYTHONPATH is set correctly.
     from tool_registry.tools.freecad import operations as _ops
     from tool_registry.tools.freecad.adapter import FreecadServer
@@ -57,7 +70,6 @@ async def main() -> None:
     # in HTTP mode too.
     faulthandler.enable()
 
-    stdio_mode = os.environ.get("FREECAD_TRANSPORT", "http").lower() == "stdio"
     # FORGE-221: HTTP mode is the gateway -- stateful tools route through a
     # FreecadWorkerPool, each worker being another copy of this same process
     # started in stdio mode (below) with FREECAD_MAX_SESSIONS=1. Stdio mode
