@@ -334,3 +334,32 @@ def test_pin_is_idempotent() -> None:
     reg.pin("mcp_x_y")
     reg.pin("mcp_x_y")
     assert reg.pinned_names() == frozenset({"mcp_x_y"})
+
+
+# ---------------------------------------------------------------------------
+# _tool_schemas' on_truncate callback (FORGE-94 remainder)
+# ---------------------------------------------------------------------------
+
+
+def test_on_truncate_fires_with_dropped_names_when_capped() -> None:
+    reg = _registry(natives=12, mcp_per_server=10, servers=12)  # 132 total
+    runtime = HarnessRuntime.build(None, tools=reg)
+    seen: list[str] = []
+    schemas = _tool_schemas(runtime, max_tools=128, on_truncate=seen.extend)
+    assert len(schemas) == 128
+    assert len(seen) == 4  # 132 - 128
+
+
+def test_on_truncate_does_not_fire_when_under_the_cap() -> None:
+    reg = _registry(natives=2, mcp_per_server=3, servers=3)  # 11 total
+    runtime = HarnessRuntime.build(None, tools=reg)
+    seen: list[str] = []
+    _tool_schemas(runtime, max_tools=128, on_truncate=seen.extend)
+    assert seen == []
+
+
+def test_on_truncate_defaults_to_none_unaffected() -> None:
+    """Every existing caller that doesn't pass on_truncate is unaffected."""
+    reg = _registry(natives=12, mcp_per_server=10, servers=12)
+    runtime = HarnessRuntime.build(None, tools=reg)
+    assert len(_tool_schemas(runtime, max_tools=128)) == 128

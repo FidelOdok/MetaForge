@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from orchestrator.harness import HarnessRuntime
-from orchestrator.harness.native_tools import _tool_schemas, run_native_tools
+from orchestrator.harness.native_tools import NATIVE_SYSTEM, _tool_schemas, run_native_tools
 from orchestrator.harness.providers import ProviderSpec, load_provider_config
 from orchestrator.harness.tools import ToolRegistry
 
@@ -380,3 +380,53 @@ async def test_tool_schemas_recomputed_each_round_trip_mid_turn() -> None:
     assert "triple" in seen_tool_names[1]  # registered mid-turn — visible on the very next call
     # The triple tool was actually driven, not just schema-visible.
     assert any(step.tool_call is not None and step.tool_call.name == "triple" for step in res.steps)
+
+
+# ---------------------------------------------------------------------------
+# FORGE-94 remainder: model-visible truncation notice
+# ---------------------------------------------------------------------------
+
+
+def _registry_over_cap(n: int) -> ToolRegistry:
+    tools = ToolRegistry()
+    for i in range(n):
+        tools.register_native(
+            f"tool_{i:03d}",
+            description="d",
+            input_schema={"type": "object", "properties": {}},
+            handler=_double,
+        )
+    return tools
+
+
+@pytest.mark.asyncio
+async def test_model_gets_a_note_the_round_a_truncation_happens() -> None:
+    """The structured log alone left the model no way to tell a dropped tool
+    apart from a capability that never existed -- it should see a note on
+    exactly the round(s) that actually truncated."""
+    rt = HarnessRuntime.build(CONFIG, tools=_registry_over_cap(130))
+    seen_systems: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        seen_systems.append(request["system"])
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    res = await run_native_tools(rt, "hello", invoke=invoke, max_tools=128)
+    assert res.status == "completed"
+    assert len(seen_systems) == 1
+    assert "search_tools" in seen_systems[0]
+    assert "2 tool(s) were omitted" in seen_systems[0]  # 130 - 128
+
+
+@pytest.mark.asyncio
+async def test_no_note_when_under_the_cap() -> None:
+    rt = _runtime_with_double()
+    seen_systems: list[str] = []
+
+    async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
+        seen_systems.append(request["system"])
+        return {"model": spec.model, "text": "done", "tool_calls": []}
+
+    res = await run_native_tools(rt, "hello", invoke=invoke, max_tools=128)
+    assert res.status == "completed"
+    assert seen_systems == [NATIVE_SYSTEM]  # unchanged -- no truncation occurred
