@@ -61,6 +61,45 @@ from twin_core.api import InMemoryTwinAPI
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.server")
 
+
+class _LazyBridgeMeasure:
+    """FORGE-233: an async ``measure(session_id, obj_id) -> dict`` callable
+    whose backing MCP bridge is bound AFTER construction, not at it.
+
+    ``geometry_recorder_fn``/``measure_tool`` are built and handed to
+    ``bootstrap_tool_registry`` before the ``ToolRegistry``/MCP bridge they'd
+    need to call ``freecad.measure`` even exist -- the bridge is built FROM
+    the registry ``bootstrap_tool_registry`` itself constructs, so passing a
+    real bridge in at construction time is a genuine circular dependency,
+    not just an ordering inconvenience. This holder breaks the cycle: it's
+    handed to ``bootstrap_tool_registry`` (transitively, to
+    ``twin.commit_geometry``) while still empty, and ``self.bridge`` is set
+    once, right after ``bootstrap_tool_registry`` returns and the real
+    bridge exists -- well before the gateway serves its first request.
+    ``__call__`` reads ``self.bridge`` lazily, at call time, so every real
+    request sees it populated.
+    """
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def __call__(self, session_id: str, obj_id: str) -> dict[str, Any]:
+        if self.bridge is None:
+            return {}
+        try:
+            return await self.bridge.invoke(
+                "freecad.measure", {"session_id": session_id, "obj_id": obj_id}
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort derivation, never raise
+            logger.warning(
+                "geometry_measure_tool_invoke_failed",
+                session_id=session_id,
+                obj_id=obj_id,
+                error=str(exc),
+            )
+            return {}
+
+
 # ---------------------------------------------------------------------------
 # OTel bootstrap (module-level so providers are active before first request)
 # ---------------------------------------------------------------------------
@@ -685,6 +724,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
     git_registry = GitRepoRegistry.from_env(twin.graph)
     init_git_registry(git_registry)
     geometry_recorder_fn = make_geometry_recorder(twin, project_backend, git_registry)
+    # FORGE-233: empty until the real MCP bridge exists (below, after
+    # bootstrap_tool_registry returns) -- see _LazyBridgeMeasure's own
+    # docstring for why this can't just be constructed with the bridge
+    # directly.
+    measure_tool = _LazyBridgeMeasure()
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -706,6 +750,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         agent_session_store=getattr(app.state, "agent_session_store", None),
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder_fn,
+        measure_tool=measure_tool,
         proposal_recorder=make_proposal_recorder(approval_workflow),
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).
@@ -793,6 +838,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
 
     active_bridge = await create_mcp_bridge(fallback=registry_bridge)
     app.state.mcp_bridge = active_bridge
+    # FORGE-233: the bridge measure_tool (handed to bootstrap_tool_registry,
+    # and from there to twin.commit_geometry, above) was waiting for -- now
+    # populated, well before the gateway serves its first request.
+    measure_tool.bridge = active_bridge
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,

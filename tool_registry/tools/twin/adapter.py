@@ -45,6 +45,7 @@ class TwinServer(McpToolServer):
         allow_mutations: bool = False,
         decision_recorder: Any = None,
         geometry_recorder: Any = None,
+        measure_tool: Any = None,
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
         engineering_entity_recorder: Any = None,
@@ -78,6 +79,17 @@ class TwinServer(McpToolServer):
         # node + project link — so it renders in the viewer. Same injection seam
         # as decision_recorder; None keeps tool_registry free of api_gateway.
         self._geometry_recorder = geometry_recorder
+        # FORGE-233: an injected async ``measure(session_id, obj_id) -> dict``
+        # that measures a still-live session object (freecad.measure) at
+        # commit time, so commit_geometry can derive volume_mm3/mass_kg/
+        # bbox_mm itself instead of trusting the caller to forward a prior
+        # measurement (FORGE-100) -- the chat agent doesn't reliably do
+        # that. Built in api_gateway over a lazily-bound MCP bridge
+        # reference (the bridge doesn't exist yet when this adapter is
+        # constructed -- see api_gateway/server.py's _LazyBridgeMeasure).
+        # None keeps tool_registry free of api_gateway/bridge imports, same
+        # injection seam as every recorder above.
+        self._measure_tool = measure_tool
         # MET-548: an injected async ``propose(...)`` that files a reviewable
         # design-change proposal (HITL) instead of mutating the twin directly.
         # Built in api_gateway over the ApprovalWorkflow; None keeps
@@ -1757,28 +1769,52 @@ class TwinServer(McpToolServer):
             if isinstance(bbox, dict):
                 flattened["bbox_mm"] = bbox
             extra_metadata = flattened or None
-        # FORGE-100 (re-test 2026-09-26): the model still doesn't reliably
-        # pass 'properties' on a commit-by-reference call, even though
+        # FORGE-100/FORGE-233: the model still doesn't reliably pass
+        # 'properties' on a commit-by-reference call, even though
         # freecad.export_model's own response already carried the measured
         # values moments earlier -- so constraints on chat-authored parts
-        # keep reading defaults. Deriving them here server-side (calling
-        # freecad.measure at commit time) would be the real fix, but this
-        # handler has no path to another adapter -- api_gateway/server.py
-        # builds geometry_recorder_fn (make_geometry_recorder) BEFORE the
-        # ToolRegistry/RegistryMcpBridge it would need to reach freecad even
-        # exist yet (circular: the bridge is built FROM the registry that
-        # bootstrap_tool_registry constructs, and geometry_recorder is one of
-        # bootstrap_tool_registry's OWN inputs) -- resolving that ordering is
-        # a real, separately-riskable change, not a contained bug fix. Until
-        # then, make the gap visible instead of silent: flag it so a
-        # constraint evaluator (or a dashboard) can tell "never measured"
-        # apart from a genuine 0 -- the same "unobserved, not vacuous" ask
-        # this ticket's own fix direction lists, tracked at the evaluator
-        # level by FORGE-105.
-        if extra_metadata is None and isinstance(session_id, str) and session_id:
-            obj_id = arguments.get("obj_id")
-            if isinstance(obj_id, str) and obj_id:
-                extra_metadata = {"measured_properties_missing": True}
+        # kept reading defaults. FORGE-233 resolved the bootstrap-ordering
+        # blocker (geometry_recorder used to be built before the bridge that
+        # would be needed to reach freecad even existed) -- when a
+        # measure_tool is available, derive the measurement server-side by
+        # calling freecad.measure on the still-live session object instead
+        # of trusting the caller. measure() has no material argument, so
+        # this recovers volume_mm3/surface_area_mm2/bbox_mm but NOT mass_kg
+        # -- a caller wanting mass must still pass it via 'properties'.
+        obj_id = arguments.get("obj_id")
+        has_session_ref = (
+            isinstance(session_id, str) and session_id and isinstance(obj_id, str) and obj_id
+        )
+        if extra_metadata is None and has_session_ref and self._measure_tool is not None:
+            try:
+                measured = await self._measure_tool(session_id, obj_id)
+            except Exception as exc:  # noqa: BLE001 — a commit must not fail over a measurement
+                logger.warning(
+                    "commit_geometry_measure_derivation_failed",
+                    session_id=session_id,
+                    obj_id=obj_id,
+                    error=str(exc),
+                )
+                measured = None
+            if isinstance(measured, dict) and measured:
+                flattened = {
+                    key: measured[key]
+                    for key in ("volume_mm3", "surface_area_mm2", "mass_kg")
+                    if key in measured
+                }
+                bbox = measured.get("bounding_box")
+                if isinstance(bbox, dict):
+                    flattened["bbox_mm"] = bbox
+                if flattened:
+                    extra_metadata = flattened
+                    if not isinstance(properties, dict):
+                        properties = measured
+        # Same "unobserved, not vacuous" flag as before (FORGE-105 tracks
+        # making the constraint evaluator itself honest about it) -- now
+        # only reached when derivation above wasn't available or found
+        # nothing, not on every commit-by-reference call.
+        if extra_metadata is None and has_session_ref:
+            extra_metadata = {"measured_properties_missing": True}
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,

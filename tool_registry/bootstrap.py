@@ -247,6 +247,7 @@ async def bootstrap_tool_registry(
     agent_session_store: Any = None,
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
+    measure_tool: Any = None,
     proposal_recorder: Any = None,
     constraint_recorder: Any = None,
     engineering_entity_recorder: Any = None,
@@ -294,6 +295,14 @@ async def bootstrap_tool_registry(
             shared adapter workspace so any CAD/FEA tool can load it by
             path even after its authoring session is gone. ``None``
             skips registration (same pattern as ``document_recorder``).
+        measure_tool: Optional async ``measure(session_id, obj_id) -> dict``
+            (FORGE-233). When supplied, ``twin.commit_geometry`` calls it to
+            derive volume_mm3/surface_area_mm2/bbox_mm server-side (via
+            freecad.measure on the still-live session object) whenever a
+            commit-by-reference call doesn't include ``properties`` --
+            instead of trusting the calling model to forward a prior
+            measurement (FORGE-100). ``None`` falls back to flagging the gap
+            (``measured_properties_missing``) instead of deriving it.
         component_catalog_store: Optional ``ComponentCatalogStore`` instance
             (MET-436). When supplied together with ``knowledge_service``
             and ``component_intent_llm``, the ``component`` MCP adapter
@@ -498,6 +507,7 @@ async def bootstrap_tool_registry(
                     allow_mutations=twin_allow_mutations,
                     decision_recorder=decision_recorder,
                     geometry_recorder=geometry_recorder,
+                    measure_tool=measure_tool,
                     proposal_recorder=proposal_recorder,
                     constraint_recorder=constraint_recorder,
                     engineering_entity_recorder=engineering_entity_recorder,
