@@ -131,18 +131,33 @@ def _select_tools(
       ``open_session`` alone wasn't enough (re-test 2026-09-25): the verbs
       that actually turn an open session's sketch into geometry, and the one
       that inspects joints just added, still sorted into the dropped tail.
+    - any tool whose ``input_schema`` requires ``session_id`` (FORGE-94
+      remainder, re-test 2026-09-26): the curated verb list above is the same
+      whack-a-mole class of fix it already replaced ``_open_session``-only
+      protection for -- it moves the gap around (measure/set_expression/
+      linear_pattern/... still dropped) instead of closing it, and every new
+      stateful tool (e.g. FORGE-231's ``import_step``) starts out unprotected
+      by construction until someone remembers to add it here. A tool that
+      requires ``session_id`` is *structurally* the same class as
+      ``_open_session`` and the curated verbs: it can only be called inside
+      an already-open session, so it belongs with them by definition, not by
+      name -- this is a superset of the two checks above, kept for
+      belt-and-suspenders since not every adapter's schema is guaranteed to
+      mark ``session_id`` required the same way.
     """
 
-    def _protected(name: str) -> bool:
-        return (
-            name in pinned
-            or name.endswith("_open_session")
-            or any(name.endswith(f"_{verb}") for verb in _SESSION_CRITICAL_VERBS)
-        )
+    def _protected(spec: Any) -> bool:
+        name = spec.name
+        if name in pinned or name.endswith("_open_session"):
+            return True
+        if any(name.endswith(f"_{verb}") for verb in _SESSION_CRITICAL_VERBS):
+            return True
+        schema = spec.input_schema if isinstance(spec.input_schema, dict) else {}
+        return "session_id" in (schema.get("required") or [])
 
     natives = [s for s in specs if s.origin == NATIVE]
     rest = [s for s in specs if s.origin != NATIVE]
-    protected_mcp = [s for s in rest if _protected(s.name)]
+    protected_mcp = [s for s in rest if _protected(s)]
     protected_ids = {id(s) for s in protected_mcp}
     mcp = [s for s in rest if id(s) not in protected_ids]
 
