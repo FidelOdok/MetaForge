@@ -43,12 +43,20 @@ export function GatewaySetup() {
       <div className="w-full max-w-lg">
         <div className="mb-8 flex items-center gap-2.5">
           <img
-            src="/logo/metaforge-mark-dark.svg"
+            className="brand-logo-dark h-7 w-auto"
+            src="/metaforge-symbol-dark.svg"
             alt=""
             aria-hidden="true"
             width={28}
             height={28}
-            className="h-7 w-auto"
+          />
+          <img
+            className="brand-logo-light h-7 w-auto"
+            src="/metaforge-symbol-light.svg"
+            alt=""
+            aria-hidden="true"
+            width={28}
+            height={28}
           />
           <span className="text-[15px] font-semibold tracking-tight text-on-surface">
             MetaForge
@@ -167,6 +175,15 @@ export function GatewaySetup() {
         <p className="mt-5 text-[12.5px] leading-relaxed text-on-surface-variant">
           The address is stored in this browser only. You can change it later under Settings.
         </p>
+
+        {/* A visitor who arrived from the landing page and is not ready to run
+            a gateway has, without this, no way back but the browser button. */}
+        <a
+          href="https://www.metaforge.uk"
+          className="mt-6 inline-flex items-center gap-1.5 text-[13px] text-on-surface-variant transition-colors hover:text-on-surface"
+        >
+          <span aria-hidden="true">&larr;</span> Back to metaforge.uk
+        </a>
       </div>
     </div>
   );
