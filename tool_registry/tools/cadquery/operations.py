@@ -383,6 +383,56 @@ _URDF_JOINT_TYPE_MAP = {"fixed": "fixed", "slider": "prismatic", "revolute": "co
 _URDF_UNSUPPORTED_JOINT_TYPES = {"cylindrical", "ball"}
 
 
+def _link_world_offsets_mm(
+    links: list[dict[str, Any]], joints: list[dict[str, Any]]
+) -> dict[str, tuple[float, float, float]]:
+    """World-frame position (mm) of each link's own local origin (FORGE-243).
+
+    Parts are STEP files authored in one shared world frame, but a URDF
+    joint's ``<origin>`` is relative to the *parent* link's frame -- so the
+    offsets are meant to accumulate down the kinematic chain while the link
+    meshes (and their inertial frames) stay put in world space, unless each
+    link's own frame is pinned back to its world position first.
+
+    A link's local origin is defined as sitting at the anchor of the one
+    joint that has it as ``follower`` (that anchor point *is* where the
+    link attaches to its parent, by construction); a link that is never a
+    follower (a chain root) sits at world-frame ``(0, 0, 0)``. Only a
+    single lookup per link is needed -- computing ``T[child]`` never
+    depends on ``T[parent]`` -- so this doesn't need a topological walk:
+
+        T[link]        = the anchor of the joint whose follower == link,
+                          or (0, 0, 0) for a root link
+        joint.origin    = joint.anchor - T[joint.base]      (parent frame)
+        link mesh/COM   = link's own raw value - T[link]    (world -> local)
+
+    Translation-only (matches every other rpy in this module -- FreeCAD's
+    joint metadata carries no orientation today, so there is no rotation
+    to compose here either; a rotated parent frame would need the offset
+    transformed by that rotation, not just subtracted).
+    """
+    offsets: dict[str, tuple[float, float, float]] = {}
+    for joint in joints:
+        follower = joint.get("follower")
+        if follower:
+            anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+            offsets[follower] = (float(anchor[0]), float(anchor[1]), float(anchor[2]))
+    for link in links:
+        offsets.setdefault(link["name"], (0.0, 0.0, 0.0))
+    return offsets
+
+
+def _sub_mm_to_m(
+    a: tuple[float, float, float], b_mm: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    """``a`` (already metres) minus ``b_mm`` (millimetres, converted first)."""
+    return (
+        a[0] - b_mm[0] * _MM_TO_M,
+        a[1] - b_mm[1] * _MM_TO_M,
+        a[2] - b_mm[2] * _MM_TO_M,
+    )
+
+
 def _build_assembly_urdf(
     *,
     robot_name: str,
@@ -404,26 +454,43 @@ def _build_assembly_urdf(
 
     ``xacro=True`` declares the xacro namespace on the root element -- see
     ``_robot_root_attrib``'s docstring.
+
+    FORGE-243: parts are STEP files in one shared world frame, but a URDF
+    joint's ``<origin>`` is parent-relative and a link's mesh/inertial
+    frame is the link's *own* frame -- so every world-frame value (mesh,
+    COM, joint anchor) is re-expressed relative to each link's own
+    chain-derived position (``_link_world_offsets_mm``) rather than
+    written raw, which previously left every link's mesh in its original
+    world position while the joint chain moved the link *frames* out from
+    under them -- the meshes visibly scattered apart down the chain.
     """
     robot = ET.Element("robot", attrib=_robot_root_attrib(robot_name, xacro))
+    world_offset_mm = _link_world_offsets_mm(links, joints)
 
     for link in links:
         link_el = ET.SubElement(robot, "link", name=link["name"])
         color_rgba = link.get("color_rgba")
+        offset_mm = world_offset_mm[link["name"]]
+        mesh_origin_xyz = (
+            f"{-offset_mm[0] * _MM_TO_M:.9g} "
+            f"{-offset_mm[1] * _MM_TO_M:.9g} "
+            f"{-offset_mm[2] * _MM_TO_M:.9g}"
+        )
         for tag in ("visual", "collision"):
             section = ET.SubElement(link_el, tag)
+            ET.SubElement(section, "origin", xyz=mesh_origin_xyz, rpy="0 0 0")
             geometry = ET.SubElement(section, "geometry")
             ET.SubElement(geometry, "mesh", filename=link["mesh_uri"], scale=_URDF_MESH_SCALE_XYZ)
             if tag == "visual" and color_rgba is not None:
                 _add_urdf_material(section, link["name"], color_rgba)
 
         ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
-        com_m = link["com_m"]
+        com_local_m = _sub_mm_to_m(link["com_m"], offset_mm)
         inertial = ET.SubElement(link_el, "inertial")
         ET.SubElement(
             inertial,
             "origin",
-            xyz=f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g}",
+            xyz=f"{com_local_m[0]:.9g} {com_local_m[1]:.9g} {com_local_m[2]:.9g}",
             rpy="0 0 0",
         )
         ET.SubElement(inertial, "mass", value=f"{link['mass_kg']:.9g}")
@@ -457,10 +524,16 @@ def _build_assembly_urdf(
         ET.SubElement(joint_el, "parent", link=joint["base"])
         ET.SubElement(joint_el, "child", link=joint["follower"])
         anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+        base_offset_mm = world_offset_mm.get(joint["base"], (0.0, 0.0, 0.0))
+        origin_m = (
+            (anchor[0] - base_offset_mm[0]) * _MM_TO_M,
+            (anchor[1] - base_offset_mm[1]) * _MM_TO_M,
+            (anchor[2] - base_offset_mm[2]) * _MM_TO_M,
+        )
         ET.SubElement(
             joint_el,
             "origin",
-            xyz=f"{anchor[0] * _MM_TO_M:.9g} {anchor[1] * _MM_TO_M:.9g} {anchor[2] * _MM_TO_M:.9g}",
+            xyz=f"{origin_m[0]:.9g} {origin_m[1]:.9g} {origin_m[2]:.9g}",
             rpy="0 0 0",
         )
         if urdf_type in ("continuous", "prismatic"):

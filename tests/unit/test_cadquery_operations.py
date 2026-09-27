@@ -20,6 +20,7 @@ from tool_registry.tools.cadquery.operations import (
     _build_assembly_sdf,
     _build_assembly_urdf,
     _build_single_link_urdf,
+    _link_world_offsets_mm,
     _stl_export_kwargs,
 )
 
@@ -896,6 +897,169 @@ class TestBuildAssemblyUrdf:
         base_link = next(el for el in root.findall("link") if el.get("name") == "base")
         assert base_link.find("visual/material") is not None
         assert base_link.find("collision/material") is None
+
+
+class TestLinkWorldOffsetsMm:
+    """FORGE-243: the shared FK-offset helper, in isolation."""
+
+    def test_root_link_never_a_follower_is_zero(self):
+        links = [{"name": "base"}, {"name": "arm"}]
+        joints = [{"name": "j1", "base": "base", "follower": "arm", "anchor": (10.0, 20.0, 30.0)}]
+        offsets = _link_world_offsets_mm(links, joints)
+        assert offsets["base"] == (0.0, 0.0, 0.0)
+        assert offsets["arm"] == (10.0, 20.0, 30.0)
+
+    def test_a_chain_accumulates_by_anchor_not_by_walking(self):
+        # T[link] never depends on T[parent] -- it's just that link's own
+        # incoming joint's anchor, however deep in the chain.
+        links = [{"name": "base"}, {"name": "l1"}, {"name": "l2"}]
+        joints = [
+            {"name": "j1", "base": "base", "follower": "l1", "anchor": (1.0, 0.0, 0.0)},
+            {"name": "j2", "base": "l1", "follower": "l2", "anchor": (1.0, 5.0, 0.0)},
+        ]
+        offsets = _link_world_offsets_mm(links, joints)
+        assert offsets["l1"] == (1.0, 0.0, 0.0)
+        assert offsets["l2"] == (1.0, 5.0, 0.0)
+
+    def test_a_link_with_no_incoming_joint_and_no_anchor_field_defaults_zero(self):
+        links = [{"name": "solo"}]
+        offsets = _link_world_offsets_mm(links, [])
+        assert offsets["solo"] == (0.0, 0.0, 0.0)
+
+
+class TestBuildAssemblyUrdfFkCorrectness:
+    """FORGE-243: a 3-link chain built from world-frame parts must FK back
+    to the original input anchors, and every world-frame value (mesh
+    origin, inertial origin) must be re-expressed relative to each link's
+    own chain position -- not left raw, which is what previously left
+    every link's mesh in its unrotated world position while the joint
+    chain moved the link *frames* out from under them.
+    """
+
+    _LINKS = [
+        {
+            "name": "base",
+            "mesh_uri": "base.stl",
+            "mass_kg": 1.0,
+            "com_m": (0.0, 0.0, 0.0),
+            "inertia_kgm2": (1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        },
+        {
+            "name": "l1",
+            "mesh_uri": "l1.stl",
+            "mass_kg": 0.5,
+            # World-frame COM -- authored where the part physically sits,
+            # not relative to any link-local frame.
+            "com_m": (0.05, 0.0, 0.1),
+            "inertia_kgm2": (0.1, 0.0, 0.0, 0.1, 0.0, 0.1),
+        },
+        {
+            "name": "l2",
+            "mesh_uri": "l2.stl",
+            "mass_kg": 0.25,
+            "com_m": (0.15, -0.02, 0.28),
+            "inertia_kgm2": (0.05, 0.0, 0.0, 0.05, 0.0, 0.05),
+        },
+    ]
+
+    # World-frame anchors (mm), a non-trivial chain (not axis-aligned,
+    # not starting at the origin).
+    _J1_ANCHOR_MM = (0.0, 0.0, 100.0)
+    _J2_ANCHOR_MM = (0.0, 0.0, 280.0)
+
+    def _joints(self):
+        return [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "l1",
+                "axis": (0, 1, 0),
+                "anchor": self._J1_ANCHOR_MM,
+            },
+            {
+                "name": "j2",
+                "type": "revolute",
+                "base": "l1",
+                "follower": "l2",
+                "axis": (0, 1, 0),
+                "anchor": self._J2_ANCHOR_MM,
+            },
+        ]
+
+    def _joint_origins_m(self, xml: str) -> dict[str, tuple[float, float, float]]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        origins = {}
+        for joint_el in root.findall("joint"):
+            xyz = joint_el.find("origin").get("xyz")
+            origins[joint_el.get("name")] = tuple(float(v) for v in xyz.split())
+        return origins
+
+    def _link_section_origin_m(self, xml: str, link_name: str, tag: str) -> tuple[float, ...]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link_el = next(el for el in root.findall("link") if el.get("name") == link_name)
+        xyz = link_el.find(f"{tag}/origin").get("xyz")
+        return tuple(float(v) for v in xyz.split())
+
+    def test_joint_origins_fk_back_to_the_input_anchors(self):
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        origins = self._joint_origins_m(xml)
+
+        # j1's parent (base) is a chain root -> origin is the raw anchor.
+        j1_expected = tuple(v * 1e-3 for v in self._J1_ANCHOR_MM)
+        assert origins["j1"] == pytest.approx(j1_expected)
+
+        # j2's parent (l1) sits at j1's anchor -> origin is the DIFFERENCE,
+        # not the raw j2 anchor (the previously-reported bug: writing raw
+        # anchors made every link's offset stack instead of accumulate).
+        j2_expected = tuple(
+            (self._J2_ANCHOR_MM[i] - self._J1_ANCHOR_MM[i]) * 1e-3 for i in range(3)
+        )
+        assert origins["j2"] == pytest.approx(j2_expected)
+        assert origins["j2"] != pytest.approx(tuple(v * 1e-3 for v in self._J2_ANCHOR_MM))
+
+        # FK reconstruction: accumulating the (parent-relative) joint
+        # origins down the chain must recover each link's original
+        # world-frame anchor exactly.
+        base_world = (0.0, 0.0, 0.0)
+        l1_world = tuple(base_world[i] + origins["j1"][i] for i in range(3))
+        l2_world = tuple(l1_world[i] + origins["j2"][i] for i in range(3))
+        assert l1_world == pytest.approx(tuple(v * 1e-3 for v in self._J1_ANCHOR_MM))
+        assert l2_world == pytest.approx(tuple(v * 1e-3 for v in self._J2_ANCHOR_MM))
+
+    def test_mesh_origins_compensate_so_world_frame_geometry_lands_correctly(self):
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        # base is a chain root -- no compensation needed.
+        assert self._link_section_origin_m(xml, "base", "visual") == pytest.approx((0, 0, 0))
+        assert self._link_section_origin_m(xml, "base", "collision") == pytest.approx((0, 0, 0))
+        # l1's mesh (authored in world frame) must be pulled back by
+        # -T[l1] so it renders at its original world position once the
+        # link frame itself sits at T[l1] via the joint chain.
+        l1_expected = tuple(-v * 1e-3 for v in self._J1_ANCHOR_MM)
+        assert self._link_section_origin_m(xml, "l1", "visual") == pytest.approx(l1_expected)
+        assert self._link_section_origin_m(xml, "l1", "collision") == pytest.approx(l1_expected)
+        l2_expected = tuple(-v * 1e-3 for v in self._J2_ANCHOR_MM)
+        assert self._link_section_origin_m(xml, "l2", "visual") == pytest.approx(l2_expected)
+
+    def test_inertial_origin_is_com_relative_to_the_link_frame_not_world(self):
+        import xml.etree.ElementTree as ET
+
+        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        root = ET.fromstring(xml)
+        l1_el = next(el for el in root.findall("link") if el.get("name") == "l1")
+        xyz = l1_el.find("inertial/origin").get("xyz")
+        got = tuple(float(v) for v in xyz.split())
+        world_com_m = self._LINKS[1]["com_m"]
+        offset_m = tuple(v * 1e-3 for v in self._J1_ANCHOR_MM)
+        expected = tuple(world_com_m[i] - offset_m[i] for i in range(3))
+        assert got == pytest.approx(expected)
+        # Must not still be the raw world-frame COM (the previously-reported
+        # bug's shape).
+        assert got != pytest.approx(world_com_m)
 
 
 class TestBuildSingleLinkUrdf:
