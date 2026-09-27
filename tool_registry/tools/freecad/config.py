@@ -64,3 +64,17 @@ class FreecadConfig(BaseModel):
             "Env-overridable (FREECAD_MAX_WORKERS)."
         ),
     )
+    worker_stdio_limit_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=2**16,
+        description=(
+            "StreamReader line-length limit for the pooled worker's stdio "
+            "transport (FORGE-238). A worker's JSON-RPC reply is one line, "
+            "and export_model inlines the exported file as base64 in that "
+            "line -- asyncio's own default limit (64 KiB) trips "
+            "LimitOverrunError on any assembly export past a handful of "
+            "parts. 64 MB comfortably covers a large multi-part STEP export "
+            "in base64 without holding an unbounded buffer. Env-overridable "
+            "(FREECAD_WORKER_STDIO_LIMIT_BYTES)."
+        ),
+    )

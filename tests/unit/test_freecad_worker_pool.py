@@ -84,6 +84,28 @@ async def test_open_and_call_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_large_reply_past_the_asyncio_default_still_round_trips() -> None:
+    """FORGE-238: a real ``freecad.export_model`` reply on a multi-part
+    assembly inlines the exported STEP as base64 in one JSON-RPC line --
+    comfortably past asyncio's own 64 KiB ``readline()`` default. Uses the
+    pool's *default* config (no override) so this proves the shipped
+    default (64 MB) actually covers the reported shape, not just that a
+    caller-supplied limit theoretically could."""
+    pool = _make_pool()
+    try:
+        opened = await pool.open_session("assembly")
+        session_id = opened["session_id"]
+        oversized_base64 = "A" * (256 * 1024)  # 4x past the 64 KiB default
+        result = await pool.call(
+            session_id, "echo", {"session_id": session_id, "step_base64": oversized_base64}
+        )
+        assert result == {"echo": {"session_id": session_id, "step_base64": oversized_base64}}
+    finally:
+        for sid in pool.session_ids():
+            await pool.close_session(sid)
+
+
+@pytest.mark.asyncio
 async def test_call_unknown_session_raises() -> None:
     pool = _make_pool()
     with pytest.raises(SessionNotFoundError):

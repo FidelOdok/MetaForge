@@ -116,3 +116,38 @@ async def test_read_stderr_empty_when_nothing_buffered() -> None:
         assert await transport.read_stderr() == b""
     finally:
         await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_default_limit_overruns_on_a_large_reply() -> None:
+    """FORGE-238: reproduces the reported bug -- asyncio's own readline()
+    default (64 KiB) trips ``LimitOverrunError`` on one big response line,
+    exactly what a multi-part STEP export inlined as base64 hits. Locks in
+    the *failure* so the next test's fix is provably doing something."""
+    transport = StdioTransport(
+        command=[sys.executable, "-u", "-c", _ECHO_LINES],
+    )
+    await transport.connect()
+    try:
+        oversized = "x" * (128 * 1024)  # well past the 64 KiB default
+        with pytest.raises(ValueError, match="exceed(s|ed)? the limit|longer than limit"):
+            await transport.send(oversized)
+    finally:
+        await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_custom_limit_accepts_a_reply_the_default_would_reject() -> None:
+    """FORGE-238: the fix -- a caller with large replies (FreecadWorkerPool)
+    passes a bigger ``limit`` and the same oversized line round-trips fine."""
+    transport = StdioTransport(
+        command=[sys.executable, "-u", "-c", _ECHO_LINES],
+        limit=1024 * 1024,
+    )
+    await transport.connect()
+    try:
+        oversized = "x" * (128 * 1024)
+        echoed = await transport.send(oversized)
+        assert echoed == oversized
+    finally:
+        await transport.disconnect()
