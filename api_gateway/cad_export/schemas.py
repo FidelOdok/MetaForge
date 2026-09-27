@@ -227,12 +227,33 @@ class UsdExportResponse(BaseModel):
     inertia_kgm2: dict[str, float]
 
 
+class EmittedJointLimits(BaseModel):
+    lower: float
+    upper: float
+    effort: float | None = None
+    velocity: float | None = None
+
+
+class EmittedJoint(BaseModel):
+    """What was actually written for one joint, post type-resolution
+    (FORGE-240) -- e.g. a revolute joint with caller-supplied limits is
+    emitted as a real bounded ``revolute`` type, not the unlimited
+    ``continuous``/``PhysicsRevoluteJoint``-without-limits a caller might
+    otherwise assume from the input alone. Lets the reporting agent state
+    what the file actually contains instead of guessing or fabricating."""
+
+    name: str
+    type: str
+    limits: EmittedJointLimits | None = None
+
+
 class UrdfAssemblyExportResponse(BaseModel):
     output_file: ExportFile
     mesh_files: list[ExportFile]
     robot_name: str
     link_names: list[str]
     joint_names: list[str]
+    joints: list[EmittedJoint] = []
     # MET-740: set when persist=true succeeded — the Twin node this export
     # was committed to (create) or updated (update_node_id given). None
     # when persist=false, or when persistence failed (export still
@@ -246,6 +267,7 @@ class SdfAssemblyExportResponse(BaseModel):
     model_name: str
     link_names: list[str]
     joint_names: list[str]
+    joints: list[EmittedJoint] = []
     robot_description_node_id: str | None = None
 
 
@@ -255,6 +277,7 @@ class UsdAssemblyExportResponse(BaseModel):
     robot_name: str
     link_names: list[str]
     joint_names: list[str]
+    joints: list[EmittedJoint] = []
     robot_description_node_id: str | None = None
 
 

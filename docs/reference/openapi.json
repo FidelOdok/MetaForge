@@ -1496,6 +1496,75 @@
         "title": "DesignChangeProposal",
         "type": "object"
       },
+      "EmittedJoint": {
+        "description": "What was actually written for one joint, post type-resolution\n(FORGE-240) -- e.g. a revolute joint with caller-supplied limits is\nemitted as a real bounded ``revolute`` type, not the unlimited\n``continuous``/``PhysicsRevoluteJoint``-without-limits a caller might\notherwise assume from the input alone. Lets the reporting agent state\nwhat the file actually contains instead of guessing or fabricating.",
+        "properties": {
+          "limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmittedJointLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "EmittedJoint",
+        "type": "object"
+      },
+      "EmittedJointLimits": {
+        "properties": {
+          "effort": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effort"
+          },
+          "lower": {
+            "title": "Lower",
+            "type": "number"
+          },
+          "upper": {
+            "title": "Upper",
+            "type": "number"
+          },
+          "velocity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Velocity"
+          }
+        },
+        "required": [
+          "lower",
+          "upper"
+        ],
+        "title": "EmittedJointLimits",
+        "type": "object"
+      },
       "EvidenceResponse": {
         "description": "Response for evidence operations.",
         "properties": {
@@ -3612,6 +3681,14 @@
             "title": "Joint Names",
             "type": "array"
           },
+          "joints": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EmittedJoint"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
           "link_names": {
             "items": {
               "type": "string"
@@ -4883,6 +4960,17 @@
             "title": "Name",
             "type": "string"
           },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
           "properties": {
             "additionalProperties": {
               "anyOf": [
@@ -5219,6 +5307,14 @@
             "title": "Joint Names",
             "type": "array"
           },
+          "joints": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EmittedJoint"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
           "link_names": {
             "items": {
               "type": "string"
@@ -5448,6 +5544,14 @@
               "type": "string"
             },
             "title": "Joint Names",
+            "type": "array"
+          },
+          "joints": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EmittedJoint"
+            },
+            "title": "Joints",
             "type": "array"
           },
           "link_names": {

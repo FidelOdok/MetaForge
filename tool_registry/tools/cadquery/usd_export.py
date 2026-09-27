@@ -257,7 +257,7 @@ def build_usda_assembly(
     robot_name: str,
     links: list[dict[str, Any]],
     joints: list[dict[str, Any]],
-) -> str:
+) -> tuple[str, list[dict[str, Any]]]:
     """Build a multi-body ``.usda`` document with real UsdPhysics joints.
 
     ``links``: each ``{name, points, face_vertex_indices, face_vertex_counts,
@@ -274,8 +274,13 @@ def build_usda_assembly(
     ``build_usda``), :class:`UnsupportedJointTypeError` for ``cylindrical``,
     and :class:`MissingJointLimitsError` for a ``slider`` joint with no
     ``limits`` supplied.
+
+    Returns ``(usda_text, emitted_joints)`` -- see
+    ``operations._build_assembly_urdf``'s docstring for what
+    ``emitted_joints`` is (FORGE-240).
     """
     link_blocks: list[str] = []
+    emitted_joints: list[dict[str, Any]] = []
     for link in links:
         ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
         _check_axis_aligned(ixx, ixy, ixz, iyy, iyz, izz)
@@ -322,31 +327,42 @@ def build_usda_assembly(
         ]
 
         extra_lines: list[str] = []
+        emitted_limits: dict[str, float] | None = None
         if usd_type in ("PhysicsRevoluteJoint", "PhysicsPrismaticJoint"):
             axis = joint.get("axis") or (0.0, 0.0, 1.0)
             w, x, y, z = _quat_align_x_to(axis)
             body_lines.append(f"    quatf physics:localRot0 = ({w:.9g}, {x:.9g}, {y:.9g}, {z:.9g})")
             body_lines.append(f"    quatf physics:localRot1 = ({w:.9g}, {x:.9g}, {y:.9g}, {z:.9g})")
             extra_lines.append('    uniform token physics:axis = "X"')
-            if usd_type == "PhysicsPrismaticJoint":
-                limits = joint.get("limits")
-                if not limits:
-                    raise MissingJointLimitsError(
-                        f"joint {name!r} is a prismatic (slider) joint -- no 'limits' "
-                        "({'lower','upper'}) was supplied for it, and MetaForge's joint "
-                        "metadata never captures one, so it must be passed explicitly "
-                        "rather than fabricated"
-                    )
-                extra_lines.append(f"    float physics:lowerLimit = {limits['lower']:.9g}")
-                extra_lines.append(f"    float physics:upperLimit = {limits['upper']:.9g}")
+            limits = joint.get("limits")
+            if usd_type == "PhysicsPrismaticJoint" and not limits:
+                raise MissingJointLimitsError(
+                    f"joint {name!r} is a prismatic (slider) joint -- no 'limits' "
+                    "({'lower','upper'}) was supplied for it, and MetaForge's joint "
+                    "metadata never captures one, so it must be passed explicitly "
+                    "rather than fabricated"
+                )
+            # FORGE-240: a revolute joint's limits are OPTIONAL here (the
+            # schema itself defaults lowerLimit/upperLimit to -inf/inf when
+            # omitted, so a limit-less revolute is already the honest
+            # "unbounded" case URDF's `continuous` represents) -- but when a
+            # caller DOES supply real limits for a revolute joint, they must
+            # be emitted, not silently dropped (previously this branch only
+            # ever fired for prismatic, so a revolute's limits -- even when
+            # given -- were never written).
+            if limits:
+                emitted_limits = {"lower": limits["lower"], "upper": limits["upper"]}
+                extra_lines.append(f"    float physics:lowerLimit = {emitted_limits['lower']:.9g}")
+                extra_lines.append(f"    float physics:upperLimit = {emitted_limits['upper']:.9g}")
 
         block = "\n".join([f'def {usd_type} "{name}"', "{", *body_lines, *extra_lines, "}"])
         joint_blocks.append("\n    " + block.replace("\n", "\n    "))
+        emitted_joints.append({"name": name, "type": usd_type, "limits": emitted_limits})
 
     links_str = "\n".join(link_blocks)
     joints_str = "\n".join(joint_blocks)
 
-    return f'''#usda 1.0
+    usda_text = f'''#usda 1.0
 (
     defaultPrim = "{robot_name}"
     metersPerUnit = 1
@@ -359,3 +375,4 @@ def Xform "{robot_name}"
 {joints_str}
 }}
 '''
+    return usda_text, emitted_joints

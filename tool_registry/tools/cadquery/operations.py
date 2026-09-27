@@ -369,18 +369,44 @@ def _build_single_link_urdf(
 # (fixed/revolute/slider/cylindrical/ball -- tool_registry/tools/freecad/
 # adapter.py's _VALID_JOINT_TYPES) don't map 1:1 onto URDF's joint types.
 # `fixed` and `slider` map directly (`slider` -> `prismatic`). `revolute`
-# maps to URDF's `continuous` (unlimited rotation), NOT `revolute` --
-# MetaForge's joint metadata (base/follower/axis/anchor) never captures a
-# rotation limit, and `revolute` is only valid in URDF *with* a `<limit>`;
+# maps to URDF's `continuous` (unlimited rotation) ONLY when the joint
+# carries no `limits` -- URDF's `revolute` requires a `<limit>`, and
 # inventing one would be the same class of mistake avoided for USD's
-# inertia (silently-plausible-but-wrong data). `continuous` needs no
-# `<limit>` at all, so it is the honest mapping given what's actually known.
+# inertia (silently-plausible-but-wrong data). FORGE-240: when `limits`
+# *is* given (MetaForge's joint metadata can carry one -- see `slider`'s
+# own required `limits` below), the caller-provided range is real, not
+# fabricated, and dropping it silently allows unlimited rotation on a
+# joint that physically can't -- so a revolute WITH limits maps to
+# `revolute` (with `<limit>`), and only a revolute with NO limits given
+# stays `continuous`. See `_revolute_joint_type_and_limits`.
 # `cylindrical`/`ball` have no single-joint URDF equivalent (URDF joints
 # are single-DOF except `floating`/`planar`, neither of which is a
 # faithful match) -- decomposing them into a chained multi-joint,
 # zero-mass-link structure is real, separate work, not attempted here.
 _URDF_JOINT_TYPE_MAP = {"fixed": "fixed", "slider": "prismatic", "revolute": "continuous"}
 _URDF_UNSUPPORTED_JOINT_TYPES = {"cylindrical", "ball"}
+
+
+def _revolute_joint_type_and_limits(
+    fc_type: str, joint: dict[str, Any], type_map: dict[str, str]
+) -> tuple[str, dict[str, Any] | None]:
+    """Resolve a joint's emitted type + limits (FORGE-240), shared across
+    URDF/SDF (whose type maps both send bare ``revolute`` to a
+    "continuous" analog -- see each map's own module comment).
+
+    A ``revolute`` joint with a caller-supplied ``limits`` dict is real
+    data, not fabricated -- it maps to the target format's real bounded
+    rotation type (``revolute``/``continuous``... the format's own
+    ``type_map["revolute"]`` value is the *unbounded* one, so a limited
+    revolute overrides it to the literal string ``"revolute"``, which
+    both URDF and SDF also use for their bounded rotational joint type).
+    Every other joint type (fixed, slider/prismatic, ball) is unaffected
+    -- this only special-cases ``revolute``.
+    """
+    limits = joint.get("limits")
+    if fc_type == "revolute" and limits:
+        return "revolute", limits
+    return type_map[fc_type], None
 
 
 def _link_world_offsets_mm(
@@ -439,7 +465,7 @@ def _build_assembly_urdf(
     links: list[dict[str, Any]],
     joints: list[dict[str, Any]],
     xacro: bool = False,
-) -> str:
+) -> tuple[str, list[dict[str, Any]]]:
     """Build a multi-link URDF document with real joints.
 
     ``links``: each ``{name, mesh_uri, mass_kg, com_m, inertia_kgm2,
@@ -448,9 +474,16 @@ def _build_assembly_urdf(
     same way -- see ``_add_urdf_material``'s docstring).
     ``joints``: each FreeCAD joint record's shape directly
     (``{name, type, base, follower, axis, anchor}``, optionally
-    ``limits: {lower, upper, effort, velocity}`` for a ``slider`` joint --
-    see ``_URDF_JOINT_TYPE_MAP``'s reasoning above for why ``revolute``
-    doesn't need one).
+    ``limits: {lower, upper, effort, velocity}`` -- required for a
+    ``slider`` joint, and honored (not dropped) for a ``revolute`` joint
+    too -- see ``_revolute_joint_type_and_limits``).
+
+    Returns ``(xml, emitted_joints)`` -- ``emitted_joints`` is
+    ``[{name, type, limits}, ...]``, one entry per input joint, recording
+    what was *actually written* (post type-resolution) so a caller (e.g.
+    the chat agent) can report the real emitted types/limits instead of
+    guessing from the input (FORGE-240: previously the agent reported
+    fabricated limits that matched neither the request nor the file).
 
     ``xacro=True`` declares the xacro namespace on the root element -- see
     ``_robot_root_attrib``'s docstring.
@@ -505,6 +538,7 @@ def _build_assembly_urdf(
             izz=f"{izz:.9g}",
         )
 
+    emitted_joints: list[dict[str, Any]] = []
     for joint in joints:
         fc_type = joint["type"].lower()
         if fc_type in _URDF_UNSUPPORTED_JOINT_TYPES:
@@ -513,14 +547,12 @@ def _build_assembly_urdf(
                 "single-joint URDF equivalent (needs multi-joint decomposition, not "
                 "yet implemented -- see _URDF_JOINT_TYPE_MAP's module comment)"
             )
-        urdf_type = _URDF_JOINT_TYPE_MAP[fc_type]
-
-        joint_el = ET.SubElement(
-            robot,
-            "joint",
-            name=joint.get("name", f"{joint['base']}_to_{joint['follower']}"),
-            type=urdf_type,
+        urdf_type, revolute_limits = _revolute_joint_type_and_limits(
+            fc_type, joint, _URDF_JOINT_TYPE_MAP
         )
+        joint_name = joint.get("name", f"{joint['base']}_to_{joint['follower']}")
+
+        joint_el = ET.SubElement(robot, "joint", name=joint_name, type=urdf_type)
         ET.SubElement(joint_el, "parent", link=joint["base"])
         ET.SubElement(joint_el, "child", link=joint["follower"])
         anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
@@ -536,30 +568,39 @@ def _build_assembly_urdf(
             xyz=f"{origin_m[0]:.9g} {origin_m[1]:.9g} {origin_m[2]:.9g}",
             rpy="0 0 0",
         )
-        if urdf_type in ("continuous", "prismatic"):
+        if urdf_type in ("continuous", "prismatic", "revolute"):
             axis = joint.get("axis") or (0.0, 0.0, 1.0)
             ET.SubElement(joint_el, "axis", xyz=f"{axis[0]:.9g} {axis[1]:.9g} {axis[2]:.9g}")
-        if urdf_type == "prismatic":
-            limits = joint.get("limits")
+        emitted_limits: dict[str, float] | None = None
+        if urdf_type in ("prismatic", "revolute"):
+            limits = revolute_limits if urdf_type == "revolute" else joint.get("limits")
             if not limits:
                 raise MissingJointLimitsError(
-                    f"joint {joint.get('name', '?')!r} is a prismatic (slider) joint, which "
+                    f"joint {joint.get('name', '?')!r} is a {urdf_type} joint, which "
                     "URDF requires a <limit> element for, but no 'limits' "
                     "({'lower','upper','effort','velocity'}) was supplied for it -- "
-                    "MetaForge's joint metadata never captures one, so it must be passed "
-                    "explicitly rather than fabricated"
+                    "MetaForge's joint metadata never captures one for a prismatic joint "
+                    "by default, so it must be passed explicitly rather than fabricated"
                 )
+            emitted_limits = {
+                "lower": limits["lower"],
+                "upper": limits["upper"],
+                "effort": limits.get("effort", 100.0),
+                "velocity": limits.get("velocity", 1.0),
+            }
             ET.SubElement(
                 joint_el,
                 "limit",
-                lower=f"{limits['lower']:.9g}",
-                upper=f"{limits['upper']:.9g}",
-                effort=f"{limits.get('effort', 100.0):.9g}",
-                velocity=f"{limits.get('velocity', 1.0):.9g}",
+                lower=f"{emitted_limits['lower']:.9g}",
+                upper=f"{emitted_limits['upper']:.9g}",
+                effort=f"{emitted_limits['effort']:.9g}",
+                velocity=f"{emitted_limits['velocity']:.9g}",
             )
+        emitted_joints.append({"name": joint_name, "type": urdf_type, "limits": emitted_limits})
 
     ET.indent(robot, space="  ")
-    return '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
+    xml = '<?xml version="1.0"?>\n' + ET.tostring(robot, encoding="unicode")
+    return xml, emitted_joints
 
 
 def _build_single_link_sdf(
@@ -636,7 +677,10 @@ def _build_single_link_sdf(
 # has no direct 2-DOF (1 translation + 1 rotation, same axis) joint element
 # -- `screw` looks similar but couples the two motions via a fixed pitch,
 # which isn't the same kinematics, so it would misrepresent the joint rather
-# than approximate it.
+# than approximate it. FORGE-240: same as URDF's map, `revolute` here maps
+# to the unbounded `continuous` ONLY when the joint carries no `limits` --
+# a caller-supplied range is real, not fabricated, and maps to the real
+# bounded `revolute` type instead (see `_revolute_joint_type_and_limits`).
 _SDF_JOINT_TYPE_MAP = {
     "fixed": "fixed",
     "slider": "prismatic",
@@ -653,13 +697,14 @@ def _build_assembly_sdf(
     joints: list[dict[str, Any]],
     static: bool,
     world_name: str,
-) -> str:
+) -> tuple[str, list[dict[str, Any]]]:
     """Build a multi-link, single-model SDFormat document with real joints.
 
     ``links``/``joints`` have the same shapes ``_build_assembly_urdf`` takes
     -- see its docstring and ``_SDF_JOINT_TYPE_MAP``'s comment above for the
     joint-type mapping (SDF's is more permissive than URDF's: it also
-    supports `ball` natively).
+    supports `ball` natively). Returns ``(xml, emitted_joints)`` -- see
+    ``_build_assembly_urdf``'s docstring for what ``emitted_joints`` is.
     """
     sdf = ET.Element("sdf", version="1.11")
     parent = sdf
@@ -695,6 +740,7 @@ def _build_assembly_sdf(
             ET.SubElement(mesh, "uri").text = link["mesh_uri"]
             ET.SubElement(mesh, "scale").text = _URDF_MESH_SCALE_XYZ
 
+    emitted_joints: list[dict[str, Any]] = []
     for joint in joints:
         fc_type = joint["type"].lower()
         if fc_type in _SDF_UNSUPPORTED_JOINT_TYPES:
@@ -702,40 +748,48 @@ def _build_assembly_sdf(
                 f"joint {joint.get('name', '?')!r} has type {fc_type!r}, which has no "
                 "direct SDF <joint> equivalent (see _SDF_JOINT_TYPE_MAP's module comment)"
             )
-        sdf_type = _SDF_JOINT_TYPE_MAP[fc_type]
-
-        joint_el = ET.SubElement(
-            model,
-            "joint",
-            name=joint.get("name", f"{joint['base']}_to_{joint['follower']}"),
-            type=sdf_type,
+        sdf_type, revolute_limits = _revolute_joint_type_and_limits(
+            fc_type, joint, _SDF_JOINT_TYPE_MAP
         )
+        joint_name = joint.get("name", f"{joint['base']}_to_{joint['follower']}")
+
+        joint_el = ET.SubElement(model, "joint", name=joint_name, type=sdf_type)
         ET.SubElement(joint_el, "parent").text = joint["base"]
         ET.SubElement(joint_el, "child").text = joint["follower"]
 
-        if sdf_type in ("continuous", "prismatic"):
+        emitted_limits: dict[str, float] | None = None
+        if sdf_type in ("continuous", "prismatic", "revolute"):
             axis = joint.get("axis") or (0.0, 0.0, 1.0)
             axis_el = ET.SubElement(joint_el, "axis")
             ET.SubElement(axis_el, "xyz").text = f"{axis[0]:.9g} {axis[1]:.9g} {axis[2]:.9g}"
-            if sdf_type == "prismatic":
-                limits = joint.get("limits")
+            if sdf_type in ("prismatic", "revolute"):
+                limits = revolute_limits if sdf_type == "revolute" else joint.get("limits")
                 if not limits:
                     raise MissingJointLimitsError(
-                        f"joint {joint.get('name', '?')!r} is a prismatic (slider) joint -- "
-                        "no 'limits' ({'lower','upper','effort','velocity'}) was supplied for "
-                        "it, and MetaForge's joint metadata never captures one, so it must be "
-                        "passed explicitly rather than fabricated"
+                        f"joint {joint.get('name', '?')!r} is a {sdf_type} joint -- no "
+                        "'limits' ({'lower','upper','effort','velocity'}) was supplied for "
+                        "it, and MetaForge's joint metadata never captures one for a "
+                        "prismatic joint by default, so it must be passed explicitly "
+                        "rather than fabricated"
                     )
+                emitted_limits = {
+                    "lower": limits["lower"],
+                    "upper": limits["upper"],
+                    **({"effort": limits["effort"]} if "effort" in limits else {}),
+                    **({"velocity": limits["velocity"]} if "velocity" in limits else {}),
+                }
                 limit_el = ET.SubElement(axis_el, "limit")
-                ET.SubElement(limit_el, "lower").text = f"{limits['lower']:.9g}"
-                ET.SubElement(limit_el, "upper").text = f"{limits['upper']:.9g}"
-                if "effort" in limits:
-                    ET.SubElement(limit_el, "effort").text = f"{limits['effort']:.9g}"
-                if "velocity" in limits:
-                    ET.SubElement(limit_el, "velocity").text = f"{limits['velocity']:.9g}"
+                ET.SubElement(limit_el, "lower").text = f"{emitted_limits['lower']:.9g}"
+                ET.SubElement(limit_el, "upper").text = f"{emitted_limits['upper']:.9g}"
+                if "effort" in emitted_limits:
+                    ET.SubElement(limit_el, "effort").text = f"{emitted_limits['effort']:.9g}"
+                if "velocity" in emitted_limits:
+                    ET.SubElement(limit_el, "velocity").text = f"{emitted_limits['velocity']:.9g}"
+        emitted_joints.append({"name": joint_name, "type": sdf_type, "limits": emitted_limits})
 
     ET.indent(sdf, space="  ")
-    return '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
+    xml = '<?xml version="1.0"?>\n' + ET.tostring(sdf, encoding="unicode")
+    return xml, emitted_joints
 
 
 class CadqueryOperations:
@@ -1330,7 +1384,7 @@ class CadqueryOperations:
                     }
                 )
 
-            urdf_xml = _build_assembly_urdf(
+            urdf_xml, emitted_joints = _build_assembly_urdf(
                 robot_name=robot_name, links=links, joints=joints, xacro=xacro
             )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
@@ -1354,6 +1408,11 @@ class CadqueryOperations:
                 "robot_name": robot_name,
                 "link_names": [link["name"] for link in links],
                 "joint_names": [joint.get("name", "") for joint in joints],
+                # FORGE-240: what was ACTUALLY written (post type-resolution),
+                # not the input -- a revolute joint's real limits, when given,
+                # are now honored rather than silently dropped, and this lets
+                # the caller report that instead of guessing/fabricating.
+                "joints": emitted_joints,
             }
 
     def export_sdf(
@@ -1531,7 +1590,7 @@ class CadqueryOperations:
                     }
                 )
 
-            sdf_xml = _build_assembly_sdf(
+            sdf_xml, emitted_joints = _build_assembly_sdf(
                 model_name=model_name,
                 links=links,
                 joints=joints,
@@ -1559,6 +1618,8 @@ class CadqueryOperations:
                 "model_name": model_name,
                 "link_names": [link["name"] for link in links],
                 "joint_names": [joint.get("name", "") for joint in joints],
+                # FORGE-240: see export_urdf_assembly's return dict comment.
+                "joints": emitted_joints,
             }
 
     def export_usd(
@@ -1728,7 +1789,9 @@ class CadqueryOperations:
                     }
                 )
 
-            usda_text = build_usda_assembly(robot_name=robot_name, links=links, joints=joints)
+            usda_text, emitted_joints = build_usda_assembly(
+                robot_name=robot_name, links=links, joints=joints
+            )
             with open(output_path, "w", encoding="utf-8") as f:  # noqa: PTH123
                 f.write(usda_text)
 
@@ -1750,6 +1813,8 @@ class CadqueryOperations:
                 "robot_name": robot_name,
                 "link_names": [link["name"] for link in links],
                 "joint_names": [joint.get("name", "") for joint in joints],
+                # FORGE-240: see export_urdf_assembly's return dict comment.
+                "joints": emitted_joints,
             }
 
     def generate_ros2_launch(
