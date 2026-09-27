@@ -81,6 +81,21 @@ async def test_empty_project_id_is_treated_as_all_projects() -> None:
     assert resp.total == 2
 
 
+async def test_each_node_carries_its_own_project_id() -> None:
+    """FORGE-248: forge twin list --json (no ?project_id= filter, the
+    default that returns every node) had no way to tell which project any
+    given node belongs to -- each node's own projectId must be present so a
+    client can filter/display it without a separate per-project query."""
+    pa = uuid4()
+    await _seed(_wp("A", pa), _wp("Unscoped", None))
+
+    resp = await routes.list_twin_nodes()
+
+    by_name = {n.name: n.projectId for n in resp.nodes}
+    assert by_name["A"] == str(pa)
+    assert by_name["Unscoped"] is None
+
+
 async def test_boolean_assembly_metadata_on_cad_model_does_not_500() -> None:
     """MET-745 regression: api_gateway/cad/builder.py's build_assembly()
     writes metadata["assembly"] = True (a bare bool flag) on CAD_MODEL
