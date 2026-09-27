@@ -28,6 +28,7 @@ from twin_core.models.datasheet import Datasheet
 from twin_core.models.engineering_change_transaction import EngineeringChangeTransaction
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.hierarchy_node import HierarchyNode
 from twin_core.models.relationship import SubGraph
 from twin_core.models.revision_snapshot import RevisionSnapshot
 from twin_core.models.version import Version, VersionDiff
@@ -339,6 +340,22 @@ class TwinAPI(ABC):
         """List EngineeringEntity nodes, optionally scoped to a project and/or
         ``entity_type`` (intent | stakeholder_need | objective | assumption |
         question | risk | verification_case | evidence)."""
+        ...
+
+    # --- Hierarchy Nodes (FORGE-260, gap G-B1) ---
+
+    @abstractmethod
+    async def create_hierarchy_node(self, node: HierarchyNode) -> HierarchyNode: ...
+
+    @abstractmethod
+    async def get_hierarchy_node(self, node_id: UUID) -> HierarchyNode | None: ...
+
+    @abstractmethod
+    async def list_hierarchy_nodes(
+        self, project_id: UUID | None = None, kind: str | None = None
+    ) -> list[HierarchyNode]:
+        """List HierarchyNode nodes, optionally scoped to a project and/or
+        ``kind`` (product | system | subsystem | assembly)."""
         ...
 
     # --- Baselines (FORGE-51) ---
@@ -972,6 +989,34 @@ class InMemoryTwinAPI(TwinAPI):
             filters["entity_type"] = entity_type
         nodes = await self._graph.list_nodes(
             node_type=NodeType.ENGINEERING_ENTITY, filters=filters if filters else None
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Hierarchy Nodes (FORGE-260, gap G-B1) ---
+
+    async def create_hierarchy_node(self, node: HierarchyNode) -> HierarchyNode:
+        existing = await self._graph.get_node(node.id)
+        if existing is not None:
+            raise ValueError(f"HierarchyNode with ID {node.id} already exists")
+        result = await self._graph.add_node(node)
+        return result  # type: ignore[return-value]
+
+    async def get_hierarchy_node(self, node_id: UUID) -> HierarchyNode | None:
+        node = await self._graph.get_node(node_id)
+        if node is not None and isinstance(node, HierarchyNode):
+            return node
+        return None
+
+    async def list_hierarchy_nodes(
+        self, project_id: UUID | None = None, kind: str | None = None
+    ) -> list[HierarchyNode]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if kind is not None:
+            filters["kind"] = kind
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.HIERARCHY_NODE, filters=filters if filters else None
         )
         return nodes  # type: ignore[return-value]
 

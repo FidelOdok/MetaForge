@@ -20,6 +20,7 @@ from twin_core.models.enums import (
     NodeType,
     WorkProductType,
 )
+from twin_core.models.hierarchy_node import HierarchyNode, HierarchyNodeKind
 from twin_core.models.patch import (
     Patch,
     PatchOp,
@@ -63,6 +64,8 @@ __all__ = [
     "Datasheet",
     "EngineeringEntity",
     "EngineeringEntityType",
+    "HierarchyNode",
+    "HierarchyNodeKind",
     # Patch/transaction (FORGE-50)
     "Patch",
     "PatchOp",

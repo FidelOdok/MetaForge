@@ -268,6 +268,8 @@ async def bootstrap_tool_registry(
     evidence_recorder: Any = None,
     claim_recorder: Any = None,
     ect_bridge: Any = None,
+    hierarchy_node_recorder: Any = None,
+    hierarchy_rollup_fn: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -535,6 +537,8 @@ async def bootstrap_tool_registry(
                     evidence_recorder=evidence_recorder,
                     claim_recorder=claim_recorder,
                     ect_bridge=ect_bridge,
+                    hierarchy_node_recorder=hierarchy_node_recorder,
+                    hierarchy_rollup_fn=hierarchy_rollup_fn,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

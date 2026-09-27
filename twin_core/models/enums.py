@@ -41,6 +41,16 @@ class NodeType(StrEnum):
     # carried through PROPOSED -> ... -> COMMITTED | ROLLED_BACK (see
     # twin_core/models/engineering_change_transaction.py).
     ENGINEERING_CHANGE_TRANSACTION = "engineering_change_transaction"
+    # FORGE-260 (gap G-B1): a generic node for the product hierarchy tree
+    # (product/system/subsystem/assembly -- see HierarchyNode.kind).
+    # Mirrors ENGINEERING_ENTITY's precedent exactly -- one node type for a
+    # whole family of organizational kinds, not one class per kind. Part/
+    # Component/Feature (the hierarchy's LEAF kinds) deliberately are NOT
+    # HierarchyNode -- they're real, already-existing nodes (a fabricated
+    # part is a WorkProductType.CAD_MODEL, a COTS component is a BOMItem)
+    # that a HierarchyNode links to via EdgeType.REALIZED_BY/INSTANCE_OF,
+    # not duplicates of them.
+    HIERARCHY_NODE = "hierarchy_node"
 
 
 class WorkProductType(StrEnum):
@@ -203,3 +213,18 @@ class EdgeType(StrEnum):
     # Baseline.includes list (same non-source-of-truth relationship
     # parent_refs already has to its own DERIVES_FROM/... edges).
     INCLUDED_IN_BASELINE = "included_in_baseline"
+    # FORGE-260 (gap G-B1): HierarchyNode --REALIZED_BY--> WorkProduct
+    # (the cad_model/robot_description that gives this hierarchy position
+    # its actual geometry). Distinct from CONTAINS (structural nesting
+    # between hierarchy positions) and from PARENT_OF (a work product's own
+    # provenance link to the geometry it was derived FROM, e.g. a
+    # robot_description's source cad_model parts) -- REALIZED_BY always
+    # points from an organizational tree position to the real artifact that
+    # fulfils it.
+    REALIZED_BY = "realized_by"
+    # FORGE-260: HierarchyNode --INSTANCE_OF--> BOMItem, for a COTS leaf
+    # position (e.g. one of 3 identical igus RL-SE-80-50 actuator mounting
+    # positions) -- the position is an instance of one canonical component
+    # record, not a duplicate of it. How MANY of this instance the parent
+    # uses is the parent's own CONTAINS edge quantity, not this edge.
+    INSTANCE_OF = "instance_of"
