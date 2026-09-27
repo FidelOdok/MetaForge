@@ -46,6 +46,7 @@ class TwinServer(McpToolServer):
         decision_recorder: Any = None,
         geometry_recorder: Any = None,
         measure_tool: Any = None,
+        assembly_info_tool: Any = None,
         proposal_recorder: Any = None,
         constraint_recorder: Any = None,
         engineering_entity_recorder: Any = None,
@@ -90,6 +91,16 @@ class TwinServer(McpToolServer):
         # None keeps tool_registry free of api_gateway/bridge imports, same
         # injection seam as every recorder above.
         self._measure_tool = measure_tool
+        # FORGE-245: an injected async ``assembly_info(session_id) -> dict``
+        # (``{"parts": [...], "joints": [...]}``) that reads a still-live
+        # FreeCAD session's assembly structure (freecad.describe_session +
+        # freecad.list_joints) at commit time, so a commit-by-reference call
+        # carries the parts/joints defined in the session instead of losing
+        # them the moment the session's TTL expires. Same lazily-bound
+        # MCP-bridge seam as measure_tool -- see
+        # api_gateway/server.py's _LazyBridgeAssemblyInfo. None skips the
+        # derivation (an explicit 'assembly' in extra_metadata still wins).
+        self._assembly_info_tool = assembly_info_tool
         # MET-548: an injected async ``propose(...)`` that files a reviewable
         # design-change proposal (HITL) instead of mutating the twin directly.
         # Built in api_gateway over the ApprovalWorkflow; None keeps
@@ -1826,6 +1837,23 @@ class TwinServer(McpToolServer):
         # stored script belongs to.
         source_tool = arguments.get("source_tool")
         source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
+        # FORGE-245: a caller (e.g. domain_agents.shared.commit_geometry,
+        # used by the create_assembly/generate_cad/generate_enclosure
+        # skills) has always sent its own 'extra_metadata' argument
+        # (measured properties, and now assembly {parts, joints}), but
+        # this handler never read it back out -- it was silently dropped
+        # on every commit-by-reference AND commit-by-blob call. Read it as
+        # the base every derivation below adds to (never replaces), so an
+        # explicit caller value always survives.
+        caller_metadata = arguments.get("extra_metadata")
+        extra_metadata: dict[str, Any] = (
+            dict(caller_metadata) if isinstance(caller_metadata, dict) else {}
+        )
+        _MEASURED_KEYS = ("volume_mm3", "surface_area_mm2", "mass_kg", "bbox_mm")
+
+        def _has_measured_keys(d: dict[str, Any]) -> bool:
+            return any(k in d for k in _MEASURED_KEYS)
+
         # FORGE-100 remainder: 'properties' already accepted measured values
         # (volume_mm3, mass_kg, ...), but the recorder only ever nested them
         # under metadata.geometry_features.properties -- never the top-level
@@ -1835,7 +1863,6 @@ class TwinServer(McpToolServer):
         # Flatten the same canonical keys measured_metadata_from_cad_result()
         # (domain_agents/shared/commit_geometry.py) uses for the skill paths,
         # in ADDITION to the existing nested structure kept for back-compat.
-        extra_metadata: dict[str, Any] | None = None
         if isinstance(properties, dict):
             flattened = {
                 key: properties[key]
@@ -1845,7 +1872,7 @@ class TwinServer(McpToolServer):
             bbox = properties.get("bounding_box")
             if isinstance(bbox, dict):
                 flattened["bbox_mm"] = bbox
-            extra_metadata = flattened or None
+            extra_metadata.update(flattened)
         # FORGE-100/FORGE-233: the model still doesn't reliably pass
         # 'properties' on a commit-by-reference call, even though
         # freecad.export_model's own response already carried the measured
@@ -1862,7 +1889,7 @@ class TwinServer(McpToolServer):
         has_session_ref = (
             isinstance(session_id, str) and session_id and isinstance(obj_id, str) and obj_id
         )
-        if extra_metadata is None and has_session_ref and self._measure_tool is not None:
+        if not _has_measured_keys(extra_metadata) and has_session_ref and self._measure_tool:
             try:
                 measured = await self._measure_tool(session_id, obj_id)
             except Exception as exc:  # noqa: BLE001 — a commit must not fail over a measurement
@@ -1883,15 +1910,35 @@ class TwinServer(McpToolServer):
                 if isinstance(bbox, dict):
                     flattened["bbox_mm"] = bbox
                 if flattened:
-                    extra_metadata = flattened
+                    extra_metadata.update(flattened)
                     if not isinstance(properties, dict):
                         properties = measured
         # Same "unobserved, not vacuous" flag as before (FORGE-105 tracks
         # making the constraint evaluator itself honest about it) -- now
         # only reached when derivation above wasn't available or found
         # nothing, not on every commit-by-reference call.
-        if extra_metadata is None and has_session_ref:
-            extra_metadata = {"measured_properties_missing": True}
+        if not _has_measured_keys(extra_metadata) and has_session_ref:
+            extra_metadata["measured_properties_missing"] = True
+        # FORGE-245: same lazy-derivation idea as measure_tool above, for
+        # the parts/joints a live FreeCAD session's assembly is made of --
+        # otherwise they're lost the moment the session's TTL expires,
+        # since the STEP alone carries only merged geometry. An explicit
+        # caller-supplied 'assembly' (skill paths that already know their
+        # own parts/joints) always wins over this derivation.
+        if "assembly" not in extra_metadata and has_session_ref and self._assembly_info_tool:
+            try:
+                assembly_info = await self._assembly_info_tool(session_id)
+            except Exception as exc:  # noqa: BLE001 — a commit must not fail over this
+                logger.warning(
+                    "commit_geometry_assembly_info_derivation_failed",
+                    session_id=session_id,
+                    error=str(exc),
+                )
+                assembly_info = None
+            if isinstance(assembly_info, dict) and (
+                assembly_info.get("parts") or assembly_info.get("joints")
+            ):
+                extra_metadata["assembly"] = assembly_info
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,

@@ -323,10 +323,46 @@ class TestCreateAssemblyHandler:
         )
 
         commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
-        assert commit_call[1]["extra_metadata"] == {
-            "volume_mm3": 45000.0,
-            "mass_kg": 0.1215,
-        }
+        extra_metadata = commit_call[1]["extra_metadata"]
+        assert extra_metadata["volume_mm3"] == 45000.0
+        assert extra_metadata["mass_kg"] == 0.1215
+        # FORGE-245: the committed node also carries which parts (and
+        # mating constraints) made up the assembly, not just measured
+        # properties -- the dashboard Assembly tab needs this without a
+        # live (TTL-bound) FreeCAD/CadQuery session.
+        assert extra_metadata["assembly"]["parts"] == [
+            {"name": "base", "file": "parts/base.step", "location": {}}
+        ]
+        assert extra_metadata["assembly"]["joints"] == []
+
+    async def test_commit_threads_constraints_as_assembly_joints(self, tmp_path):
+        """FORGE-245: mating constraints are this skill's own joint-like
+        concept -- they must reach the committed node's assembly metadata
+        alongside the parts list, not be silently dropped."""
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        step_file = tmp_path / "assembly.step"
+        step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ctx.mcp.register_tool_response(
+            "cadquery.create_assembly", {**ASSEMBLY_RESULT, "assembly_file": str(step_file)}
+        )
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry", name="Commit")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            CreateAssemblyInput(
+                name="Gripper Assembly",
+                work_product_id=work_product.id,
+                parts=[
+                    AssemblyPart(name="base", file="parts/base.step"),
+                    AssemblyPart(name="arm", file="parts/arm.step"),
+                ],
+                constraints=[AssemblyConstraint(part_a="base", part_b="arm", type="Point")],
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        joints = commit_call[1]["extra_metadata"]["assembly"]["joints"]
+        assert joints == [{"part_a": "base", "part_b": "arm", "type": "Point"}]
 
     def test_name_is_required_and_non_empty(self):
         with pytest.raises(ValidationError):

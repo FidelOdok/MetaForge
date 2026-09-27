@@ -1186,6 +1186,252 @@ class TestCommitGeometryMeasureToolDerivation:
 
 
 # ---------------------------------------------------------------------------
+# twin.commit_geometry -- caller-supplied extra_metadata was silently
+# dropped (FORGE-245)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryReadsCallerExtraMetadata:
+    """Before FORGE-245, commit_geometry's handler never read
+    arguments['extra_metadata'] at all -- a caller (e.g.
+    domain_agents.shared.commit_geometry, used by the create_assembly/
+    generate_cad/generate_enclosure skills) that sent one had it silently
+    dropped on every commit, whether by blob or by session reference."""
+
+    async def test_caller_supplied_extra_metadata_reaches_the_recorder(self) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "name": "Gripper Assembly",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "extra_metadata": {
+                        "assembly": {
+                            "parts": [{"name": "base", "file": "parts/base.step"}],
+                            "joints": [],
+                        }
+                    },
+                },
+            )
+        )
+
+        assert received["extra_metadata"] == {
+            "assembly": {
+                "parts": [{"name": "base", "file": "parts/base.step"}],
+                "joints": [],
+            }
+        }
+
+    async def test_measured_properties_merge_alongside_caller_supplied_assembly(self) -> None:
+        """The two derivations must coexist -- neither one clobbers the
+        other's keys."""
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "name": "Gripper Assembly",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "properties": {"volume_mm3": 1800.0},
+                    "extra_metadata": {"assembly": {"parts": [], "joints": []}},
+                },
+            )
+        )
+
+        assert received["extra_metadata"] == {
+            "assembly": {"parts": [], "joints": []},
+            "volume_mm3": 1800.0,
+        }
+
+
+# ---------------------------------------------------------------------------
+# twin.commit_geometry -- assembly_info_tool derivation (FORGE-245)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryAssemblyInfoDerivation:
+    """When an assembly_info_tool is wired in, commit_geometry attaches the
+    still-live FreeCAD session's parts/joints to a commit-by-reference
+    call -- otherwise they're lost the moment the session's TTL expires,
+    since the committed STEP carries only merged geometry with no
+    part/joint structure of its own. Reported live: 'Arm Assembly v1'
+    (twin.commit_geometry), 'Arm Assembly v3'
+    (skill_mechanical_create_assembly), and five forge-cad-build
+    sub-assemblies all had assembly: null on the node."""
+
+    async def test_derives_and_attaches_assembly_info_when_absent(self) -> None:
+        received: dict[str, Any] = {}
+        info_calls: list[str] = []
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def assembly_info_tool(session_id: str) -> dict[str, Any]:
+            info_calls.append(session_id)
+            return {
+                "parts": [{"name": "base", "obj_id": "o1"}, {"name": "arm", "obj_id": "o2"}],
+                "joints": [{"name": "j1", "type": "revolute", "base": "base", "follower": "arm"}],
+            }
+
+        srv = TwinServer(
+            twin=_FakeTwin(), geometry_recorder=recorder, assembly_info_tool=assembly_info_tool
+        )
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Arm Assembly v1",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert info_calls == ["s1"]
+        assert received["extra_metadata"]["assembly"] == {
+            "parts": [{"name": "base", "obj_id": "o1"}, {"name": "arm", "obj_id": "o2"}],
+            "joints": [{"name": "j1", "type": "revolute", "base": "base", "follower": "arm"}],
+        }
+
+    async def test_explicit_assembly_still_wins_over_derivation(self) -> None:
+        """A caller that already knows its own parts/joints (e.g. the
+        create_assembly skill) must not have that overwritten by a
+        server-side session-lookup guess."""
+        received: dict[str, Any] = {}
+        info_calls: list[str] = []
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def assembly_info_tool(session_id: str) -> dict[str, Any]:
+            info_calls.append(session_id)
+            return {"parts": [{"name": "should-not-be-used"}], "joints": []}
+
+        srv = TwinServer(
+            twin=_FakeTwin(), geometry_recorder=recorder, assembly_info_tool=assembly_info_tool
+        )
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Arm Assembly v1",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "extra_metadata": {"assembly": {"parts": [{"name": "explicit"}], "joints": []}},
+                },
+            )
+        )
+
+        assert info_calls == []
+        assert received["extra_metadata"]["assembly"] == {
+            "parts": [{"name": "explicit"}],
+            "joints": [],
+        }
+
+    async def test_empty_derivation_result_leaves_no_assembly_key(self) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def assembly_info_tool(session_id: str) -> dict[str, Any]:
+            return {}  # e.g. describe_session failed, or the session had nothing
+
+        srv = TwinServer(
+            twin=_FakeTwin(), geometry_recorder=recorder, assembly_info_tool=assembly_info_tool
+        )
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Solo Part",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert "assembly" not in received.get("extra_metadata", {})
+
+    async def test_a_raising_assembly_info_tool_does_not_fail_the_commit(self) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def assembly_info_tool(session_id: str) -> dict[str, Any]:
+            raise RuntimeError("adapter unreachable")
+
+        srv = TwinServer(
+            twin=_FakeTwin(), geometry_recorder=recorder, assembly_info_tool=assembly_info_tool
+        )
+        result = await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "assembly_4",
+                    "name": "Arm Assembly v1",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert json.loads(result)["result"]["data"]["node_id"] == "node-1"
+        assert "assembly" not in received.get("extra_metadata", {})
+
+    async def test_no_session_id_skips_derivation_entirely(self) -> None:
+        """A stateless blob commit (no session_id/obj_id) has no live
+        session to inspect -- the tool must not be called at all."""
+        received: dict[str, Any] = {}
+        info_calls: list[str] = []
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def assembly_info_tool(session_id: str) -> dict[str, Any]:
+            info_calls.append(session_id)
+            return {"parts": [{"name": "x"}], "joints": []}
+
+        srv = TwinServer(
+            twin=_FakeTwin(), geometry_recorder=recorder, assembly_info_tool=assembly_info_tool
+        )
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "name": "Standalone Part",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                },
+            )
+        )
+
+        assert info_calls == []
+        assert "assembly" not in received.get("extra_metadata", {})
+
+
+# ---------------------------------------------------------------------------
 # Subgraph serialisation helper
 # ---------------------------------------------------------------------------
 

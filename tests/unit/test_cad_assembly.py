@@ -128,6 +128,17 @@ async def test_build_assembly_authors_all_parts_and_commits() -> None:
     assert recorded["step_base64"] == "U1RFUA=="
     assert recorded["name"] == "Gimbal Base"
     assert recorded["extra_metadata"]["part_count"] == 3
+    # FORGE-245: the dashboard Assembly tab reads a real {parts, joints}
+    # structure off the committed node, not a bare boolean flag -- this
+    # builder never authors joints itself, so "joints" is honestly empty.
+    assembly_meta = recorded["extra_metadata"]["assembly"]
+    assert assembly_meta["joints"] == []
+    assert [p["name"] for p in assembly_meta["parts"]] == [
+        "Base Plate",
+        "Yaw Housing",
+        "Tripod Boss",
+    ]
+    assert all(p["obj_id"] for p in assembly_meta["parts"])
 
 
 @pytest.mark.asyncio
