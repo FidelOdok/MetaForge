@@ -259,6 +259,38 @@ class TestGenerateCadIrHandler:
         assert output.twin_node_id == "node-456"
         assert output.model_url == "https://twin.local/models/node-456"
         assert output.commit_error is None
+        assert output.already_committed is False
+
+    async def test_already_committed_flag_relayed_from_commit_geometry(self, tmp_path, monkeypatch):
+        """FORGE-237: twin.commit_geometry itself reports already_committed
+        when identical geometry under this name already exists (a no-op,
+        not a new node) -- the skill's own output must relay that so the
+        model doesn't call commit_geometry again for the same part."""
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response(
+            "twin.commit_geometry",
+            {
+                "node_id": "node-456",
+                "model_url": "https://twin.local/models/node-456",
+                "already_committed": True,
+                "message": "'Test Part' with this exact geometry is already committed",
+            },
+        )
+
+        output = await handler.execute(
+            GenerateCadIrInput(
+                name="Test Part",
+                work_product_id=work_product.id,
+                entities=_BRACKET_ENTITIES,
+                project_id="13d60463-433b-4735-af07-690cbf8e07b9",
+            )
+        )
+
+        assert output.committed is True
+        assert output.already_committed is True
+        assert output.twin_node_id == "node-456"
 
     def test_name_is_required_and_non_empty(self):
         with pytest.raises(ValidationError):

@@ -426,6 +426,107 @@ class TestScriptAndGeometryFeatures:
         assert "script_node_id" not in result
 
 
+class TestDuplicateContentIsANoOp:
+    """FORGE-237: live-observed one turn producing THREE "Upper Arm Link"
+    cad_model nodes (two generate_cad_ir auto-commits + one explicit
+    commit_geometry, all the same geometry) -- nothing compared content_hash
+    before creating a new node."""
+
+    async def test_identical_scriptless_recommit_returns_the_existing_node(
+        self, patched_blob_store: dict
+    ) -> None:
+        from uuid import UUID
+
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "44444444-4444-4444-4444-444444444444"
+
+        v1 = await record(step_base64=_STEP_B64, name="Upper Arm Link", project_id=project_id)
+        v2 = await record(step_base64=_STEP_B64, name="Upper Arm Link", project_id=project_id)
+        v3 = await record(step_base64=_STEP_B64, name="Upper Arm Link", project_id=project_id)
+
+        assert v2["node_id"] == v1["node_id"]
+        assert v3["node_id"] == v1["node_id"]
+        assert v2["already_committed"] is True
+        assert v3["already_committed"] is True
+        assert "already_committed" not in v1
+
+        # Only ONE cad_model node ever got created -- not three.
+        cad_models = await twin.list_work_products(project_id=UUID(project_id))
+        assert len(cad_models) == 1
+
+    async def test_already_committed_message_names_the_existing_node(
+        self, patched_blob_store: dict
+    ) -> None:
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "55555555-5555-5555-5555-555555555555"
+
+        v1 = await record(step_base64=_STEP_B64, name="Bracket", project_id=project_id)
+        v2 = await record(step_base64=_STEP_B64, name="Bracket", project_id=project_id)
+
+        assert v1["node_id"] in v2["message"]
+
+    async def test_different_geometry_same_name_still_versions_normally(
+        self, patched_blob_store: dict
+    ) -> None:
+        """A genuinely different STEP body under the same name must still
+        create a new node + SUPERSEDES link -- the short circuit is keyed
+        on content_hash, not just name."""
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "66666666-6666-6666-6666-666666666666"
+        other_step_b64 = base64.b64encode(
+            b"ISO-10303-21;\nHEADER;\na genuinely different body\nENDSEC;\n"
+        ).decode("ascii")
+
+        v1 = await record(step_base64=_STEP_B64, name="Bracket", project_id=project_id)
+        v2 = await record(step_base64=other_step_b64, name="Bracket", project_id=project_id)
+
+        assert v2["node_id"] != v1["node_id"]
+        assert v2["supersedes_node_id"] == v1["node_id"]
+        assert "already_committed" not in v2
+
+    async def test_a_script_source_still_versions_even_with_identical_geometry(
+        self, patched_blob_store: dict, tmp_path
+    ) -> None:
+        """A caller supplying script_source is deliberately authoring a new
+        revision -- must still version even when the STEP bytes happen to
+        be byte-identical to the current node (mirrors
+        test_regenerating_same_name_links_supersedes_chain, just isolating
+        the "identical geometry" leg of it)."""
+        from api_gateway.twin.git_repo_registry import GitRepoRegistry
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        registry = GitRepoRegistry(twin.graph, tmp_path / "repo")
+        record = make_geometry_recorder(twin, None, registry)
+        project_id = "77777777-7777-7777-7777-777777777777"
+
+        v1 = await record(
+            step_base64=_STEP_B64,
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(10)\n",
+        )
+        v2 = await record(
+            step_base64=_STEP_B64,  # byte-identical geometry
+            name="Bracket",
+            project_id=project_id,
+            script_source="pad(10)  # re-run, unchanged\n",
+        )
+
+        assert v2["node_id"] != v1["node_id"]
+        assert v2["supersedes_node_id"] == v1["node_id"]
+        assert "already_committed" not in v2
+
+
 @pytest.mark.asyncio
 async def test_unconstrained_warning_paths() -> None:
     from api_gateway.twin.geometry_recorder import _unconstrained_warning
