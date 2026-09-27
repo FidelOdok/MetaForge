@@ -13,6 +13,7 @@ from twin_core.models import (
     Datasheet,
     EdgeType,
     EngineeringEntity,
+    HierarchyNode,
     WorkProduct,
     WorkProductType,
 )
@@ -963,3 +964,66 @@ class TestEngineeringEntityRevisionUpdates:
     async def test_unknown_entity_raises_key_error(self, api):
         with pytest.raises(KeyError):
             await api.update_engineering_entity(uuid4(), {"statement": "x"})
+
+
+class TestHierarchyNode:
+    """FORGE-260 (gap G-B1): the product hierarchy tree's node CRUD."""
+
+    async def test_create_and_get(self, api):
+        node = HierarchyNode(name="6-DOF Arm", kind="product")
+        created = await api.create_hierarchy_node(node)
+        assert created.id == node.id
+
+        fetched = await api.get_hierarchy_node(node.id)
+        assert fetched is not None
+        assert fetched.name == "6-DOF Arm"
+        assert fetched.kind == "product"
+
+    async def test_get_unknown_returns_none(self, api):
+        assert await api.get_hierarchy_node(uuid4()) is None
+
+    async def test_get_non_hierarchy_node_returns_none(self, api):
+        """A real node id of the WRONG type must not be returned as one --
+        mirrors get_engineering_entity's own isinstance guard."""
+        wp = WorkProduct(
+            name="Bracket",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path="",
+            content_hash="x",
+            format="step",
+            created_by="test",
+        )
+        created = await api.create_work_product(wp)
+        assert await api.get_hierarchy_node(created.id) is None
+
+    async def test_duplicate_id_raises(self, api):
+        node = HierarchyNode(name="Base", kind="subsystem")
+        await api.create_hierarchy_node(node)
+        with pytest.raises(ValueError):
+            await api.create_hierarchy_node(node)
+
+    async def test_list_scopes_by_project_and_kind(self, api):
+        pid = uuid4()
+        product = HierarchyNode(name="Arm", kind="product", project_id=pid)
+        subsystem = HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        other_project = HierarchyNode(name="Other", kind="product", project_id=uuid4())
+        for n in (product, subsystem, other_project):
+            await api.create_hierarchy_node(n)
+
+        scoped = await api.list_hierarchy_nodes(project_id=pid)
+        assert {n.id for n in scoped} == {product.id, subsystem.id}
+
+        by_kind = await api.list_hierarchy_nodes(project_id=pid, kind="product")
+        assert [n.id for n in by_kind] == [product.id]
+
+    async def test_contains_edge_carries_quantity(self, api):
+        """CONTAINS is already a real EdgeType -- FORGE-260 needs zero
+        schema changes to carry {quantity, placement} on it."""
+        parent = await api.create_hierarchy_node(HierarchyNode(name="Base", kind="subsystem"))
+        child = await api.create_hierarchy_node(HierarchyNode(name="Standoff", kind="assembly"))
+        edge = await api.add_edge(
+            parent.id, child.id, EdgeType.CONTAINS, {"quantity": 4, "placement": {"x": 10}}
+        )
+        assert edge.metadata["quantity"] == 4
+        assert edge.metadata["placement"] == {"x": 10}

@@ -63,6 +63,8 @@ class TwinServer(McpToolServer):
         evidence_recorder: Any = None,
         claim_recorder: Any = None,
         ect_bridge: Any = None,
+        hierarchy_node_recorder: Any = None,
+        hierarchy_rollup_fn: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -190,6 +192,18 @@ class TwinServer(McpToolServer):
         # imports (see twin_core.transactions.ect's own callers -- this
         # bridge is built in api_gateway, which may import twin_core).
         self._ect_bridge = ect_bridge
+        # FORGE-260 (gap G-B1): an injected async ``record(...)`` that
+        # creates one HierarchyNode + its CONTAINS/REALIZED_BY/INSTANCE_OF
+        # edges (api_gateway/twin/hierarchy_recorder.py). Same injection
+        # seam as every recorder above; None keeps tool_registry free of
+        # twin_core imports (a HierarchyNode instance must be constructed
+        # to persist it, same reason document_recorder is injected rather
+        # than built here).
+        self._hierarchy_node_recorder = hierarchy_node_recorder
+        # FORGE-260: an injected async ``rollup(root_id: str) -> dict``
+        # wrapping ``twin_core.consistency.hierarchy_rollup.
+        # compute_hierarchy_rollup`` -- same injection seam, same reason.
+        self._hierarchy_rollup_fn = hierarchy_rollup_fn
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -227,6 +241,10 @@ class TwinServer(McpToolServer):
             self._register_record_claim()
         if ect_bridge is not None:
             self._register_ect_tools()
+        if hierarchy_node_recorder is not None:
+            self._register_record_hierarchy_node()
+        if hierarchy_rollup_fn is not None:
+            self._register_compute_hierarchy_rollup()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -3144,3 +3162,191 @@ class TwinServer(McpToolServer):
         self, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         return await self._ect_bridge.mark_rolled_back(arguments)
+
+    # ------------------------------------------------------------------
+    # twin.record_hierarchy_node / twin.compute_hierarchy_rollup
+    # (FORGE-260, gap G-B1)
+    # ------------------------------------------------------------------
+
+    _HIERARCHY_NODE_KINDS = ("product", "system", "subsystem", "assembly")
+
+    def _register_record_hierarchy_node(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_hierarchy_node",
+                adapter_id="twin",
+                name="Record Hierarchy Node",
+                description=(
+                    "Persist one position in the project's product hierarchy "
+                    "tree (product/system/subsystem/assembly) -- the "
+                    "organizational structure a design's real parts and "
+                    "components hang off of, distinct from the twin's other "
+                    "'by type' views. Pass parent_id to nest this node under "
+                    "an existing one (creates a CONTAINS edge carrying "
+                    "quantity -- how many of THIS child the parent has); "
+                    "pass realized_by_node_id (a cad_model/robot_description "
+                    "work product id) once this position has real geometry; "
+                    "pass instance_of_node_id (a BOMItem id) for a COTS leaf "
+                    "position, so repeated identical parts (e.g. 3 actuators) "
+                    "share one canonical component record instead of each "
+                    "duplicating it. Use twin.compute_hierarchy_rollup "
+                    "afterwards to total mass/cost over a branch."
+                ),
+                capability="twin_hierarchy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Human-readable name, e.g. 'Upper Arm'.",
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": list(self._HIERARCHY_NODE_KINDS),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                        "parent_id": {
+                            "type": "string",
+                            "description": (
+                                "An existing HierarchyNode's id to nest this one under. "
+                                "Omit only for the tree's own root (e.g. the Product node)."
+                            ),
+                        },
+                        "quantity": {
+                            "type": "number",
+                            "default": 1,
+                            "description": (
+                                "How many of this child the parent has -- weights this "
+                                "whole branch's rolled-up mass/cost by this factor. "
+                                "Only meaningful with parent_id."
+                            ),
+                        },
+                        "placement": {
+                            "type": "object",
+                            "description": (
+                                "Optional placement/transform for this child within its "
+                                "parent (e.g. {'x':0,'y':0,'z':120,'rotation_deg':90}). "
+                                "Only meaningful with parent_id."
+                            ),
+                        },
+                        "realized_by_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A cad_model/robot_description work product id giving "
+                                "this position its real geometry (REALIZED_BY edge)."
+                            ),
+                        },
+                        "instance_of_node_id": {
+                            "type": "string",
+                            "description": (
+                                "A BOMItem id this COTS leaf position is an instance of "
+                                "(INSTANCE_OF edge)."
+                            ),
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": (
+                                "Extra structured fields (maturity, lifecycle risk, ...)."
+                            ),
+                        },
+                    },
+                    "required": ["name", "kind"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "parent_linked": {"type": "boolean"},
+                        "realized_by_linked": {"type": "boolean"},
+                        "instance_of_linked": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.record_hierarchy_node,
+        )
+
+    async def record_hierarchy_node(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = arguments.get("name")
+        kind = arguments.get("kind")
+        if not name or not isinstance(name, str):
+            raise ValueError("twin.record_hierarchy_node: 'name' is required (non-empty string)")
+        if kind not in self._HIERARCHY_NODE_KINDS:
+            raise ValueError(
+                f"twin.record_hierarchy_node: 'kind' must be one of {self._HIERARCHY_NODE_KINDS}"
+            )
+        project_id = arguments.get("project_id")
+        parent_id = arguments.get("parent_id")
+        quantity = arguments.get("quantity", 1)
+        placement = arguments.get("placement")
+        realized_by_node_id = arguments.get("realized_by_node_id")
+        instance_of_node_id = arguments.get("instance_of_node_id")
+        metadata = arguments.get("metadata")
+        return await self._hierarchy_node_recorder(
+            name=name,
+            kind=kind,
+            project_id=project_id if isinstance(project_id, str) else None,
+            parent_id=parent_id if isinstance(parent_id, str) else None,
+            quantity=quantity if isinstance(quantity, (int, float)) else 1,
+            placement=placement if isinstance(placement, dict) else None,
+            realized_by_node_id=(
+                realized_by_node_id if isinstance(realized_by_node_id, str) else None
+            ),
+            instance_of_node_id=(
+                instance_of_node_id if isinstance(instance_of_node_id, str) else None
+            ),
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+
+    def _register_compute_hierarchy_rollup(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.compute_hierarchy_rollup",
+                adapter_id="twin",
+                name="Compute Hierarchy Rollup",
+                description=(
+                    "Total mass/cost over one branch of the product hierarchy "
+                    "tree (root_id and everything it CONTAINS, recursively, "
+                    "weighted by each CONTAINS edge's own quantity). Reads "
+                    "mass_kg from each node's REALIZED_BY-linked cad_model and "
+                    "cost from each node's INSTANCE_OF-linked BOMItem -- "
+                    "computed live, never cached, so it can't go stale "
+                    "relative to its children."
+                ),
+                capability="twin_hierarchy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "root_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The HierarchyNode id to total from.",
+                        },
+                    },
+                    "required": ["root_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "root_id": {"type": "string"},
+                        "mass_kg": {"type": "number"},
+                        "cost": {"type": "number"},
+                        "node_count": {"type": "integer"},
+                        "skipped_node_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.compute_hierarchy_rollup,
+        )
+
+    async def compute_hierarchy_rollup(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        root_id = arguments.get("root_id")
+        if not root_id or not isinstance(root_id, str):
+            raise ValueError(
+                "twin.compute_hierarchy_rollup: 'root_id' is required (non-empty string)"
+            )
+        return await self._hierarchy_rollup_fn(root_id)

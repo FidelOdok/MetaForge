@@ -311,6 +311,15 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.twin_model import TwinModel
 
             return TwinModel.model_validate(data)
+        elif node_type == NodeType.HIERARCHY_NODE:
+            # Same FORGE-68 failure mode -- without this branch a
+            # HierarchyNode read back from Neo4j degrades to a bare
+            # NodeBase, losing kind/name entirely, and
+            # compute_hierarchy_rollup's tree walk (FORGE-260) silently
+            # treats every node as massless/costless past the first hop.
+            from twin_core.models.hierarchy_node import HierarchyNode
+
+            return HierarchyNode.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 

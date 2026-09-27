@@ -457,6 +457,33 @@ class DesignElement(NodeBase):
 
 *Source: `twin_core/models/design_element.py`*
 
+### 2.10 HierarchyNode
+
+A HierarchyNode is one position in a project's product hierarchy tree (product -> system -> subsystem -> assembly), added in FORGE-260 (gap G-B1). One generic node type discriminated by `kind` -- the same "common base, not eight bespoke classes" pattern `EngineeringEntity` already uses -- rather than a class per organizational level. A fabricated part or COTS component is deliberately NOT a HierarchyNode: it's the already-real `WorkProductType.CAD_MODEL` or `BOMItem` a leaf HierarchyNode links to via `REALIZED_BY`/`INSTANCE_OF`, never duplicated.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | `UUID` | Yes | Unique identifier (inherited from `NodeBase`) |
+| `node_type` | `NodeType` | Yes | Always `NodeType.HIERARCHY_NODE` |
+| `kind` | `str` | Yes | One of `product` \| `system` \| `subsystem` \| `assembly` |
+| `name` | `str` | Yes | Human-readable name, e.g. `"Upper Arm"` |
+| `created_by` | `str` | No | Tool/agent that created this node |
+| `metadata` | `dict` | No | Type-specific/derived fields (maturity, lifecycle risk, ...) |
+
+```python
+class HierarchyNode(NodeBase):
+    id: UUID = Field(default_factory=uuid4)
+    node_type: NodeType = NodeType.HIERARCHY_NODE
+    kind: Literal["product", "system", "subsystem", "assembly"]
+    name: str
+    created_by: str = ""
+    metadata: dict = Field(default_factory=dict)
+```
+
+Rolled-up mass/cost are deliberately NOT cached fields here -- see `twin_core.consistency.hierarchy_rollup.compute_hierarchy_rollup`, computed live over the `CONTAINS` tree so a rollup can never go stale relative to its children.
+
+*Source: `twin_core/models/hierarchy_node.py`*
+
 ---
 
 ## 3. Edge Types
@@ -468,13 +495,15 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 | `DEPENDS_ON` | WorkProduct -> WorkProduct | WorkProduct A requires WorkProduct B (e.g., PCB depends on schematic) |
 | `IMPLEMENTS` | WorkProduct -> WorkProduct | WorkProduct A implements the spec defined in WorkProduct B |
 | `VALIDATES` | WorkProduct -> WorkProduct | WorkProduct A (test result) validates WorkProduct B (design) |
-| `CONTAINS` | WorkProduct -> WorkProduct | WorkProduct A contains WorkProduct B (hierarchical composition) |
+| `CONTAINS` | WorkProduct -> WorkProduct, or HierarchyNode -> HierarchyNode | Hierarchical composition. FORGE-260: `metadata` carries `{quantity, placement}` when nesting one product-hierarchy position inside another |
 | `VERSIONED_BY` | WorkProduct -> Version | Links an work_product to the version that last modified it |
 | `CONSTRAINED_BY` | WorkProduct -> Constraint | Constraint applies to this work_product |
 | `PRODUCED_BY` | WorkProduct -> Agent | WorkProduct was produced or modified by this agent |
 | `USES_COMPONENT` | WorkProduct -> Component | WorkProduct references this component (e.g., BOM uses resistor) |
-| `PARENT_OF` | Version -> Version | Version lineage (parent -> child) |
+| `PARENT_OF` | Version -> Version (also used for WorkProduct -> WorkProduct provenance, e.g. a robot_description's source cad_model parts) | Version lineage / source-artifact provenance |
 | `CONFLICTS_WITH` | Constraint -> Constraint | Two constraints that cannot both be satisfied |
+| `REALIZED_BY` | HierarchyNode -> WorkProduct | FORGE-260: a hierarchy position's real cad_model/robot_description geometry |
+| `INSTANCE_OF` | HierarchyNode -> BOMItem | FORGE-260: a COTS leaf position is an instance of one canonical component record |
 
 ### Typed Edge Models
 

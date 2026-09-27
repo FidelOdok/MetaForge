@@ -750,6 +750,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.evidence_recorder import make_evidence_recorder
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
+    from api_gateway.twin.hierarchy_recorder import (
+        make_hierarchy_node_recorder,
+        make_hierarchy_rollup_fn,
+    )
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
         make_robot_description_updater,
@@ -865,6 +869,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # and tested since FORGE-66/67 but unreachable from any agent --
         # nothing wired it to an MCP tool until this.
         ect_bridge=make_ect_bridge(twin),
+        # FORGE-260 (gap G-B1): the product hierarchy tree -- a project's
+        # structural product/system/subsystem/assembly nesting, distinct
+        # from the twin's other "by type" views.
+        hierarchy_node_recorder=make_hierarchy_node_recorder(twin, project_backend),
+        hierarchy_rollup_fn=make_hierarchy_rollup_fn(twin),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

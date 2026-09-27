@@ -14,6 +14,7 @@ from twin_core.models.engineering_change_transaction import (
 )
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.hierarchy_node import HierarchyNode
 from twin_core.models.patch import Patch, PatchOp, PatchOperation
 from twin_core.models.work_product import WorkProduct
 from twin_core.neo4j_graph_engine import (
@@ -276,6 +277,24 @@ class TestNodeOperations:
         assert isinstance(result, EngineeringEntity)
         assert result.entity_type == "intent"
         assert result.title == "Desktop quadruped intent"
+
+    async def test_get_node_reconstructs_hierarchy_node(self, engine, mock_session) -> None:
+        """FORGE-260/FORGE-68 failure mode: without this branch a
+        HierarchyNode read back from Neo4j degrades to a bare NodeBase,
+        losing kind/name entirely -- compute_hierarchy_rollup's tree walk
+        would then silently treat every node past the first hop as
+        massless/costless instead of raising."""
+        node = HierarchyNode(name="Upper Arm", kind="subsystem")
+        record = _make_mock_record(node)
+
+        mock_result = AsyncMock()
+        mock_result.single = AsyncMock(return_value=record)
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        result = await engine.get_node(node.id)
+        assert isinstance(result, HierarchyNode)
+        assert result.kind == "subsystem"
+        assert result.name == "Upper Arm"
 
     async def test_get_node_reconstructs_engineering_change_transaction(
         self, engine, mock_session
