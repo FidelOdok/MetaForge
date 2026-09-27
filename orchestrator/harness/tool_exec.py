@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from orchestrator.harness.tools import ToolNotFoundError
 from orchestrator.harness.validation import ToolValidationError
 
 CACHED_NOTE = (
@@ -97,7 +98,7 @@ def error_content(exc: Exception) -> str:
     do instead — was flattened into one opaque line, so a model could not tell
     "the container is down, stop trying" from "that argument was wrong, fix it".
     """
-    if isinstance(exc, ToolValidationError):
+    if isinstance(exc, (ToolValidationError, ToolNotFoundError)):
         return render_json(exc.to_payload())
     payload: dict[str, Any] = {"status": "error", "error": str(exc)}
     tool_id = getattr(exc, "tool_id", None)

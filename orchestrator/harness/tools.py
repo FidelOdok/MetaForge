@@ -20,6 +20,7 @@ protocol call, so the registry stays a pure orchestration-layer component.
 
 from __future__ import annotations
 
+import difflib
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -47,7 +48,36 @@ def _slug(value: str) -> str:
 
 
 class ToolNotFoundError(KeyError):
-    """No registered tool with the given name."""
+    """No registered tool with the given name.
+
+    FORGE-236: a weaker model routinely calls a tool by an unprefixed or
+    dotted/slashed name (``twin_commit_geometry``, ``project/list``) instead
+    of the registered ``mcp_<server>_<tool>`` form -- ``KeyError``'s own
+    ``__str__`` (just ``repr(name)``) then reached the model as the ENTIRE
+    error with no explanation, which was live-observed making a model
+    conclude a healthy backend was down. Carries a structured payload
+    (``to_payload``, mirroring ``ToolValidationError``) instead.
+    """
+
+    def __init__(self, name: str, did_you_mean: Sequence[str] = ()) -> None:
+        self.tool = name
+        self.did_you_mean = list(did_you_mean)
+        super().__init__(name)
+
+    def to_payload(self) -> dict[str, Any]:
+        """The structured tool result the model sees."""
+        payload: dict[str, Any] = {
+            "status": "error",
+            "error": "unknown_tool",
+            "tool": self.tool,
+            "hint": (
+                "Tool names are prefixed mcp_<server>_<tool> (e.g. "
+                "mcp_twin_commit_geometry), never dotted/slashed/un-prefixed."
+            ),
+        }
+        if self.did_you_mean:
+            payload["did_you_mean"] = self.did_you_mean
+        return payload
 
 
 class DuplicateToolError(ValueError):
@@ -183,8 +213,34 @@ class ToolRegistry:
     def get(self, name: str) -> ToolSpec:
         try:
             return self._tools[name]
-        except KeyError as exc:
-            raise ToolNotFoundError(name) from exc
+        except KeyError:
+            pass
+        resolved = self._resolve_alias(name)
+        if resolved is not None:
+            logger.info("tool_name_alias_resolved", requested=name, resolved=resolved.name)
+            return resolved
+        raise ToolNotFoundError(name, did_you_mean=self._closest_names(name))
+
+    def _resolve_alias(self, name: str) -> ToolSpec | None:
+        """FORGE-236: resolve an unambiguous alias before giving up.
+
+        ``_slug`` (the same normalization ``mcp_name`` itself uses to build
+        the registered name) turns ``twin.commit_geometry`` / ``twin/commit_
+        geometry`` / ``twin_commit_geometry`` all into the identical
+        ``twin_commit_geometry`` -- prefixing ``mcp_`` (unless the caller
+        already included it) gives exactly one real candidate to check, not
+        a fuzzy guess.
+        """
+        slug = _slug(name)
+        candidates = (slug,) if slug.startswith("mcp_") else (f"mcp_{slug}", slug)
+        for candidate in candidates:
+            spec = self._tools.get(candidate)
+            if spec is not None:
+                return spec
+        return None
+
+    def _closest_names(self, name: str, limit: int = 3) -> list[str]:
+        return difflib.get_close_matches(name, self.names(), n=limit, cutoff=0.4)
 
     def names(self) -> list[str]:
         return sorted(self._tools)
