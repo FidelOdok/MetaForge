@@ -311,6 +311,13 @@ async def anthropic_invoke(
     result: dict[str, Any] = {"text": text, "model": getattr(resp, "model", spec.model)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    # FORGE-235: Anthropic reports "max_tokens" as stop_reason when the
+    # response was cut off at the output-token cap (mid tool-call argument,
+    # usually) rather than the model choosing to stop -- without this, the
+    # native loop's "no tool_calls" branch reads identically to a real
+    # completed turn and reports the wrong cause to the model and user.
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        result["truncated"] = True
     usage = _usage_from(resp)
     if usage:
         result["usage"] = usage
@@ -374,6 +381,12 @@ async def openai_invoke(
         "tool_calls": tool_calls,
         "model": getattr(resp, "model", spec.model),
     }
+    # FORGE-235: OpenAI-compatible APIs (OpenRouter included) report
+    # finish_reason == "length" when the response was cut off at the
+    # output-token cap -- same rationale as anthropic_invoke's stop_reason
+    # check above.
+    if getattr(resp.choices[0], "finish_reason", None) == "length":
+        out["truncated"] = True
     usage = _usage_from(resp, "prompt_tokens", "completion_tokens")
     if usage:
         out["usage"] = usage
