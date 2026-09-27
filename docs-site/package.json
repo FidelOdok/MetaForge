@@ -1,0 +1,33 @@
+{
+  "name": "metaforge-docs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MetaForge documentation site (Docusaurus).",
+  "scripts": {
+    "sync": "node scripts/sync-static.mjs",
+    "start": "npm run sync && docusaurus start",
+    "build": "npm run sync && docusaurus build",
+    "serve": "docusaurus serve --dir build",
+    "clear": "docusaurus clear",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@docusaurus/theme-mermaid": "3.10.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.3",
+    "@mdx-js/react": "^3.0.0",
+    "clsx": "^2.1.1",
+    "prism-react-renderer": "^2.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "redocusaurus": "2.5.2"
+  },
+  "browserslist": {
+    "production": [">0.5%", "not dead", "not op_mini all"],
+    "development": ["last 3 chrome version", "last 3 firefox version", "last 5 safari version"]
+  },
+  "engines": {
+    "node": ">=20.0"
+  }
+}

@@ -28,7 +28,7 @@ The extras are additive — pick the subset you need:
 
 | Extra | Adds |
 |---|---|
-| `dev` | pytest, ruff, mypy, mkdocs-material |
+| `dev` | pytest, ruff, mypy |
 | `knowledge` | LightRAG + asyncpg (pgvector) |
 | `cadquery` | CadQuery CAD kernel |
 | `freecad` | FreeCAD adapter (heavier; only if you need it) |

@@ -14,7 +14,7 @@ Architecture documentation lives in **two places**, split by tense — what is b
 
 ### Live architecture — this repo's `docs/`
 
-The **`docs/`** directory in *this* repo documents the architecture **as implemented**. This is the source of truth for how the system actually works today. It is published as a MkDocs Material site on GitHub Pages at **https://fidelodok.github.io/MetaForge/** (auto-deployed by `.github/workflows/docs.yml` on every push to `main` that touches `docs/`). Key references:
+The **`docs/`** directory in *this* repo documents the architecture **as implemented**. This is the source of truth for how the system actually works today. It is published as a Docusaurus site on GitHub Pages at **https://fidelodok.github.io/MetaForge/** (auto-deployed by `.github/workflows/docs.yml` on every push to `main` that touches `docs/` or `docs-site/`). The markdown stays in `docs/`; `docs-site/` is only the renderer. Key references:
 
 - **Overview**: `docs/architecture.md` — system architecture as built
 - **Harness**: `docs/architecture/robust-harness-design.md` — the agent harness (ReAct loop, providers, tools, gates)
@@ -24,13 +24,13 @@ The **`docs/`** directory in *this* repo documents the architecture **as impleme
 - **Skill / Twin specs**: `docs/skill_spec.md`, `docs/twin_schema.md`
 - **Session capture**: `docs/session-capture.md`
 
-When documenting or reasoning about **current behavior**, use `docs/` — and keep it accurate, since the docs CI builds `--strict` (broken links / warnings fail the build).
+When documenting or reasoning about **current behavior**, use `docs/` — and keep it accurate, since the docs CI fails on a broken link or cross-reference.
 
 **Update documentation before merge.** Any change that alters user-facing behavior, gateway routes, schemas, CLI commands, or architecture must land its `docs/` update **in the same PR** — never as a follow-up. Specifically:
 
-- **Gateway API**: the reference at `docs/reference/gateway-api.md` renders `docs/reference/openapi.json`, which is generated from the live app. When you change a route or response schema, run `python scripts/gen_openapi.py` and commit the regenerated spec so the published reference can't drift.
+- **Gateway API**: the reference at `docs/reference/gateway-api.md` and the explorer at `/reference/openapi/` both render `docs/reference/openapi.json`, which is generated from the live app. When you change a route or response schema, run `python scripts/gen_openapi.py` and commit the regenerated spec so the published reference can't drift.
 - **CLI / behavior / architecture**: update the relevant `docs/` page (e.g. `cli-reference.md`, `architecture.md`, `capability-matrix.md`) alongside the code.
-- Verify locally with `mkdocs build --strict` before opening the PR — this is exactly what CI runs, and it fails on broken links or warnings.
+- Verify locally with `cd docs-site && npm run build && npm test` before opening the PR — this is exactly what CI runs. The build throws on a broken link or a broken markdown cross-reference (the `mkdocs build --strict` equivalent), and the test asserts that every URL the site published before the Docusaurus switch still resolves.
 
 ### Future plans — the MetaForge-Planner repo
 
@@ -129,7 +129,7 @@ for the full command catalog.
 1. **Branch** — Create a feature branch from `main` (e.g., `feat/met-15-twin-api`)
 2. **Implement** — Commit changes to the feature branch
 3. **Test branch** — Run `pytest`, `ruff check .`, `mypy .` on the branch
-4. **Update docs** — Land any required `docs/` updates **in the same PR** (see [Update documentation before merge](#documentation-two-sources-of-truth)); verify with `mkdocs build --strict`
+4. **Update docs** — Land any required `docs/` updates **in the same PR** (see [Update documentation before merge](#documentation-two-sources-of-truth)); verify with `cd docs-site && npm run build && npm test`
 5. **Pull request** — Open a PR to `main` with a summary of changes
 6. **Merge** — Merge the PR into `main` (squash or merge commit)
 7. **Test main** — Verify `main` passes all checks after merge
