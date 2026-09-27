@@ -1979,6 +1979,90 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HierarchyNodeResponse": {
+        "description": "One HierarchyNode, in the dashboard's camelCase shape.",
+        "properties": {
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "massKg": {
+            "title": "Masskg",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentid"
+          },
+          "placement": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "massKg",
+          "cost"
+        ],
+        "title": "HierarchyNodeResponse",
+        "type": "object"
+      },
+      "HierarchyTreeResponse": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyNodeResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "HierarchyTreeResponse",
+        "type": "object"
+      },
       "Hole": {
         "description": "A mounting/fastener hole drilled into a part (local part frame, mm).",
         "properties": {
@@ -9623,6 +9707,56 @@
         "summary": "Create Load Case",
         "tags": [
           "simulation"
+        ]
+      }
+    },
+    "/v1/twin/hierarchy": {
+      "get": {
+        "description": "List a project's hierarchy nodes, each with its parent link and its\nown rolled-up mass/cost.\n\nEmpty (not a 404) when the project has none yet, matching ``/v1/bom``.\nNote: computes one rollup per node (each its own subtree walk) -- fine\nat the scale a hand-built product hierarchy actually reaches, not\noptimized for a tree of thousands of nodes.",
+        "operationId": "get_hierarchy_tree_v1_twin_hierarchy_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyTreeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Hierarchy Tree",
+        "tags": [
+          "twin"
         ]
       }
     },

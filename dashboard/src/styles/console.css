@@ -3310,3 +3310,77 @@ button:disabled {
   font-size: 11px;
   color: var(--mf-c-9a9aaa);
 }
+
+/* ── Structure view (FORGE-261) ──────────────────────────────────────────
+   Reuses .tw-assembly for the shell, same as Manufacturing. A tree-table:
+   one grid-templated row per hierarchy node, indented per depth via inline
+   padding-left (set from JS, not CSS, since depth is unbounded). */
+.tw-structure-tree {
+  margin: 15px 0;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.tw-structure-row {
+  display: grid;
+  grid-template-columns: 24px 20px minmax(120px, 1fr) 90px 50px 70px 70px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+  font-size: 12.5px;
+}
+.tw-structure-row:last-child { border-bottom: none; }
+.tw-structure-header {
+  background: var(--mf-c-191b22);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+  padding-left: 10px !important;
+}
+.tw-structure-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mf-c-9a9aaa);
+  cursor: pointer;
+}
+.tw-structure-toggle:disabled { cursor: default; opacity: 0.4; }
+.tw-structure-toggle .material-symbols-outlined { font-size: 16px; }
+.tw-structure-leaf-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--mf-c-9a9aaa);
+}
+.tw-structure-kind-icon { font-size: 15px; color: var(--mf-c-9a9aaa); }
+.tw-structure-name {
+  background: transparent;
+  border: none;
+  color: var(--mf-c-e2e2eb);
+  font-size: 12.5px;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tw-structure-name:hover { text-decoration: underline; }
+.tw-structure-kind-label {
+  font-size: 11px;
+  color: var(--mf-c-9a9aaa);
+  text-transform: capitalize;
+}
+.tw-structure-qty, .tw-structure-mass, .tw-structure-cost {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: var(--mf-c-9a9aaa);
+  text-align: right;
+}

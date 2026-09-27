@@ -183,7 +183,7 @@ Served by Vite under `dashboard/` — boot with
 | `/approvals` | Pending change-proposal review | gateway approvals API |
 | `/bom` | BOM viewer | `GET /v1/bom/...` |
 | `/sim` | Load-case editor + list, per project (FORGE-278) | `GET/POST /v1/simulation/load-cases` |
-| `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB | `GET /v1/twin/files/...` |
+| `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB; its Structure tab (FORGE-261) shows the product hierarchy tree-table with per-node mass/cost rollups | `GET /v1/twin/files/...`, `GET /v1/twin/hierarchy` |
 | `/files` | Legacy file browser | gateway files API |
 | `/knowledge` | Ingested-sources table (sortable, filterable) | `GET /api/v1/knowledge/sources` |
 | `/knowledge/sources/:id` | Per-source drill-in (placeholder in v1) | _stub_ |
