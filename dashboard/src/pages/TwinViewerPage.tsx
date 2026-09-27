@@ -29,6 +29,7 @@ import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
+import { ManufacturingView } from '../components/viewer/ManufacturingView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { useViewerStore } from '../store/viewer-store';
@@ -621,12 +622,18 @@ function NodeHistorySection({ nodeId }: { nodeId: string }) {
 
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
-type TwinTab = 'graph' | 'model' | 'sim' | 'asm';
+type TwinTab = 'graph' | 'model' | 'sim' | 'asm' | 'mfg';
 type InspectorTab = 'overview' | 'constraints' | 'history';
 type NodeScope = 'all' | 'attention' | string;
 
-const TWIN_TABS: TwinTab[] = ['graph', 'model', 'sim', 'asm'];
-const TAB_LABELS: Record<TwinTab, string> = { graph: 'Graph', model: 'Model', sim: 'Sim', asm: 'Assembly' };
+const TWIN_TABS: TwinTab[] = ['graph', 'model', 'sim', 'asm', 'mfg'];
+const TAB_LABELS: Record<TwinTab, string> = {
+  graph: 'Graph',
+  model: 'Model',
+  sim: 'Sim',
+  asm: 'Assembly',
+  mfg: 'Manufacturing',
+};
 const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history'];
 
 /** Status words that put a node in the "need attention" bucket. */
@@ -830,7 +837,7 @@ export function TwinViewerPage() {
 
   const switchTab = (next: TwinTab) => {
     setTab(next);
-    setViewMode(next === 'graph' || next === 'asm' ? 'graph' : '3d');
+    setViewMode(next === 'model' || next === 'sim' ? '3d' : 'graph');
   };
 
   const selectNode = (id: string | null) => {
@@ -985,6 +992,8 @@ export function TwinViewerPage() {
                 <button onClick={() => setImportOpen(true)}>Import work product</button>
               </div>
             )
+          ) : tab === 'mfg' ? (
+            <ManufacturingView nodes={items} onSelect={selectNode} />
           ) : tab === 'asm' ? (
             <div className="tw-assembly">
               <div className="tw-assembly-heading">
