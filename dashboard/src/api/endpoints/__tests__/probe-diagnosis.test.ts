@@ -91,9 +91,9 @@ describe('probeGateway names the cause it can determine', () => {
     // Same scheme, different origin: the browser did send it, so the cause
     // really is unknown from here. Say that rather than inventing one.
     onPage('http://fidel-dev:3000');
-    const err = await probeGateway('http://fidel-dev:8000').catch((e: Error) => e);
-    expect(err.message).toMatch(/Could not reach/);
-    expect(err.message).not.toMatch(/mixed content/i);
+    const probe = probeGateway('http://fidel-dev:8000');
+    await expect(probe).rejects.toThrow(/Could not reach/);
+    await expect(probe).rejects.not.toThrow(/mixed content/i);
   });
 
   it('still reports a real HTTP error status from the gateway', async () => {
