@@ -319,7 +319,7 @@ never a silently dropped budget. Passing an explicit `budgets=[]`/
 `invariants=[]` still bypasses the Twin lookup, unchanged, for a caller
 evaluating a hypothetical declaration that was never persisted.
 
-### Concept selection / Decision Agent (FORGE-73)
+### Concept selection / Decision Agent (FORGE-73) {#concept-selection-decision-agent-forge-73}
 
 `evaluate_g5_concept_selection`'s checks (viable concept(s), trade study
 performed, rationale captured, selected concept linked to
@@ -352,7 +352,7 @@ execution path yet — so this handler's selection is the LLM's own reasoning,
 not an objective-weighted ranking. Wiring a real read path for engineering
 entities is separate, later work.
 
-### Waiver / release model (FORGE-73)
+### Waiver / release model (FORGE-73) {#waiver-release-model-forge-73}
 
 `evaluate_g8_release`'s "waivers approved" and "build/manufacturing release
 approved" checks used to always come back `NOT_EVALUATED` — there was no

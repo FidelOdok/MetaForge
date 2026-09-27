@@ -5,8 +5,13 @@ on:
     branches: [main]
     paths:
       - docs/**
-      - mkdocs.yml
+      - docs-site/**
       - README.md
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - docs/**
+      - docs-site/**
       - .github/workflows/docs.yml
   workflow_dispatch:
 
@@ -16,37 +21,64 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  # PR previews must not queue behind (or cancel) a production deploy, and two
+  # deploys must never overlap — hence the ref in the group rather than a
+  # single global `pages`.
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, fidel-dev]
+    # GitHub-hosted, not the self-hosted fidel-dev box the other workflows use.
+    #
+    # The first run of this job on fidel-dev took the whole machine off the
+    # network — SSH and ICMP both — and the step died fourteen minutes in with
+    # no log. A Docusaurus production build is a webpack run over ~1500
+    # packages, and that box has form for going down under a heavy build
+    # (MET-643, and the freecad-adapter image build before it).
+    #
+    # Nothing here needs fidel-dev: no MetaForge services, no Docker, no
+    # adapters, no GPU. It is Node and nothing else, the repo is public so
+    # hosted minutes are free, and keeping it off the shared box means a docs
+    # build can no longer take the rest of CI down with it.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
-          cache: pip
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
 
-      - name: Install MkDocs
-        run: pip install mkdocs-material mkdocs-include-markdown-plugin mkdocs-swagger-ui-tag
+      - name: Install
+        working-directory: docs-site
+        run: npm ci
 
-      - name: Build site (strict — fails on warnings or broken links)
-        run: mkdocs build --strict
+      # `onBrokenLinks: 'throw'` and `markdown.hooks.onBrokenMarkdownLinks:
+      # 'throw'` make this the equivalent of the old `mkdocs build --strict`:
+      # a broken cross-reference fails the build rather than shipping a 404.
+      - name: Build site
+        working-directory: docs-site
+        run: npm run build
+
+      - name: Check the published URLs still resolve
+        working-directory: docs-site
+        run: npm test
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./site
+          path: ./docs-site/build
 
   deploy:
+    # Previews build on PRs; only main publishes.
+    if: github.event_name != 'pull_request'
     needs: build
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

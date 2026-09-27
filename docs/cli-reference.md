@@ -200,27 +200,33 @@ Precedence, highest first: an explicit CLI flag, then the
 `METAFORGE_GATEWAY_URL` env var, then the config file, then the built-in
 default.
 
-!!! warning "This changed in MET-729"
-    The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
-    usual convention — an environment variable exists to override persisted
-    config for a single invocation — and it had a real cost: a unit test that
-    set `METAFORGE_GATEWAY_URL` to a dead port to keep itself local was
-    silently ignored, and instead ingested documents into a shared dev
-    gateway on every run (11 such writes in one week, found in that
-    deployment's own logs).
+:::warning[This changed in MET-729]
 
-    If you relied on the old order, note that `forge config set gateway_url`
-    still works exactly as before whenever the env var is unset — which is the
-    normal case. Only a shell that exports `METAFORGE_GATEWAY_URL` now behaves
-    differently, and in that case the export is the more specific instruction.
+The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
+usual convention — an environment variable exists to override persisted
+config for a single invocation — and it had a real cost: a unit test that
+set `METAFORGE_GATEWAY_URL` to a dead port to keep itself local was
+silently ignored, and instead ingested documents into a shared dev
+gateway on every run (11 such writes in one week, found in that
+deployment's own logs).
 
-!!! note "What this does and doesn't configure"
-    `config` stores *your client's* choice of gateway and the per-turn
-    provider/model it sends. To give the gateway a **credential** (API key or a
-    ChatGPT subscription), use [`auth`](#auth-provider-login-selection) — it does
-    not set the `METAFORGE_CHAT_HARNESS` flag, which is a server-side setting.
+If you relied on the old order, note that `forge config set gateway_url`
+still works exactly as before whenever the env var is unset — which is the
+normal case. Only a shell that exports `METAFORGE_GATEWAY_URL` now behaves
+differently, and in that case the export is the more specific instruction.
 
-### `auth` — provider login & selection
+:::
+
+:::note[What this does and doesn't configure]
+
+`config` stores *your client's* choice of gateway and the per-turn
+provider/model it sends. To give the gateway a **credential** (API key or a
+ChatGPT subscription), use [`auth`](#auth-provider-login-selection) — it does
+not set the `METAFORGE_CHAT_HARNESS` flag, which is a server-side setting.
+
+:::
+
+### `auth` — provider login & selection {#auth-provider-login-selection}
 
 ```
 auth list                          # providers with configured/active state
@@ -254,7 +260,7 @@ Active-selection precedence: an explicit `chat --provider/--model` flag → the
 env. If the gateway sets `METAFORGE_HARNESS_ADMIN_TOKEN`, the CLI sends it
 automatically (from the same env var) so writes are authorized.
 
-### `chat` — interactive assistant REPL
+### `chat` — interactive assistant REPL {#chat-interactive-assistant-repl}
 
 ```
 chat [-m MESSAGE] [--thread ID] [--session ID] [--project ID] [--title T]
@@ -727,7 +733,7 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
 | `FORGE_LOG_FILE` | `forge` (TUI) | Override the log path (default `~/.forge/logs/session.log`) |
 
-## Logs & debugging the interactive TUI
+## Logs & debugging the interactive TUI {#logs-debugging-the-interactive-tui}
 
 The interactive `forge` TUI owns the terminal, so it cannot print diagnostics to
 the screen without corrupting the UI. Instead it appends a JSONL session log to

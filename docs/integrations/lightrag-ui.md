@@ -161,7 +161,7 @@ referencing the broken test rather than a UI screenshot.
 ## Phase-1 adoption status (MET-346)
 
 - **Workspace separation policy is pinned.** Per L1-A5 / L1-D1 in
-  [`docs/plans/l1-implementation.md`](../plans/l1-implementation.md),
+  [`docs/plans/l1-implementation.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/plans/l1-implementation.md),
   the gateway and the LightRAG UI keep **separate** pgvector
   workspaces in Phase-1 (`lightrag` and `lightrag_ui` respectively).
   This is intentional — the LightRAG UI is engineer-dogfood scope and
@@ -211,9 +211,9 @@ surface for sources browsing now lives in the Kinetic Console:
 See the L1 status board and the MET-346 adoption record for the full
 sequencing:
 
-- [`docs/plans/l1-implementation.md`](../plans/l1-implementation.md) —
+- [`docs/plans/l1-implementation.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/plans/l1-implementation.md) —
   L1 status board (L1-D / L1-E rows)
-- [`docs/uat/met-346-adoption-checklist-2026-05-10.md`](../uat/met-346-adoption-checklist-2026-05-10.md)
+- [`docs/uat/met-346-adoption-checklist-2026-05-10.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/uat/met-346-adoption-checklist-2026-05-10.md)
   — the L1-D2 adoption-checklist run report
 
 ---
@@ -224,4 +224,4 @@ sequencing:
 - [MET-346](https://linear.app/metaforge/issue/MET-346) — the L1 KnowledgeService spike this UI dogfoods
 - [MET-392](https://linear.app/metaforge/issue/MET-392) — the docker-compose mount task
 - [MET-393](https://linear.app/metaforge/issue/MET-393) — this doc
-- [`docs/architecture/knowledge-ingestion-playbook.md`](../architecture/knowledge-ingestion-playbook.md) — what fields LightRAG's chunking pipeline expects
+- [`docs/architecture/knowledge-ingestion-playbook.md`](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/knowledge-ingestion-playbook.md) — what fields LightRAG's chunking pipeline expects

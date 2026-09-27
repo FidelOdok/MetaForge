@@ -140,14 +140,16 @@ Five-minute walkthrough: **[`docs/getting-started.md`](docs/getting-started.md)*
 - **Reference example:** [drone flight controller](examples/drone_flight_controller/README.md)
 - **Architecture & roadmap:** [architecture](docs/architecture.md) ·
   [roadmap](docs/roadmap.md)
-- **Hosted docs site:** _coming once `.github/workflows/docs.yml` runs_ —
-  will be at `https://fidelodok.github.io/MetaForge/`.
+- **Hosted docs site:** <https://fidelodok.github.io/MetaForge/>
 
 ## Local docs preview
 
+The site is Docusaurus; the markdown it renders stays in `docs/`.
+
 ```bash
-pip install -e ".[dev]"
-mkdocs serve              # http://127.0.0.1:8000/
+cd docs-site
+npm install
+npm start                 # http://localhost:3000/MetaForge/
 ```
 
 ## Status

@@ -34,15 +34,17 @@ order:
 
 Step 3 is what keeps `npm run dev` and the Docker image working unchanged.
 
-!!! warning "The `/api` prefix is a proxy artefact, not a gateway path"
+:::warning[The `/api` prefix is a proxy artefact, not a gateway path]
 
-    The gateway mounts its versioned routers at `/v1` (`APIRouter(prefix="/v1/…")`
-    throughout `api_gateway/`). The extra `/api` segment exists only so the dev
-    proxy and nginx have something to match and strip. Requests that go *through*
-    a proxy must say `/api/v1/x`; requests sent *straight to* the gateway must say
-    `/v1/x`. The dashboard handles this for you — `apiBase()` in
-    `dashboard/src/lib/gatewayConfig.ts` picks the right one — but it matters if
-    you are testing routes by hand with `curl`.
+The gateway mounts its versioned routers at `/v1` (`APIRouter(prefix="/v1/…")`
+throughout `api_gateway/`). The extra `/api` segment exists only so the dev
+proxy and nginx have something to match and strip. Requests that go *through*
+a proxy must say `/api/v1/x`; requests sent *straight to* the gateway must say
+`/v1/x`. The dashboard handles this for you — `apiBase()` in
+`dashboard/src/lib/gatewayConfig.ts` picks the right one — but it matters if
+you are testing routes by hand with `curl`.
+
+:::
 
 ## Deploying
 
@@ -100,17 +102,19 @@ CORS is not an obstacle: the gateway's `create_app` defaults `allow_origins` to
 
 ## Security: read this before exposing a gateway
 
-!!! danger "The gateway has no authentication on its data routes"
+:::danger[The gateway has no authentication on its data routes]
 
-    Only the harness credential routes are guarded, by
-    `METAFORGE_HARNESS_ADMIN_TOKEN`. Everything else — the digital twin, projects,
-    chat, file download — is open to anything that can reach the port. Combined
-    with `allow_origins=["*"]`, a gateway on a public address is readable and
-    writable by anyone who finds it.
+Only the harness credential routes are guarded, by
+`METAFORGE_HARNESS_ADMIN_TOKEN`. Everything else — the digital twin, projects,
+chat, file download — is open to anything that can reach the port. Combined
+with `allow_origins=["*"]`, a gateway on a public address is readable and
+writable by anyone who finds it.
 
-    Do not put one on the open internet. Use a private network (Tailscale) or an
-    authenticating proxy (Cloudflare Access, an OAuth2 proxy) in front of it. Both
-    also give you the HTTPS endpoint the section above requires.
+Do not put one on the open internet. Use a private network (Tailscale) or an
+authenticating proxy (Cloudflare Access, an OAuth2 proxy) in front of it. Both
+also give you the HTTPS endpoint the section above requires.
+
+:::
 
 Gateway authentication is not yet implemented and is tracked as follow-up work.
 
