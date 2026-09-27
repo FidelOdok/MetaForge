@@ -445,6 +445,44 @@ class TestImportEndpoint:
             wp = await twin.get_work_product(_uuid.UUID(nid))
             assert str(wp.project_id) == pid
 
+    async def test_imported_node_carries_wp_type_property_on_read_back(self, client):
+        """FORGE-247 regression: live-reported the persisted node's own
+        properties (as read back via GET /v1/twin/nodes/{id}, the shape the
+        dashboard's AssemblyExportPanel and similar filter on) lacked
+        wp_type -- unlike every other cad_model node. Live re-verification
+        against a real fidel-dev import + node fetch could not reproduce
+        this against current code (wp_type was present both times), but
+        nothing existing asserted on the READ-BACK shape specifically --
+        test_imports_step_file only checks the immediate import response.
+        This locks in the read-back path so a future regression is caught
+        here instead of in a live dogfood session again."""
+        from unittest.mock import patch
+
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        with patch("api_gateway.twin.routes._twin", twin):
+            async with client:
+                import_resp = await client.post(
+                    "/v1/twin/import",
+                    files={
+                        "file": (
+                            "ar4_link.step",
+                            b"ISO-10303-21;\nfake\nENDSEC;\n",
+                            "application/step",
+                        )
+                    },
+                    data={"wp_type": "cad_model"},
+                )
+                assert import_resp.status_code == 201, import_resp.text
+                node_id = import_resp.json()["id"]
+
+                node_resp = await client.get(f"/v1/twin/nodes/{node_id}")
+            assert node_resp.status_code == 200, node_resp.text
+            properties = node_resp.json()["properties"]
+            assert properties["wp_type"] == "cad_model"
+            assert properties["imported"] is True
+
     async def test_imports_step_file(self, client):
         with patch(
             "api_gateway.twin.import_service.ImportService.extract_metadata",
