@@ -29,7 +29,19 @@ concurrency:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, fidel-dev]
+    # GitHub-hosted, not the self-hosted fidel-dev box the other workflows use.
+    #
+    # The first run of this job on fidel-dev took the whole machine off the
+    # network — SSH and ICMP both — and the step died fourteen minutes in with
+    # no log. A Docusaurus production build is a webpack run over ~1500
+    # packages, and that box has form for going down under a heavy build
+    # (MET-643, and the freecad-adapter image build before it).
+    #
+    # Nothing here needs fidel-dev: no MetaForge services, no Docker, no
+    # adapters, no GPU. It is Node and nothing else, the repo is public so
+    # hosted minutes are free, and keeping it off the shared box means a docs
+    # build can no longer take the rest of CI down with it.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,7 +78,7 @@ jobs:
     # Previews build on PRs; only main publishes.
     if: github.event_name != 'pull_request'
     needs: build
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
