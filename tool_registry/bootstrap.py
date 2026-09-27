@@ -248,6 +248,7 @@ async def bootstrap_tool_registry(
     decision_recorder: Any = None,
     geometry_recorder: Any = None,
     measure_tool: Any = None,
+    assembly_info_tool: Any = None,
     proposal_recorder: Any = None,
     constraint_recorder: Any = None,
     engineering_entity_recorder: Any = None,
@@ -303,6 +304,15 @@ async def bootstrap_tool_registry(
             instead of trusting the calling model to forward a prior
             measurement (FORGE-100). ``None`` falls back to flagging the gap
             (``measured_properties_missing``) instead of deriving it.
+        assembly_info_tool: Optional async ``assembly_info(session_id) -> dict``
+            (FORGE-245). Same lazy-bridge pattern as ``measure_tool``: when
+            supplied, ``twin.commit_geometry`` calls it (via
+            freecad.describe_session + freecad.list_joints on the still-live
+            session) to attach ``metadata.assembly = {parts, joints}`` to a
+            commit-by-reference call, so the parts/joints defined in the
+            FreeCAD session aren't lost once it expires. ``None`` skips the
+            derivation (an explicit ``assembly`` in ``extra_metadata`` still
+            wins either way).
         component_catalog_store: Optional ``ComponentCatalogStore`` instance
             (MET-436). When supplied together with ``knowledge_service``
             and ``component_intent_llm``, the ``component`` MCP adapter
@@ -508,6 +518,7 @@ async def bootstrap_tool_registry(
                     decision_recorder=decision_recorder,
                     geometry_recorder=geometry_recorder,
                     measure_tool=measure_tool,
+                    assembly_info_tool=assembly_info_tool,
                     proposal_recorder=proposal_recorder,
                     constraint_recorder=constraint_recorder,
                     engineering_entity_recorder=engineering_entity_recorder,

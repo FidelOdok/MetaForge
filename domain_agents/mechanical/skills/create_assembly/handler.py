@@ -149,12 +149,27 @@ class CreateAssemblyHandler(SkillBase[CreateAssemblyInput, CreateAssemblyOutput]
             model_url: str | None = None
             commit_error: str | None = None
             if input_data.commit:
+                # FORGE-245: without this, the committed node carries only
+                # the merged STEP geometry -- the dashboard Assembly tab,
+                # the URDF export panel's "load joints from node", and the
+                # digital thread all need to know which parts (and mating
+                # constraints, this skill's own joint-like concept) made up
+                # the assembly. "joints" here are CadQuery constraint
+                # records (part_a/part_b/type/...), not FreeCAD's
+                # {name, type, base, follower, axis, anchor} shape --
+                # documented so a consumer doesn't assume a single format
+                # across every commit path.
+                extra_metadata = measured_metadata_from_cad_result(result)
+                extra_metadata["assembly"] = {
+                    "parts": parts_dicts,
+                    "joints": constraints_dicts or [],
+                }
                 committed, twin_node_id, model_url, commit_error = await commit_geometry(
                     self.context.mcp,
                     cad_file=assembly_file,
                     name=input_data.name,
                     project_id=input_data.project_id,
-                    extra_metadata=measured_metadata_from_cad_result(result),
+                    extra_metadata=extra_metadata,
                 )
                 span.set_attribute("committed", committed)
 

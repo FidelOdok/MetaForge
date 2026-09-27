@@ -100,6 +100,47 @@ class _LazyBridgeMeasure:
             return {}
 
 
+class _LazyBridgeAssemblyInfo:
+    """FORGE-245: an async ``assembly_info(session_id) -> dict`` callable,
+    same lazy-bridge-binding seam as ``_LazyBridgeMeasure`` (see its
+    docstring for why the bridge can't be supplied at construction time).
+
+    Reads a still-live FreeCAD session's assembly structure -- every
+    part currently registered (``freecad.describe_session``) and every
+    joint defined between them (``freecad.list_joints``) -- so
+    ``twin.commit_geometry`` can attach ``metadata.assembly = {parts,
+    joints}`` to a commit-by-reference call. Without this, the joints a
+    session built up (``add_assembly_joint``) are lost the moment the
+    session's TTL expires, since the committed STEP carries only merged
+    geometry with no part/joint structure of its own.
+    """
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def __call__(self, session_id: str) -> dict[str, Any]:
+        if self.bridge is None:
+            return {}
+        try:
+            session = await self.bridge.invoke(
+                "freecad.describe_session", {"session_id": session_id}
+            )
+            joints = await self.bridge.invoke("freecad.list_joints", {"session_id": session_id})
+        except Exception as exc:  # noqa: BLE001 — best-effort derivation, never raise
+            logger.warning(
+                "geometry_assembly_info_tool_invoke_failed",
+                session_id=session_id,
+                error=str(exc),
+            )
+            return {}
+        parts = [
+            {"name": obj.get("name"), "obj_id": obj.get("obj_id"), "kind": obj.get("kind")}
+            for obj in (session.get("objects") or [])
+            if isinstance(obj, dict)
+        ]
+        return {"parts": parts, "joints": joints.get("joints") or []}
+
+
 # ---------------------------------------------------------------------------
 # OTel bootstrap (module-level so providers are active before first request)
 # ---------------------------------------------------------------------------
@@ -729,6 +770,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # docstring for why this can't just be constructed with the bridge
     # directly.
     measure_tool = _LazyBridgeMeasure()
+    # FORGE-245: same lazy-bridge seam, for a live FreeCAD session's
+    # assembly structure (parts + joints) at commit time.
+    assembly_info_tool = _LazyBridgeAssemblyInfo()
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -751,6 +795,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         decision_recorder=decision_recorder,
         geometry_recorder=geometry_recorder_fn,
         measure_tool=measure_tool,
+        assembly_info_tool=assembly_info_tool,
         proposal_recorder=make_proposal_recorder(approval_workflow),
         # MET-582: structured requirements -> evaluable Constraint nodes +
         # a constraint_set work product (feeds MET-583's gate criteria).
@@ -842,6 +887,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # and from there to twin.commit_geometry, above) was waiting for -- now
     # populated, well before the gateway serves its first request.
     measure_tool.bridge = active_bridge
+    # FORGE-245: same for assembly_info_tool.
+    assembly_info_tool.bridge = active_bridge
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
