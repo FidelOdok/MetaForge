@@ -454,6 +454,8 @@ class TestExecuteThermalSolverParsesRealResults:
         assert result["max_temperature"] == pytest.approx(100.0)
         assert result["min_temperature"] == pytest.approx(20.0)
         assert result["temperature_distribution"], "must contain real per-node data"
+        # FORGE-239: same frd_path surfacing as _execute_solver.
+        assert result["frd_path"] == str(frd_path)
 
 
 class TestEmptyResultIsNeverReportedAsSuccess:
@@ -586,6 +588,91 @@ class TestExecuteSolverBuildsDeckForStaticStress:
 
         assert result["solver_time"] == 1.23
         assert result["mesh_elements"] == 8  # node_count from REAL_CCX_FRD
+        # FORGE-239: reported live -- run_fea writes "<stem>_solved.frd", the
+        # model called extract_results on "<stem>.frd" and got a not-found.
+        # The exact path must be surfaced directly, not left buried inside
+        # result_files.
+        assert result["frd_path"] == str(frd_path)
+        # Surface1 (nodes 1-4, all x=0) is a real, legitimately small face
+        # of this 100mm-long part -- no sanity-check warning.
+        assert "warnings" not in result
+
+    async def test_a_fixed_node_set_spanning_the_whole_part_warns(
+        self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-239's core regression: the reported bug's exact shape --
+        a fixed_node_set that (wrongly) spans the part's full length along
+        one axis instead of just one end -- must be flagged, not silently
+        solved and returned as if it were a normal, trustworthy result."""
+        mesh_path = tmp_path / "box.inp"
+        mesh_path.write_text(self._MESH_INP, encoding="utf-8")
+        frd_path = tmp_path / "box_solved.frd"
+        frd_path.write_text(REAL_CCX_FRD, encoding="utf-8")
+
+        async def _fake_solver_run_fea(**kwargs: Any) -> dict[str, Any]:
+            return {"solver_time_s": 1.23, "result_files": [str(frd_path)]}
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        # Volume1 (all 10 nodes, x spans 0..100 -- the WHOLE part) is exactly
+        # the reported bug's shape: a face-shaped name expected, but the
+        # group actually claimed by "fixed_node_set" spans the full length.
+        result = await server._execute_solver(
+            str(mesh_path),
+            "static_stress",
+            {
+                "youngs_modulus_mpa": 200000.0,
+                "poissons_ratio": 0.30,
+                "fixed_node_set": "Volume1",
+                "load_node_set": "Surface2",
+                "load_force_n": (0.0, 0.0, -100.0),
+            },
+        )
+
+        assert "warnings" in result
+        assert len(result["warnings"]) == 1
+        assert "Volume1" in result["warnings"][0]
+        assert "axis, x:" in result["warnings"][0]
+        assert "100%" in result["warnings"][0]
+
+
+class TestFixedNodeSetSpanWarning:
+    """FORGE-239: the sanity-check helper in isolation."""
+
+    _MESH_INP = TestExecuteSolverBuildsDeckForStaticStress._MESH_INP
+
+    def _mesh(self, tmp_path: Path):
+        from tool_registry.tools.calculix.inp_mesh import parse_mesh_inp
+
+        mesh_path = tmp_path / "box.inp"
+        mesh_path.write_text(self._MESH_INP, encoding="utf-8")
+        return parse_mesh_inp(str(mesh_path))
+
+    def test_a_real_small_face_does_not_warn(self, tmp_path: Path) -> None:
+        from tool_registry.tools.calculix.adapter import _fixed_node_set_span_warning
+
+        mesh = self._mesh(tmp_path)
+        assert _fixed_node_set_span_warning(mesh, "Surface1") is None
+
+    def test_a_group_spanning_the_full_part_warns_naming_the_axis(self, tmp_path: Path) -> None:
+        from tool_registry.tools.calculix.adapter import _fixed_node_set_span_warning
+
+        mesh = self._mesh(tmp_path)
+        warning = _fixed_node_set_span_warning(mesh, "Volume1")
+        assert warning is not None
+        assert "Volume1" in warning
+        assert "axis, x:" in warning
+
+    def test_an_unknown_elset_name_returns_none_not_an_exception(self, tmp_path: Path) -> None:
+        """Let run_fea's own downstream error paths report an unknown
+        fixed_node_set -- this sanity check must never be what surfaces
+        that error, or replace it with a confusing one."""
+        from tool_registry.tools.calculix.adapter import _fixed_node_set_span_warning
+
+        mesh = self._mesh(tmp_path)
+        assert _fixed_node_set_span_warning(mesh, "NoSuchSet") is None
 
 
 class TestUnmockedSolverRaisesOnMissingFiles:

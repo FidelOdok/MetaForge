@@ -355,6 +355,157 @@ def _parse_inp_mesh_counts(inp_path: str) -> tuple[int, dict[str, int]]:
     return node_count, counts_by_type
 
 
+# FORGE-239: gmsh's Abaqus/CalculiX writer emits each original STEP face as
+# its own *ELEMENT, TYPE=CPS3 (triangle) ELSET -- confirmed against the real
+# adapter output (see tests/unit/test_freecad_operations.py's
+# _REAL_GMSH_INP_FIXTURE, captured live). CPS4 (quad) is handled too since
+# gmsh can emit either depending on its own meshing choice; anything else
+# (T3D2 lines, C3D* volumes, an unrecognized surface type) is a different
+# kind of group entirely and is left out of the face table -- reported live:
+# with no way to tell "Surface1" (the CalculiX ELSET name gmsh happened to
+# assign) from "the face at x=0", the model guessed wrong and clamped the
+# ENTIRE long side of a cantilever instead of just its fixed end, giving an
+# FEA result ~10x too stiff.
+_SURFACE_ELEMENT_TYPES = ("CPS3", "CPS4")
+
+
+def _triangle_area_and_normal(
+    a: tuple[float, float, float], b: tuple[float, float, float], c: tuple[float, float, float]
+) -> tuple[float, tuple[float, float, float]]:
+    """Area and unit normal of the triangle a-b-c (right-hand rule on a-b, a-c).
+
+    Winding order is whatever gmsh wrote -- this reports the geometric
+    normal as-is, not independently verified to point away from the solid
+    (that needs the part's interior, which isn't available from the mesh
+    alone); callers should treat it as "a" normal, not guaranteed "outward".
+    """
+    ab = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    ac = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    mag = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
+    area = mag / 2.0
+    if mag < 1e-12:
+        return area, (0.0, 0.0, 0.0)
+    return area, (cross[0] / mag, cross[1] / mag, cross[2] / mag)
+
+
+def _parse_inp_face_table(inp_path: str) -> list[dict[str, Any]]:
+    """Per-STEP-face geometric summary of a gmsh-written .inp mesh.
+
+    Answers "which named element set is the face at x=0" without a human
+    having to open the mesh file and eyeball coordinates: for every surface
+    (CPS3/CPS4) ELSET, its bounding box, centroid, total area, and an
+    average face normal -- enough for a caller to pick e.g. ``{"face":
+    x_min}`` style reasoning themselves ("the group whose bbox is flat in X
+    at the part's minimum X is the fixed end"), which is exactly the
+    judgment call the model got wrong live (see module comment above).
+    """
+    nodes: dict[int, tuple[float, float, float]] = {}
+    # name -> (element_type, list of connectivity tuples)
+    surface_sets: dict[str, tuple[str, list[tuple[int, ...]]]] = {}
+    current_type: str | None = None
+    current_name: str | None = None
+    in_nodes = False
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.upper().startswith("*NODE"):
+                current_type = None
+                current_name = None
+                in_nodes = True
+            elif stripped.upper().startswith("*ELEMENT"):
+                in_nodes = False
+                current_type = "UNKNOWN"
+                current_name = None
+                for part in stripped.split(","):
+                    key, _, value = part.strip().partition("=")
+                    key_upper = key.strip().upper()
+                    if key_upper == "TYPE":
+                        current_type = value.strip()
+                    elif key_upper == "ELSET":
+                        current_name = value.strip()
+            elif stripped.startswith("*"):
+                in_nodes = False
+                current_type = None
+                current_name = None
+            elif in_nodes:
+                parts = [p.strip() for p in stripped.split(",")]
+                node_id = int(parts[0])
+                nodes[node_id] = (float(parts[1]), float(parts[2]), float(parts[3]))
+            elif (
+                current_type in _SURFACE_ELEMENT_TYPES
+                and current_name is not None
+                and current_type is not None
+            ):
+                parts = [p.strip() for p in stripped.split(",")]
+                connectivity = tuple(int(p) for p in parts[1:])
+                entry = surface_sets.setdefault(current_name, (current_type, []))
+                entry[1].append(connectivity)
+
+    faces: list[dict[str, Any]] = []
+    for name, (etype, elements) in sorted(surface_sets.items()):
+        member_node_ids: set[int] = set()
+        for conn in elements:
+            member_node_ids.update(conn)
+        coords = [nodes[n] for n in member_node_ids if n in nodes]
+        if not coords:
+            continue
+
+        xs = [c[0] for c in coords]
+        ys = [c[1] for c in coords]
+        zs = [c[2] for c in coords]
+        bbox_min = (min(xs), min(ys), min(zs))
+        bbox_max = (max(xs), max(ys), max(zs))
+        centroid = (
+            sum(c[0] for c in coords) / len(coords),
+            sum(c[1] for c in coords) / len(coords),
+            sum(c[2] for c in coords) / len(coords),
+        )
+
+        total_area = 0.0
+        normal_sum = [0.0, 0.0, 0.0]
+        for conn in elements:
+            pts = [nodes[n] for n in conn if n in nodes]
+            # A quad (CPS4) is split fan-wise from its first corner; any
+            # element with fewer than 3 resolvable corners contributes no
+            # area (e.g. a dangling/unresolved node id) rather than guessing.
+            for i in range(1, len(pts) - 1):
+                area, normal = _triangle_area_and_normal(pts[0], pts[i], pts[i + 1])
+                total_area += area
+                normal_sum[0] += normal[0] * area
+                normal_sum[1] += normal[1] * area
+                normal_sum[2] += normal[2] * area
+        normal_mag = math.sqrt(sum(n * n for n in normal_sum))
+        avg_normal = (
+            tuple(n / normal_mag for n in normal_sum) if normal_mag > 1e-12 else (0.0, 0.0, 0.0)
+        )
+
+        faces.append(
+            {
+                "name": name,
+                "element_type": etype,
+                "num_elements": len(elements),
+                "num_nodes": len(member_node_ids),
+                "bbox_mm": {
+                    "min": [round(v, 6) for v in bbox_min],
+                    "max": [round(v, 6) for v in bbox_max],
+                },
+                "centroid_mm": [round(v, 6) for v in centroid],
+                "area_mm2": round(total_area, 6),
+                # area-weighted average normal -- "a" normal, see
+                # _triangle_area_and_normal's own docstring on outward-ness.
+                "normal": [round(v, 6) for v in avg_normal],
+            }
+        )
+    return faces
+
+
 # Shape dimension defaults per shape type
 _SHAPE_DEFAULTS: dict[str, dict[str, float]] = {
     "box": {"length": 10.0, "width": 10.0, "height": 10.0},
@@ -819,8 +970,10 @@ class FreecadOperations:
             # .unv/.stl use different, unparsed formats here.
             if output_format == "inp":
                 num_nodes, counts_by_type = _parse_inp_mesh_counts(output_path)
+                faces = _parse_inp_face_table(output_path)
             else:
                 num_nodes, counts_by_type = 0, {}
+                faces = []
 
             num_volume_elements = sum(
                 n
@@ -851,6 +1004,7 @@ class FreecadOperations:
                 num_elements=sum(counts_by_type.values()),
                 num_volume_elements=num_volume_elements,
                 element_counts_by_type=counts_by_type,
+                num_faces=len(faces),
                 duration_s=round(elapsed, 3),
             )
 
@@ -865,6 +1019,14 @@ class FreecadOperations:
                     "num_volume_elements": num_volume_elements,
                     "element_counts_by_type": counts_by_type,
                 },
+                # FORGE-239: per-STEP-face geometry (name, bbox, centroid,
+                # area, normal) so a caller can identify "the face at x=0"
+                # by its actual coordinates instead of guessing from an
+                # opaque gmsh-assigned name like "Surface1" -- see
+                # _parse_inp_face_table's own docstring for the reported
+                # bug this fixes (a wrongly-picked face silently gave an
+                # FEA result ~10x too stiff).
+                "faces": faces,
             }
 
     # ------------------------------------------------------------------

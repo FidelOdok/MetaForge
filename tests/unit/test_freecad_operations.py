@@ -1097,6 +1097,31 @@ class TestGenerateMeshUsesGmsh:
         # Total spans every element type, not just the volumetric ones.
         assert result["num_elements"] == 3 + 2 + 2
 
+    def test_faces_is_empty_when_referenced_nodes_are_not_in_the_trimmed_fixture(
+        self, tmp_path
+    ) -> None:
+        """The module-level fixture is deliberately trimmed (only 3 of the
+        real mesh's nodes) -- Surface1's real node ids aren't among them, so
+        the face table correctly reports nothing rather than computing a
+        bogus bbox/area from partial data. See TestParseInpFaceTable below
+        for the real computation, against a small, fully self-consistent
+        mesh."""
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=_fake_gmsh_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file))
+        assert result["faces"] == []
+
     def test_gmsh_binary_missing_raises(self, tmp_path) -> None:
         step_file = tmp_path / "part.step"
         step_file.write_text("x")
@@ -1219,3 +1244,147 @@ class TestParseInpMeshCounts:
 
         assert num_nodes == 0
         assert counts_by_type == {}
+
+
+# A small, fully self-consistent mesh (unlike _REAL_GMSH_INP_FIXTURE, whose
+# node table is deliberately trimmed for brevity and doesn't resolve its own
+# CPS3 elements) -- two named surface groups, each a real 10x10mm square
+# split into 2 triangles, at two different Z heights, so bbox/centroid/area/
+# normal are all independently hand-verifiable.
+_FACE_TABLE_FIXTURE = """\
+*Heading
+ box.inp
+*NODE
+1, 0, 0, 0
+2, 10, 0, 0
+3, 10, 10, 0
+4, 0, 10, 0
+5, 0, 0, 5
+6, 10, 0, 5
+7, 10, 10, 5
+8, 0, 10, 5
+*ELEMENT, type=CPS3, ELSET=Surface1
+1, 1, 2, 3
+2, 1, 3, 4
+*ELEMENT, type=CPS3, ELSET=Surface2
+1, 5, 6, 7
+2, 5, 7, 8
+*ELEMENT, type=T3D2, ELSET=Line1
+1, 1, 5
+*ELEMENT, type=C3D4, ELSET=Volume1
+1, 1, 2, 3, 5
+"""
+
+
+class TestParseInpFaceTable:
+    """FORGE-239: per-STEP-face geometry (bbox/centroid/area/normal) so a
+    caller can identify a face by its real coordinates instead of guessing
+    from an opaque gmsh-assigned name."""
+
+    def test_computes_bbox_centroid_area_and_normal_for_each_surface_group(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+
+        faces = _parse_inp_face_table(str(inp))
+
+        assert [f["name"] for f in faces] == ["Surface1", "Surface2"]
+        s1 = faces[0]
+        assert s1["element_type"] == "CPS3"
+        assert s1["num_elements"] == 2
+        assert s1["num_nodes"] == 4
+        assert s1["bbox_mm"] == {"min": [0.0, 0.0, 0.0], "max": [10.0, 10.0, 0.0]}
+        assert s1["centroid_mm"] == [5.0, 5.0, 0.0]
+        assert s1["area_mm2"] == pytest.approx(100.0)
+        assert s1["normal"] == pytest.approx([0.0, 0.0, 1.0])
+
+        s2 = faces[1]
+        assert s2["bbox_mm"] == {"min": [0.0, 0.0, 5.0], "max": [10.0, 10.0, 5.0]}
+        assert s2["centroid_mm"] == [5.0, 5.0, 5.0]
+        assert s2["area_mm2"] == pytest.approx(100.0)
+
+    def test_line_and_volume_element_sets_are_excluded(self, tmp_path) -> None:
+        """Only CPS3/CPS4 (surface) groups are meaningful as a placeable
+        face -- a line (T3D2) or the volumetric mesh itself (C3D4) isn't."""
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+
+        faces = _parse_inp_face_table(str(inp))
+
+        names = {f["name"] for f in faces}
+        assert "Line1" not in names
+        assert "Volume1" not in names
+
+    def test_a_group_whose_nodes_are_entirely_unresolved_is_skipped(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(
+            "*NODE\n1, 0, 0, 0\n*ELEMENT, type=CPS3, ELSET=Ghost\n1, 100, 200, 300\n",
+            encoding="utf-8",
+        )
+
+        assert _parse_inp_face_table(str(inp)) == []
+
+    def test_empty_file_returns_no_faces(self, tmp_path) -> None:
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "empty.inp"
+        inp.write_text("*Heading\n empty\n", encoding="utf-8")
+
+        assert _parse_inp_face_table(str(inp)) == []
+
+
+class TestGenerateMeshFacesField:
+    """generate_mesh's own 'faces' passthrough, end-to-end via a real
+    fake-gmsh run (mirrors TestGenerateMeshUsesGmsh's style)."""
+
+    def test_faces_are_populated_for_a_resolvable_mesh(self, tmp_path) -> None:
+        import subprocess as _subprocess
+
+        def fake_run(cmd: list[str], **kwargs):
+            output_path = cmd[cmd.index("-o") + 1]
+            Path(output_path).write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+            return _subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch("tool_registry.tools.freecad.operations.subprocess.run", side_effect=fake_run),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file))
+
+        assert [f["name"] for f in result["faces"]] == ["Surface1", "Surface2"]
+        assert result["faces"][0]["bbox_mm"]["min"] == [0.0, 0.0, 0.0]
+
+    def test_faces_is_empty_for_non_inp_formats(self, tmp_path) -> None:
+        import subprocess as _subprocess
+
+        def stl_run(cmd: list[str], **kwargs):
+            output_path = cmd[cmd.index("-o") + 1]
+            Path(output_path).write_text("solid\nendsolid\n", encoding="utf-8")
+            return _subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch("tool_registry.tools.freecad.operations.subprocess.run", side_effect=stl_run),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file), output_format="stl")
+
+        assert result["faces"] == []

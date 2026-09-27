@@ -143,7 +143,13 @@ class FreecadServer(McpToolServer):
                 description=(
                     "Generate a volumetric finite-element mesh (real C3D4 "
                     "tetrahedra, via gmsh) from a STEP file -- for output_format="
-                    "'inp' this is what calculix.validate_mesh/run_fea consume."
+                    "'inp' this is what calculix.validate_mesh/run_fea consume. "
+                    "FORGE-239: the result's 'faces' table gives the real bbox/"
+                    "centroid/area/normal of every named surface group (e.g. "
+                    "'Surface1') -- use it to identify which group is 'the face "
+                    "at x=0' by its actual coordinates before choosing "
+                    "fixed_node_set/load_node_set; a gmsh-assigned name alone "
+                    "gives no clue which STEP face it is."
                 ),
                 capability="mesh_generation",
                 input_schema={
@@ -194,6 +200,17 @@ class FreecadServer(McpToolServer):
                         "num_elements": {"type": "integer"},
                         "element_types": {"type": "array"},
                         "quality_metrics": {"type": "object"},
+                        "faces": {
+                            "type": "array",
+                            "description": (
+                                "output_format='inp' only. One entry per named "
+                                "surface (CPS3/CPS4) element set: name, "
+                                "element_type, num_elements, num_nodes, "
+                                "bbox_mm ({min,max}: [x,y,z]), centroid_mm "
+                                "([x,y,z]), area_mm2, normal ([x,y,z], unit "
+                                "vector -- 'a' normal, not verified outward)."
+                            ),
+                        },
                     },
                 },
                 phase=1,
