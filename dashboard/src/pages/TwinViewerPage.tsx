@@ -30,6 +30,7 @@ import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { ManufacturingView } from '../components/viewer/ManufacturingView';
+import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { useViewerStore } from '../store/viewer-store';
@@ -622,13 +623,14 @@ function NodeHistorySection({ nodeId }: { nodeId: string }) {
 
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
-type TwinTab = 'graph' | 'model' | 'sim' | 'asm' | 'mfg';
+type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg';
 type InspectorTab = 'overview' | 'constraints' | 'history';
 type NodeScope = 'all' | 'attention' | string;
 
-const TWIN_TABS: TwinTab[] = ['graph', 'model', 'sim', 'asm', 'mfg'];
+const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg'];
 const TAB_LABELS: Record<TwinTab, string> = {
   graph: 'Graph',
+  structure: 'Structure',
   model: 'Model',
   sim: 'Sim',
   asm: 'Assembly',
@@ -992,6 +994,8 @@ export function TwinViewerPage() {
                 <button onClick={() => setImportOpen(true)}>Import work product</button>
               </div>
             )
+          ) : tab === 'structure' ? (
+            <StructureView projectId={activeProjectId} onSelect={selectNode} />
           ) : tab === 'mfg' ? (
             <ManufacturingView nodes={items} onSelect={selectNode} />
           ) : tab === 'asm' ? (

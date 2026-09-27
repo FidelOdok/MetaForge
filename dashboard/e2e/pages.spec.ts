@@ -39,6 +39,12 @@ test.describe('Digital Twin Viewer', () => {
     await page.goto('/twin');
     await expect(page.locator('main')).toBeVisible();
   });
+
+  test('Structure tab renders the hierarchy tree area', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Structure' })).toBeVisible();
+  });
 });
 
 test.describe('Design Assistant', () => {

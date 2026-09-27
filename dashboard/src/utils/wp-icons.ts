@@ -49,6 +49,19 @@ const NODE_TYPE_ICONS: Record<string, string> = {
 
 const FALLBACK_ICON = 'description';
 
+/** Icon per HierarchyNode.kind (FORGE-261) — a separate, small lookup since
+ * a hierarchy position is not a work_product and has no wp_type. */
+const HIERARCHY_KIND_ICONS: Record<string, string> = {
+  product: 'inventory_2',
+  system: 'hub',
+  subsystem: 'category',
+  assembly: 'view_in_ar',
+};
+
+export function iconForHierarchyKind(kind: string): string {
+  return HIERARCHY_KIND_ICONS[kind] ?? FALLBACK_ICON;
+}
+
 /**
  * The icon a node should show anywhere in the Twin UI (node list, scene
  * dropdown, graph canvas, detail panel header) -- keyed by `wp_type` for
