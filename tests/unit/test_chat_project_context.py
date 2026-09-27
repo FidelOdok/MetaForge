@@ -40,11 +40,13 @@ def _thread(scope_kind: str, entity: str) -> ChatThreadRecord:
     )
 
 
-def _project(wps: list[ProjectWorkProductResponse]) -> ProjectResponse:
+def _project(
+    wps: list[ProjectWorkProductResponse], description: str = "A 2-axis camera gimbal"
+) -> ProjectResponse:
     return ProjectResponse(
         id="p-123",
         name="Pan-Tilt Gimbal",
-        description="A 2-axis camera gimbal",
+        description=description,
         status="active",
         work_products=wps,
         last_updated="2026-07-01T00:00:00Z",
@@ -432,3 +434,103 @@ async def test_requirement_doc_excerpts_capped_and_most_recent_first(
         assert f"content of {name}" in brief
     oldest = "content of Doc 0"
     assert oldest not in brief
+
+
+# ---------------------------------------------------------------------------
+# FORGE-300: domain-scoped tool lists for plain project chat
+# ---------------------------------------------------------------------------
+
+
+class TestInferProjectDomains:
+    """``_infer_project_domains`` -- pure function, no fixtures needed."""
+
+    def test_no_signal_returns_none(self) -> None:
+        import api_gateway.chat.routes as routes
+
+        assert routes._infer_project_domains("A general-purpose gadget.", []) is None
+
+    def test_cad_model_work_product_implies_mechanical(self) -> None:
+        import api_gateway.chat.routes as routes
+
+        assert routes._infer_project_domains("", ["cad_model"]) == ("mechanical",)
+
+    def test_schematic_and_firmware_work_products_union(self) -> None:
+        import api_gateway.chat.routes as routes
+
+        result = routes._infer_project_domains("", ["schematic", "firmware_source"])
+        assert result == ("electronics", "firmware")
+
+    def test_description_keyword_alone_infers_domain(self) -> None:
+        """A brand-new project has no work products yet -- exactly when this
+        matters most, since the tool cap bites from turn one."""
+        import api_gateway.chat.routes as routes
+
+        result = routes._infer_project_domains("A 6-DOF robotic arm for pick-and-place.", [])
+        assert result == ("mechanical",)
+
+    def test_description_and_work_product_signals_union(self) -> None:
+        import api_gateway.chat.routes as routes
+
+        result = routes._infer_project_domains(
+            "Firmware for the gimbal's STM32 controller.", ["cad_model"]
+        )
+        assert result == ("firmware", "mechanical")
+
+    def test_ambiguous_work_product_types_are_not_mapped(self) -> None:
+        """bom/test_plan/prd/documentation are deliberately excluded -- they
+        don't unambiguously identify one discipline, and their tool servers
+        are already always-visible core adapters regardless of scoping."""
+        import api_gateway.chat.routes as routes
+
+        result = routes._infer_project_domains(
+            "", ["bom", "test_plan", "test_result", "prd", "documentation"]
+        )
+        assert result is None
+
+    def test_result_is_sorted_for_determinism(self) -> None:
+        import api_gateway.chat.routes as routes
+
+        result = routes._infer_project_domains("", ["firmware_source", "cad_model", "schematic"])
+        assert result == ("electronics", "firmware", "mechanical")
+
+
+async def _domains(
+    monkeypatch: pytest.MonkeyPatch, thread: ChatThreadRecord, project: Any
+) -> tuple[str, ...] | None:
+    import api_gateway.chat.routes as routes
+    import api_gateway.projects.routes as projects_routes
+
+    monkeypatch.setattr(projects_routes, "_backend", _FakeProjectBackend(project))
+    return await routes._project_domains(thread)
+
+
+class TestProjectDomains:
+    """``_project_domains`` -- the async wrapper wired into the chat turn."""
+
+    @pytest.mark.asyncio
+    async def test_non_project_thread_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        result = await _domains(monkeypatch, _thread("assistant", ""), None)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_project_not_found_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        result = await _domains(monkeypatch, _thread("project", "p-123"), None)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_project_with_cad_model_scopes_to_mechanical(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project = _project([_wp("Bracket", "cad_model")])
+        result = await _domains(monkeypatch, _thread("project", "p-123"), project)
+        assert result == ("mechanical",)
+
+    @pytest.mark.asyncio
+    async def test_project_with_no_signal_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A description matching no keyword and no work products yet must
+        fall back to unscoped, not guess."""
+        project = _project([], description="A general-purpose desk gadget.")
+        result = await _domains(monkeypatch, _thread("project", "p-123"), project)
+        assert result is None
