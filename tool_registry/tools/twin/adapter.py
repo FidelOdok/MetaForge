@@ -1359,7 +1359,12 @@ class TwinServer(McpToolServer):
     # twin.record_document (MET-588)
     # ------------------------------------------------------------------
 
-    _DOCUMENT_TYPES = ("prd", "documentation")
+    _DOCUMENT_TYPES = ("prd", "documentation", "robot_description")
+    _DOCUMENT_TYPE_DOMAIN = {"prd": "requirements", "robot_description": "mechanical"}
+    _DOCUMENT_TYPE_DEFAULT_FORMAT = {"robot_description": "urdf"}
+    # FORGE-241: formats commit_geometry must refuse -- see its guard, and
+    # twin.record_document(document_type="robot_description") above.
+    _ROBOT_DESCRIPTION_FORMATS = frozenset({"urdf", "xacro", "sdf", "usd", "usda"})
 
     def _register_record_document(self) -> None:
         self.register_tool(
@@ -1368,15 +1373,22 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Record Document",
                 description=(
-                    "Persist a text/markdown artifact (requirements, notes, a "
-                    "spec) as a first-class PRD or DOCUMENTATION work product: "
-                    "stores it in MinIO and links it to a project so it shows on "
-                    "the project's work-product list. Writes immediately — no "
-                    "approval gate, same as twin.record_decision. Use this "
-                    "instead of twin.propose_change for saving a document; "
-                    "propose_change's apply-on-approve step only implements a "
-                    "'record_decision' action, so any other diff (including a "
-                    "document) silently does nothing even after a human approves it."
+                    "Persist a text artifact (requirements, notes, a spec, or a "
+                    "robot-description export like URDF/SDF/a ROS2 launch file) "
+                    "as a first-class PRD, DOCUMENTATION, or ROBOT_DESCRIPTION "
+                    "work product: stores it in MinIO and links it to a project "
+                    "so it shows on the project's work-product list. Writes "
+                    "immediately — no approval gate, same as "
+                    "twin.record_decision. Use this instead of "
+                    "twin.propose_change for saving a document; propose_change's "
+                    "apply-on-approve step only implements a 'record_decision' "
+                    "action, so any other diff (including a document) silently "
+                    "does nothing even after a human approves it. FORGE-241: use "
+                    "this — not twin.commit_geometry — for a URDF/SDF/launch "
+                    "file: commit_geometry is STEP-oriented and rejects those "
+                    "formats, since committing them as cad_model previously "
+                    "inflated CAD counts and left the twin unable to answer "
+                    "'which robot description belongs to this assembly'."
                 ),
                 capability="twin_decision",
                 input_schema={
@@ -1390,15 +1402,51 @@ class TwinServer(McpToolServer):
                         "content": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "The document body, as markdown.",
+                            "description": (
+                                "The document body (markdown, or the raw XML/text "
+                                "of a robot-description export)."
+                            ),
                         },
                         "document_type": {
                             "type": "string",
                             "enum": list(self._DOCUMENT_TYPES),
                             "description": (
                                 "'prd' for a requirements/product doc, "
-                                "'documentation' for general notes/specs. "
+                                "'documentation' for general notes/specs, "
+                                "'robot_description' for a URDF/SDF/ROS2-launch "
+                                "export (e.g. from cadquery.export_urdf_assembly). "
                                 "Defaults to 'documentation'."
+                            ),
+                        },
+                        "format": {
+                            "type": "string",
+                            "description": (
+                                "File extension of 'content' (e.g. 'urdf', 'sdf', "
+                                "'xacro', 'launch.py'). Only meaningful for "
+                                "'robot_description'; other document types are "
+                                "always stored as markdown."
+                            ),
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": (
+                                "Extra structured metadata to attach — for "
+                                "'robot_description', pass 'robot_name' and the "
+                                "{parts, joints} assembly shape "
+                                "cadquery.export_urdf_assembly took/returned, so "
+                                "the dashboard can show which parts/joints this "
+                                "description covers."
+                            ),
+                        },
+                        "source_part_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Twin node ids of the cad_model parts this "
+                                "document was derived from (e.g. the assembly's "
+                                "committed parts) — recorded as PARENT_OF edges "
+                                "so the twin can answer 'which robot description "
+                                "belongs to this assembly'."
                             ),
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
@@ -1436,16 +1484,28 @@ class TwinServer(McpToolServer):
             )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
+        fmt = arguments.get("format")
+        fmt = (
+            fmt
+            if isinstance(fmt, str) and fmt
+            else self._DOCUMENT_TYPE_DEFAULT_FORMAT.get(document_type, "md")
+        )
+        metadata = arguments.get("metadata")
+        source_ids = arguments.get("source_part_node_ids")
         return await self._document_recorder(
             content=content,
             name=name,
             wp_type=document_type,
-            domain="requirements" if document_type == "prd" else "documentation",
-            fmt="md",
+            domain=self._DOCUMENT_TYPE_DOMAIN.get(document_type, "documentation"),
+            fmt=fmt,
             link_type=document_type,
             source_tool="twin.record_document",
             session_id=session_id if isinstance(session_id, str) else None,
             project_id=project_id if isinstance(project_id, str) else None,
+            extra_metadata=metadata if isinstance(metadata, dict) else None,
+            source_part_node_ids=(
+                [str(s) for s in source_ids] if isinstance(source_ids, list) else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1736,6 +1796,23 @@ class TwinServer(McpToolServer):
         session_id = arguments.get("session_id")
         domain = arguments.get("domain")
         fmt = arguments.get("format")
+        # FORGE-241: commit_geometry is STEP-oriented (its recorder always
+        # types the result as cad_model) -- a URDF/SDF/ROS2-launch export
+        # committed through it landed as a cad_model work product despite
+        # the twin having a real ROBOT_DESCRIPTION type, inflating CAD
+        # counts and leaving the twin unable to answer "which robot
+        # description belongs to this assembly". Reject the known
+        # robot-description formats here rather than silently mistyping
+        # them; twin.record_document(document_type="robot_description")
+        # is the correct tool for that content.
+        if isinstance(fmt, str) and fmt.lower().lstrip(".") in self._ROBOT_DESCRIPTION_FORMATS:
+            raise ValueError(
+                f"twin.commit_geometry: format {fmt!r} is not STEP-oriented CAD "
+                "geometry -- commit_geometry always types its result as cad_model, "
+                "which is wrong for a robot-description export (URDF/SDF/USD "
+                "assembly). Use twin.record_document(document_type="
+                f"'robot_description', format={fmt!r}, ...) instead."
+            )
         script_source = arguments.get("script_source")
         parameters = arguments.get("parameters")
         properties = arguments.get("properties")

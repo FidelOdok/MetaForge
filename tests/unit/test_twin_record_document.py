@@ -22,7 +22,8 @@ import pytest
 from api_gateway.twin.document_recorder import make_document_recorder
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.models.enums import WorkProductType
+from twin_core.models.enums import EdgeType, WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 
 class _FakeProjectBackend:
@@ -135,6 +136,57 @@ class TestRecorder:
         assert wp.content_hash == r["content_hash"]
         assert "minio_object_key" not in wp.metadata
 
+    async def test_source_part_node_ids_creates_parent_of_edges(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-241: a robot_description derived from real cad_model parts
+        records provenance edges, mirroring robot_description_recorder.py's
+        established PARENT_OF pattern for the REST route."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Upper Arm Link",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+        record = make_document_recorder(twin, None)
+        result = await record(
+            content="<robot name='bot' />",
+            name="Bot URDF",
+            wp_type="robot_description",
+            domain="mechanical",
+            fmt="urdf",
+            link_type="robot_description",
+            source_tool="cadquery.export_urdf_assembly",
+            source_part_node_ids=[str(part.id)],
+        )
+        edges = await twin.get_edges(UUID(result["node_id"]))
+        assert any(e.target_id == part.id and e.edge_type == EdgeType.PARENT_OF for e in edges)
+
+    async def test_a_bad_source_id_does_not_block_the_commit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_document_recorder(twin, None)
+        result = await record(
+            content="<robot name='bot' />",
+            name="Bot URDF",
+            wp_type="robot_description",
+            domain="mechanical",
+            fmt="urdf",
+            link_type="robot_description",
+            source_tool="cadquery.export_urdf_assembly",
+            source_part_node_ids=["00000000-0000-0000-0000-000000000000"],
+        )
+        assert result["node_id"]  # the commit itself still succeeds
+
     async def test_requires_name_and_content(self) -> None:
         twin = InMemoryTwinAPI.create()
         record = make_document_recorder(twin, None)
@@ -186,6 +238,75 @@ class TestAdapterHandler:
         wp = await twin.get_work_product(UUID(out["node_id"]))
         assert wp.type == WorkProductType.PRD
         assert wp.domain == "requirements"
+
+    async def test_robot_description_document_type_sets_mechanical_domain_and_urdf_format(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-241: the fix's core assertion — a robot-description export
+        committed through twin.record_document lands as a real
+        ROBOT_DESCRIPTION work product, not cad_model."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "6-DOF Arm URDF",
+                "content": "<robot name='arm' />",
+                "document_type": "robot_description",
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp.type == WorkProductType.ROBOT_DESCRIPTION
+        assert wp.domain == "mechanical"
+        assert wp.format == "urdf"  # default when 'format' is omitted
+
+    async def test_robot_description_honors_explicit_format_and_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "6-DOF Arm SDF",
+                "content": "<sdf />",
+                "document_type": "robot_description",
+                "format": "sdf",
+                "metadata": {"robot_name": "arm", "assembly": {"parts": [], "joints": []}},
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp.format == "sdf"
+        assert wp.metadata["robot_name"] == "arm"
+        assert wp.metadata["assembly"] == {"parts": [], "joints": []}
+
+    async def test_robot_description_source_part_node_ids_passed_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Base Link",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="cafebabe",
+                format="step",
+                created_by="test",
+            )
+        )
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Bot URDF",
+                "content": "<robot name='bot' />",
+                "document_type": "robot_description",
+                "source_part_node_ids": [str(part.id)],
+            }
+        )
+        edges = await twin.get_edges(UUID(out["node_id"]))
+        assert any(e.target_id == part.id and e.edge_type == EdgeType.PARENT_OF for e in edges)
 
     def test_record_document_absent_without_recorder(self) -> None:
         server = TwinServer(twin=InMemoryTwinAPI.create())
