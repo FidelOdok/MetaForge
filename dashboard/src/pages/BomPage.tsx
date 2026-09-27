@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { useBom } from '../hooks/use-bom';
+import { useBom, useHierarchicalBom } from '../hooks/use-bom';
 import { useActiveProject } from '../hooks/use-active-project';
-import type { BomComponent } from '../types/bom';
+import type { BomComponent, HierarchicalBomLine } from '../types/bom';
+
+type BomView = 'flat' | 'hierarchical';
 
 type SortField = 'designator' | 'partNumber' | 'description' | 'manufacturer' | 'quantity' | 'unitPrice' | 'status';
 type SortDir = 'asc' | 'desc';
@@ -89,9 +91,50 @@ function BomRow({ component }: { component: BomComponent }) {
   );
 }
 
+/** FORGE-267: one derived EBOM row, indented by its depth in the product
+ * hierarchy (path.length) -- deliberately no where-used drawer or 3D
+ * click-to-highlight in this first pass (see FORGE-267's own scope note). */
+function HierarchicalBomRow({ line }: { line: HierarchicalBomLine }) {
+  const depth = line.path.length - 1;
+  const leafName = line.path[line.path.length - 1];
+  return (
+    <tr
+      className="hover:bg-[var(--mf-c-282a30)] cursor-default"
+      style={{ height: '36px', borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}
+    >
+      <td
+        className="px-3 text-xs text-on-surface whitespace-nowrap"
+        style={{ paddingLeft: `${12 + depth * 20}px` }}
+        title={line.path.join(' / ')}
+      >
+        {leafName}
+      </td>
+      <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
+        {line.partNumber ?? '—'}
+      </td>
+      <td className="px-3 text-xs text-on-surface-variant">{line.description}</td>
+      <td className="px-3 text-xs text-on-surface-variant whitespace-nowrap">
+        {line.manufacturer ?? '—'}
+      </td>
+      <td className="px-3 text-right font-mono text-xs text-on-surface">{line.quantity}</td>
+      <td className="px-3 text-right font-mono text-xs text-on-surface">
+        {line.unitCost != null ? `$${line.unitCost.toFixed(2)}` : '—'}
+      </td>
+      <td className="px-3 text-xs text-on-surface-variant capitalize">
+        {line.source === 'instance_of' ? 'COTS' : 'Fabricated'}
+      </td>
+    </tr>
+  );
+}
+
 export function BomPage() {
   const { activeProjectId } = useActiveProject();
-  const { data: components, isLoading } = useBom(activeProjectId ?? undefined);
+  const [view, setView] = useState<BomView>('flat');
+  const { data: components, isLoading: flatLoading } = useBom(activeProjectId ?? undefined);
+  const { data: hierarchicalLines, isLoading: hierarchicalLoading } = useHierarchicalBom(
+    activeProjectId ?? undefined,
+  );
+  const isLoading = view === 'flat' ? flatLoading : hierarchicalLoading;
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -184,24 +227,53 @@ export function BomPage() {
             Bill of Materials
           </h1>
           <span className="font-mono text-xs text-on-surface-variant">
-            {items.length} components &middot; total ${totalCost.toFixed(2)}
+            {view === 'flat'
+              ? <>{items.length} components &middot; total ${totalCost.toFixed(2)}</>
+              : <>{(hierarchicalLines ?? []).length} EBOM lines</>}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-          style={{
-            background: 'var(--mf-c-282a30)',
-            border: '1px solid var(--mf-r-65-72-90-0p3)',
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>download</span>
-          CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <div
+            className="flex items-center rounded overflow-hidden"
+            style={{ border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+            role="group"
+            aria-label="BOM view"
+          >
+            {(['flat', 'hierarchical'] as BomView[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => setView(v)}
+                className="px-2.5 py-1 text-xs capitalize transition-colors"
+                style={{
+                  background: view === v ? 'var(--mf-c-282a30)' : 'transparent',
+                  color: view === v ? 'var(--mf-c-e2e2eb)' : 'var(--mf-c-9a9aaa)',
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          {view === 'flat' && (
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+              style={{
+                background: 'var(--mf-c-282a30)',
+                border: '1px solid var(--mf-r-65-72-90-0p3)',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>download</span>
+              CSV
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Toolbar */}
+      {/* Toolbar (flat view only -- the hierarchical view is already structured) */}
+      {view === 'flat' && (
       <div className="mb-3 flex items-center gap-2">
         <div className="relative flex items-center">
           <span
@@ -253,6 +325,7 @@ export function BomPage() {
           </span>
         )}
       </div>
+      )}
 
       {/* Loading skeleton */}
       {isLoading && (
@@ -277,72 +350,128 @@ export function BomPage() {
         </div>
       )}
 
-      {/* Empty state */}
-      {!isLoading && items.length === 0 && (
-        <EmptyState
-          title="No components"
-          description={
-            activeProjectId
-              ? 'This project has no BOM components yet.'
-              : 'Select a project, or run an agent, to populate the bill of materials.'
-          }
-        />
+      {view === 'flat' && (
+        <>
+          {/* Empty state */}
+          {!isLoading && items.length === 0 && (
+            <EmptyState
+              title="No components"
+              description={
+                activeProjectId
+                  ? 'This project has no BOM components yet.'
+                  : 'Select a project, or run an agent, to populate the bill of materials.'
+              }
+            />
+          )}
+
+          {/* Empty search result */}
+          {!isLoading && items.length > 0 && sorted.length === 0 && (
+            <EmptyState
+              title="No matches"
+              description="Try adjusting your search or filter."
+            />
+          )}
+
+          {/* Table */}
+          {!isLoading && sorted.length > 0 && (
+            <div
+              className="rounded-lg overflow-hidden overflow-x-auto"
+              style={{
+                background: 'var(--mf-r-30-31-38-0p85)',
+                border: '1px solid var(--mf-r-65-72-90-0p2)',
+              }}
+            >
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                    <th
+                      style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', width: '32px' }}
+                      aria-label="Image"
+                    />
+                    {(
+                      [
+                        { field: 'designator' as SortField, label: 'Ref', align: 'left' },
+                        { field: 'partNumber' as SortField, label: 'Part Number', align: 'left' },
+                        { field: 'description' as SortField, label: 'Description', align: 'left' },
+                        { field: 'manufacturer' as SortField, label: 'Manufacturer', align: 'left' },
+                        { field: 'quantity' as SortField, label: 'Qty', align: 'right' },
+                        { field: 'unitPrice' as SortField, label: 'Unit Price', align: 'right' },
+                        { field: 'status' as SortField, label: 'Status', align: 'left' },
+                      ] as { field: SortField; label: string; align: string }[]
+                    ).map(({ field, label, align }) => (
+                      <th
+                        key={field}
+                        className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
+                        style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        onClick={() => handleSort(field)}
+                      >
+                        {label}
+                        <SortIcon field={field} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((component) => (
+                    <BomRow key={component.id} component={component} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Empty search result */}
-      {!isLoading && items.length > 0 && sorted.length === 0 && (
-        <EmptyState
-          title="No matches"
-          description="Try adjusting your search or filter."
-        />
-      )}
+      {view === 'hierarchical' && (
+        <>
+          {/* Empty state -- FORGE-267: no product hierarchy recorded yet
+              (twin.record_hierarchy_node hasn't been used for this project),
+              distinct from "no BOM at all" */}
+          {!isLoading && (hierarchicalLines ?? []).length === 0 && (
+            <EmptyState
+              title="No product hierarchy yet"
+              description={
+                activeProjectId
+                  ? 'Build one with twin.record_hierarchy_node -- a product, its subsystems, and the parts/components each one is realized by -- to see a derived EBOM here.'
+                  : 'Select a project to view its hierarchical BOM.'
+              }
+            />
+          )}
 
-      {/* Table */}
-      {!isLoading && sorted.length > 0 && (
-        <div
-          className="rounded-lg overflow-hidden overflow-x-auto"
-          style={{
-            background: 'var(--mf-r-30-31-38-0p85)',
-            border: '1px solid var(--mf-r-65-72-90-0p2)',
-          }}
-        >
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr style={{ background: 'var(--mf-c-191b22)' }}>
-                <th
-                  style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', width: '32px' }}
-                  aria-label="Image"
-                />
-                {(
-                  [
-                    { field: 'designator' as SortField, label: 'Ref', align: 'left' },
-                    { field: 'partNumber' as SortField, label: 'Part Number', align: 'left' },
-                    { field: 'description' as SortField, label: 'Description', align: 'left' },
-                    { field: 'manufacturer' as SortField, label: 'Manufacturer', align: 'left' },
-                    { field: 'quantity' as SortField, label: 'Qty', align: 'right' },
-                    { field: 'unitPrice' as SortField, label: 'Unit Price', align: 'right' },
-                    { field: 'status' as SortField, label: 'Status', align: 'left' },
-                  ] as { field: SortField; label: string; align: string }[]
-                ).map(({ field, label, align }) => (
-                  <th
-                    key={field}
-                    className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${align === 'right' ? 'text-right' : 'text-left'}`}
-                    style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                    onClick={() => handleSort(field)}
-                  >
-                    {label}
-                    <SortIcon field={field} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((component) => (
-                <BomRow key={component.id} component={component} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+          {/* Table */}
+          {!isLoading && (hierarchicalLines ?? []).length > 0 && (
+            <div
+              className="rounded-lg overflow-hidden overflow-x-auto"
+              style={{
+                background: 'var(--mf-r-30-31-38-0p85)',
+                border: '1px solid var(--mf-r-65-72-90-0p2)',
+              }}
+            >
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                    {(
+                      ['Name', 'Part Number', 'Description', 'Manufacturer', 'Qty', 'Unit Cost', 'Source'] as string[]
+                    ).map((label, i) => (
+                      <th
+                        key={label}
+                        className={`px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant select-none ${i >= 4 && i <= 5 ? 'text-right' : 'text-left'}`}
+                        style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', whiteSpace: 'nowrap' }}
+                      >
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(hierarchicalLines ?? []).map((line) => (
+                    <HierarchicalBomRow key={`${line.hierarchyNodeId}-${line.componentId}`} line={line} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

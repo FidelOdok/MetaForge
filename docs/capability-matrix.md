@@ -181,7 +181,7 @@ Served by Vite under `dashboard/` — boot with
 | `/sessions` | Workflow run list | `GET /v1/sessions` |
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |
 | `/approvals` | Pending change-proposal review | gateway approvals API |
-| `/bom` | BOM viewer | `GET /v1/bom/...` |
+| `/bom` | BOM viewer, with a flat/hierarchical toggle (FORGE-267): the hierarchical view derives an EBOM from the product hierarchy, quantities multiplied down the CONTAINS tree | `GET /v1/bom/...`, `GET /v1/bom/hierarchical` |
 | `/sim` | Load-case editor + list, per project (FORGE-278) | `GET/POST /v1/simulation/load-cases` |
 | `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB; its Structure tab (FORGE-261) shows the product hierarchy tree-table with per-node mass/cost rollups | `GET /v1/twin/files/...`, `GET /v1/twin/hierarchy` |
 | `/files` | Legacy file browser | gateway files API |

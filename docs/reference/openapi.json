@@ -1979,6 +1979,102 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HierarchicalBomLineResponse": {
+        "description": "One derived EBOM line, in the dashboard's camelCase shape.",
+        "properties": {
+          "componentId": {
+            "title": "Componentid",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "hierarchyNodeId": {
+            "title": "Hierarchynodeid",
+            "type": "string"
+          },
+          "manufacturer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manufacturer"
+          },
+          "partNumber": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partnumber"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "unitCost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unitcost"
+          }
+        },
+        "required": [
+          "hierarchyNodeId",
+          "path",
+          "quantity",
+          "source",
+          "componentId",
+          "description"
+        ],
+        "title": "HierarchicalBomLineResponse",
+        "type": "object"
+      },
+      "HierarchicalBomResponse": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchicalBomLineResponse"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lines",
+          "total"
+        ],
+        "title": "HierarchicalBomResponse",
+        "type": "object"
+      },
       "HierarchyNodeResponse": {
         "description": "One HierarchyNode, in the dashboard's camelCase shape.",
         "properties": {
@@ -6519,6 +6615,56 @@
           }
         },
         "summary": "List Bom",
+        "tags": [
+          "bom"
+        ]
+      }
+    },
+    "/v1/bom/hierarchical": {
+      "get": {
+        "description": "Derive the hierarchical BOM (EBOM) -- FORGE-267, gap G-C3 -- from\nevery \"product\"-kind HierarchyNode's CONTAINS tree in a project.\n\nEmpty (not an error) when the project has no product hierarchy yet\n(FORGE-260's tools haven't been used for it) -- matches the flat BOM's\nown convention.",
+        "operationId": "list_hierarchical_bom_v1_bom_hierarchical_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchicalBomResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Hierarchical Bom",
         "tags": [
           "bom"
         ]
