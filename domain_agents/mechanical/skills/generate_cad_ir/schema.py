@@ -106,3 +106,13 @@ class GenerateCadIrOutput(BaseModel):
         default=None,
         description="Set when commit=True was requested but persistence was skipped or failed",
     )
+    already_committed: bool = Field(
+        default=False,
+        description=(
+            "FORGE-237: true when a cad_model with this exact name and geometry "
+            "(content_hash) already existed in the project — twin_node_id/model_url "
+            "point at that EXISTING node, nothing new was created. Do not call "
+            "twin.commit_geometry again for this same part; only re-commit if the "
+            "geometry actually changes."
+        ),
+    )

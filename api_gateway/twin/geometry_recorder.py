@@ -146,6 +146,54 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             span.set_attribute("geometry.name", name)
             span.set_attribute("geometry.size_bytes", len(content))
 
+            # FORGE-237: computed BEFORE any of the work below (MinIO upload,
+            # script commit, node creation) so an identical re-commit of the
+            # same named part's geometry is a genuine no-op, not just a
+            # SUPERSEDES-linked sibling. Live-observed: one turn produced
+            # THREE "Upper Arm Link" cad_model nodes (two generate_cad_ir
+            # auto-commits + one explicit commit_geometry, all the same
+            # geometry) because nothing compared content_hash before
+            # creating a new node.
+            #
+            # Gated on ``script_source is None``: a caller that supplies a
+            # script is deliberately authoring a new revision (see
+            # test_regenerating_same_name_links_supersedes_chain -- the same
+            # STEP bytes with a genuinely edited script must still version,
+            # since the script IS the real, diffable authoring record even
+            # when its output geometry happens not to have changed yet).
+            # Only a bare, scriptless re-commit -- exactly the reported
+            # bug's shape -- short-circuits.
+            prior_step = await _find_current_work_product(
+                twin, WorkProductType.CAD_MODEL, name, project_id
+            )
+            if (
+                script_source is None
+                and prior_step is not None
+                and prior_step.content_hash == content_hash
+            ):
+                existing_id = str(prior_step.id)
+                logger.info(
+                    "geometry_commit_already_exists",
+                    node_id=existing_id,
+                    name=name,
+                    project_id=project_id,
+                )
+                return {
+                    "node_id": existing_id,
+                    "content_hash": content_hash,
+                    "format": prior_step.format,
+                    "size_bytes": len(content),
+                    "project_linked": bool(project_id),
+                    "model_url": f"/v1/twin/nodes/{existing_id}/model",
+                    "already_committed": True,
+                    "message": (
+                        f"'{name}' with this exact geometry is already committed as "
+                        f"{existing_id} — nothing new was created. Do not call "
+                        "commit_geometry again for the same part unless the geometry "
+                        "actually changed."
+                    ),
+                }
+
             # 1. blob → MinIO (graceful: keep the node even if storage is down).
             minio_object_key: str | None = None
             try:
@@ -241,11 +289,9 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             # (by project_id + name) so parameter/property changes across
             # regenerations form a real version chain in the graph, not
             # isolated nodes — mirrors TwinAPI.ingest_datasheet's SUPERSEDES
-            # pattern. Captured *before* the new node is inserted, else it
-            # would match itself.
-            prior_step = await _find_current_work_product(
-                twin, WorkProductType.CAD_MODEL, name, project_id
-            )
+            # pattern. `prior_step` was already resolved above (FORGE-237,
+            # for the identical-content short circuit) — reused here as the
+            # SUPERSEDES predecessor rather than looked up twice.
 
             now = datetime.now(UTC)
             wp = WorkProduct(

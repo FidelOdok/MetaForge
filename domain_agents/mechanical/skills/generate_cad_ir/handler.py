@@ -146,6 +146,7 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             twin_node_id: str | None = None
             model_url: str | None = None
             commit_error: str | None = None
+            already_committed = False
             if input_data.commit:
                 # FORGE-100: same canonical measured keys as
                 # generate_cad/generate_enclosure/create_assembly, computed
@@ -163,13 +164,20 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
                     density = resolve_density_kg_m3(input_data.material)
                     extra_metadata["mass_kg"] = round(result.volume_mm3 * 1e-9 * density, 6)
 
-                committed, twin_node_id, model_url, commit_error = await self._commit_geometry(
+                (
+                    committed,
+                    twin_node_id,
+                    model_url,
+                    commit_error,
+                    already_committed,
+                ) = await self._commit_geometry(
                     step_bytes=result.step_bytes,
                     name=input_data.name,
                     project_id=input_data.project_id,
                     extra_metadata=extra_metadata,
                 )
                 span.set_attribute("committed", committed)
+                span.set_attribute("already_committed", already_committed)
 
             return GenerateCadIrOutput(
                 work_product_id=input_data.work_product_id,
@@ -184,6 +192,7 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
                 twin_node_id=twin_node_id,
                 model_url=model_url,
                 commit_error=commit_error,
+                already_committed=already_committed,
             )
 
     async def _commit_geometry(
@@ -193,7 +202,7 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
         name: str,
         project_id: str | None,
         extra_metadata: dict[str, Any],
-    ) -> tuple[bool, str | None, str | None, str | None]:
+    ) -> tuple[bool, str | None, str | None, str | None, bool]:
         """Best-effort persist the STEP bytes via twin.commit_geometry.
 
         Unlike ``generate_cad``'s equivalent, this needs no on-disk re-read:
@@ -201,10 +210,14 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
         FreeCAD's ``export_model`` MCP tool returns bytes, not a file path.
 
         Returns:
-            (committed, twin_node_id, model_url, commit_error).
+            (committed, twin_node_id, model_url, commit_error, already_committed).
+            FORGE-237: ``already_committed`` is true when twin.commit_geometry
+            itself found identical content already committed under this name
+            (a no-op, not a new node) -- surfaced so the model doesn't call
+            commit_geometry again for the same part.
         """
         if not await self.context.mcp.is_available("twin.commit_geometry"):
-            return False, None, None, "twin.commit_geometry tool is not available"
+            return False, None, None, "twin.commit_geometry tool is not available", False
 
         arguments: dict[str, Any] = {
             "name": name,
@@ -221,9 +234,15 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             result = await self.context.mcp.invoke("twin.commit_geometry", arguments, timeout=60)
         except Exception as exc:
             self.logger.warning("twin.commit_geometry failed", error=str(exc))
-            return False, None, None, str(exc)
+            return False, None, None, str(exc), False
 
-        return True, result.get("node_id"), result.get("model_url"), None
+        return (
+            True,
+            result.get("node_id"),
+            result.get("model_url"),
+            None,
+            bool(result.get("already_committed")),
+        )
 
     @staticmethod
     def _write_output(output_path: str, content: bytes) -> None:
