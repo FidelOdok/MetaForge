@@ -64,6 +64,69 @@ async def test_invoke_unknown_raises() -> None:
         await ToolRegistry().invoke("nope", {})
 
 
+# ---------------------------------------------------------------------------
+# FORGE-236: unknown-tool-name alias resolution + structured error
+# ---------------------------------------------------------------------------
+
+
+def _registry_with_twin_commit_geometry() -> ToolRegistry:
+    reg = ToolRegistry()
+    reg.register_mcp("twin", "commit_geometry", description="d", input_schema=SCHEMA, handler=_echo)
+    return reg
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [
+        "twin_commit_geometry",  # dropped the mcp_ prefix entirely
+        "twin.commit_geometry",  # dotted tool_id form
+        "twin/commit_geometry",  # slashed form
+        "mcp_twin_commit_geometry",  # exact -- must still resolve via get()
+    ],
+)
+def test_get_resolves_unprefixed_dotted_and_slashed_aliases(requested: str) -> None:
+    reg = _registry_with_twin_commit_geometry()
+    assert reg.get(requested).name == "mcp_twin_commit_geometry"
+
+
+@pytest.mark.asyncio
+async def test_invoke_resolves_an_alias_too_not_just_get() -> None:
+    """The alias resolution must actually reach a call, not just a lookup --
+    live-observed: the model called twin_commit_geometry directly."""
+    reg = _registry_with_twin_commit_geometry()
+    assert await reg.invoke("twin_commit_geometry", {"x": 1}) == {"echo": {"x": 1}}
+
+
+def test_get_unknown_raises_structured_payload_not_a_bare_keyerror_string() -> None:
+    """FORGE-236: str(KeyError(name)) is just repr(name) -- e.g.
+    "'twin_commit_geometry'" -- live-observed making a model conclude a
+    healthy backend was down. to_payload() must carry an actionable hint."""
+    reg = _registry_with_twin_commit_geometry()
+    with pytest.raises(ToolNotFoundError) as exc_info:
+        reg.get("freecad_open_session")  # genuinely not registered here
+    payload = exc_info.value.to_payload()
+    assert payload["status"] == "error"
+    assert payload["error"] == "unknown_tool"
+    assert payload["tool"] == "freecad_open_session"
+    assert "mcp_" in payload["hint"]
+
+
+def test_get_unknown_but_close_suggests_did_you_mean() -> None:
+    reg = _registry_with_twin_commit_geometry()
+    with pytest.raises(ToolNotFoundError) as exc_info:
+        reg.get("mcp_twin_commit_geometrie")  # one-character typo
+    assert "mcp_twin_commit_geometry" in exc_info.value.to_payload()["did_you_mean"]
+
+
+def test_alias_resolution_never_shadows_a_real_exact_match() -> None:
+    """A native tool's own bare name (no mcp_ prefix by design) must resolve
+    by exact match first -- aliasing only ever activates once that lookup
+    has already failed."""
+    reg = ToolRegistry()
+    reg.register_native("twin_search", description="d", input_schema=SCHEMA, handler=_echo)
+    assert reg.get("twin_search").origin == NATIVE
+
+
 def test_list_and_filter_by_origin() -> None:
     reg = ToolRegistry()
     reg.register_native("twin_search", description="d", input_schema=SCHEMA, handler=_echo)

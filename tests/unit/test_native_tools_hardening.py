@@ -363,6 +363,49 @@ class TestStructuredErrors:
         assert payload["error"] == "invalid_arguments"
         assert payload["validation_errors"] == ["missing 'x'"]
 
+    @pytest.mark.asyncio
+    async def test_an_unprefixed_tool_name_self_corrects_without_a_bare_keyerror(self):
+        """FORGE-236: live-observed a model calling twin_commit_geometry
+        (dropped the mcp_ prefix); the ENTIRE error used to be the bare
+        quoted name via KeyError's own __str__, with nothing telling the
+        model what went wrong -- it once concluded a healthy backend was
+        down. The registry now auto-resolves the alias when unambiguous, so
+        this exact call just succeeds."""
+        executed: list[dict[str, Any]] = []
+
+        async def commit(arguments: dict[str, Any]) -> dict[str, Any]:
+            executed.append(arguments)
+            return {"committed": True}
+
+        registry = ToolRegistry()
+        registry.register_mcp(
+            "twin",
+            "commit_geometry",
+            description="d",
+            input_schema={"type": "object"},
+            handler=commit,
+        )
+
+        invoke, seen = _scripted([[_call("twin_commit_geometry", {"obj_id": "o1"}, "1")]])
+        await run_native_tools(_runtime(registry), "commit", invoke=invoke)
+
+        assert executed == [{"obj_id": "o1"}]
+        content = [m for m in seen[-1]["messages"] if m.get("role") == "tool"][0]["content"]
+        assert json.loads(content) == {"committed": True}
+
+    def test_unknown_tool_renders_as_its_own_structured_payload(self):
+        from orchestrator.harness.tool_exec import error_content
+        from orchestrator.harness.tools import ToolNotFoundError
+
+        payload = json.loads(
+            error_content(ToolNotFoundError("nope", did_you_mean=["mcp_twin_get_node"]))
+        )
+
+        assert payload["error"] == "unknown_tool"
+        assert payload["tool"] == "nope"
+        assert payload["did_you_mean"] == ["mcp_twin_get_node"]
+        assert "mcp_" in payload["hint"]
+
 
 class TestSkillReportedFailureMarkedAsStepError:
     """FORGE-225: a skill tool that catches its own error and returns a
