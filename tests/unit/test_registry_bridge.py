@@ -83,3 +83,35 @@ class TestRegistryMcpBridge:
                 "cadquery.create_parametric",
                 {"shape_type": "", "parameters": {}, "output_path": "/out.step"},
             )
+
+
+class _BlankError(Exception):
+    """Raised with no args -- ``str(exc)`` is ``""``, like aiohttp's
+    ``ServerDisconnectedError()`` under real connection contention."""
+
+
+class _FakeClientRaisingBlank:
+    async def call_tool(self, request):  # noqa: ANN001, ANN201 — test double
+        raise _BlankError()
+
+
+class _FakeRegistryWithBlankFailure:
+    def get_adapter_for_tool(self, tool_id: str) -> str | None:
+        return "fake-adapter"
+
+    def get_client(self, adapter_id: str) -> _FakeClientRaisingBlank:
+        return _FakeClientRaisingBlank()
+
+
+class TestRegistryMcpBridgeErrorMessages:
+    """FORGE-249: a message-less transport failure must not render blank."""
+
+    async def test_a_blank_exception_still_produces_a_non_empty_detail(self):
+        bridge = RegistryMcpBridge(_FakeRegistryWithBlankFailure())  # type: ignore[arg-type]
+        with pytest.raises(McpToolError) as exc_info:
+            await bridge.invoke("freecad.open_session", {"name": "x"})
+        assert exc_info.value.details != ""
+        assert exc_info.value.details == "_BlankError"
+        # The rendered message must not end in a bare trailing "failed: "
+        # with nothing after it -- the exact reported symptom.
+        assert not str(exc_info.value).rstrip().endswith("failed:")

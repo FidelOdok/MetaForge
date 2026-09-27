@@ -25,7 +25,7 @@ from mcp_core.protocol import (
     ToolUnavailableError,
 )
 from mcp_core.schemas import ToolCallRequest
-from skill_registry.mcp_bridge import McpBridge, McpToolError
+from skill_registry.mcp_bridge import McpBridge, McpToolError, exc_details
 
 logger = structlog.get_logger(__name__)
 
@@ -126,7 +126,10 @@ class McpClientBridge(McpBridge):
                 backoff = min(backoff * 2, self._backoff_cap)
                 continue
             except Exception as exc:  # noqa: BLE001 — defensive top-level guard
-                raise McpToolError(tool_id, str(exc)) from exc
+                # FORGE-249: never let a message-less transport failure (e.g.
+                # a connection dropped under concurrent load) render as a
+                # blank "failed: " with nothing after it.
+                raise McpToolError(tool_id, exc_details(exc)) from exc
 
             if result.status != "success":
                 raise McpToolError(

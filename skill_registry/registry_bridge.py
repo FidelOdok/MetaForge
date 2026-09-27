@@ -12,7 +12,7 @@ import structlog
 
 from mcp_core.schemas import ToolCallRequest
 from skill_registry.geometry_stash import GeometryStash
-from skill_registry.mcp_bridge import McpBridge, McpToolError
+from skill_registry.mcp_bridge import McpBridge, McpToolError, exc_details
 from tool_registry.registry import ToolRegistry
 
 logger = structlog.get_logger(__name__)
@@ -99,7 +99,10 @@ class RegistryMcpBridge(McpBridge):
         try:
             result = await client.call_tool(request)
         except Exception as exc:
-            raise McpToolError(tool_id, str(exc)) from exc
+            # FORGE-249: never let a message-less transport failure (e.g. a
+            # connection dropped under concurrent load) render as a blank
+            # "failed: " with nothing after it.
+            raise McpToolError(tool_id, exc_details(exc)) from exc
 
         if result.status != "success":
             # MET-569: the adapter's envelope (its error object, code, and any
