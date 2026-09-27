@@ -64,7 +64,11 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
         project_id: str | None = None,
         extra_metadata: dict[str, Any] | None = None,
         source_part_node_ids: list[str] | None = None,
+        source_edge_type: str = "parent_of",
+        evidence_node_id: str | None = None,
     ) -> dict[str, Any]:
+        from uuid import UUID
+
         from twin_core.models.enums import EdgeType
         from twin_core.models.work_product import WorkProduct
 
@@ -130,17 +134,43 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
             # cad_model parts -- mirrors robot_description_recorder.py's
             # PARENT_OF precedent so the twin can answer "which document
             # derives from this part" (best-effort per edge: one bad
-            # node_id must not block the whole commit).
+            # node_id must not block the whole commit). FORGE-246:
+            # source_edge_type is a plain string, not an EdgeType member --
+            # tool_registry (layer 3) may not import twin_core (layer 4+),
+            # so the adapter can only hand this recorder a name, never an
+            # EdgeType instance, to pick a more accurate relation than the
+            # default (e.g. "derives_from" for a simulation_result's real
+            # geometric dependency on its source cad_model).
+            edge_type = EdgeType(source_edge_type)
             edge_failures = 0
             for source_id in source_part_node_ids or []:
                 try:
-                    await twin.add_edge(created.id, source_id, EdgeType.PARENT_OF)
+                    await twin.add_edge(created.id, source_id, edge_type)
                 except Exception as exc:  # noqa: BLE001 — provenance edge is best-effort
                     edge_failures += 1
                     logger.warning(
                         "document_source_edge_failed",
                         node_id=node_id,
                         source_id=source_id,
+                        error=str(exc),
+                    )
+
+            # FORGE-246: e.g. a simulation_result the agent already recorded
+            # an evidence EngineeringEntity for (twin.record_evidence) --
+            # link the evidence claim back to the real, structured artifact
+            # it's about, so the twin can answer "what result backs this
+            # evidence" instead of only having numbers restated as text on
+            # the evidence node itself.
+            evidence_edge_failed = False
+            if evidence_node_id:
+                try:
+                    await twin.add_edge(UUID(evidence_node_id), created.id, EdgeType.GENERATED_FROM)
+                except Exception as exc:  # noqa: BLE001 — provenance edge is best-effort
+                    evidence_edge_failed = True
+                    logger.warning(
+                        "document_evidence_edge_failed",
+                        node_id=node_id,
+                        evidence_node_id=evidence_node_id,
                         error=str(exc),
                     )
 
@@ -160,6 +190,7 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                 linked=linked,
                 size_bytes=len(blob),
                 edge_failures=edge_failures,
+                evidence_edge_failed=evidence_edge_failed,
             )
             return {
                 "node_id": node_id,

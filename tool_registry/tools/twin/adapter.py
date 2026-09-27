@@ -1370,9 +1370,17 @@ class TwinServer(McpToolServer):
     # twin.record_document (MET-588)
     # ------------------------------------------------------------------
 
-    _DOCUMENT_TYPES = ("prd", "documentation", "robot_description")
-    _DOCUMENT_TYPE_DOMAIN = {"prd": "requirements", "robot_description": "mechanical"}
-    _DOCUMENT_TYPE_DEFAULT_FORMAT = {"robot_description": "urdf"}
+    _DOCUMENT_TYPES = ("prd", "documentation", "robot_description", "simulation_result")
+    _DOCUMENT_TYPE_DOMAIN = {
+        "prd": "requirements",
+        "robot_description": "mechanical",
+        "simulation_result": "mechanical",
+    }
+    _DOCUMENT_TYPE_DEFAULT_FORMAT = {"robot_description": "urdf", "simulation_result": "json"}
+    # FORGE-246: a simulation_result's real dependency on its source
+    # cad_model is "derives_from" (the ticket's own naming), not the
+    # generic "parent_of" every other document_type defaults to.
+    _DOCUMENT_TYPE_EDGE_TYPE = {"simulation_result": "derives_from"}
     # FORGE-241: formats commit_geometry must refuse -- see its guard, and
     # twin.record_document(document_type="robot_description") above.
     _ROBOT_DESCRIPTION_FORMATS = frozenset({"urdf", "xacro", "sdf", "usd", "usda"})
@@ -1384,9 +1392,10 @@ class TwinServer(McpToolServer):
                 adapter_id="twin",
                 name="Record Document",
                 description=(
-                    "Persist a text artifact (requirements, notes, a spec, or a "
-                    "robot-description export like URDF/SDF/a ROS2 launch file) "
-                    "as a first-class PRD, DOCUMENTATION, or ROBOT_DESCRIPTION "
+                    "Persist a text artifact (requirements, notes, a spec, a "
+                    "robot-description export like URDF/SDF/a ROS2 launch file, "
+                    "or an FEA results summary) as a first-class PRD, "
+                    "DOCUMENTATION, ROBOT_DESCRIPTION, or SIMULATION_RESULT "
                     "work product: stores it in MinIO and links it to a project "
                     "so it shows on the project's work-product list. Writes "
                     "immediately — no approval gate, same as "
@@ -1399,7 +1408,13 @@ class TwinServer(McpToolServer):
                     "file: commit_geometry is STEP-oriented and rejects those "
                     "formats, since committing them as cad_model previously "
                     "inflated CAD counts and left the twin unable to answer "
-                    "'which robot description belongs to this assembly'."
+                    "'which robot description belongs to this assembly'. "
+                    "FORGE-246: use document_type='simulation_result' after "
+                    "calculix.extract_results + twin.record_evidence -- without "
+                    "this, a completed run_fea/extract_results chain leaves the "
+                    "twin with only an evidence entity (numbers restated as "
+                    "text) and no versioned, loadable result the dashboard's "
+                    "Sim tab can show."
                 ),
                 capability="twin_decision",
                 input_schema={
@@ -1414,8 +1429,12 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "minLength": 1,
                             "description": (
-                                "The document body (markdown, or the raw XML/text "
-                                "of a robot-description export)."
+                                "The document body: markdown for prd/documentation, "
+                                "the raw XML/text of a robot-description export, or "
+                                "a JSON summary (max_von_mises_mpa, "
+                                "max_displacement_mm, load_case, mesh_stats, ...) "
+                                "for a simulation_result -- calculix.extract_results' "
+                                "own structured output, not a restated assertion."
                             ),
                         },
                         "document_type": {
@@ -1425,17 +1444,19 @@ class TwinServer(McpToolServer):
                                 "'prd' for a requirements/product doc, "
                                 "'documentation' for general notes/specs, "
                                 "'robot_description' for a URDF/SDF/ROS2-launch "
-                                "export (e.g. from cadquery.export_urdf_assembly). "
-                                "Defaults to 'documentation'."
+                                "export (e.g. from cadquery.export_urdf_assembly), "
+                                "'simulation_result' for an FEA results summary "
+                                "(e.g. from calculix.extract_results). Defaults to "
+                                "'documentation'."
                             ),
                         },
                         "format": {
                             "type": "string",
                             "description": (
                                 "File extension of 'content' (e.g. 'urdf', 'sdf', "
-                                "'xacro', 'launch.py'). Only meaningful for "
-                                "'robot_description'; other document types are "
-                                "always stored as markdown."
+                                "'xacro', 'launch.py', 'json'). Only meaningful for "
+                                "'robot_description'/'simulation_result'; other "
+                                "document types are always stored as markdown."
                             ),
                         },
                         "metadata": {
@@ -1444,20 +1465,36 @@ class TwinServer(McpToolServer):
                                 "Extra structured metadata to attach — for "
                                 "'robot_description', pass 'robot_name' and the "
                                 "{parts, joints} assembly shape "
-                                "cadquery.export_urdf_assembly took/returned, so "
-                                "the dashboard can show which parts/joints this "
-                                "description covers."
+                                "cadquery.export_urdf_assembly took/returned; for "
+                                "'simulation_result', pass the same summary fields "
+                                "as top-level keys (mirrors 'content') so a "
+                                "constraint expression can read them directly "
+                                "(e.g. wp.metadata.get('max_von_mises_mpa'))."
                             ),
                         },
                         "source_part_node_ids": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Twin node ids of the cad_model parts this "
-                                "document was derived from (e.g. the assembly's "
-                                "committed parts) — recorded as PARENT_OF edges "
-                                "so the twin can answer 'which robot description "
-                                "belongs to this assembly'."
+                                "Twin node ids this document was derived from -- "
+                                "the assembly's committed parts for a "
+                                "'robot_description', or the source cad_model for "
+                                "a 'simulation_result' -- recorded as PARENT_OF "
+                                "edges (DERIVES_FROM for 'simulation_result') so "
+                                "the twin can answer 'which document belongs to "
+                                "this part'."
+                            ),
+                        },
+                        "evidence_node_id": {
+                            "type": "string",
+                            "description": (
+                                "Twin node id of the EngineeringEntity "
+                                "twin.record_evidence already created for this "
+                                "result (FORGE-246) -- recorded as a GENERATED_FROM "
+                                "edge from the evidence to this new work product, "
+                                "so the twin can answer 'what real artifact backs "
+                                "this evidence claim'. Only meaningful for "
+                                "'simulation_result'."
                             ),
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
@@ -1503,6 +1540,7 @@ class TwinServer(McpToolServer):
         )
         metadata = arguments.get("metadata")
         source_ids = arguments.get("source_part_node_ids")
+        evidence_node_id = arguments.get("evidence_node_id")
         return await self._document_recorder(
             content=content,
             name=name,
@@ -1516,6 +1554,10 @@ class TwinServer(McpToolServer):
             extra_metadata=metadata if isinstance(metadata, dict) else None,
             source_part_node_ids=(
                 [str(s) for s in source_ids] if isinstance(source_ids, list) else None
+            ),
+            source_edge_type=self._DOCUMENT_TYPE_EDGE_TYPE.get(document_type, "parent_of"),
+            evidence_node_id=(
+                evidence_node_id if isinstance(evidence_node_id, str) and evidence_node_id else None
             ),
         )
 
