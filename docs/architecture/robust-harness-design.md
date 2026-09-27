@@ -319,8 +319,18 @@ named discipline's own tools are registered — `tool_ids_for_domains`
 (`skill_registry/skill_context.py`) reuses the tool scope every skill already
 declares via `tools_required`, so a mechanical-only phase never sees
 `kicad.*`/`spice.*` schemas at all. `domains=None` (the default) registers
-everything, unchanged from before this existed; plain ad-hoc chat has no
-discipline signal today and stays unscoped.
+everything, unchanged from before this existed.
+
+Plain project-scoped chat (FORGE-300) derives its own `domains` signal from
+the project itself, no new field or migration required: the disciplines its
+recorded work products already evidence (a `cad_model` implies mechanical, a
+`schematic` implies electronics, ...) unioned with a keyword scan of the
+project's own `description` for the brand-new-project case where nothing has
+been recorded yet (`_infer_project_domains`,
+`api_gateway/chat/routes.py`). Either signal being empty falls back to
+`domains=None` — under-scoping costs nothing, so a false negative is always
+preferred over guessing. Non-project ad-hoc chat still has no scoping signal
+and stays unscoped.
 
 Scoping down trades completeness for headroom, so a scoped turn can still
 call `search_tools` — a native tool that searches the *full* catalog by

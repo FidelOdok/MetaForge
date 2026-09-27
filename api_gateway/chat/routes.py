@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import UUID, uuid4
@@ -405,6 +405,137 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     return "\n".join(lines)
 
 
+# FORGE-300: work-product types that unambiguously identify a discipline
+# already active in a project. BOM/test_plan/test_result/prd/documentation/
+# design_decision/constraint_set are deliberately omitted -- either ambiguous
+# across disciplines (a BOM serves both mechanical and electronics) or
+# genuinely cross-cutting, and their tool servers (twin, component,
+# digikey/mouser/nexar) are already always-visible core adapters regardless
+# of domain scoping (see `_CORE_ADAPTER_SERVERS` in harness_backend.py).
+_WORK_PRODUCT_TYPE_DOMAINS: dict[str, str] = {
+    "cad_model": "mechanical",
+    "cad_source_script": "mechanical",
+    "robot_description": "mechanical",
+    "manufacturing_file": "mechanical",
+    "schematic": "electronics",
+    "pcb_layout": "electronics",
+    "gerber": "electronics",
+    "pick_and_place": "electronics",
+    "firmware_source": "firmware",
+    "pinmap": "firmware",
+    "simulation_result": "simulation",
+}
+
+# A brand-new project has no work products yet -- exactly when the tool cap
+# bites hardest (the catalog is the same size turn one as turn one hundred)
+# but the type-based signal above is necessarily empty. This is a coarse,
+# best-effort keyword scan of the project's own stated `description` (set at
+# creation, always present) as a second, independent signal for that case.
+_DESCRIPTION_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "mechanical": (
+        "enclosure",
+        "bracket",
+        "gearbox",
+        "housing",
+        "chassis",
+        "mechanism",
+        "linkage",
+        "gimbal",
+        "robotic arm",
+        "robot arm",
+        "cad model",
+        "3d print",
+        "actuator",
+        "gripper",
+        "structural",
+        "servo mount",
+    ),
+    "electronics": (
+        "pcb",
+        "schematic",
+        "circuit board",
+        "circuit",
+        "sensor board",
+        "power supply",
+        "voltage regulator",
+        "wiring harness",
+        "connector",
+    ),
+    "firmware": (
+        "firmware",
+        "embedded",
+        "microcontroller",
+        "rtos",
+        "esp32",
+        "stm32",
+        "arduino",
+        "bootloader",
+    ),
+    "simulation": (
+        "simulate",
+        "simulation",
+        "gazebo",
+        "physics engine",
+        "fea",
+        "stress analysis",
+        "finite element",
+    ),
+}
+
+
+def _infer_project_domains(
+    description: str, work_product_types: Iterable[str]
+) -> tuple[str, ...] | None:
+    """Best-effort discipline signal for a project-scoped chat turn (FORGE-300).
+
+    FORGE-94 found chat's full MCP catalog (143+ tools) exceeds OpenAI's
+    128-tool-array cap, so a round-robin silently drops some tools every
+    turn. ``mcp_tools_from_bridge``'s ``domains`` param already lets a
+    caller register only the always-visible core adapters plus a chosen
+    discipline's own tools -- design-flow phases have used this since
+    MET-747 (``domains=phase.disciplines``) -- but plain chat had no
+    per-conversation domain signal to pass, so it always registered
+    everything and relied on truncation (see
+    ``docs/architecture/robust-harness-design.md``, "plain ad-hoc chat has
+    no discipline signal today and stays unscoped").
+
+    This combines two signals already present on every project, no new
+    field or migration required: the disciplines its recorded work products
+    already evidence (``_WORK_PRODUCT_TYPE_DOMAINS``), and a keyword scan of
+    its own stated ``description`` (``_DESCRIPTION_DOMAIN_KEYWORDS``) for the
+    brand-new-project case where no work products exist yet. Returns
+    ``None`` (register everything, today's exact behavior) whenever neither
+    signal finds anything -- a false negative here costs nothing (the
+    catalog just isn't narrowed that turn), whereas a false positive that
+    silently hid a needed tool would be strictly worse. A scoped turn can
+    still reach anything outside its inferred domains via ``search_tools``
+    (the same rescue mechanism design-flow phases already rely on), so
+    under-scoping and over-scoping both fail safe.
+    """
+    domains: set[str] = set()
+    for wp_type in work_product_types:
+        domain = _WORK_PRODUCT_TYPE_DOMAINS.get(wp_type)
+        if domain:
+            domains.add(domain)
+    haystack = description.lower()
+    for domain, keywords in _DESCRIPTION_DOMAIN_KEYWORDS.items():
+        if any(keyword in haystack for keyword in keywords):
+            domains.add(domain)
+    return tuple(sorted(domains)) or None
+
+
+async def _project_domains(thread: ChatThreadRecord) -> tuple[str, ...] | None:
+    """``_infer_project_domains`` for a thread's project, or ``None`` when
+    the thread isn't project-scoped or the project can't be resolved."""
+    if thread.scope_kind != "project" or not thread.scope_entity_id:
+        return None
+    project = await get_project_backend().get_project(thread.scope_entity_id)
+    if project is None:
+        return None
+    wp_types = (str(getattr(wp.type, "value", wp.type)) for wp in project.work_products)
+    return _infer_project_domains(project.description, wp_types)
+
+
 def _try_uuid(value: str | None) -> UUID | None:
     if not value:
         return None
@@ -557,6 +688,7 @@ async def _invoke_agent(
                 # placement (system prompt vs. history pair) is path-dependent
                 # and decided in harness_backend (MET-566).
                 brief = await _project_brief(thread)
+                domains = await _project_domains(thread)
                 history = await _thread_history(thread.id)
                 availability = await _context_availability(thread)
                 # MET-566: assemble retrieved knowledge for this message via
@@ -599,6 +731,11 @@ async def _invoke_agent(
                         # MET-567: scope this turn's experience deposit to the
                         # thread's project (None on an unscoped assistant thread).
                         project_id=capture_project,
+                        # FORGE-300: scope the registered MCP tools to the
+                        # project's inferred disciplines (None -- register
+                        # everything -- for a non-project thread or a
+                        # project with no discipline signal yet).
+                        domains=domains,
                     )
                 await notify_agent_done(thread.id, "harness-agent")
                 await capture_turn_done(
