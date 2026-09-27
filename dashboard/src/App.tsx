@@ -25,6 +25,7 @@ const RunsPage = page(() => import('./pages/RunsPage'), 'RunsPage');
 const RunDetailPage = page(() => import('./pages/RunDetailPage'), 'RunDetailPage');
 const ApprovalsPage = page(() => import('./pages/ApprovalsPage'), 'ApprovalsPage');
 const BomPage = page(() => import('./pages/BomPage'), 'BomPage');
+const SimPage = page(() => import('./pages/SimPage'), 'SimPage');
 const TwinViewerPage = page(() => import('./pages/TwinViewerPage'), 'TwinViewerPage');
 const FilesPage = page(() => import('./pages/FilesPage'), 'FilesPage');
 const KnowledgePage = page(() => import('./pages/KnowledgePage'), 'KnowledgePage');
@@ -46,6 +47,7 @@ const ROUTES: Array<[path: string, Page: ComponentType]> = [
   ['runs/:id', RunDetailPage],
   ['approvals', ApprovalsPage],
   ['bom', BomPage],
+  ['sim', SimPage],
   ['twin', TwinViewerPage],
   ['files', FilesPage],
   ['knowledge', KnowledgePage],

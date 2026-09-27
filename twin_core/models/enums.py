@@ -103,6 +103,14 @@ class WorkProductType(StrEnum):
     # distributor, lead time) produced by `create_procurement_record`,
     # usually linked back to the BOM it was sourced from.
     PROCUREMENT_RECORD = "procurement_record"
+    # FORGE-278: a reusable FEA boundary-condition definition (material,
+    # fixed_node_set, load_node_set, load_force_n, source_of_loads) so a
+    # load case is authored once and re-run across design versions instead
+    # of being retyped inline on every calculix.run_fea call. Linked to the
+    # cad_model/mesh it applies to via a PARENT_OF edge (the same precedent
+    # ROBOT_DESCRIPTION/CAD_SOURCE_SCRIPT already use for their own source
+    # geometry link).
+    LOAD_CASE = "load_case"
 
 
 class ConstraintSeverity(StrEnum):

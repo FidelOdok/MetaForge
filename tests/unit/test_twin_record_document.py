@@ -517,3 +517,87 @@ class TestAdapterHandler:
             await server.record_document(
                 {"name": "n", "content": "c", "document_type": "create_work_product"}
             )
+
+    async def test_load_case_document_type_sets_mechanical_domain_and_json_format(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-278: the fix's core assertion -- a load case committed
+        through twin.record_document lands as a real LOAD_CASE work
+        product, reusable across design versions instead of being retyped
+        inline on every calculix.run_fea call."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Cantilever Static Load",
+                "content": '{"fixed_node_set": "Surface1", "load_node_set": "Surface2"}',
+                "document_type": "load_case",
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp.type == WorkProductType.LOAD_CASE
+        assert wp.domain == "mechanical"
+        assert wp.format == "json"  # default when 'format' is omitted
+
+    async def test_load_case_metadata_flattens_fields_for_dashboard_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A load case's material/node-set/force fields must reach
+        top-level metadata (mirrors simulation_result's own flattening test
+        above) so the dashboard's Sim-tab list can render columns without
+        fetching each work product's blob."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Cantilever Static Load",
+                "content": '{"material": {"name": "steel"}}',
+                "document_type": "load_case",
+                "metadata": {
+                    "material": {"name": "steel"},
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface2",
+                    "load_force_n": [0, 0, -100],
+                    "source_of_loads": "Requirement REQ-12",
+                },
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp.metadata["material"] == {"name": "steel"}
+        assert wp.metadata["fixed_node_set"] == "Surface1"
+        assert wp.metadata["load_node_set"] == "Surface2"
+        assert wp.metadata["load_force_n"] == [0, 0, -100]
+        assert wp.metadata["source_of_loads"] == "Requirement REQ-12"
+
+    async def test_load_case_source_part_node_ids_use_parent_of(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unlike simulation_result, a load_case has no override in
+        _DOCUMENT_TYPE_EDGE_TYPE -- it keeps the generic parent_of default,
+        linking to the cad_model/mesh it applies to."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Bracket",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Cantilever Static Load",
+                "content": "{}",
+                "document_type": "load_case",
+                "source_part_node_ids": [str(part.id)],
+            }
+        )
+        edges = await twin.get_edges(UUID(out["node_id"]))
+        assert any(e.target_id == part.id and e.edge_type == EdgeType.PARENT_OF for e in edges)

@@ -4,6 +4,7 @@ import {
   Box,
   Boxes,
   Files,
+  FlaskConical,
   Package,
   Play,
   ShieldCheck,
@@ -37,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/twin', label: 'Digital twin', icon: Box },
       { to: '/bom', label: 'Bill of materials', icon: Package },
+      { to: '/sim', label: 'Simulation', icon: FlaskConical },
       { to: '/files', label: 'Files & artifacts', icon: Files },
       { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
       { to: '/compliance', label: 'Compliance', icon: BadgeCheck },
@@ -51,6 +53,7 @@ export const SECTION_LABELS: Record<string, string> = {
   runs: 'Runs',
   approvals: 'Approvals',
   bom: 'Bill of materials',
+  sim: 'Simulation',
   twin: 'Digital twin',
   files: 'Files & artifacts',
   knowledge: 'Knowledge',
