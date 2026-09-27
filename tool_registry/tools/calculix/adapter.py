@@ -13,7 +13,7 @@ from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.cadquery.materials import resolve_elastic_properties
 from tool_registry.tools.calculix.config import CalculixConfig
 from tool_registry.tools.calculix.deck_builder import build_static_stress_deck
-from tool_registry.tools.calculix.inp_mesh import parse_mesh_inp
+from tool_registry.tools.calculix.inp_mesh import MeshData, parse_mesh_inp
 from tool_registry.tools.calculix.result_parser import extract_results, parse_frd_file
 from tool_registry.tools.calculix.solver import SolverError
 from tool_registry.tools.calculix.solver import run_fea as solver_run_fea
@@ -35,6 +35,51 @@ _MESH_FILE_DESCRIPTION = (
     "a work_product_id -- call twin.stage_work_product_file first if you "
     "only have one, and pass its returned file_path here."
 )
+
+# FORGE-239: a fixed_node_set that spans this much of the part's own extent
+# along its LONGEST axis (its "length") is very likely the wrong face, not a
+# legitimately large one -- reported live: a cantilever's fixed end was
+# meant to be the x=0 face, but the model picked a gmsh-named group
+# ("Surface1") that turned out to be the entire long side (x spans the full
+# 0..360mm part length, not just the x=0 end), clamping the whole beam and
+# understating stress ~10x. Checked ONLY on the longest axis, not all three
+# independently: a real, intentionally-large fixed face (e.g. a full end
+# cap) legitimately spans ~100% of the part's OTHER two (cross-sectional)
+# axes -- that's not suspicious, and checking every axis independently
+# false-positived on exactly that shape during this fix's own testing.
+_FIXED_SET_SPAN_WARNING_THRESHOLD = 0.5
+
+
+def _fixed_node_set_span_warning(mesh: MeshData, fixed_node_set: str) -> str | None:
+    """None if fixed_node_set's bbox looks like a real face; else a warning
+    naming how much of the part's longest axis it suspiciously spans."""
+    try:
+        fixed_ids = mesh.node_ids_for_elset(fixed_node_set)
+        fixed_bbox = mesh.bounding_box_for_nodes(fixed_ids)
+        whole_bbox = mesh.bounding_box_for_nodes(list(mesh.nodes))
+    except (KeyError, ValueError):
+        return None  # let run_fea's own error paths report the real problem
+
+    extents = {
+        axis: whole_bbox[f"max_{axis}"] - whole_bbox[f"min_{axis}"] for axis in ("x", "y", "z")
+    }
+    axis = max(extents, key=lambda a: extents[a])
+    whole_extent = extents[axis]
+    if whole_extent <= 1e-9:
+        return None  # a degenerate (point-like) mesh -- nothing to compare against
+    fixed_extent = fixed_bbox[f"max_{axis}"] - fixed_bbox[f"min_{axis}"]
+    ratio = fixed_extent / whole_extent
+    if ratio > _FIXED_SET_SPAN_WARNING_THRESHOLD:
+        return (
+            f"fixed_node_set {fixed_node_set!r} spans {ratio:.0%} of the part's length "
+            f"(its longest axis, {axis}: {fixed_extent:.3g}mm of {whole_extent:.3g}mm) -- "
+            "this usually means the wrong face was picked (e.g. a whole side instead "
+            "of just one end), which silently over-constrains the model and "
+            "understates stress/deflection. Use freecad.generate_mesh's own 'faces' "
+            "table (bbox/centroid per named face) to pick the intended one by its "
+            "real coordinates before re-running."
+        )
+    return None
 
 
 class CalculixServer(McpToolServer):
@@ -138,6 +183,27 @@ class CalculixServer(McpToolServer):
                         },
                         "solver_time": {"type": "number"},
                         "mesh_elements": {"type": "integer"},
+                        "frd_path": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-239: the exact .frd result file to pass to "
+                                "calculix.extract_results -- note it is "
+                                "'<mesh_stem>_solved.frd', NOT '<mesh_stem>.frd'."
+                            ),
+                        },
+                        "warnings": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-239: present only when something about this "
+                                "run looks suspect (e.g. fixed_node_set spans most "
+                                "of the part along one axis, which usually means "
+                                "the wrong face was picked). The solve still "
+                                "completed -- but don't record this result as "
+                                "trustworthy evidence without addressing the "
+                                "warning first."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -396,13 +462,27 @@ class CalculixServer(McpToolServer):
 
             try:
                 solved_file = mesh_file
+                span_warning: str | None = None
                 if deck_spec is not None:
                     mesh = parse_mesh_inp(mesh_file)
+                    # FORGE-239: check BEFORE solving -- the warning is about
+                    # the boundary condition choice itself, not the result,
+                    # so there's no reason to wait for a (possibly slow)
+                    # solve to surface it.
+                    span_warning = _fixed_node_set_span_warning(mesh, deck_spec["fixed_node_set"])
                     deck_text = build_static_stress_deck(mesh, **deck_spec)
                     solved_path = Path(mesh_file).with_name(f"{Path(mesh_file).stem}_solved.inp")
                     solved_path.write_text(deck_text, encoding="utf-8")
                     solved_file = str(solved_path)
                     span.set_attribute("calculix.solved_file", solved_file)
+                if span_warning:
+                    span.set_attribute("calculix.fixed_node_set_warning", span_warning)
+                    logger.warning(
+                        "run_fea_fixed_node_set_span_suspect",
+                        mesh_file=mesh_file,
+                        fixed_node_set=deck_spec["fixed_node_set"] if deck_spec else None,
+                        warning=span_warning,
+                    )
 
                 solver_result = await solver_run_fea(
                     mesh_file=solved_file,
@@ -425,17 +505,28 @@ class CalculixServer(McpToolServer):
                         "nothing was actually solved (check the deck has a *STEP with real "
                         "loads/boundary conditions and *NODE FILE/*EL FILE output requests)."
                     )
-                parsed = parse_frd_file(frd_files[0])
-                return {
+                frd_path = frd_files[0]
+                parsed = parse_frd_file(frd_path)
+                result: dict[str, Any] = {
                     "max_von_mises": {
                         "global": parsed.get("stress", {}).get("max", 0.0),
                     },
                     "solver_time": solver_result["solver_time_s"],
                     "mesh_elements": parsed.get("node_count", 0),
                     "result_files": solver_result["result_files"],
+                    # FORGE-239: reported live -- run_fea writes
+                    # "<stem>_solved.frd", but the model called
+                    # extract_results on "<stem>.frd" (not found), because
+                    # the exact path was only ever buried inside
+                    # 'result_files' (a mixed list of every solver output
+                    # file, not just the .frd). Surface it directly.
+                    "frd_path": frd_path,
                     "stress": parsed.get("stress", {}),
                     "displacement": parsed.get("displacement", {}),
                 }
+                if span_warning:
+                    result["warnings"] = [span_warning]
+                return result
 
             except Exception as exc:
                 span.record_exception(exc)
@@ -474,7 +565,8 @@ class CalculixServer(McpToolServer):
                         "CalculiX exited successfully but produced no .frd result file -- "
                         "nothing was actually solved."
                     )
-                parsed = parse_frd_file(frd_files[0])
+                frd_path = frd_files[0]
+                parsed = parse_frd_file(frd_path)
                 temperature = parsed.get("temperature", {})
                 return {
                     "max_temperature": temperature.get("max", 0.0),
@@ -482,6 +574,8 @@ class CalculixServer(McpToolServer):
                     "temperature_distribution": temperature.get("nodes", {}),
                     "solver_time": solver_result["solver_time_s"],
                     "result_files": solver_result["result_files"],
+                    # FORGE-239: see _execute_solver's own comment.
+                    "frd_path": frd_path,
                 }
 
             except Exception as exc:
