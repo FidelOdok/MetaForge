@@ -3384,3 +3384,16 @@ button:disabled {
   color: var(--mf-c-9a9aaa);
   text-align: right;
 }
+
+/* FORGE-264: an over-budget branch's actual/allocated pair and its row
+   are flagged distinctly from "no allocation yet" (which stays neutral). */
+.tw-structure-row.is-over-budget { background: rgba(255,180,171,0.08); }
+.tw-structure-mass.is-over-budget, .tw-structure-cost.is-over-budget {
+  color: var(--mf-c-ffb4ab);
+  font-weight: 600;
+}
+.tw-structure-warning {
+  font-size: 14px !important;
+  color: var(--mf-c-ffb4ab);
+  margin-right: 2px;
+}

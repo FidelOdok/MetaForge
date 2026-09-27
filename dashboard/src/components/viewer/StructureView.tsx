@@ -33,12 +33,14 @@ function buildForest(nodes: HierarchyNode[]): TreeNode[] {
   return roots;
 }
 
-function formatMass(massKg: number): string {
-  return massKg > 0 ? `${massKg.toFixed(2)} kg` : '—';
+function formatMass(massKg: number, budgetKg: number | null): string {
+  if (massKg <= 0) return '—';
+  return budgetKg != null ? `${massKg.toFixed(2)} / ${budgetKg.toFixed(2)} kg` : `${massKg.toFixed(2)} kg`;
 }
 
-function formatCost(cost: number): string {
-  return cost > 0 ? `$${cost.toFixed(2)}` : '—';
+function formatCost(cost: number, budget: number | null): string {
+  if (cost <= 0) return '—';
+  return budget != null ? `$${cost.toFixed(2)} / $${budget.toFixed(2)}` : `$${cost.toFixed(2)}`;
 }
 
 function TreeRow({
@@ -56,10 +58,14 @@ function TreeRow({
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
+  const overBudget = node.massOverBudget === true || node.costOverBudget === true;
 
   return (
     <>
-      <div className="tw-structure-row" style={{ paddingLeft: depth * 20 }}>
+      <div
+        className={`tw-structure-row${overBudget ? ' is-over-budget' : ''}`}
+        style={{ paddingLeft: depth * 20 }}
+      >
         <button
           type="button"
           className="tw-structure-toggle"
@@ -79,12 +85,21 @@ function TreeRow({
           {iconForHierarchyKind(node.kind)}
         </span>
         <button type="button" className="tw-structure-name" onClick={() => onSelect(node.id)}>
+          {overBudget && (
+            <span className="material-symbols-outlined tw-structure-warning" aria-label="Over budget">
+              warning
+            </span>
+          )}
           {node.name}
         </button>
         <span className="tw-structure-kind-label">{node.kind}</span>
         <span className="tw-structure-qty">{node.quantity ?? '—'}</span>
-        <span className="tw-structure-mass">{formatMass(node.massKg)}</span>
-        <span className="tw-structure-cost">{formatCost(node.cost)}</span>
+        <span className={`tw-structure-mass${node.massOverBudget ? ' is-over-budget' : ''}`}>
+          {formatMass(node.massKg, node.massBudgetKg)}
+        </span>
+        <span className={`tw-structure-cost${node.costOverBudget ? ' is-over-budget' : ''}`}>
+          {formatCost(node.cost, node.costBudget)}
+        </span>
       </div>
       {hasChildren && !isCollapsed && (
         <div>

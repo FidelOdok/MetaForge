@@ -9,4 +9,10 @@ export interface HierarchyNode {
   /** Rolled up over this node's own CONTAINS subtree. */
   massKg: number;
   cost: number;
+  /** FORGE-264: set only when a budget entity allocates to this node.
+   * null means no allocation targets it -- not "under budget". */
+  massBudgetKg: number | null;
+  massOverBudget: boolean | null;
+  costBudget: number | null;
+  costOverBudget: boolean | null;
 }

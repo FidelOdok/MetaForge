@@ -1986,6 +1986,28 @@
             "title": "Cost",
             "type": "number"
           },
+          "costBudget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Costbudget"
+          },
+          "costOverBudget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Costoverbudget"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1994,9 +2016,31 @@
             "title": "Kind",
             "type": "string"
           },
+          "massBudgetKg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Massbudgetkg"
+          },
           "massKg": {
             "title": "Masskg",
             "type": "number"
+          },
+          "massOverBudget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Massoverbudget"
           },
           "name": {
             "title": "Name",
