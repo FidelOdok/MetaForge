@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from api_gateway.twin.hierarchy_routes import get_hierarchy_tree, init_twin
 from twin_core.api import InMemoryTwinAPI
+from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, WorkProductType
 from twin_core.models.hierarchy_node import HierarchyNode
 from twin_core.models.work_product import WorkProduct
@@ -86,3 +87,132 @@ class TestGetHierarchyTree:
         with pytest.raises(HTTPException) as exc:
             await get_hierarchy_tree(project_id="not-a-uuid")
         assert exc.value.status_code == 400
+
+
+class TestBudgetAllocationWiring:
+    """FORGE-264 (gap G-B4): mass/cost budget allocation fields."""
+
+    async def test_over_budget_node_is_flagged(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+
+        base = await twin.create_hierarchy_node(
+            HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        )
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Base plate",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+                metadata={"mass_kg": 5.16},
+            )
+        )
+        await twin.add_edge(base.id, part.id, EdgeType.REALIZED_BY)
+        await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="budget",
+                statement="Moving mass budget",
+                title="mass_budget",
+                project_id=pid,
+                metadata={
+                    "metric": "mass",
+                    "unit": "kg",
+                    "system_total": 4.5,
+                    "allocations": [{"target": str(base.id), "amount": 4.5}],
+                },
+            )
+        )
+
+        result = await get_hierarchy_tree(project_id=str(pid))
+        node = next(n for n in result.nodes if n.id == str(base.id))
+        assert node.massBudgetKg == 4.5
+        assert node.massOverBudget is True
+
+    async def test_under_budget_node_is_not_flagged(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+
+        base = await twin.create_hierarchy_node(
+            HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        )
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Base plate",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+                metadata={"mass_kg": 1.0},
+            )
+        )
+        await twin.add_edge(base.id, part.id, EdgeType.REALIZED_BY)
+        await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="budget",
+                statement="Moving mass budget",
+                title="mass_budget",
+                project_id=pid,
+                metadata={
+                    "metric": "mass",
+                    "unit": "kg",
+                    "system_total": 4.5,
+                    "allocations": [{"target": str(base.id), "amount": 4.5}],
+                },
+            )
+        )
+
+        result = await get_hierarchy_tree(project_id=str(pid))
+        node = next(n for n in result.nodes if n.id == str(base.id))
+        assert node.massOverBudget is False
+
+    async def test_unallocated_node_has_no_budget_fields(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+        node = await twin.create_hierarchy_node(
+            HierarchyNode(name="Untracked", kind="assembly", project_id=pid)
+        )
+
+        result = await get_hierarchy_tree(project_id=str(pid))
+        out = next(n for n in result.nodes if n.id == str(node.id))
+        assert out.massBudgetKg is None
+        assert out.massOverBudget is None
+
+    async def test_malformed_budget_entity_does_not_break_the_list(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+        node = await twin.create_hierarchy_node(
+            HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        )
+        # Missing required 'system_total' -- budget_from_entity raises ValueError.
+        await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="budget",
+                statement="Broken budget",
+                project_id=pid,
+                metadata={"metric": "mass", "unit": "kg"},
+            )
+        )
+
+        result = await get_hierarchy_tree(project_id=str(pid))
+        assert len(result.nodes) == 1
+        assert result.nodes[0].id == str(node.id)
+
+    async def test_unscoped_listing_skips_budget_lookup(self) -> None:
+        """No project_id means no single project's budgets apply -- must
+        not guess, and must not error."""
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        await twin.create_hierarchy_node(HierarchyNode(name="Arm", kind="product"))
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].massBudgetKg is None
