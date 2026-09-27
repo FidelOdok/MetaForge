@@ -841,6 +841,85 @@ class TestCommitGeometryFilePath:
 
 
 # ---------------------------------------------------------------------------
+# twin.commit_geometry -- rejects robot-description formats (FORGE-241)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryRejectsRobotDescriptionFormats:
+    """commit_geometry always types its result as cad_model -- a URDF/SDF/USD
+    robot-description export committed through it lands with the wrong
+    WorkProductType, inflating CAD counts and leaving the twin unable to
+    answer "which robot description belongs to this assembly" (reported
+    live: a URDF, SDF, and ROS2 launch file all landed as cad_model)."""
+
+    @pytest.mark.parametrize("fmt", ["urdf", "xacro", "sdf", "usd", "usda", "URDF"])
+    async def test_known_robot_description_formats_are_rejected(self, fmt: str) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "should-not-be-reached"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        with pytest.raises(ValueError, match="not STEP-oriented CAD geometry"):
+            await srv.commit_geometry(
+                {
+                    "step_base64": base64.b64encode(b"<robot/>").decode("ascii"),
+                    "name": "Bot URDF",
+                    "format": fmt,
+                }
+            )
+
+    async def test_the_rejection_names_record_document_as_the_right_tool(self) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "should-not-be-reached"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        with pytest.raises(ValueError, match="twin.record_document"):
+            await srv.commit_geometry(
+                {
+                    "step_base64": base64.b64encode(b"<robot/>").decode("ascii"),
+                    "name": "Bot URDF",
+                    "format": "urdf",
+                }
+            )
+
+    async def test_step_and_other_cad_formats_are_unaffected(self) -> None:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-ok"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        for fmt in ("step", "stp", "brep", None):
+            result = await srv.commit_geometry(
+                {
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "name": "Bracket",
+                    **({"format": fmt} if fmt else {}),
+                }
+            )
+            assert result["node_id"] == "node-ok"
+
+    async def test_rejection_surfaces_as_a_clean_tool_error_via_handle_request(self) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "should-not-be-reached"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        resp = json.loads(
+            await srv.handle_request(
+                _request(
+                    "twin.commit_geometry",
+                    {
+                        "step_base64": base64.b64encode(b"<robot/>").decode("ascii"),
+                        "name": "Bot URDF",
+                        "format": "sdf",
+                    },
+                )
+            )
+        )
+        assert "error" in resp
+
+
+# ---------------------------------------------------------------------------
 # twin.commit_geometry -- flatten 'properties' onto top-level metadata (FORGE-100)
 # ---------------------------------------------------------------------------
 

@@ -34,6 +34,12 @@ _CONTENT_TYPE = {
     "c": "text/x-csrc",
     "h": "text/x-chdr",
     "json": "application/json",
+    # FORGE-241: robot_description formats.
+    "urdf": "application/xml",
+    "xacro": "application/xml",
+    "sdf": "application/xml",
+    "usd": "application/octet-stream",
+    "usda": "text/plain",
 }
 
 
@@ -57,7 +63,9 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
         session_id: str | None = None,
         project_id: str | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        source_part_node_ids: list[str] | None = None,
     ) -> dict[str, Any]:
+        from twin_core.models.enums import EdgeType
         from twin_core.models.work_product import WorkProduct
 
         if not name or not isinstance(name, str):
@@ -118,6 +126,24 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
             created = await twin.create_work_product(wp)
             node_id = str(getattr(created, "id", wp_id))
 
+            # FORGE-241: e.g. a robot_description derived from one or more
+            # cad_model parts -- mirrors robot_description_recorder.py's
+            # PARENT_OF precedent so the twin can answer "which document
+            # derives from this part" (best-effort per edge: one bad
+            # node_id must not block the whole commit).
+            edge_failures = 0
+            for source_id in source_part_node_ids or []:
+                try:
+                    await twin.add_edge(created.id, source_id, EdgeType.PARENT_OF)
+                except Exception as exc:  # noqa: BLE001 — provenance edge is best-effort
+                    edge_failures += 1
+                    logger.warning(
+                        "document_source_edge_failed",
+                        node_id=node_id,
+                        source_id=source_id,
+                        error=str(exc),
+                    )
+
             linked = False
             if project_id and project_backend is not None:
                 try:
@@ -133,6 +159,7 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                 project_id=project_id,
                 linked=linked,
                 size_bytes=len(blob),
+                edge_failures=edge_failures,
             )
             return {
                 "node_id": node_id,
