@@ -782,7 +782,7 @@ class TestBuildAssemblyUrdf:
                 "anchor": (0, 0, 0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'scale="0.001 0.001 0.001"' in xml
         assert xml.count('scale="0.001 0.001 0.001"') == 4  # 2 links x (visual+collision)
 
@@ -797,7 +797,7 @@ class TestBuildAssemblyUrdf:
                 "anchor": (10.0, 0.0, 0.0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert '<robot name="bot">' in xml
         assert '<link name="base">' in xml
         assert '<link name="arm">' in xml
@@ -820,10 +820,67 @@ class TestBuildAssemblyUrdf:
                 "anchor": (0, 0, 0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, emitted = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'type="continuous"' in xml
         assert "<axis" in xml
         assert "<limit" not in xml
+        assert emitted == [{"name": "j1", "type": "continuous", "limits": None}]
+
+    def test_revolute_with_real_limits_maps_to_revolute_not_continuous(self):
+        """FORGE-240: a revolute joint with CALLER-SUPPLIED limits must not
+        be silently downgraded to unlimited continuous -- that's real data,
+        not the fabricated-limit case the continuous mapping exists to
+        avoid. Reported live: a user-specified +/-170deg/+/-110deg range
+        was dropped, exported as unlimited continuous, and the agent then
+        reported fabricated +/-180deg limits that matched neither the
+        request nor the file."""
+        joints = [
+            {
+                "name": "J1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+                "limits": {"lower": -2.9670597, "upper": 2.9670597},  # +/-170deg
+            },
+        ]
+        xml, emitted = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'name="J1" type="revolute"' in xml
+        assert "<axis" in xml
+        assert 'lower="-2.9670597"' in xml
+        assert 'upper="2.9670597"' in xml
+        # Default effort/velocity fill in the same way prismatic's already do.
+        assert 'effort="100"' in xml
+        assert 'velocity="1"' in xml
+        assert emitted == [
+            {
+                "name": "J1",
+                "type": "revolute",
+                "limits": {
+                    "lower": -2.9670597,
+                    "upper": 2.9670597,
+                    "effort": 100.0,
+                    "velocity": 1.0,
+                },
+            }
+        ]
+
+    def test_revolute_with_limits_honors_explicit_effort_and_velocity(self):
+        joints = [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "anchor": (0, 0, 0),
+                "limits": {"lower": -1.0, "upper": 1.0, "effort": 50.0, "velocity": 2.5},
+            },
+        ]
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        assert 'effort="50"' in xml
+        assert 'velocity="2.5"' in xml
 
     def test_slider_maps_to_prismatic_with_limits(self):
         joints = [
@@ -837,7 +894,7 @@ class TestBuildAssemblyUrdf:
                 "limits": {"lower": -0.05, "upper": 0.05},
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=joints)
         assert 'type="prismatic"' in xml
         assert 'lower="-0.05"' in xml
         assert 'upper="0.05"' in xml
@@ -886,7 +943,7 @@ class TestBuildAssemblyUrdf:
                 "anchor": (0, 0, 0),
             },
         ]
-        xml = _build_assembly_urdf(robot_name="bot", links=links, joints=joints)
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=links, joints=joints)
         assert '<material name="base_material">' in xml
         assert 'rgba="0.2 0.25 0.3 1"' in xml
         assert "arm_material" not in xml
@@ -1006,7 +1063,7 @@ class TestBuildAssemblyUrdfFkCorrectness:
         return tuple(float(v) for v in xyz.split())
 
     def test_joint_origins_fk_back_to_the_input_anchors(self):
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
         origins = self._joint_origins_m(xml)
 
         # j1's parent (base) is a chain root -> origin is the raw anchor.
@@ -1032,7 +1089,7 @@ class TestBuildAssemblyUrdfFkCorrectness:
         assert l2_world == pytest.approx(tuple(v * 1e-3 for v in self._J2_ANCHOR_MM))
 
     def test_mesh_origins_compensate_so_world_frame_geometry_lands_correctly(self):
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
         # base is a chain root -- no compensation needed.
         assert self._link_section_origin_m(xml, "base", "visual") == pytest.approx((0, 0, 0))
         assert self._link_section_origin_m(xml, "base", "collision") == pytest.approx((0, 0, 0))
@@ -1048,7 +1105,7 @@ class TestBuildAssemblyUrdfFkCorrectness:
     def test_inertial_origin_is_com_relative_to_the_link_frame_not_world(self):
         import xml.etree.ElementTree as ET
 
-        xml = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
+        xml, _ = _build_assembly_urdf(robot_name="bot", links=self._LINKS, joints=self._joints())
         root = ET.fromstring(xml)
         l1_el = next(el for el in root.findall("link") if el.get("name") == "l1")
         xyz = l1_el.find("inertial/origin").get("xyz")
@@ -1334,7 +1391,7 @@ class TestBuildAssemblySdf:
         joints = [
             {"name": "base_to_arm", "type": "fixed", "base": "base", "follower": "arm"},
         ]
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert '<model name="bot">' in xml
@@ -1356,18 +1413,46 @@ class TestBuildAssemblySdf:
                 "axis": (0, 0, 1),
             },
         ]
-        xml = _build_assembly_sdf(
+        xml, emitted = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert 'type="continuous"' in xml
         assert "<axis>" in xml
         assert "<limit" not in xml
+        assert emitted == [{"name": "j1", "type": "continuous", "limits": None}]
+
+    def test_revolute_with_real_limits_maps_to_revolute_not_continuous(self):
+        """FORGE-240: same fix as URDF's -- caller-supplied limits on a
+        revolute joint must not be dropped in favor of unlimited continuous."""
+        joints = [
+            {
+                "name": "J2",
+                "type": "revolute",
+                "base": "base",
+                "follower": "arm",
+                "axis": (0, 0, 1),
+                "limits": {"lower": -1.9198622, "upper": 1.9198622},  # +/-110deg
+            },
+        ]
+        xml, emitted = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
+        )
+        assert 'name="J2" type="revolute"' in xml
+        assert "<lower>-1.9198622</lower>" in xml
+        assert "<upper>1.9198622</upper>" in xml
+        assert emitted == [
+            {
+                "name": "J2",
+                "type": "revolute",
+                "limits": {"lower": -1.9198622, "upper": 1.9198622},
+            }
+        ]
 
     def test_ball_joint_is_supported_natively(self):
         joints = [
             {"name": "j1", "type": "ball", "base": "base", "follower": "arm"},
         ]
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert 'type="ball">' in xml
@@ -1384,7 +1469,7 @@ class TestBuildAssemblySdf:
                 "limits": {"lower": -0.05, "upper": 0.05},
             },
         ]
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=joints, static=False, world_name=""
         )
         assert 'type="prismatic"' in xml
@@ -1410,7 +1495,7 @@ class TestBuildAssemblySdf:
             )
 
     def test_world_name_wraps_model(self):
-        xml = _build_assembly_sdf(
+        xml, _ = _build_assembly_sdf(
             model_name="bot", links=self._LINKS, joints=[], static=False, world_name="my_world"
         )
         assert '<world name="my_world">' in xml
