@@ -280,6 +280,37 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.revision_snapshot import RevisionSnapshot
 
             return RevisionSnapshot.model_validate(data)
+        elif node_type == NodeType.BOM_ITEM:
+            # FORGE-242/FORGE-68 failure mode: without this branch a BOMItem
+            # read back from Neo4j degrades to a bare NodeBase, losing
+            # part_number/specifications/etc entirely -- api_gateway/bom/
+            # routes.py's _item_to_component then raises AttributeError on
+            # the first such row and 500s the whole GET /v1/bom endpoint for
+            # every project, not just the one with the bad row.
+            from twin_core.models.bom_item import BOMItem
+
+            return BOMItem.model_validate(data)
+        elif node_type == NodeType.DATASHEET:
+            # Same FORGE-68 failure mode -- ingest_datasheet's own
+            # idempotency check and get_current_datasheet/list_datasheets
+            # (twin_core/api.py) all read NodeType.DATASHEET rows back and
+            # use them as real Datasheet objects (mpn/file_hash/superseded
+            # revisions) without this branch, every read degrades silently.
+            from twin_core.models.datasheet import Datasheet
+
+            return Datasheet.model_validate(data)
+        elif node_type == NodeType.DEVICE_INSTANCE:
+            from twin_core.models.device_instance import DeviceInstance
+
+            return DeviceInstance.model_validate(data)
+        elif node_type == NodeType.DESIGN_ELEMENT:
+            from twin_core.models.design_element import DesignElement
+
+            return DesignElement.model_validate(data)
+        elif node_type == NodeType.TWIN_MODEL:
+            from twin_core.models.twin_model import TwinModel
+
+            return TwinModel.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 

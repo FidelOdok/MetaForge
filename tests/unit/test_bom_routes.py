@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
 
 from api_gateway.bom.routes import _item_to_component, init_twin, list_bom
 from twin_core.api import InMemoryTwinAPI
+from twin_core.models.base import NodeBase
 from twin_core.models.bom_item import BOMItem
+from twin_core.models.enums import NodeType
 
 
 class TestMapping:
@@ -100,3 +103,40 @@ class TestRoute:
         with pytest.raises(HTTPException) as exc:
             await list_bom(project_id="not-a-uuid")
         assert exc.value.status_code == 400
+
+
+class _FakeTwinWithABareNodeBase:
+    """FORGE-242: InMemoryTwinAPI stores objects by reference (no
+    serialize/deserialize round trip), so it can never reproduce the real
+    failure -- a Neo4j-backed twin returning a bare NodeBase for a row that
+    should have deserialized as a BOMItem (the root cause, fixed separately
+    in neo4j_graph_engine.py's _props_to_node). This fake reproduces that
+    exact shape directly, independent of the root-cause fix, so the
+    defensive skip in list_bom is tested on its own."""
+
+    def __init__(self, items: list[Any]) -> None:
+        self._items = items
+
+    async def list_bom_items(self, project_id: UUID | None = None) -> list[Any]:
+        return self._items
+
+
+class TestMalformedNodeDoesNotBreakTheWholeList:
+    async def test_a_bare_nodebase_row_is_skipped_not_fatal(self) -> None:
+        good = BOMItem(part_number="A", manufacturer="m")
+        bad = NodeBase(node_type=NodeType.WORK_PRODUCT)  # degraded read-back shape
+        init_twin(_FakeTwinWithABareNodeBase([good, bad]))
+
+        result = await list_bom()
+
+        assert result.total == 1
+        assert result.components[0].partNumber == "A"
+
+    async def test_all_rows_malformed_returns_empty_not_500(self) -> None:
+        bad = NodeBase(node_type=NodeType.WORK_PRODUCT)
+        init_twin(_FakeTwinWithABareNodeBase([bad]))
+
+        result = await list_bom()
+
+        assert result.total == 0
+        assert result.components == []
