@@ -31,7 +31,7 @@ when the gateway supplies their backend).
 | `twin` | `twin.constraint_violations` | List active constraint violations on a project. Pass `project_id` to scope explicitly (FORGE-75, the project brief tells the agent to do this the same way it does for `twin.commit_geometry`) — without it, falls back to the calling session's ambient project context if one is set (FORGE-74, not currently reachable from a real chat turn — see FORGE-75), and otherwise evaluates every constraint across every project (admin path, previously always did this unconditionally, a real cross-project leak) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
 | `twin` | `twin.query_cypher` | Run a Cypher query against the Twin (mutating Cypher gated by `--allow-twin-mutations`) | [`tier1/twin-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/twin-hp.md) |
 | `twin` | `twin.record_decision` | Record a design decision as a typed DESIGN_DECISION work product (markdown blob + project link) | live-verified (MET-495) |
-| `twin` | `twin.record_document` | Persist a markdown document (requirements, notes) as a typed PRD/DOCUMENTATION work product (blob + project link); writes immediately, no approval gate | live-verified (MET-588) |
+| `twin` | `twin.record_document` | Persist a text artifact as a typed PRD/DOCUMENTATION/ROBOT_DESCRIPTION/SIMULATION_RESULT/LOAD_CASE work product (blob + project link); writes immediately, no approval gate. A `load_case` (FORGE-278) persists a reusable FEA boundary-condition definition (material, node sets, load force, source of loads) so it doesn't need retyping inline on every `calculix.run_fea` call | live-verified (MET-588) |
 | `twin` (injected) | `twin.record_component_selection` | Persist one chosen `component.search_parametric`/`search_intent` result as a real BOMItem work product (graph node + project link) — without this, a search result was pure chat output with no reviewable, versioned trace in the Twin (MET-436). Optionally stores `datasheet_url`/`image_url`/`footprint`/`cad_model_url` plus purchase/pricing provenance (`purchase_url`, `price_currency`, `priced_distributor`, and an auto-captured `priced_at` timestamp — a price is a snapshot, never caller-timestamped) on the BOMItem; any of those left unset by the caller are auto-filled from the component catalog store when a match on MPN/manufacturer exists, so a bare selection call still gets media/cost fields when the catalog already knows the part. When project-scoped, also adds a real `CONTAINS` edge from the project's `BOM` work product (created on first use, reused via a `kind` metadata marker so a document-shaped BOM work product is never mistaken for the container) to the new BOMItem — without this a BOMItem had only the Postgres project-junction link and no graph edge, so `TwinAPI.find_orphans()` flagged it as an orphan and it was unreachable via `twin.thread_for` | unit-verified (MET-436) |
 | `twin` | `twin.record_constraint_set` | Record structured requirements as evaluable Constraint nodes + a CONSTRAINT_SET work product; expressions compile-checked, violations feed gate criteria (MET-583) | unit-verified (MET-582) |
 | `twin` | `twin.record_engineering_entity` | Record one Engineering Intent & Requirements Harness entity (intent/stakeholder_need/objective/assumption/question/risk/verification_case/evidence/budget/invariant/waiver/release_approval), optionally linked to parent(s) via a real graph edge (`derives_from`/`satisfies`/`motivates`/...), resolved by exact name or UUID (FORGE-45/35). A `budget`/`invariant` (metric/unit/system_total or limit in `extra`) is read back automatically by the G3 Preliminary Feasibility gate; a `waiver`/`release_approval` only counts toward the G8 Release gate once approved via `twin.approve_engineering_entity` (FORGE-73) | unit-verified (FORGE-45/73) |
@@ -167,7 +167,7 @@ This is what lets a constraint expression like
 `wp.metadata.get('mass_kg', 0) <= 4.5` read a real measured value instead of
 always the vacuous-pass default (FORGE-100).
 
-## Dashboard routes (11)
+## Dashboard routes (12)
 
 Served by Vite under `dashboard/` — boot with
 `docker compose up gateway dashboard` and open `localhost:5173`.
@@ -180,6 +180,7 @@ Served by Vite under `dashboard/` — boot with
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |
 | `/approvals` | Pending change-proposal review | gateway approvals API |
 | `/bom` | BOM viewer | `GET /v1/bom/...` |
+| `/sim` | Load-case editor + list, per project (FORGE-278) | `GET/POST /v1/simulation/load-cases` |
 | `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB | `GET /v1/twin/files/...` |
 | `/files` | Legacy file browser | gateway files API |
 | `/knowledge` | Ingested-sources table (sortable, filterable) | `GET /api/v1/knowledge/sources` |

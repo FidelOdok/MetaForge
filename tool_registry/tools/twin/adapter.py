@@ -1370,13 +1370,24 @@ class TwinServer(McpToolServer):
     # twin.record_document (MET-588)
     # ------------------------------------------------------------------
 
-    _DOCUMENT_TYPES = ("prd", "documentation", "robot_description", "simulation_result")
+    _DOCUMENT_TYPES = (
+        "prd",
+        "documentation",
+        "robot_description",
+        "simulation_result",
+        "load_case",
+    )
     _DOCUMENT_TYPE_DOMAIN = {
         "prd": "requirements",
         "robot_description": "mechanical",
         "simulation_result": "mechanical",
+        "load_case": "mechanical",
     }
-    _DOCUMENT_TYPE_DEFAULT_FORMAT = {"robot_description": "urdf", "simulation_result": "json"}
+    _DOCUMENT_TYPE_DEFAULT_FORMAT = {
+        "robot_description": "urdf",
+        "simulation_result": "json",
+        "load_case": "json",
+    }
     # FORGE-246: a simulation_result's real dependency on its source
     # cad_model is "derives_from" (the ticket's own naming), not the
     # generic "parent_of" every other document_type defaults to.
@@ -1394,9 +1405,10 @@ class TwinServer(McpToolServer):
                 description=(
                     "Persist a text artifact (requirements, notes, a spec, a "
                     "robot-description export like URDF/SDF/a ROS2 launch file, "
-                    "or an FEA results summary) as a first-class PRD, "
-                    "DOCUMENTATION, ROBOT_DESCRIPTION, or SIMULATION_RESULT "
-                    "work product: stores it in MinIO and links it to a project "
+                    "an FEA results summary, or a reusable FEA boundary-condition "
+                    "definition) as a first-class PRD, DOCUMENTATION, "
+                    "ROBOT_DESCRIPTION, SIMULATION_RESULT, or LOAD_CASE work "
+                    "product: stores it in MinIO and links it to a project "
                     "so it shows on the project's work-product list. Writes "
                     "immediately — no approval gate, same as "
                     "twin.record_decision. Use this instead of "
@@ -1414,7 +1426,16 @@ class TwinServer(McpToolServer):
                     "this, a completed run_fea/extract_results chain leaves the "
                     "twin with only an evidence entity (numbers restated as "
                     "text) and no versioned, loadable result the dashboard's "
-                    "Sim tab can show."
+                    "Sim tab can show. FORGE-278: use "
+                    "document_type='load_case' to persist a boundary-condition "
+                    "definition (material, fixed_node_set, load_node_set, "
+                    "load_force_n, source_of_loads) ONCE so it can be reused "
+                    "across design versions instead of retyped inline on every "
+                    "calculix.run_fea call -- pass those fields as top-level "
+                    "'metadata' keys (mirrors 'simulation_result'); this is "
+                    "unrelated to a simulation_result's own free-text "
+                    "'load_case' summary field, which just NAMES which load "
+                    "case a result came from."
                 ),
                 capability="twin_decision",
                 input_schema={
@@ -1430,11 +1451,14 @@ class TwinServer(McpToolServer):
                             "minLength": 1,
                             "description": (
                                 "The document body: markdown for prd/documentation, "
-                                "the raw XML/text of a robot-description export, or "
+                                "the raw XML/text of a robot-description export, "
                                 "a JSON summary (max_von_mises_mpa, "
                                 "max_displacement_mm, load_case, mesh_stats, ...) "
                                 "for a simulation_result -- calculix.extract_results' "
-                                "own structured output, not a restated assertion."
+                                "own structured output, not a restated assertion -- "
+                                "or, for a load_case, a JSON encoding of the same "
+                                "fields passed in 'metadata' below (kept in sync so "
+                                "the record is loadable as a file too)."
                             ),
                         },
                         "document_type": {
@@ -1446,8 +1470,9 @@ class TwinServer(McpToolServer):
                                 "'robot_description' for a URDF/SDF/ROS2-launch "
                                 "export (e.g. from cadquery.export_urdf_assembly), "
                                 "'simulation_result' for an FEA results summary "
-                                "(e.g. from calculix.extract_results). Defaults to "
-                                "'documentation'."
+                                "(e.g. from calculix.extract_results), 'load_case' "
+                                "for a reusable FEA boundary-condition definition. "
+                                "Defaults to 'documentation'."
                             ),
                         },
                         "format": {
@@ -1455,8 +1480,9 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "File extension of 'content' (e.g. 'urdf', 'sdf', "
                                 "'xacro', 'launch.py', 'json'). Only meaningful for "
-                                "'robot_description'/'simulation_result'; other "
-                                "document types are always stored as markdown."
+                                "'robot_description'/'simulation_result'/"
+                                "'load_case'; other document types are always "
+                                "stored as markdown."
                             ),
                         },
                         "metadata": {
@@ -1469,7 +1495,16 @@ class TwinServer(McpToolServer):
                                 "'simulation_result', pass the same summary fields "
                                 "as top-level keys (mirrors 'content') so a "
                                 "constraint expression can read them directly "
-                                "(e.g. wp.metadata.get('max_von_mises_mpa'))."
+                                "(e.g. wp.metadata.get('max_von_mises_mpa')); for "
+                                "'load_case', pass 'material' (name or explicit "
+                                "properties, matching calculix.run_fea's own "
+                                "'material' shape), 'fixed_node_set', "
+                                "'load_node_set', 'load_force_n' ([x, y, z] "
+                                "newtons), and optionally 'source_of_loads' (a "
+                                "short note on where the load figure came from, "
+                                "e.g. a requirement or hand calc) as top-level "
+                                "keys, so the dashboard's Sim-tab load-case list "
+                                "can render them without fetching the blob."
                             ),
                         },
                         "source_part_node_ids": {

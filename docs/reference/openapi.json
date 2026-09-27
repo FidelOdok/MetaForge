@@ -1174,6 +1174,82 @@
         "title": "CreateAssemblyRequest",
         "type": "object"
       },
+      "CreateLoadCaseRequest": {
+        "description": "Body for ``POST /v1/simulation/load-cases``.",
+        "properties": {
+          "fixedNodeSet": {
+            "minLength": 1,
+            "title": "Fixednodeset",
+            "type": "string"
+          },
+          "loadForceN": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Loadforcen",
+            "type": "array"
+          },
+          "loadNodeSet": {
+            "minLength": 1,
+            "title": "Loadnodeset",
+            "type": "string"
+          },
+          "material": {
+            "additionalProperties": true,
+            "minProperties": 1,
+            "title": "Material",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "projectId": {
+            "minLength": 1,
+            "title": "Projectid",
+            "type": "string"
+          },
+          "sourceOfLoads": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceofloads"
+          },
+          "sourcePartNodeIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcepartnodeids"
+          }
+        },
+        "required": [
+          "name",
+          "projectId",
+          "material",
+          "fixedNodeSet",
+          "loadNodeSet",
+          "loadForceN"
+        ],
+        "title": "CreateLoadCaseRequest",
+        "type": "object"
+      },
       "CreateProjectRequest": {
         "description": "Body for ``POST /v1/projects``.",
         "properties": {
@@ -2611,6 +2687,120 @@
           "title"
         ],
         "title": "LinkEvidenceRequest",
+        "type": "object"
+      },
+      "LoadCaseListResponse": {
+        "properties": {
+          "loadCases": {
+            "items": {
+              "$ref": "#/components/schemas/LoadCaseResponse"
+            },
+            "title": "Loadcases",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "loadCases",
+          "total"
+        ],
+        "title": "LoadCaseListResponse",
+        "type": "object"
+      },
+      "LoadCaseResponse": {
+        "description": "One load case, in the dashboard's camelCase shape.",
+        "properties": {
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "fixedNodeSet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixednodeset"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "loadForceN": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadforcen"
+          },
+          "loadNodeSet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadnodeset"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "sourceOfLoads": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceofloads"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "projectId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "LoadCaseResponse",
         "type": "object"
       },
       "MemoryHitResponse": {
@@ -9343,6 +9533,96 @@
         "summary": "Append Session Event",
         "tags": [
           "sessions"
+        ]
+      }
+    },
+    "/v1/simulation/load-cases": {
+      "get": {
+        "description": "List load cases, optionally scoped to a project.\n\nEmpty (not a 404) when the project has none yet, matching ``/v1/bom``.",
+        "operationId": "list_load_cases_v1_simulation_load_cases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoadCaseListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Load Cases",
+        "tags": [
+          "simulation"
+        ]
+      },
+      "post": {
+        "description": "Create a load case, via the same document-recorder path\n``twin.record_document(document_type='load_case')`` uses (see module\ndocstring) so a dashboard-authored and agent-authored case are\nindistinguishable on the twin.",
+        "operationId": "create_load_case_v1_simulation_load_cases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLoadCaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoadCaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Load Case",
+        "tags": [
+          "simulation"
         ]
       }
     },
