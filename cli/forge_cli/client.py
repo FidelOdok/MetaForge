@@ -154,13 +154,21 @@ class ForgeClient:
         self,
         domain: str | None = None,
         work_product_type: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        """List Digital Twin work_products via ``GET /api/v1/twin/nodes``."""
+        """List Digital Twin work_products via ``GET /api/v1/twin/nodes``.
+
+        ``project_id`` (FORGE-248) maps to the gateway's own project-scoped
+        node query -- omitted or ``None`` returns every node (including
+        unscoped legacy nodes), matching the gateway's own default.
+        """
         params: dict[str, str] = {}
         if domain:
             params["domain"] = domain
         if work_product_type:
             params["type"] = work_product_type
+        if project_id:
+            params["project_id"] = project_id
         with self._client() as client:
             resp = client.get(self._url("/twin/nodes"), params=params)
             resp.raise_for_status()

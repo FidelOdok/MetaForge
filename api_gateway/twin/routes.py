@@ -129,6 +129,7 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         status="valid",
         properties=properties,
         updatedAt=wp.updated_at.isoformat(),
+        projectId=str(wp.project_id) if wp.project_id else None,
         # MET-630: surface the structured (non-scalar) geometry_features
         # metadata that the loop above silently drops, and whether a
         # git-versioned script backs this node.

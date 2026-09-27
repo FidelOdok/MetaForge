@@ -6,6 +6,7 @@ Usage::
     python -m cli.forge_cli.main status <session-id>
     python -m cli.forge_cli.main twin query <node-id>
     python -m cli.forge_cli.main twin list --domain mechanical --type cad_model
+    python -m cli.forge_cli.main twin list --project "6-DOF Robotic Arm"
     python -m cli.forge_cli.main proposals
     python -m cli.forge_cli.main approve <change-id> --reason "looks good"
     python -m cli.forge_cli.main reject <change-id> --reason "needs revision"
@@ -91,6 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     twin_list = twin_sub.add_parser("list", help="List twin work_products")
     twin_list.add_argument("--domain", default=None, help="Filter by domain")
     twin_list.add_argument("--type", default=None, dest="work_product_type", help="Filter by type")
+    twin_list.add_argument(
+        "--project", default=None, help="Filter by project id or name (FORGE-248)"
+    )
 
     # -- proposals ---------------------------------------------------------
     subparsers.add_parser("proposals", help="List pending change proposals")
@@ -358,12 +362,45 @@ def handle_status(args: argparse.Namespace, client: ForgeClient) -> Any:
     return client.get_status(args.session_id)
 
 
+def _resolve_project_ref(client: ForgeClient, project_ref: str) -> str:
+    """Accept either a project UUID or a project name for ``--project`` (FORGE-248).
+
+    A name is resolved via ``GET /v1/projects`` (case-insensitive exact
+    match) -- the gateway's own node-list filter only understands a real
+    project id.
+    """
+    import uuid as _uuid
+
+    try:
+        _uuid.UUID(project_ref)
+        return project_ref
+    except ValueError:
+        pass
+
+    projects = client.list_projects().get("projects", [])
+    matches = [p for p in projects if str(p.get("name", "")).lower() == project_ref.lower()]
+    if not matches:
+        print(f"Error: no project named {project_ref!r} found", file=sys.stderr)
+        sys.exit(1)
+    if len(matches) > 1:
+        print(
+            f"Error: {len(matches)} projects are named {project_ref!r} -- use the project id "
+            "instead to disambiguate",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return str(matches[0]["id"])
+
+
 def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Handle ``forge twin query|list``."""
     if args.twin_command == "query":
         return client.twin_query(args.node_id)
     if args.twin_command == "list":
-        return client.twin_list(domain=args.domain, work_product_type=args.work_product_type)
+        project_id = _resolve_project_ref(client, args.project) if args.project else None
+        return client.twin_list(
+            domain=args.domain, work_product_type=args.work_product_type, project_id=project_id
+        )
     print("Error: specify a twin subcommand (query or list)", file=sys.stderr)
     sys.exit(1)
 

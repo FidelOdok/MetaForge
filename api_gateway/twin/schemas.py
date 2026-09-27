@@ -17,6 +17,12 @@ class TwinNodeResponse(BaseModel):
     status: str
     properties: dict[str, str | int | float | bool]
     updatedAt: str  # noqa: N815
+    # FORGE-248: the node's own project scope (MET-491's project_id, None for
+    # an unscoped legacy node) -- without this, a client that already listed
+    # every node (no ?project_id= filter, the default) has no way to tell
+    # which project any given node belongs to, and `forge twin list --json`
+    # had nothing to filter or display on.
+    projectId: str | None = None  # noqa: N815
     # MET-630: structured geometry parameters/properties (pad_length_mm,
     # volume_mm3, ...) — kept separate from `properties` above, which is
     # scalar-only and shared by every node type. None when the node has
