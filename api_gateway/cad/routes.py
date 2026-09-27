@@ -25,6 +25,35 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/cad", tags=["cad"])
 
+# FORGE-249: 9 parallel /v1/cad/assembly calls each spawn a FreeCAD worker
+# subprocess (tool_registry.tools.freecad.worker_pool); under real contention
+# a worker can time out waiting for its ready signal, crash, or have its
+# connection drop mid-call. None of that is the caller's fault -- a bad spec
+# fails the same way every time, but a resource-contention failure might
+# succeed on retry. Checked by class name (not isinstance) for the
+# freecad/aiohttp-specific cases so this stays layer-clean -- api_gateway
+# doesn't import tool_registry or aiohttp directly (see api_gateway/CLAUDE.md).
+_TRANSIENT_EXCEPTION_NAMES = frozenset(
+    {
+        "FreecadWorkerCrashedError",
+        "ServerDisconnectedError",
+        "ClientConnectionError",
+        "ClientConnectorError",
+        "ClientOSError",
+        "ClientPayloadError",
+    }
+)
+
+_RETRY_AFTER_SECONDS = "2"
+
+
+def _is_transient_failure(exc: BaseException) -> bool:
+    """Best-effort: was this a resource-contention failure worth retrying?"""
+    cause = exc.__cause__ or exc
+    if isinstance(cause, (ConnectionError, TimeoutError, OSError)):
+        return True
+    return type(cause).__name__ in _TRANSIENT_EXCEPTION_NAMES
+
 
 async def _build_spec(spec: CreateAssemblyRequest) -> dict[str, object]:
     """Validate + author + commit a spec; return the recorder result.
@@ -53,7 +82,14 @@ async def _build_spec(spec: CreateAssemblyRequest) -> dict[str, object]:
             parts=parts,
             project_id=spec.project_id,
         )
-    except Exception as exc:  # noqa: BLE001 — surface a clean 502 with the cause
+    except Exception as exc:  # noqa: BLE001 — surface a clean 502/503 with the cause
+        if _is_transient_failure(exc):
+            logger.warning("cad_assembly_failed_transient", name=spec.name, error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail=f"assembly authoring temporarily unavailable (contention): {exc}",
+                headers={"Retry-After": _RETRY_AFTER_SECONDS},
+            ) from exc
         logger.warning("cad_assembly_failed", name=spec.name, error=str(exc))
         raise HTTPException(status_code=502, detail=f"assembly authoring failed: {exc}") from exc
 
