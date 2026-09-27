@@ -104,7 +104,28 @@ async def list_bom(project_id: str | None = None) -> BomListResponse:
                 raise HTTPException(status_code=400, detail="Invalid project_id format")
             span.set_attribute("bom.project_id", project_id)
         items = await _twin.list_bom_items(project_id=scoped)
-        components = [_item_to_component(i) for i in items]
+        components: list[BomComponentResponse] = []
+        skipped = 0
+        for i in items:
+            # FORGE-242: list_bom_items is typed list[BOMItem], but a legacy
+            # row (written before a node_type existed, or by some other path
+            # that never set it) can still degrade to a bare NodeBase on
+            # read-back -- one such row must not 500 the whole endpoint for
+            # every project. The real fix is closing the deserialization gap
+            # (neo4j_graph_engine.py's _props_to_node) so this almost never
+            # fires; this is the belt-and-suspenders backstop for whatever
+            # that fix doesn't cover (truly legacy data, a future new gap).
+            if not isinstance(i, BOMItem):
+                skipped += 1
+                logger.warning(
+                    "bom_item_skipped_not_bom_item",
+                    node_id=str(getattr(i, "id", "?")),
+                    node_type=type(i).__name__,
+                )
+                continue
+            components.append(_item_to_component(i))
         span.set_attribute("bom.count", len(components))
-        logger.info("bom_listed", count=len(components), project_id=project_id)
+        if skipped:
+            span.set_attribute("bom.skipped", skipped)
+        logger.info("bom_listed", count=len(components), skipped=skipped, project_id=project_id)
         return BomListResponse(components=components, total=len(components))
