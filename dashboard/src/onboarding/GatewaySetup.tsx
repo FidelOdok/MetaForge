@@ -103,6 +103,11 @@ export function GatewaySetup() {
               {form.error}
             </p>
           )}
+          {form.selfTargetWarning && (
+            <p role="alert" className="text-[13px] leading-relaxed text-warning">
+              {form.selfTargetWarning}
+            </p>
+          )}
           {form.mixedContentWarning && (
             <p className="text-[13px] leading-relaxed text-warning">{form.mixedContentWarning}</p>
           )}

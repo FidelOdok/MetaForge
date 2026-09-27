@@ -325,7 +325,7 @@ export function SettingsPage() {
     dirty,
     test,
   } = gateway;
-  const warning = gateway.mixedContentWarning;
+  const warning = gateway.selfTargetWarning ?? gateway.mixedContentWarning;
 
   const handleTest = gateway.runTest;
 
