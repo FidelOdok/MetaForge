@@ -306,13 +306,29 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     if project.description:
         lines.append(f"Project intent: {project.description}")
 
-    wps = project.work_products[:_PROJECT_WP_LIMIT]
+    # FORGE-244: work_products is insertion order (oldest first) -- a busy
+    # project's newest, most-relevant work (live-observed: 14 AR4 robot-arm
+    # parts + its robot description, all at positions 38-52) sorted straight
+    # past a flat [:_PROJECT_WP_LIMIT] slice, so the brief described an old
+    # 3-joint URDF instead of the actual current design. Sorting by recency
+    # first means the newest work is always what a plain positional cutoff
+    # keeps, not what it drops.
+    wps_by_recency = sorted(project.work_products, key=lambda wp: wp.updated_at, reverse=True)
+    wps = wps_by_recency[:_PROJECT_WP_LIMIT]
     if wps:
-        lines.append(f"\nExisting work products in this project ({len(project.work_products)}):")
+        lines.append(
+            f"\nExisting work products in this project "
+            f"({len(project.work_products)}, newest first):"
+        )
         for wp in wps:
             lines.append(f"- {wp.name} — {wp.type} (status {wp.status})")
-        if len(project.work_products) > _PROJECT_WP_LIMIT:
-            lines.append(f"- …and {len(project.work_products) - _PROJECT_WP_LIMIT} more")
+        remaining = len(project.work_products) - _PROJECT_WP_LIMIT
+        if remaining > 0:
+            lines.append(
+                f"- …and {remaining} more (older) work product(s) not shown here. "
+                "Call twin.find_by_property (or project.get) if you need to see "
+                "something not listed above."
+            )
     else:
         lines.append("\nThis project has no work products yet.")
 
