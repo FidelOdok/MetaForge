@@ -170,6 +170,47 @@ async def test_project_brief_caps_work_product_list(monkeypatch: pytest.MonkeyPa
     assert "and 5 more" in brief
 
 
+def _wp_at(name: str, wp_type: str, updated_at: str) -> ProjectWorkProductResponse:
+    return ProjectWorkProductResponse(
+        id=f"wp-{name}", name=name, type=wp_type, status="draft", updated_at=updated_at
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_brief_shows_newest_work_not_oldest_by_insertion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FORGE-244: live-observed on a 53-work_product project -- the newest
+    14 parts + a robot description sat at positions 38-52 (insertion order,
+    oldest first), so a flat [:_PROJECT_WP_LIMIT] slice cut every one of
+    them and the brief described stale, months-old work instead. Recency
+    (updated_at) must decide what's kept, not list position."""
+    import api_gateway.chat.routes as routes
+
+    limit = routes._PROJECT_WP_LIMIT
+    old = [_wp_at(f"Old Part {i}", "cad_model", "2026-01-01T00:00:00Z") for i in range(limit)]
+    newest = _wp_at("annin_ar4 robot description", "robot_description", "2026-09-27T00:00:00Z")
+    project = _project([*old, newest])  # newest is appended LAST, past the old items' cutoff
+
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), project)
+
+    assert brief is not None
+    assert "annin_ar4 robot description" in brief
+    assert "newest first" in brief
+
+
+@pytest.mark.asyncio
+async def test_project_brief_overflow_tells_the_model_how_to_see_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import api_gateway.chat.routes as routes
+
+    many = [_wp(f"Part {i}", "cad_model") for i in range(routes._PROJECT_WP_LIMIT + 5)]
+    brief = await _brief(monkeypatch, _thread("project", "p-123"), _project(many))
+    assert brief is not None
+    assert "twin.find_by_property" in brief
+
+
 # --------------------------------------------------------------------------
 # Requirements-discovery directive (MET-584)
 # --------------------------------------------------------------------------
