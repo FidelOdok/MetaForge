@@ -154,8 +154,17 @@ class StdioTransport(Transport):
         ready_signal: str | None = None,
         ready_timeout: float = 30.0,
         api_key: str | None = None,
+        limit: int = 2**16,
     ) -> None:
         self._command = list(command)
+        # FORGE-238: readline()'s LimitOverrunError trips at this many bytes
+        # of unread data on one line. asyncio's own default (2**16 = 64 KiB)
+        # is smaller than a real-world JSON-RPC response can be once it
+        # inlines a base64 blob (e.g. a multi-part STEP export) -- a caller
+        # whose responses can be large should pass a bigger limit rather than
+        # switch framing, since every stdio MCP server in this codebase
+        # already speaks this same one-line-per-message wire format.
+        self._limit = limit
         # MET-338: when ``api_key`` is set, propagate it to the spawned
         # subprocess as ``METAFORGE_MCP_CLIENT_KEY`` so the server-side
         # auth check passes. The subprocess inherits the rest of the
@@ -185,6 +194,7 @@ class StdioTransport(Transport):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self._env,
+            limit=self._limit,
         )
         if self._ready_signal is not None:
             await self._wait_for_ready()

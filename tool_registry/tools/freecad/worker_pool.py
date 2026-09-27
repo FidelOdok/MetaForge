@@ -163,6 +163,12 @@ class FreecadWorkerPool:
                 env=_worker_env(self._config),
                 ready_signal=READY_SIGNAL,
                 ready_timeout=self._worker_ready_timeout,
+                # FORGE-238: a worker's JSON-RPC reply is one line, and
+                # export_model inlines the exported file as base64 in it --
+                # asyncio's own readline() default (64 KiB) trips
+                # LimitOverrunError on any assembly export past a handful of
+                # parts. See FreecadConfig.worker_stdio_limit_bytes.
+                limit=self._config.worker_stdio_limit_bytes,
             )
             await transport.connect()
             try:
