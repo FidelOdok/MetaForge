@@ -187,6 +187,87 @@ class TestRecorder:
         )
         assert result["node_id"]  # the commit itself still succeeds
 
+    async def test_source_edge_type_overrides_the_parent_of_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-246: a simulation_result's dependency on its source cad_model
+        is 'derives_from' -- source_edge_type lets a caller pick a more
+        accurate relation than the generic parent_of default."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Bracket",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="cafed00d",
+                format="step",
+                created_by="test",
+            )
+        )
+        record = make_document_recorder(twin, None)
+        result = await record(
+            content='{"max_von_mises_mpa": 42.0}',
+            name="Bracket FEA Result",
+            wp_type="simulation_result",
+            domain="mechanical",
+            fmt="json",
+            link_type="simulation_result",
+            source_tool="calculix.extract_results",
+            source_part_node_ids=[str(part.id)],
+            source_edge_type="derives_from",
+        )
+        edges = await twin.get_edges(UUID(result["node_id"]))
+        assert any(e.target_id == part.id and e.edge_type == EdgeType.DERIVES_FROM for e in edges)
+
+    async def test_evidence_node_id_creates_a_generated_from_edge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-246: links the evidence EngineeringEntity's claim back to
+        the real, structured artifact it's about."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        from twin_core.models.engineering_entity import EngineeringEntity
+
+        evidence = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="evidence", statement="FEA evidence")
+        )
+        record = make_document_recorder(twin, None)
+        result = await record(
+            content='{"max_von_mises_mpa": 42.0}',
+            name="Bracket FEA Result",
+            wp_type="simulation_result",
+            domain="mechanical",
+            fmt="json",
+            link_type="simulation_result",
+            source_tool="calculix.extract_results",
+            evidence_node_id=str(evidence.id),
+        )
+        edges = await twin.get_edges(evidence.id)
+        assert any(
+            e.target_id == UUID(result["node_id"]) and e.edge_type == EdgeType.GENERATED_FROM
+            for e in edges
+        )
+
+    async def test_a_bad_evidence_node_id_does_not_block_the_commit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_document_recorder(twin, None)
+        result = await record(
+            content='{"max_von_mises_mpa": 42.0}',
+            name="Bracket FEA Result",
+            wp_type="simulation_result",
+            domain="mechanical",
+            fmt="json",
+            link_type="simulation_result",
+            source_tool="calculix.extract_results",
+            evidence_node_id="00000000-0000-0000-0000-000000000000",
+        )
+        assert result["node_id"]  # the commit itself still succeeds
+
     async def test_requires_name_and_content(self) -> None:
         twin = InMemoryTwinAPI.create()
         record = make_document_recorder(twin, None)
@@ -307,6 +388,111 @@ class TestAdapterHandler:
         )
         edges = await twin.get_edges(UUID(out["node_id"]))
         assert any(e.target_id == part.id and e.edge_type == EdgeType.PARENT_OF for e in edges)
+
+    async def test_simulation_result_document_type_sets_mechanical_domain_and_json_format(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-246: the fix's core assertion -- FEA results committed
+        through twin.record_document land as a real SIMULATION_RESULT work
+        product, not restated only as text on an evidence entity."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Bracket FEA Result",
+                "content": '{"max_von_mises_mpa": 42.0, "max_displacement_mm": 0.8}',
+                "document_type": "simulation_result",
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp.type == WorkProductType.SIMULATION_RESULT
+        assert wp.domain == "mechanical"
+        assert wp.format == "json"  # default when 'format' is omitted
+
+    async def test_simulation_result_source_part_node_ids_use_derives_from(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-246: a simulation_result's dependency on its source
+        cad_model is 'derives_from', not the generic 'parent_of' every
+        other document_type gets -- unlike robot_description's own test
+        for the same source_part_node_ids field, just above."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Bracket",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Bracket FEA Result",
+                "content": '{"max_von_mises_mpa": 42.0}',
+                "document_type": "simulation_result",
+                "source_part_node_ids": [str(part.id)],
+            }
+        )
+        edges = await twin.get_edges(UUID(out["node_id"]))
+        assert any(e.target_id == part.id and e.edge_type == EdgeType.DERIVES_FROM for e in edges)
+
+    async def test_simulation_result_evidence_node_id_passed_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        from twin_core.models.engineering_entity import EngineeringEntity
+
+        evidence = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="evidence", statement="FEA evidence")
+        )
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Bracket FEA Result",
+                "content": '{"max_von_mises_mpa": 42.0}',
+                "document_type": "simulation_result",
+                "evidence_node_id": str(evidence.id),
+            }
+        )
+        edges = await twin.get_edges(evidence.id)
+        assert any(
+            e.target_id == UUID(out["node_id"]) and e.edge_type == EdgeType.GENERATED_FROM
+            for e in edges
+        )
+
+    async def test_metadata_flattens_summary_fields_for_constraint_reads(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-246: the summary must reach top-level metadata keys (like
+        FORGE-100's measured-property flattening), not just the raw JSON
+        body -- so a constraint expression can read
+        wp.metadata.get('max_von_mises_mpa', 0) directly."""
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(twin=twin, document_recorder=make_document_recorder(twin, None))
+        out = await server.record_document(
+            {
+                "name": "Bracket FEA Result",
+                "content": '{"max_von_mises_mpa": 42.0}',
+                "document_type": "simulation_result",
+                "metadata": {
+                    "max_von_mises_mpa": 42.0,
+                    "max_displacement_mm": 0.8,
+                    "load_case": "static_1g",
+                },
+            }
+        )
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp.metadata["max_von_mises_mpa"] == 42.0
+        assert wp.metadata["max_displacement_mm"] == 0.8
+        assert wp.metadata["load_case"] == "static_1g"
 
     def test_record_document_absent_without_recorder(self) -> None:
         server = TwinServer(twin=InMemoryTwinAPI.create())
