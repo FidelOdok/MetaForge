@@ -602,6 +602,41 @@ async def run_native_tools(
             _tally(resp)
             text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
             calls = resp.get("tool_calls") if isinstance(resp, dict) else None
+            truncated = bool(isinstance(resp, dict) and resp.get("truncated"))
+
+            if not calls and truncated:
+                # FORGE-235: finish_reason == "length" / stop_reason ==
+                # "max_tokens" with no tool_calls means the provider cut the
+                # response off mid-generation (usually mid a large tool-call
+                # argument) -- NOT the model choosing to stop. Treating this
+                # like a normal "done" produced the wrong user-facing message
+                # ("couldn't converge within the step budget" after a single
+                # step) and silently threw the truncated call away with no
+                # hint to the model. Feed the real cause back as a genuine
+                # step instead -- max_steps/deadline still bound how many
+                # times this can happen, and THAT path already reports the
+                # correct cause via summarize_trajectory.
+                logger.warning("native_tools_output_truncated", steps=step_no)
+                messages.append({"role": "assistant", "content": text or None})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was truncated at the output token "
+                            "limit before it finished -- no tool call completed. Split "
+                            "the work into a smaller step (e.g. a shorter tool argument, "
+                            "or fewer entities per call) and try again."
+                        ),
+                    }
+                )
+                step = ReActStep(
+                    thought=text,
+                    tool_call=None,
+                    error="response truncated at the output token limit",
+                )
+                steps.append(step)
+                await _emit(step)
+                continue
 
             if not calls:
                 logger.info("native_tools_completed", steps=step_no)

@@ -130,6 +130,53 @@ async def test_openai_invoke_prepends_system() -> None:
     }
 
 
+# --- FORGE-235: output-truncation signal ------------------------------------
+@pytest.mark.asyncio
+async def test_anthropic_invoke_flags_truncation_on_max_tokens_stop_reason() -> None:
+    resp = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="partial")],
+        model="claude-opus-4-8",
+        stop_reason="max_tokens",
+    )
+    client = FakeAnthropic(resp=resp)
+    out = await anthropic_invoke(ANTHROPIC, {"prompt": "hi"}, client=client)
+    assert out["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_anthropic_invoke_does_not_flag_a_normal_stop() -> None:
+    resp = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="done")],
+        model="claude-opus-4-8",
+        stop_reason="end_turn",
+    )
+    client = FakeAnthropic(resp=resp)
+    out = await anthropic_invoke(ANTHROPIC, {"prompt": "hi"}, client=client)
+    assert "truncated" not in out
+
+
+@pytest.mark.asyncio
+async def test_openai_invoke_flags_truncation_on_length_finish_reason() -> None:
+    msg = SimpleNamespace(content="partial", tool_calls=None)
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason="length")], model="gpt-5"
+    )
+    client = FakeOpenAI(resp=resp)
+    out = await openai_invoke(OPENAI, {"prompt": "hi"}, client=client)
+    assert out["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_openai_invoke_does_not_flag_a_normal_stop() -> None:
+    msg = SimpleNamespace(content="done", tool_calls=None)
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason="stop")], model="gpt-5"
+    )
+    client = FakeOpenAI(resp=resp)
+    out = await openai_invoke(OPENAI, {"prompt": "hi"}, client=client)
+    assert "truncated" not in out
+
+
 # --- adapters (error mapping) ----------------------------------------------
 @pytest.mark.asyncio
 async def test_anthropic_invoke_maps_rate_limit() -> None:
