@@ -199,6 +199,22 @@ class TestParseFrdFileRealCcxOutput:
         assert result["displacement"]["nodes"]
         assert result["stress"]["nodes"]
 
+    def test_stress_carries_an_accuracy_verdict(self, real_frd_path: str) -> None:
+        """FORGE-280: auto-flag is computed unconditionally, from the full
+        nodal field, so it's present even without include_node_data=False
+        stripping anything."""
+        result = extract_results(real_frd_path)
+        assert "accuracy" in result["stress"]
+        assert result["stress"]["accuracy"]["suspicious"] in (True, False)
+
+    def test_accuracy_survives_stripped_node_data(self, real_frd_path: str) -> None:
+        """The accuracy verdict is a summary, computed before include_node_
+        data=False discards the raw per-node values it was computed from."""
+        result = extract_results(real_frd_path, include_node_data=False)
+        assert result["stress"]["nodes"] == {}
+        assert "accuracy" in result["stress"]
+        assert result["stress"]["accuracy"]["max_to_median_ratio"] is not None
+
 
 class TestParseFrdFileRealThermalOutput:
     """MET-661 follow-up: same -4/100C block-detection bug applies to the

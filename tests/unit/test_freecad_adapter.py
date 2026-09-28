@@ -309,6 +309,15 @@ class TestGenerateMesh:
         assert call_args[0][1] == 1.0  # default element_size
         assert call_args[0][2] == "netgen"  # default algorithm
         assert call_args[0][3] == "inp"  # default output_format
+        assert call_args[0][4] == 1  # default element_order (FORGE-280)
+
+    async def test_generate_mesh_unsupported_element_order_raises(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        with pytest.raises(ValueError, match="Unsupported element_order"):
+            await server_with_mocks.generate_mesh(
+                {"input_file": "/models/bracket.step", "element_order": 3}
+            )
 
     async def test_generate_mesh_missing_input_raises(
         self, server_with_mocks: FreecadServer

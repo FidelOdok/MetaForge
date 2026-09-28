@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 
 from observability.tracing import get_tracer
+from tool_registry.tools.calculix.accuracy import assess_stress_accuracy
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.calculix.result_parser")
@@ -291,6 +292,12 @@ def extract_results(frd_path: str, include_node_data: bool = True) -> dict[str, 
         Structured dict with stress/displacement summaries.
     """
     result = parse_frd_file(frd_path)
+
+    # FORGE-280: computed from the full nodal field, before it's optionally
+    # stripped below -- the accuracy summary survives include_node_data=False
+    # even though the raw per-node values it was computed from don't.
+    if "stress" in result:
+        result["stress"]["accuracy"] = assess_stress_accuracy(result["stress"])
 
     if not include_node_data:
         # Strip per-node data to reduce payload size

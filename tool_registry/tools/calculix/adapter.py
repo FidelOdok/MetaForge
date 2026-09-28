@@ -11,6 +11,10 @@ from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.cadquery.materials import resolve_elastic_properties
+from tool_registry.tools.calculix.accuracy import (
+    check_mesh_convergence,
+    cross_check_cantilever_bending,
+)
 from tool_registry.tools.calculix.config import CalculixConfig
 from tool_registry.tools.calculix.deck_builder import build_static_stress_deck
 from tool_registry.tools.calculix.inp_mesh import MeshData, parse_mesh_inp
@@ -284,7 +288,17 @@ class CalculixServer(McpToolServer):
                 tool_id="calculix.extract_results",
                 adapter_id="calculix",
                 name="Extract FEA Results",
-                description="Parse existing CalculiX .frd result files into structured JSON",
+                description=(
+                    "Parse existing CalculiX .frd result files into structured JSON. "
+                    "FORGE-280: the stress block's own 'accuracy' field auto-flags a "
+                    "suspicious result (max stress disproportionate to the rest of "
+                    "the field, usually a point-load/BC concentration artifact) — "
+                    "check it before trusting max_von_mises for a safety-factor call. "
+                    "For a second opinion, calculix.cross_check_cantilever_beam (a "
+                    "hand calc, for the textbook case) and "
+                    "calculix.check_mesh_convergence (run at 2+ element sizes and "
+                    "compare) are separate tools."
+                ),
                 capability="result_extraction",
                 input_schema={
                     "type": "object",
@@ -304,7 +318,13 @@ class CalculixServer(McpToolServer):
                 output_schema={
                     "type": "object",
                     "properties": {
-                        "stress": {"type": "object"},
+                        "stress": {
+                            "type": "object",
+                            "description": (
+                                "nodes, max, min, avg, and 'accuracy' "
+                                "({suspicious, reason, max_to_median_ratio})."
+                            ),
+                        },
                         "displacement": {"type": "object"},
                         "node_count": {"type": "integer"},
                         "metadata": {"type": "object"},
@@ -314,6 +334,131 @@ class CalculixServer(McpToolServer):
                 resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=60),
             ),
             handler=self.handle_extract_results,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="calculix.cross_check_cantilever_beam",
+                adapter_id="calculix",
+                name="Cross-Check Cantilever Beam",
+                description=(
+                    "Euler-Bernoulli hand calc for a rectangular cantilever with a "
+                    "tip point load (sigma = M*c/I) — FORGE-280. Compares against an "
+                    "FEA max stress within a tolerance, for exactly the textbook case "
+                    "a human caught FORGE-239's bad fixed_node_set with manually. "
+                    "Only valid for this one loading case (fixed-free cantilever, "
+                    "rectangular cross-section, tip load) — not a general beam solver."
+                ),
+                capability="accuracy_check",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "length_mm": {
+                            "type": "number",
+                            "description": "Distance from the fixed end to the tip load, mm.",
+                        },
+                        "width_mm": {
+                            "type": "number",
+                            "description": "Cross-section width (bending-neutral direction), mm.",
+                        },
+                        "height_mm": {
+                            "type": "number",
+                            "description": "Cross-section height (in the bending direction), mm.",
+                        },
+                        "force_n": {
+                            "type": "number",
+                            "description": "Tip point load, Newtons (perpendicular to beam axis).",
+                        },
+                        "fea_max_stress_mpa": {
+                            "type": "number",
+                            "description": "The FEA run's own max von Mises stress, MPa, to check.",
+                        },
+                        "tolerance_pct": {
+                            "type": "number",
+                            "default": 20.0,
+                            "description": (
+                                "Max allowed percent difference between the hand calc "
+                                "and the FEA number before flagging a mismatch."
+                            ),
+                        },
+                    },
+                    "required": [
+                        "length_mm",
+                        "width_mm",
+                        "height_mm",
+                        "force_n",
+                        "fea_max_stress_mpa",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "hand_calc_stress_mpa": {"type": "number"},
+                        "fea_max_stress_mpa": {"type": "number"},
+                        "percent_difference": {"type": "number"},
+                        "tolerance_pct": {"type": "number"},
+                        "within_tolerance": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
+            ),
+            handler=self.handle_cross_check_cantilever_beam,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="calculix.check_mesh_convergence",
+                adapter_id="calculix",
+                name="Check Mesh Convergence",
+                description=(
+                    "Whether max stress has stopped changing meaningfully across "
+                    "element sizes already run (FORGE-280) — pass the "
+                    "max_von_mises_mpa this tool's own calculix.run_fea/"
+                    "extract_results produced at each of 2+ element sizes; this does "
+                    "NOT run the sweep itself, only compares results you already have."
+                ),
+                capability="accuracy_check",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "points": {
+                            "type": "array",
+                            "minItems": 2,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "element_size_mm": {"type": "number"},
+                                    "max_von_mises_mpa": {"type": "number"},
+                                },
+                                "required": ["element_size_mm", "max_von_mises_mpa"],
+                            },
+                            "description": "One entry per element size already run, at least 2.",
+                        },
+                        "tolerance_pct": {
+                            "type": "number",
+                            "default": 5.0,
+                            "description": (
+                                "Max allowed percent change in max stress between "
+                                "the two finest sizes before calling it converged."
+                            ),
+                        },
+                    },
+                    "required": ["points"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "points": {"type": "array"},
+                        "changes": {"type": "array"},
+                        "converged": {"type": "boolean"},
+                        "recommendation": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
+            ),
+            handler=self.handle_check_mesh_convergence,
         )
 
     async def run_fea(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -409,6 +554,47 @@ class CalculixServer(McpToolServer):
             except Exception as exc:
                 span.record_exception(exc)
                 raise
+
+    async def handle_cross_check_cantilever_beam(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Euler-Bernoulli hand-calc cross-check for a tip-loaded cantilever."""
+        required = ("length_mm", "width_mm", "height_mm", "force_n", "fea_max_stress_mpa")
+        missing = [name for name in required if arguments.get(name) is None]
+        if missing:
+            raise ValueError(f"Missing required field(s): {', '.join(missing)}")
+
+        with tracer.start_as_current_span("calculix.cross_check_cantilever_beam") as span:
+            try:
+                result = cross_check_cantilever_bending(
+                    length_mm=float(arguments["length_mm"]),
+                    width_mm=float(arguments["width_mm"]),
+                    height_mm=float(arguments["height_mm"]),
+                    force_n=float(arguments["force_n"]),
+                    fea_max_stress_mpa=float(arguments["fea_max_stress_mpa"]),
+                    tolerance_pct=float(arguments.get("tolerance_pct", 20.0)),
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise
+            span.set_attribute("calculix.within_tolerance", result["within_tolerance"])
+            return result
+
+    async def handle_check_mesh_convergence(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Compare max stress across already-run element sizes for convergence."""
+        points = arguments.get("points")
+        if not points:
+            raise ValueError("points is required")
+
+        with tracer.start_as_current_span("calculix.check_mesh_convergence") as span:
+            try:
+                result = check_mesh_convergence(
+                    points=points,
+                    tolerance_pct=float(arguments.get("tolerance_pct", 5.0)),
+                )
+            except (ValueError, KeyError) as exc:
+                span.record_exception(exc)
+                raise
+            span.set_attribute("calculix.converged", result["converged"])
+            return result
 
     async def run_thermal(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute CalculiX thermal analysis."""
