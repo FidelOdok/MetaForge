@@ -3311,6 +3311,73 @@ button:disabled {
   color: var(--mf-c-9a9aaa);
 }
 
+/* ── Assembly joint editor (FORGE-271) ───────────────────────────────────
+   Reuses .tw-mfg-row's bordered-row look for each joint; the add form is a
+   plain label/input stack matching LoadCaseDialog's own minimal style. */
+.tw-assembly-joints-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.tw-assembly-joints-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.tw-assembly-joint-summary {
+  flex: 1;
+  color: var(--mf-c-e2e2eb);
+}
+.tw-assembly-joints-list button {
+  background: transparent;
+  border: none;
+  color: var(--mf-c-9a9aaa);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+.tw-assembly-joints-list button:hover {
+  color: var(--mf-c-e2e2eb);
+  background: var(--mf-c-282a30);
+}
+.tw-assembly-joint-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 12px 14px;
+  margin-top: 8px;
+}
+.tw-assembly-joint-form label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+  margin-top: 6px;
+}
+.tw-assembly-joint-form input,
+.tw-assembly-joint-form select {
+  background: var(--mf-c-1e1f26);
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+  border-radius: 5px;
+  color: var(--mf-c-e2e2eb);
+  padding: 6px 8px;
+  font-size: 13px;
+  width: 100%;
+}
+.tw-assembly-joint-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 /* ── Structure view (FORGE-261) ──────────────────────────────────────────
    Reuses .tw-assembly for the shell, same as Manufacturing. A tree-table:
    one grid-templated row per hierarchy node, indented per depth via inline

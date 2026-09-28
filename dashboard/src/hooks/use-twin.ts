@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getTwinNodes, getTwinNode, getTwinRelationships, getNodeVersionHistory, approveSketch } from '../api/endpoints/twin';
+import {
+  getTwinNodes,
+  getTwinNode,
+  getTwinRelationships,
+  getNodeVersionHistory,
+  approveSketch,
+  updateAssemblyJoints,
+} from '../api/endpoints/twin';
+import type { AssemblyDescription } from '../types/twin';
 
 export const twinKeys = {
   all: ['twin'] as const,
@@ -54,6 +62,27 @@ export function useNodeVersionHistory(nodeId: string | undefined) {
     queryFn: () => getNodeVersionHistory(nodeId!),
     enabled: !!nodeId,
     staleTime: 15_000,
+  });
+}
+
+/** FORGE-271: edit the joint list on an already-committed assembly node —
+ * no live FreeCAD session or re-export needed, unlike the export panel's
+ * own joint form. Invalidates the node + list so the Assembly tab's
+ * joint list and any part picker reflect the change immediately. */
+export function useUpdateAssemblyJoints() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      nodeId,
+      joints,
+    }: {
+      nodeId: string;
+      joints: AssemblyDescription['joints'];
+    }) => updateAssemblyJoints(nodeId, joints),
+    onSuccess: (_data, { nodeId }) => {
+      queryClient.invalidateQueries({ queryKey: twinKeys.node(nodeId) });
+      queryClient.invalidateQueries({ queryKey: twinKeys.all });
+    },
   });
 }
 

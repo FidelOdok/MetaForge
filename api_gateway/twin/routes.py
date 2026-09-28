@@ -51,6 +51,8 @@ from api_gateway.twin.schemas import (
     TwinNodeScriptResponse,
     TwinRelationshipListResponse,
     TwinRelationshipResponse,
+    UpdateAssemblyJointsRequest,
+    UpdateAssemblyJointsResponse,
 )
 from api_gateway.twin.version_schemas import (
     IterateRequest,
@@ -873,6 +875,56 @@ async def iterate_work_product(node_id: UUID, body: IterateRequest) -> WorkProdu
     final_meta = VersionService.append_to_metadata(updated_meta, revision)
     await _twin.update_work_product(node_id, {"metadata": final_meta})
     return WorkProductRevision(**revision)
+
+
+@router.patch("/nodes/{node_id}/assembly-joints", response_model=UpdateAssemblyJointsResponse)
+async def update_assembly_joints(
+    node_id: UUID, body: UpdateAssemblyJointsRequest
+) -> UpdateAssemblyJointsResponse:
+    """Add/edit/delete mates+joints on an already-committed assembly node (FORGE-271).
+
+    Whole-list replace -- matches how the URDF/SDF/USD export panel's own
+    manual joint-list form already works (FORGE-245/MET-740). Persisted
+    directly onto ``metadata.assembly.joints``: a joint is a logical
+    annotation, not new geometry, so this deliberately skips the full
+    ``VersionService`` revision machinery ``/nodes/{id}/iterate`` uses for
+    an actual re-export -- editing joints here never touches the underlying
+    committed blob.
+
+    Unlike the export panel, this does NOT require a live FreeCAD session or
+    re-running an export -- it works on any already-committed node, any
+    time, which is the whole point (FORGE-245's own fix only got joints
+    persisted onto the node at commit time; this is what makes them
+    editable afterward).
+    """
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+
+    existing_assembly = wp.metadata.get("assembly")
+    if existing_assembly is not None and not isinstance(existing_assembly, dict):
+        # MET-745: some CAD_MODEL nodes carry a bare `assembly: True` flag
+        # (a different, older meaning -- "was this built from multiple
+        # parts?"), a real, documented key-name collision. Refuse rather
+        # than silently clobber it with the {parts, joints} shape.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Node {node_id}'s 'assembly' metadata is not a {{parts, joints}} "
+                "structure (likely a legacy boolean flag) -- refusing to overwrite it."
+            ),
+        )
+
+    parts = existing_assembly.get("parts", []) if existing_assembly else []
+    new_assembly: dict[str, Any] = {
+        "parts": parts,
+        "joints": [j.model_dump() for j in body.joints],
+    }
+    updated_metadata = {**wp.metadata, "assembly": new_assembly}
+    await _twin.update_work_product(node_id, {"metadata": updated_metadata})
+
+    logger.info("assembly_joints_updated", node_id=str(node_id), joint_count=len(body.joints))
+    return UpdateAssemblyJointsResponse(nodeId=str(node_id), assembly=new_assembly)
 
 
 @router.get("/nodes/{node_id}/diff", response_model=RevisionDiff)

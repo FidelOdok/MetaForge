@@ -32,6 +32,7 @@ import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls'
 import { ManufacturingView } from '../components/viewer/ManufacturingView';
 import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
+import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor';
 import { TwinAgentChat } from '../components/viewer/TwinAgentChat';
 import { useViewerStore } from '../store/viewer-store';
 import { useLayoutStore } from '../store/layout-store';
@@ -1016,15 +1017,13 @@ export function TwinViewerPage() {
                         <small>{part.material || 'Material unspecified'}</small>
                       </button>
                     ))}
-                    {node.assembly.joints.map((joint) => (
-                      <p key={joint.name}>
-                        {joint.base} → {joint.follower}
-                        <small>
-                          {joint.name} · {joint.type}
-                        </small>
-                      </p>
-                    ))}
                   </div>
+                  <h3>Mates &amp; joints</h3>
+                  <AssemblyJointsEditor
+                    nodeId={node.id}
+                    parts={node.assembly.parts}
+                    joints={node.assembly.joints}
+                  />
                   <details>
                     <summary>Assembly source</summary>
                     <pre>{JSON.stringify(node.assembly, null, 2)}</pre>
