@@ -1,4 +1,4 @@
-"""Load-case work-product API (FORGE-278).
+"""Load-case + simulation-result work-product API (FORGE-278, FORGE-279).
 
 A load case (material, supports, loads, source of loads) is persisted as a
 first-class ``LOAD_CASE`` work product -- the same generic document-recorder
@@ -12,6 +12,18 @@ project) and ``POST /v1/simulation/load-cases`` (create) for the dashboard's
 Sim tab. Read-only fields the dashboard's list needs (material, node sets,
 force vector) live in ``metadata`` -- mirrored from ``content`` so the list
 renders without fetching each work product's blob.
+
+FORGE-279: ``GET /v1/simulation/results`` lists ``SIMULATION_RESULT`` work
+products the same way -- FORGE-246 already persists these (agent-side, via
+``twin.record_document(document_type='simulation_result')`` after a
+``calculix.extract_results`` run) with ``max_von_mises_mpa``,
+``max_displacement_mm``, ``load_case`` (a free-text name of which load case
+produced it) and an optional ``mesh_stats`` object flattened onto
+``metadata``; this route is the piece FORGE-246 didn't add, a read path the
+dashboard's Sim tab can list and compare from. There is deliberately no
+``POST`` here -- creation stays exactly the agent-driven
+``twin.record_document`` path (a result without a real FEA run behind it
+would be worse than no result at all).
 """
 
 from __future__ import annotations
@@ -62,6 +74,25 @@ class LoadCaseResponse(BaseModel):
 
 class LoadCaseListResponse(BaseModel):
     loadCases: list[LoadCaseResponse]  # noqa: N815
+    total: int
+
+
+class SimulationResultResponse(BaseModel):
+    """One FEA result, in the dashboard's camelCase shape (FORGE-279)."""
+
+    id: str
+    name: str
+    maxVonMisesMpa: float | None = None  # noqa: N815
+    maxDisplacementMm: float | None = None  # noqa: N815
+    loadCase: str | None = None  # noqa: N815 — free-text name, not a load-case node id
+    meshStats: dict[str, Any] | None = None  # noqa: N815
+    projectId: str  # noqa: N815
+    createdAt: str  # noqa: N815
+    updatedAt: str  # noqa: N815
+
+
+class SimulationResultListResponse(BaseModel):
+    results: list[SimulationResultResponse]
     total: int
 
 
@@ -158,3 +189,45 @@ async def create_load_case(body: CreateLoadCaseRequest) -> LoadCaseResponse:
             raise HTTPException(status_code=500, detail="Load case created but not readable back")
         logger.info("load_case_created", node_id=result["node_id"], project_id=body.projectId)
         return _wp_to_load_case(wp)
+
+
+def _wp_to_simulation_result(wp: WorkProduct) -> SimulationResultResponse:
+    md = wp.metadata or {}
+    return SimulationResultResponse(
+        id=str(wp.id),
+        name=wp.name,
+        maxVonMisesMpa=md.get("max_von_mises_mpa"),
+        maxDisplacementMm=md.get("max_displacement_mm"),
+        loadCase=md.get("load_case"),
+        meshStats=md.get("mesh_stats") if isinstance(md.get("mesh_stats"), dict) else None,
+        projectId=str(wp.project_id) if wp.project_id else "",
+        createdAt=wp.created_at.isoformat(),
+        updatedAt=wp.updated_at.isoformat(),
+    )
+
+
+@router.get("/results", response_model=SimulationResultListResponse)
+async def list_simulation_results(project_id: str | None = None) -> SimulationResultListResponse:
+    """List FEA results, optionally scoped to a project (FORGE-279).
+
+    Empty (not a 404) when the project has none yet, matching
+    ``list_load_cases``. Creation is agent-driven only (see module
+    docstring) — there is no corresponding POST.
+    """
+    with tracer.start_as_current_span("simulation.list_simulation_results") as span:
+        scoped: UUID | None = None
+        if project_id:
+            try:
+                scoped = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("simulation.project_id", project_id)
+        wps = await _twin.list_work_products(
+            work_product_type=WorkProductType.SIMULATION_RESULT, project_id=scoped
+        )
+        results = [_wp_to_simulation_result(wp) for wp in wps]
+        # Newest first — a version-compare view wants the latest runs up top.
+        results.sort(key=lambda r: r.createdAt, reverse=True)
+        span.set_attribute("simulation.count", len(results))
+        logger.info("simulation_results_listed", count=len(results), project_id=project_id)
+        return SimulationResultListResponse(results=results, total=len(results))
