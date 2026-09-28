@@ -106,6 +106,96 @@
         "title": "ApproveSketchResponse",
         "type": "object"
       },
+      "AssemblyJoint": {
+        "description": "One mate/joint between two committed parts (FORGE-271).\n\nSame shape as ``AssemblyDescription['joints'][n]`` (``types/twin.ts``) /\nthe export panel's own ``JointRow`` -- a joint authored here and one\nauthored via the URDF/SDF/USD export form are structurally identical.",
+        "properties": {
+          "anchor": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Anchor",
+            "type": "array"
+          },
+          "axis": {
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Axis",
+            "type": "array"
+          },
+          "base": {
+            "minLength": 1,
+            "title": "Base",
+            "type": "string"
+          },
+          "follower": {
+            "minLength": 1,
+            "title": "Follower",
+            "type": "string"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limits"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "base",
+          "follower"
+        ],
+        "title": "AssemblyJoint",
+        "type": "object"
+      },
       "AssemblyPart": {
         "description": "One primitive component of an assembly.",
         "properties": {
@@ -5714,6 +5804,42 @@
         "title": "TwinRelationshipResponse",
         "type": "object"
       },
+      "UpdateAssemblyJointsRequest": {
+        "description": "Body for ``PATCH /nodes/{node_id}/assembly-joints`` -- whole-list replace.",
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/AssemblyJoint"
+            },
+            "title": "Joints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "joints"
+        ],
+        "title": "UpdateAssemblyJointsRequest",
+        "type": "object"
+      },
+      "UpdateAssemblyJointsResponse": {
+        "properties": {
+          "assembly": {
+            "additionalProperties": true,
+            "title": "Assembly",
+            "type": "object"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nodeId",
+          "assembly"
+        ],
+        "title": "UpdateAssemblyJointsResponse",
+        "type": "object"
+      },
       "UpdateProjectRequest": {
         "description": "Body for ``PATCH /v1/projects/{id}``. Only supplied fields change.",
         "properties": {
@@ -10566,6 +10692,60 @@
           }
         },
         "summary": "Approve Design Sketch",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/assembly-joints": {
+      "patch": {
+        "description": "Add/edit/delete mates+joints on an already-committed assembly node (FORGE-271).\n\nWhole-list replace -- matches how the URDF/SDF/USD export panel's own\nmanual joint-list form already works (FORGE-245/MET-740). Persisted\ndirectly onto ``metadata.assembly.joints``: a joint is a logical\nannotation, not new geometry, so this deliberately skips the full\n``VersionService`` revision machinery ``/nodes/{id}/iterate`` uses for\nan actual re-export -- editing joints here never touches the underlying\ncommitted blob.\n\nUnlike the export panel, this does NOT require a live FreeCAD session or\nre-running an export -- it works on any already-committed node, any\ntime, which is the whole point (FORGE-245's own fix only got joints\npersisted onto the node at commit time; this is what makes them\neditable afterward).",
+        "operationId": "update_assembly_joints_v1_twin_nodes__node_id__assembly_joints_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAssemblyJointsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateAssemblyJointsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Assembly Joints",
         "tags": [
           "twin"
         ]

@@ -879,6 +879,21 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
       };
     }
   }
+  if (method === 'patch') {
+    // FORGE-271: whole-list joint replace on an already-committed node.
+    const jointsMatch = path.match(/^\/twin\/nodes\/([^/]+)\/assembly-joints$/);
+    if (jointsMatch) {
+      const nodeId = jointsMatch[1];
+      const node = s.nodes.find((n) => n.id === nodeId) as
+        | { assembly?: { parts: unknown[]; joints: unknown[] } }
+        | undefined;
+      if (!node) return undefined;
+      const assembly = node.assembly ?? { parts: [], joints: [] };
+      assembly.joints = (body.joints as unknown[]) ?? [];
+      node.assembly = assembly;
+      return { nodeId, assembly };
+    }
+  }
   return undefined;
 }
 

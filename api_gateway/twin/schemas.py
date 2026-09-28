@@ -41,6 +41,34 @@ class TwinNodeResponse(BaseModel):
     assembly: dict[str, Any] | None = None
 
 
+class AssemblyJoint(BaseModel):
+    """One mate/joint between two committed parts (FORGE-271).
+
+    Same shape as ``AssemblyDescription['joints'][n]`` (``types/twin.ts``) /
+    the export panel's own ``JointRow`` -- a joint authored here and one
+    authored via the URDF/SDF/USD export form are structurally identical.
+    """
+
+    name: str = Field(min_length=1)
+    type: str
+    base: str = Field(min_length=1)
+    follower: str = Field(min_length=1)
+    axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    anchor: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    limits: dict[str, float] | None = None
+
+
+class UpdateAssemblyJointsRequest(BaseModel):
+    """Body for ``PATCH /nodes/{node_id}/assembly-joints`` -- whole-list replace."""
+
+    joints: list[AssemblyJoint]
+
+
+class UpdateAssemblyJointsResponse(BaseModel):
+    nodeId: str  # noqa: N815 — dashboard contract is camelCase
+    assembly: dict[str, Any]
+
+
 class TwinNodeScriptResponse(BaseModel):
     """The current generation script text for a CAD_MODEL node (MET-630)."""
 

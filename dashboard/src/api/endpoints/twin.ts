@@ -272,6 +272,26 @@ export async function approveSketch(nodeId: string, approvedBy?: string): Promis
   return { nodeId: data.node_id, approved: data.approved, approvedAt: data.approved_at };
 }
 
+interface UpdateAssemblyJointsApiResponse {
+  nodeId: string;
+  assembly: AssemblyDescription;
+}
+
+/** PATCH /v1/twin/nodes/{id}/assembly-joints — whole-list replace of an
+ * already-committed node's mates/joints (FORGE-271). No live FreeCAD
+ * session or re-export needed, unlike the URDF/SDF/USD export panel's own
+ * joint form — this edits the persisted annotation directly. */
+export async function updateAssemblyJoints(
+  nodeId: string,
+  joints: AssemblyDescription['joints'],
+): Promise<AssemblyDescription> {
+  const { data } = await apiClient.patch<UpdateAssemblyJointsApiResponse>(
+    `/twin/nodes/${nodeId}/assembly-joints`,
+    { joints },
+  );
+  return data.assembly;
+}
+
 // ── Real boolean CSG cut between two committed CAD nodes (MET-612) ─────────
 
 export type BooleanCutOperation = 'subtract' | 'union' | 'intersect';
