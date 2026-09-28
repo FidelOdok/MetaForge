@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test/test-utils';
 
 vi.mock('../../hooks/use-bom', () => ({
   useBom: vi.fn(),
+  useHierarchicalBom: vi.fn(),
 }));
 
 const mockUseActiveProject = vi.fn(() => ({
@@ -16,11 +18,22 @@ vi.mock('../../hooks/use-active-project', () => ({
 }));
 
 import { BomPage } from '../BomPage';
-import { useBom } from '../../hooks/use-bom';
+import { useBom, useHierarchicalBom } from '../../hooks/use-bom';
 
 const mockUseBom = vi.mocked(useBom);
+const mockUseHierarchicalBom = vi.mocked(useHierarchicalBom);
 
 describe('BomPage', () => {
+  beforeEach(() => {
+    // FORGE-267: the hierarchical view is never the default (`view` starts
+    // 'flat'), but BomPage always calls both hooks — an unset mock crashes
+    // the very first render with "isLoading of undefined".
+    mockUseHierarchicalBom.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+    } as ReturnType<typeof useHierarchicalBom>);
+  });
+
   it('shows loading state', () => {
     mockUseBom.mockReturnValue({ data: undefined, isLoading: true } as ReturnType<typeof useBom>);
     const { container } = render(<BomPage />);
@@ -91,5 +104,38 @@ describe('BomPage', () => {
     const datasheetLink = screen.getByTitle('Open datasheet');
     expect(datasheetLink).toHaveAttribute('href', 'https://example.com/mp2459.pdf');
     expect(screen.getByAltText('MP2459')).toHaveAttribute('src', 'https://example.com/mp2459.png');
+  });
+
+  it('switches to the hierarchical view and renders indented EBOM lines', async () => {
+    mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
+    mockUseHierarchicalBom.mockReturnValue({
+      data: [
+        {
+          hierarchyNodeId: 'h1',
+          path: ['Robotic Arm', 'Base', 'Servo Motor'],
+          quantity: 2,
+          source: 'instance_of',
+          componentId: 'c1',
+          partNumber: 'MG996R',
+          manufacturer: 'TowerPro',
+          description: 'Servo motor',
+          unitCost: 5.5,
+        },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchicalBom>);
+
+    const user = userEvent.setup();
+    render(<BomPage />);
+
+    // Flat view is the default — the hierarchical line isn't shown yet.
+    expect(screen.queryByText('Servo Motor')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'hierarchical' }));
+
+    expect(screen.getByText('Servo Motor')).toBeInTheDocument();
+    expect(screen.getByText('MG996R')).toBeInTheDocument();
+    expect(screen.getByText('TowerPro')).toBeInTheDocument();
+    expect(screen.getByText('COTS')).toBeInTheDocument();
   });
 });
