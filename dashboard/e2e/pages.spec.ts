@@ -32,6 +32,17 @@ test.describe('BOM Page', () => {
     await page.goto('/bom');
     await expect(page.getByRole('heading', { name: 'Bill of Materials' })).toBeVisible();
   });
+
+  test('flat/hierarchical toggle switches views', async ({ page }) => {
+    await page.goto('/bom?demo=1');
+    const toggle = page.getByRole('group', { name: 'BOM view' });
+    await expect(toggle.getByRole('button', { name: 'flat' })).toHaveAttribute('aria-pressed', 'true');
+    await toggle.getByRole('button', { name: 'hierarchical' }).click();
+    await expect(toggle.getByRole('button', { name: 'hierarchical' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
 });
 
 test.describe('Digital Twin Viewer', () => {

@@ -8,11 +8,18 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import HTTPException
 
-from api_gateway.bom.routes import _item_to_component, init_twin, list_bom
+from api_gateway.bom.routes import (
+    _item_to_component,
+    init_twin,
+    list_bom,
+    list_hierarchical_bom,
+)
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.base import NodeBase
 from twin_core.models.bom_item import BOMItem
-from twin_core.models.enums import NodeType
+from twin_core.models.enums import EdgeType, NodeType, WorkProductType
+from twin_core.models.hierarchy_node import HierarchyNode
+from twin_core.models.work_product import WorkProduct
 
 
 class TestMapping:
@@ -140,3 +147,62 @@ class TestMalformedNodeDoesNotBreakTheWholeList:
 
         assert result.total == 0
         assert result.components == []
+
+
+class TestListHierarchicalBom:
+    """FORGE-267 (gap G-C3) — GET /v1/bom/hierarchical."""
+
+    async def test_empty_when_no_product_hierarchy(self) -> None:
+        init_twin(InMemoryTwinAPI.create())
+        result = await list_hierarchical_bom()
+        assert result.total == 0
+        assert result.lines == []
+
+    async def test_derives_lines_from_the_product_hierarchy(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+
+        root = await twin.create_hierarchy_node(
+            HierarchyNode(name="Arm", kind="product", project_id=pid)
+        )
+        base = await twin.create_hierarchy_node(
+            HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        )
+        await twin.add_edge(root.id, base.id, EdgeType.CONTAINS, {"quantity": 1})
+        part = await twin.create_work_product(
+            WorkProduct(
+                name="Base plate",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+        await twin.add_edge(base.id, part.id, EdgeType.REALIZED_BY)
+
+        result = await list_hierarchical_bom(project_id=str(pid))
+        assert result.total == 1
+        line = result.lines[0]
+        assert line.path == ["Arm", "Base"]
+        assert line.quantity == 1
+        assert line.source == "realized_by"
+        assert line.description == "Base plate"
+
+    async def test_scopes_by_project(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid_a, pid_b = uuid4(), uuid4()
+        await twin.create_hierarchy_node(HierarchyNode(name="A", kind="product", project_id=pid_a))
+        await twin.create_hierarchy_node(HierarchyNode(name="B", kind="product", project_id=pid_b))
+
+        result = await list_hierarchical_bom(project_id=str(pid_a))
+        assert result.total == 0  # neither product has any REALIZED_BY/INSTANCE_OF leaves
+
+    async def test_invalid_project_id_is_400(self) -> None:
+        init_twin(InMemoryTwinAPI.create())
+        with pytest.raises(HTTPException) as exc:
+            await list_hierarchical_bom(project_id="not-a-uuid")
+        assert exc.value.status_code == 400
