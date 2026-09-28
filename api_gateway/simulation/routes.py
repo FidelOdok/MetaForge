@@ -24,6 +24,10 @@ dashboard's Sim tab can list and compare from. There is deliberately no
 ``POST`` here -- creation stays exactly the agent-driven
 ``twin.record_document`` path (a result without a real FEA run behind it
 would be worse than no result at all).
+
+FORGE-277: ``POST /v1/simulation/named-faces`` is unrelated to load cases/
+results but lives here too -- it backs the load-case dialog's face picker,
+bridging to the ``freecad.list_named_faces`` MCP tool.
 """
 
 from __future__ import annotations
@@ -94,6 +98,32 @@ class SimulationResultResponse(BaseModel):
 class SimulationResultListResponse(BaseModel):
     results: list[SimulationResultResponse]
     total: int
+
+
+class NamedFace(BaseModel):
+    """One geometric face of a generated mesh (FORGE-277).
+
+    Mirrors ``freecad.list_named_faces``'/``generate_mesh``'s ``faces``
+    table (FORGE-239) in the dashboard's camelCase shape -- real
+    coordinates for a face, not just its opaque gmsh-assigned name.
+    """
+
+    name: str
+    centroidMm: list[float]  # noqa: N815 — dashboard contract is camelCase
+    normal: list[float]
+    areaMm2: float  # noqa: N815
+    bboxMm: dict[str, list[float]]  # noqa: N815 — {"min": [x,y,z], "max": [x,y,z]}
+
+
+class NamedFacesResponse(BaseModel):
+    meshFile: str  # noqa: N815
+    faces: list[NamedFace]
+
+
+class NamedFacesRequest(BaseModel):
+    """Body for ``POST /v1/simulation/named-faces``."""
+
+    meshFile: str = Field(min_length=1)  # noqa: N815
 
 
 class CreateLoadCaseRequest(BaseModel):
@@ -231,3 +261,51 @@ async def list_simulation_results(project_id: str | None = None) -> SimulationRe
         span.set_attribute("simulation.count", len(results))
         logger.info("simulation_results_listed", count=len(results), project_id=project_id)
         return SimulationResultListResponse(results=results, total=len(results))
+
+
+@router.post("/named-faces", response_model=NamedFacesResponse)
+async def list_named_faces(body: NamedFacesRequest) -> NamedFacesResponse:
+    """Named-face geometry for an already-generated mesh (FORGE-277).
+
+    Backs the dashboard's geometric boundary-condition face picker: given a
+    mesh file path (from an earlier ``freecad.generate_mesh`` call, e.g.
+    surfaced in a forge chat turn), returns each named surface group's real
+    centroid/normal/area/bbox so the dashboard can render pickable face
+    patches instead of a blind "type the gmsh group name" text field.
+    """
+    from api_gateway.chat.routes import get_mcp_bridge
+
+    with tracer.start_as_current_span("simulation.list_named_faces") as span:
+        span.set_attribute("simulation.mesh_file", body.meshFile)
+        bridge = get_mcp_bridge()
+        try:
+            envelope = await bridge.invoke("freecad.list_named_faces", {"mesh_file": body.meshFile})
+        except Exception as exc:  # noqa: BLE001 — surface a clean 502 with the cause
+            logger.warning("named_faces_tool_failed", mesh_file=body.meshFile, error=str(exc))
+            span.record_exception(exc)
+            raise HTTPException(
+                status_code=502, detail=f"freecad.list_named_faces failed: {exc}"
+            ) from exc
+
+        if isinstance(envelope, dict) and envelope.get("status") == "error":
+            err = envelope.get("error") or envelope
+            logger.warning("named_faces_tool_failed", mesh_file=body.meshFile, error=str(err))
+            raise HTTPException(status_code=502, detail=f"freecad.list_named_faces failed: {err}")
+
+        data = envelope.get("data", envelope) if isinstance(envelope, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        raw_faces = data.get("faces", [])
+        faces = [
+            NamedFace(
+                name=f["name"],
+                centroidMm=f["centroid_mm"],
+                normal=f["normal"],
+                areaMm2=f["area_mm2"],
+                bboxMm=f["bbox_mm"],
+            )
+            for f in raw_faces
+        ]
+        span.set_attribute("simulation.face_count", len(faces))
+        logger.info("named_faces_listed", mesh_file=body.meshFile, count=len(faces))
+        return NamedFacesResponse(meshFile=data.get("mesh_file", body.meshFile), faces=faces)

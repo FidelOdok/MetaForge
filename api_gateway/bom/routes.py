@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
+from twin_core.consistency.hierarchical_bom import compute_hierarchical_bom
 from twin_core.models.bom_item import BOMItem
 
 logger = structlog.get_logger(__name__)
@@ -129,3 +130,69 @@ async def list_bom(project_id: str | None = None) -> BomListResponse:
             span.set_attribute("bom.skipped", skipped)
         logger.info("bom_listed", count=len(components), skipped=skipped, project_id=project_id)
         return BomListResponse(components=components, total=len(components))
+
+
+class HierarchicalBomLineResponse(BaseModel):
+    """One derived EBOM line, in the dashboard's camelCase shape."""
+
+    hierarchyNodeId: str  # noqa: N815 — dashboard contract is camelCase
+    path: list[str]
+    quantity: float
+    source: str
+    componentId: str  # noqa: N815
+    partNumber: str | None = None  # noqa: N815
+    manufacturer: str | None = None
+    description: str
+    unitCost: float | None = None  # noqa: N815
+
+
+class HierarchicalBomResponse(BaseModel):
+    lines: list[HierarchicalBomLineResponse]
+    total: int
+
+
+@router.get("/hierarchical", response_model=HierarchicalBomResponse)
+async def list_hierarchical_bom(project_id: str | None = None) -> HierarchicalBomResponse:
+    """Derive the hierarchical BOM (EBOM) -- FORGE-267, gap G-C3 -- from
+    every "product"-kind HierarchyNode's CONTAINS tree in a project.
+
+    Empty (not an error) when the project has no product hierarchy yet
+    (FORGE-260's tools haven't been used for it) -- matches the flat BOM's
+    own convention.
+    """
+    with tracer.start_as_current_span("bom.list_hierarchical") as span:
+        scoped: UUID | None = None
+        if project_id:
+            try:
+                scoped = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("bom.project_id", project_id)
+
+        roots = await _twin.list_hierarchy_nodes(project_id=scoped, kind="product")
+        lines: list[HierarchicalBomLineResponse] = []
+        for root in roots:
+            try:
+                derived = await compute_hierarchical_bom(_twin, root.id)
+            except KeyError:
+                # Shouldn't happen (every root here came from
+                # list_hierarchy_nodes itself), but one bad root must never
+                # break the whole listing.
+                continue
+            for line in derived:
+                lines.append(
+                    HierarchicalBomLineResponse(
+                        hierarchyNodeId=str(line.hierarchy_node_id),
+                        path=line.path,
+                        quantity=line.quantity,
+                        source=line.source,
+                        componentId=str(line.component_id),
+                        partNumber=line.part_number,
+                        manufacturer=line.manufacturer,
+                        description=line.description,
+                        unitCost=line.unit_cost,
+                    )
+                )
+        span.set_attribute("bom.hierarchical_line_count", len(lines))
+        logger.info("hierarchical_bom_listed", count=len(lines), project_id=project_id)
+        return HierarchicalBomResponse(lines=lines, total=len(lines))

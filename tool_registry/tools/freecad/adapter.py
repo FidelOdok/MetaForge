@@ -223,6 +223,58 @@ class FreecadServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="freecad.list_named_faces",
+                adapter_id="freecad",
+                name="List Named Faces",
+                description=(
+                    "Re-fetch the per-face geometry table (name, bbox, centroid, "
+                    "area, normal) for an .inp mesh already produced by "
+                    "freecad.generate_mesh (FORGE-277) -- use this to identify a "
+                    "STEP face by its real coordinates (for fixed_node_set/"
+                    "load_node_set) without re-running gmsh, e.g. from a dashboard "
+                    "face picker or a later turn that no longer has the original "
+                    "generate_mesh result in context."
+                ),
+                capability="mesh_generation",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mesh_file": {
+                            "type": "string",
+                            "description": (
+                                "Path to an .inp mesh file already on the shared "
+                                "adapter workspace, e.g. the 'mesh_file' result of an "
+                                "earlier freecad.generate_mesh call."
+                            ),
+                        },
+                    },
+                    "required": ["mesh_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "mesh_file": {"type": "string"},
+                        "faces": {
+                            "type": "array",
+                            "description": (
+                                "One entry per named surface (CPS3/CPS4) element "
+                                "set: name, element_type, num_elements, num_nodes, "
+                                "bbox_mm ({min,max}: [x,y,z]), centroid_mm ([x,y,z]), "
+                                "area_mm2, normal ([x,y,z], unit vector)."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=512, max_cpu_seconds=30, max_disk_mb=64
+                ),
+            ),
+            handler=self.list_named_faces,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="freecad.boolean_operation",
                 adapter_id="freecad",
                 name="Boolean Operation",
@@ -488,6 +540,15 @@ class FreecadServer(McpToolServer):
         result = await self._execute_meshing(input_file, element_size, algorithm, output_format)
         return result
 
+    async def list_named_faces(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Re-fetch the per-face geometry table for an already-generated mesh."""
+        mesh_file = arguments.get("mesh_file", "")
+        if not mesh_file:
+            raise ValueError("mesh_file is required")
+
+        logger.info("Listing named faces", mesh_file=mesh_file)
+        return await self._execute_list_named_faces(mesh_file)
+
     async def boolean_operation(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Perform CSG boolean operation on two CAD models."""
         input_file_a = arguments.get("input_file_a", "")
@@ -563,6 +624,10 @@ class FreecadServer(McpToolServer):
     ) -> dict[str, Any]:
         """Generate a mesh via FreeCAD (headless)."""
         return self._ops.generate_mesh(input_file, element_size, algorithm, output_format)
+
+    async def _execute_list_named_faces(self, mesh_file: str) -> dict[str, Any]:
+        """Re-parse an already-generated mesh's per-face geometry table."""
+        return self._ops.list_named_faces(mesh_file)
 
     async def _execute_boolean(
         self,
