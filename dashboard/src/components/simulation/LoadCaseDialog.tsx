@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { ArrowRight, X } from 'lucide-react';
-import { useCreateLoadCase } from '../../hooks/use-load-cases';
+import { useCreateLoadCase, useNamedFaces } from '../../hooks/use-load-cases';
+import { FacePickerViewer } from './FacePickerViewer';
 
 export interface LoadCaseDialogHandle {
   open: () => void;
@@ -30,6 +31,14 @@ export const LoadCaseDialog = forwardRef<LoadCaseDialogHandle, LoadCaseDialogPro
     const [forceY, setForceY] = useState('0');
     const [forceZ, setForceZ] = useState('0');
     const [sourceOfLoads, setSourceOfLoads] = useState('');
+    // FORGE-277: geometric face selection — a mesh file the user already has
+    // in hand from an earlier freecad.generate_mesh turn unlocks a 3D face
+    // picker instead of typing an opaque gmsh group name below.
+    const [meshFile, setMeshFile] = useState('');
+    const [pickMode, setPickMode] = useState<'fixed' | 'load'>('fixed');
+    const { data: namedFaces, isLoading: facesLoading } = useNamedFaces(
+      meshFile.trim() || undefined,
+    );
 
     const open = () => {
       createLoadCase.reset?.();
@@ -74,6 +83,8 @@ export const LoadCaseDialog = forwardRef<LoadCaseDialogHandle, LoadCaseDialogPro
             setForceY('0');
             setForceZ('0');
             setSourceOfLoads('');
+            setMeshFile('');
+            setPickMode('fixed');
             close();
           },
         },
@@ -114,6 +125,55 @@ export const LoadCaseDialog = forwardRef<LoadCaseDialogHandle, LoadCaseDialogPro
             onChange={(e) => setMaterialName(e.target.value)}
             placeholder="e.g. steel, aluminum_6061"
           />
+
+          <label htmlFor="load-case-mesh-file">
+            Mesh file <span>(optional — pick faces visually instead of typing names)</span>
+          </label>
+          <input
+            id="load-case-mesh-file"
+            value={meshFile}
+            onChange={(e) => setMeshFile(e.target.value)}
+            placeholder="e.g. /workspace/bracket.inp — from a generate_mesh call"
+          />
+
+          {meshFile.trim() && facesLoading && (
+            <p className="font-mono text-xs text-on-surface-variant">Loading named faces…</p>
+          )}
+
+          {namedFaces && namedFaces.faces.length > 0 && (
+            <>
+              <div
+                role="group"
+                aria-label="Face pick mode"
+                style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}
+              >
+                <button
+                  type="button"
+                  aria-pressed={pickMode === 'fixed'}
+                  onClick={() => setPickMode('fixed')}
+                  className={pickMode === 'fixed' ? 'action-primary' : 'action-secondary'}
+                >
+                  Pick fixed face
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={pickMode === 'load'}
+                  onClick={() => setPickMode('load')}
+                  className={pickMode === 'load' ? 'action-primary' : 'action-secondary'}
+                >
+                  Pick load face
+                </button>
+              </div>
+              <FacePickerViewer
+                faces={namedFaces.faces}
+                fixedFace={fixedNodeSet}
+                loadFace={loadNodeSet}
+                pickMode={pickMode}
+                onPickFixed={setFixedNodeSet}
+                onPickLoad={setLoadNodeSet}
+              />
+            </>
+          )}
 
           <label htmlFor="load-case-fixed">
             Fixed node set <span>(from freecad.generate_mesh's own 'faces' table)</span>

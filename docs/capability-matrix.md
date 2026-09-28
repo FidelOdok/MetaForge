@@ -69,6 +69,7 @@ when the gateway supplies their backend).
 | `freecad` | `freecad.describe_step_file` | Per-component breakdown of a multipart assembly file (Label/volume/area/bbox per named part, not just the flattened aggregate) (MET-629) | unit-verified (MET-629) |
 | `freecad` | `freecad.export_geometry` | FreeCAD STEP / STL / IGES export | _none yet_ |
 | `freecad` | `freecad.generate_mesh` | FreeCAD-driven mesh generation | _none yet_ |
+| `freecad` | `freecad.list_named_faces` | Re-fetch an already-generated mesh's per-face geometry table (name, bbox, centroid, area, normal) without re-running gmsh — backs the dashboard's geometric boundary-condition face picker (FORGE-277) | unit-verified (FORGE-277) |
 | `kicad` (opt-in) | `kicad.run_erc` | Electrical rules check | _none yet_ |
 | `kicad` | `kicad.run_drc` | Design rules check | _none yet_ |
 | `kicad` | `kicad.export_bom` | Bill of materials export | _none yet_ |

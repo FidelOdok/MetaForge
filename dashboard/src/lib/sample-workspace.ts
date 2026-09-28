@@ -823,6 +823,30 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
       }
       return s.proposal;
     }
+    if (path === '/simulation/named-faces') {
+      // FORGE-277: a small illustrative box mesh's two named faces — enough
+      // for the load-case dialog's 3D face picker to demonstrate a real
+      // pick without a live gmsh/freecad-adapter mesh.
+      return {
+        meshFile: String(body.meshFile ?? ''),
+        faces: [
+          {
+            name: 'Surface1',
+            centroidMm: [5, 5, 0],
+            normal: [0, 0, -1],
+            areaMm2: 100,
+            bboxMm: { min: [0, 0, 0], max: [10, 10, 0] },
+          },
+          {
+            name: 'Surface2',
+            centroidMm: [5, 5, 5],
+            normal: [0, 0, 1],
+            areaMm2: 100,
+            bboxMm: { min: [0, 0, 5], max: [10, 10, 5] },
+          },
+        ],
+      };
+    }
   }
   return undefined;
 }
