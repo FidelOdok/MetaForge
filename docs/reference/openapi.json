@@ -3424,6 +3424,88 @@
         "title": "ModelsResponse",
         "type": "object"
       },
+      "NamedFace": {
+        "description": "One geometric face of a generated mesh (FORGE-277).\n\nMirrors ``freecad.list_named_faces``'/``generate_mesh``'s ``faces``\ntable (FORGE-239) in the dashboard's camelCase shape -- real\ncoordinates for a face, not just its opaque gmsh-assigned name.",
+        "properties": {
+          "areaMm2": {
+            "title": "Areamm2",
+            "type": "number"
+          },
+          "bboxMm": {
+            "additionalProperties": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Bboxmm",
+            "type": "object"
+          },
+          "centroidMm": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Centroidmm",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "normal": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Normal",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "centroidMm",
+          "normal",
+          "areaMm2",
+          "bboxMm"
+        ],
+        "title": "NamedFace",
+        "type": "object"
+      },
+      "NamedFacesRequest": {
+        "description": "Body for ``POST /v1/simulation/named-faces``.",
+        "properties": {
+          "meshFile": {
+            "minLength": 1,
+            "title": "Meshfile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "meshFile"
+        ],
+        "title": "NamedFacesRequest",
+        "type": "object"
+      },
+      "NamedFacesResponse": {
+        "properties": {
+          "faces": {
+            "items": {
+              "$ref": "#/components/schemas/NamedFace"
+            },
+            "title": "Faces",
+            "type": "array"
+          },
+          "meshFile": {
+            "title": "Meshfile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "meshFile",
+          "faces"
+        ],
+        "title": "NamedFacesResponse",
+        "type": "object"
+      },
       "OkResponse": {
         "properties": {
           "method": {
@@ -9895,6 +9977,48 @@
           }
         },
         "summary": "Create Load Case",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/named-faces": {
+      "post": {
+        "description": "Named-face geometry for an already-generated mesh (FORGE-277).\n\nBacks the dashboard's geometric boundary-condition face picker: given a\nmesh file path (from an earlier ``freecad.generate_mesh`` call, e.g.\nsurfaced in a forge chat turn), returns each named surface group's real\ncentroid/normal/area/bbox so the dashboard can render pickable face\npatches instead of a blind \"type the gmsh group name\" text field.",
+        "operationId": "list_named_faces_v1_simulation_named_faces_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NamedFacesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedFacesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Named Faces",
         "tags": [
           "simulation"
         ]

@@ -21,3 +21,18 @@ export interface CreateLoadCasePayload {
   loadForceN: [number, number, number];
   sourceOfLoads?: string;
 }
+
+/** One geometric face of a generated mesh (FORGE-277) — real coordinates
+ * for a face, not just its opaque gmsh-assigned name (e.g. "Surface1"). */
+export interface NamedFace {
+  name: string;
+  centroidMm: [number, number, number];
+  normal: [number, number, number];
+  areaMm2: number;
+  bboxMm: { min: [number, number, number]; max: [number, number, number] };
+}
+
+export interface NamedFacesResponse {
+  meshFile: string;
+  faces: NamedFace[];
+}
