@@ -4957,6 +4957,106 @@
         "title": "SetSelectionRequest",
         "type": "object"
       },
+      "SimulationResultListResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SimulationResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "total"
+        ],
+        "title": "SimulationResultListResponse",
+        "type": "object"
+      },
+      "SimulationResultResponse": {
+        "description": "One FEA result, in the dashboard's camelCase shape (FORGE-279).",
+        "properties": {
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "loadCase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadcase"
+          },
+          "maxDisplacementMm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxdisplacementmm"
+          },
+          "maxVonMisesMpa": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxvonmisesmpa"
+          },
+          "meshStats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meshstats"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "projectId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "SimulationResultResponse",
+        "type": "object"
+      },
       "SourceDeleteResponse": {
         "description": "Envelope for ``DELETE /knowledge/sources/{path}``.",
         "properties": {
@@ -10019,6 +10119,56 @@
           }
         },
         "summary": "List Named Faces",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/results": {
+      "get": {
+        "description": "List FEA results, optionally scoped to a project (FORGE-279).\n\nEmpty (not a 404) when the project has none yet, matching\n``list_load_cases``. Creation is agent-driven only (see module\ndocstring) \u2014 there is no corresponding POST.",
+        "operationId": "list_simulation_results_v1_simulation_results_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationResultListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Simulation Results",
         "tags": [
           "simulation"
         ]

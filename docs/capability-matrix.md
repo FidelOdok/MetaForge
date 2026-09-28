@@ -183,7 +183,7 @@ Served by Vite under `dashboard/` — boot with
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |
 | `/approvals` | Pending change-proposal review | gateway approvals API |
 | `/bom` | BOM viewer, with a flat/hierarchical toggle (FORGE-267): the hierarchical view derives an EBOM from the product hierarchy, quantities multiplied down the CONTAINS tree | `GET /v1/bom/...`, `GET /v1/bom/hierarchical` |
-| `/sim` | Load-case editor + list, per project (FORGE-278) | `GET/POST /v1/simulation/load-cases` |
+| `/sim` | Load-case editor + list (FORGE-278), with a 3D geometric face picker for fixed/load faces (FORGE-277); FEA results list with a numeric side-by-side version-compare panel (FORGE-279 — a mesh contour/colorMap overlay is deferred pending Twin mesh persistence), per project | `GET/POST /v1/simulation/load-cases`, `POST /v1/simulation/named-faces`, `GET /v1/simulation/results` |
 | `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB; its Structure tab (FORGE-261) shows the product hierarchy tree-table with per-node mass/cost rollups | `GET /v1/twin/files/...`, `GET /v1/twin/hierarchy` |
 | `/files` | Legacy file browser | gateway files API |
 | `/knowledge` | Ingested-sources table (sortable, filterable) | `GET /api/v1/knowledge/sources` |

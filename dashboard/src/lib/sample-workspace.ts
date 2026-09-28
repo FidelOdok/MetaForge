@@ -778,6 +778,37 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path === '/assistant/proposals') return { proposals: [s.proposal], total: 1 };
     if (path === '/sessions') return { sessions: s.sessions, total: s.sessions.length };
     if (path === `/sessions/${s.sessions[0]?.id}`) return s.sessions[0];
+    if (path === '/simulation/results') {
+      // FORGE-279: two illustrative revisions of the same analysis, so the
+      // version-compare panel has something real to show.
+      return {
+        results: [
+          {
+            id: 'sample-fea-rev1',
+            name: 'Rev 1 FEA — static 1g',
+            maxVonMisesMpa: 62.4,
+            maxDisplacementMm: 0.41,
+            loadCase: 'static_1g',
+            meshStats: { num_nodes: 12500, num_elements: 48000 },
+            projectId: s.project.id,
+            createdAt: '2026-09-20T10:00:00Z',
+            updatedAt: '2026-09-20T10:00:00Z',
+          },
+          {
+            id: 'sample-fea-rev2',
+            name: 'Rev 2 FEA — static 1g',
+            maxVonMisesMpa: 45.1,
+            maxDisplacementMm: 0.29,
+            loadCase: 'static_1g',
+            meshStats: { num_nodes: 12500, num_elements: 48000 },
+            projectId: s.project.id,
+            createdAt: '2026-09-22T10:00:00Z',
+            updatedAt: '2026-09-22T10:00:00Z',
+          },
+        ],
+        total: 2,
+      };
+    }
     return undefined;
   }
   if (method === 'post') {
