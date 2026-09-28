@@ -119,7 +119,7 @@ class TestToolRegistry:
         assert adapter_info.adapter_id == "calculix"
         assert adapter_info.version == "0.1.0"
         assert adapter_info.status == AdapterStatus.CONNECTED
-        assert len(adapter_info.tools) == 4
+        assert len(adapter_info.tools) == 6
 
     async def test_register_adapter_populates_tools(self) -> None:
         registry = ToolRegistry()
@@ -131,6 +131,8 @@ class TestToolRegistry:
             "calculix.run_thermal",
             "calculix.validate_mesh",
             "calculix.extract_results",
+            "calculix.cross_check_cantilever_beam",
+            "calculix.check_mesh_convergence",
         }
         actual_ids = {t.tool_id for t in registry.list_tools()}
         assert actual_ids == expected_ids
@@ -185,7 +187,7 @@ class TestToolRegistry:
         await registry.register_adapter(server)
 
         tools = registry.list_tools()
-        assert len(tools) == 4
+        assert len(tools) == 6
 
     async def test_list_tools_by_capability(self) -> None:
         registry = ToolRegistry()
@@ -211,7 +213,7 @@ class TestToolRegistry:
 
         # All CalculiX tools are phase 1
         tools = registry.list_tools(phase=1)
-        assert len(tools) == 4
+        assert len(tools) == 6
 
         tools = registry.list_tools(phase=2)
         assert tools == []
@@ -231,18 +233,25 @@ class TestToolRegistry:
         await registry.register_adapter(server)
 
         capabilities = registry.list_capabilities()
-        assert len(capabilities) == 4
+        # FORGE-280 adds one new capability (accuracy_check), shared by both
+        # of its two new tools -- everything else stays 1:1.
+        assert len(capabilities) == 5
         capability_names = {c.capability for c in capabilities}
         assert capability_names == {
             "stress_analysis",
             "thermal_analysis",
             "mesh_validation",
             "result_extraction",
+            "accuracy_check",
         }
 
-        # Check that each capability references the correct tool
+        # Check that each capability references the correct tool(s) --
+        # accuracy_check is the one exception with more than one.
         for cap in capabilities:
-            assert len(cap.tool_ids) == 1
+            if cap.capability == "accuracy_check":
+                assert len(cap.tool_ids) == 2
+            else:
+                assert len(cap.tool_ids) == 1
 
     async def test_check_health(self) -> None:
         registry = ToolRegistry()
@@ -253,7 +262,7 @@ class TestToolRegistry:
         assert health.status == "healthy"
         assert health.adapter_id == "calculix"
         assert health.version == "0.1.0"
-        assert health.tools_available == 4
+        assert health.tools_available == 6
 
         # Verify adapter status was updated
         adapter = registry.get_adapter("calculix")
@@ -318,7 +327,7 @@ class TestToolRegistry:
         # Should still have exactly one adapter
         assert len(registry.list_adapters()) == 1
         # Tools should not be duplicated
-        assert len(registry.list_tools()) == 4
+        assert len(registry.list_tools()) == 6
         # Both infos should reference same adapter
         assert info1.adapter_id == info2.adapter_id
 

@@ -189,6 +189,20 @@ class FreecadServer(McpToolServer):
                             "default": "inp",
                             "description": "Output mesh format",
                         },
+                        "element_order": {
+                            "type": "integer",
+                            "enum": [1, 2],
+                            "default": 1,
+                            "description": (
+                                "FORGE-280: 1 (linear tets, C3D4) or 2 (quadratic, "
+                                "C3D10, gmsh's own '-order 2'). Second-order elements "
+                                "capture bending stress far more accurately per "
+                                "element -- linear tets are notoriously too stiff in "
+                                "bending. Try this before just shrinking element_size "
+                                "when calculix.check_mesh_convergence says the result "
+                                "hasn't converged."
+                            ),
+                        },
                     },
                     "required": ["input_file"],
                 },
@@ -199,7 +213,10 @@ class FreecadServer(McpToolServer):
                         "num_nodes": {"type": "integer"},
                         "num_elements": {"type": "integer"},
                         "element_types": {"type": "array"},
-                        "quality_metrics": {"type": "object"},
+                        "quality_metrics": {
+                            "type": "object",
+                            "description": "Includes 'element_order' (1 or 2).",
+                        },
                         "faces": {
                             "type": "array",
                             "description": (
@@ -523,11 +540,14 @@ class FreecadServer(McpToolServer):
         element_size = arguments.get("element_size", 1.0)
         algorithm = arguments.get("algorithm", self.config.default_mesh_algorithm)
         output_format = arguments.get("output_format", "inp")
+        element_order = arguments.get("element_order", 1)
 
         if not input_file:
             raise ValueError("input_file is required")
         if algorithm not in ("netgen", "gmsh", "mefisto"):
             raise ValueError(f"Unsupported meshing algorithm: {algorithm}")
+        if element_order not in (1, 2):
+            raise ValueError(f"Unsupported element_order: {element_order}")
 
         logger.info(
             "Generating mesh",
@@ -535,9 +555,12 @@ class FreecadServer(McpToolServer):
             element_size=element_size,
             algorithm=algorithm,
             output_format=output_format,
+            element_order=element_order,
         )
 
-        result = await self._execute_meshing(input_file, element_size, algorithm, output_format)
+        result = await self._execute_meshing(
+            input_file, element_size, algorithm, output_format, element_order
+        )
         return result
 
     async def list_named_faces(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -621,9 +644,12 @@ class FreecadServer(McpToolServer):
         element_size: float,
         algorithm: str,
         output_format: str,
+        element_order: int = 1,
     ) -> dict[str, Any]:
         """Generate a mesh via FreeCAD (headless)."""
-        return self._ops.generate_mesh(input_file, element_size, algorithm, output_format)
+        return self._ops.generate_mesh(
+            input_file, element_size, algorithm, output_format, element_order
+        )
 
     async def _execute_list_named_faces(self, mesh_file: str) -> dict[str, Any]:
         """Re-parse an already-generated mesh's per-face geometry table."""

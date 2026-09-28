@@ -1175,6 +1175,66 @@ class TestGenerateMeshUsesGmsh:
             with pytest.raises(ValueError, match="Unsupported meshing algorithm"):
                 ops.generate_mesh(str(step_file), algorithm="bogus")
 
+    def test_unsupported_element_order_raises(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("x")
+        ops = FreecadOperations()
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True):
+            with pytest.raises(ValueError, match="Unsupported element_order"):
+                ops.generate_mesh(str(step_file), element_order=3)
+
+    def test_element_order_defaults_to_one_and_is_passed_to_gmsh(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        captured_cmd: list[str] = []
+
+        def capturing_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return _fake_gmsh_run(cmd, **kwargs)
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=capturing_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file))
+
+        assert result["quality_metrics"]["element_order"] == 1
+        order_index = captured_cmd.index("-order")
+        assert captured_cmd[order_index + 1] == "1"
+
+    def test_element_order_two_requests_quadratic_elements_from_gmsh(self, tmp_path) -> None:
+        step_file = tmp_path / "part.step"
+        step_file.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        ops = FreecadOperations()
+        captured_cmd: list[str] = []
+
+        def capturing_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return _fake_gmsh_run(cmd, **kwargs)
+
+        with (
+            patch("tool_registry.tools.freecad.operations.HAS_FREECAD", True),
+            patch(
+                "tool_registry.tools.freecad.operations.shutil.which", return_value="/usr/bin/gmsh"
+            ),
+            patch(
+                "tool_registry.tools.freecad.operations.subprocess.run", side_effect=capturing_run
+            ),
+            patch.object(ops, "work_dir", str(tmp_path)),
+        ):
+            result = ops.generate_mesh(str(step_file), element_order=2)
+
+        assert result["quality_metrics"]["element_order"] == 2
+        order_index = captured_cmd.index("-order")
+        assert captured_cmd[order_index + 1] == "2"
+
     def test_netgen_and_mefisto_are_accepted_but_route_through_gmsh(self, tmp_path) -> None:
         """FORGE-99: gmsh has no backend literally named netgen/mefisto, so
         these are honored as recognized requests (never a 400) but actually

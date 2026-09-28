@@ -168,8 +168,9 @@ class TestCalculixConfig:
 
 
 class TestCalculixServer:
-    def test_server_registers_four_tools(self, server: CalculixServer) -> None:
-        assert len(server.tool_ids) == 4
+    def test_server_registers_six_tools(self, server: CalculixServer) -> None:
+        # FORGE-280 adds cross_check_cantilever_beam + check_mesh_convergence.
+        assert len(server.tool_ids) == 6
 
     def test_tool_ids(self, server: CalculixServer) -> None:
         expected = {
@@ -177,6 +178,8 @@ class TestCalculixServer:
             "calculix.run_thermal",
             "calculix.validate_mesh",
             "calculix.extract_results",
+            "calculix.cross_check_cantilever_beam",
+            "calculix.check_mesh_convergence",
         }
         assert set(server.tool_ids) == expected
 
@@ -422,6 +425,95 @@ class TestValidateMesh:
         # Verify _validate_mesh_file was called with default value
         call_args = server_with_mocks._validate_mesh_file.call_args  # type: ignore[attr-defined]
         assert call_args[0][1] == 10.0
+
+
+# ---------------------------------------------------------------------------
+# TestCrossCheckCantileverBeam / TestCheckMeshConvergence (FORGE-280)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossCheckCantileverBeam:
+    """Thin handler over accuracy.cross_check_cantilever_bending — no
+    _execute_* mock needed, this is pure computation, no solver I/O."""
+
+    async def test_success(self, server: CalculixServer) -> None:
+        result = await server.handle_cross_check_cantilever_beam(
+            {
+                "length_mm": 100,
+                "width_mm": 10,
+                "height_mm": 20,
+                "force_n": 500,
+                "fea_max_stress_mpa": 76.0,
+            }
+        )
+        assert result["hand_calc_stress_mpa"] == pytest.approx(75.0, abs=0.1)
+        assert result["within_tolerance"] is True
+
+    async def test_default_tolerance_is_twenty_percent(self, server: CalculixServer) -> None:
+        result = await server.handle_cross_check_cantilever_beam(
+            {
+                "length_mm": 100,
+                "width_mm": 10,
+                "height_mm": 20,
+                "force_n": 500,
+                "fea_max_stress_mpa": 76.0,
+            }
+        )
+        assert result["tolerance_pct"] == 20.0
+
+    @pytest.mark.parametrize(
+        "missing", ["length_mm", "width_mm", "height_mm", "force_n", "fea_max_stress_mpa"]
+    )
+    async def test_missing_required_field_raises(
+        self, server: CalculixServer, missing: str
+    ) -> None:
+        args = {
+            "length_mm": 100,
+            "width_mm": 10,
+            "height_mm": 20,
+            "force_n": 500,
+            "fea_max_stress_mpa": 76.0,
+        }
+        del args[missing]
+        with pytest.raises(ValueError, match="Missing required field"):
+            await server.handle_cross_check_cantilever_beam(args)
+
+    async def test_invalid_dimensions_raise(self, server: CalculixServer) -> None:
+        with pytest.raises(ValueError, match="must all be positive"):
+            await server.handle_cross_check_cantilever_beam(
+                {
+                    "length_mm": 0,
+                    "width_mm": 10,
+                    "height_mm": 20,
+                    "force_n": 500,
+                    "fea_max_stress_mpa": 76.0,
+                }
+            )
+
+
+class TestCheckMeshConvergence:
+    """Thin handler over accuracy.check_mesh_convergence."""
+
+    async def test_success(self, server: CalculixServer) -> None:
+        result = await server.handle_check_mesh_convergence(
+            {
+                "points": [
+                    {"element_size_mm": 4.0, "max_von_mises_mpa": 100.0},
+                    {"element_size_mm": 1.0, "max_von_mises_mpa": 101.0},
+                ],
+            }
+        )
+        assert result["converged"] is True
+
+    async def test_missing_points_raises(self, server: CalculixServer) -> None:
+        with pytest.raises(ValueError, match="points is required"):
+            await server.handle_check_mesh_convergence({})
+
+    async def test_single_point_raises(self, server: CalculixServer) -> None:
+        with pytest.raises(ValueError, match="at least 2 points"):
+            await server.handle_check_mesh_convergence(
+                {"points": [{"element_size_mm": 1.0, "max_von_mises_mpa": 100.0}]}
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -717,7 +809,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 4
+        assert len(response["result"]["tools"]) == 6
 
     async def test_tool_list_contains_expected_ids(self, server: CalculixServer) -> None:
         request = _make_jsonrpc("tool/list")
@@ -729,6 +821,8 @@ class TestJsonRpcIntegration:
             "calculix.run_thermal",
             "calculix.validate_mesh",
             "calculix.extract_results",
+            "calculix.cross_check_cantilever_beam",
+            "calculix.check_mesh_convergence",
         }
 
     async def test_tool_call_fea_via_handle_request(
@@ -799,7 +893,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "calculix"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 4
+        assert response["result"]["tools_available"] == 6
 
     async def test_tool_call_unknown_tool(self, server: CalculixServer) -> None:
         request = _make_jsonrpc(

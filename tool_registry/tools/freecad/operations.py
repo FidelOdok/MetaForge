@@ -858,6 +858,7 @@ class FreecadOperations:
         element_size: float = 1.0,
         algorithm: str = "netgen",
         output_format: str = "inp",
+        element_order: int = 1,
     ) -> dict[str, Any]:
         """Generate a volumetric finite-element mesh from a CAD file (FORGE-99).
 
@@ -887,6 +888,14 @@ class FreecadOperations:
                 a trace.
             output_format: Output format (inp, unv, stl) -- gmsh infers the
                 writer from ``output_path``'s extension.
+            element_order: 1 (default, linear tetrahedra -- C3D4) or 2
+                (quadratic -- C3D10, gmsh's ``-order 2``). FORGE-280: second-
+                order elements capture bending stress far more accurately
+                per element than first-order ones (linear tets are
+                notoriously stiff in bending -- the classic reason a coarse
+                first-order mesh under-predicts deflection/over-predicts
+                stiffness); use this instead of just shrinking element_size
+                when convergence (calculix.check_mesh_convergence) is slow.
 
         Returns:
             Dict with mesh file path, node/element counts (total and by
@@ -899,6 +908,8 @@ class FreecadOperations:
                 f"Unsupported meshing algorithm '{algorithm}' -- accepted: "
                 f"{', '.join(_MESH_ALGORITHMS)}"
             )
+        if element_order not in (1, 2):
+            raise ValueError(f"Unsupported element_order '{element_order}' -- accepted: 1, 2")
         if algorithm != "gmsh":
             logger.warning(
                 "freecad_mesh_algorithm_not_honored",
@@ -919,6 +930,7 @@ class FreecadOperations:
             span.set_attribute("input.file", input_file)
             span.set_attribute("mesh.element_size", element_size)
             span.set_attribute("mesh.algorithm", algorithm)
+            span.set_attribute("mesh.element_order", element_order)
 
             start = time.monotonic()
 
@@ -932,6 +944,8 @@ class FreecadOperations:
                 "-3",
                 "-clmax",
                 str(element_size),
+                "-order",
+                str(element_order),
                 "-o",
                 output_path,
             ]
@@ -1016,6 +1030,7 @@ class FreecadOperations:
                 "quality_metrics": {
                     "element_size": element_size,
                     "algorithm": "gmsh",
+                    "element_order": element_order,
                     "num_volume_elements": num_volume_elements,
                     "element_counts_by_type": counts_by_type,
                 },

@@ -473,7 +473,7 @@ class TestMcpProtocolE2E:
         assert health.status == "healthy"
         assert health.adapter_id == "calculix"
         assert health.version == "0.1.0"
-        assert health.tools_available == 4
+        assert health.tools_available == 6
 
 
 # ---------------------------------------------------------------------------
