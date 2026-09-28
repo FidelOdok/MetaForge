@@ -658,6 +658,64 @@ const SAMPLE_WORKSPACE_SEED = {
     },
   },
   urdf: '<?xml version="1.0"?><robot name="sample_drone"><link name="base"><inertial><mass value="0.8"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/></inertial><visual><geometry><box size="0.18 0.14 0.04"/></geometry><material name="body"><color rgba="0.3 0.35 0.42 1"/></material></visual><collision><geometry><box size="0.18 0.14 0.04"/></geometry></collision></link><link name="rotor"><inertial><mass value="0.06"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial><visual><geometry><box size="0.16 0.018 0.006"/></geometry><material name="orange"><color rgba="1 0.35 0.04 1"/></material></visual><collision><geometry><box size="0.16 0.018 0.006"/></geometry></collision></link><joint name="rotor_joint" type="revolute"><parent link="base"/><child link="rotor"/><origin xyz="0.12 0 0.03"/><axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="1" velocity="4"/></joint></robot>',
+  // FORGE-257: two illustrative requirements for the Requirements panel --
+  // one clean, one with real lint issues and a bound-conflict, so the
+  // sample workspace can demonstrate flags/conflicts/completeness without
+  // a live gateway.
+  requirementsReport: {
+    requirements: [
+      {
+        id: 'sample-req-mass-max',
+        name: 'mass_limit',
+        text: 'The drone shall weigh at most 0.8 kg.',
+        severity: 'error',
+        clarity: 'pass',
+        atomicity: 'pass',
+        quantified: 'pass',
+        traceability: 'pass',
+        verificationReady: 'pass',
+        conflicts: ['sample-req-mass-min'],
+      },
+      {
+        id: 'sample-req-mass-min',
+        name: 'mass_floor',
+        text: 'The drone shall weigh at least 1 kg.',
+        severity: 'error',
+        clarity: 'pass',
+        atomicity: 'pass',
+        quantified: 'pass',
+        traceability: null,
+        verificationReady: 'pass',
+        conflicts: ['sample-req-mass-max'],
+      },
+      {
+        id: 'sample-req-speed',
+        name: 'vague_speed',
+        text: 'The drone should fly fast.',
+        severity: 'warning',
+        clarity: 'fail',
+        atomicity: 'pass',
+        quantified: 'fail',
+        traceability: null,
+        verificationReady: 'fail',
+        conflicts: [],
+      },
+    ],
+    conflicts: [
+      {
+        aId: 'sample-req-mass-max',
+        aName: 'mass_limit',
+        bId: 'sample-req-mass-min',
+        bName: 'mass_floor',
+        detail: 'one requires at most 0.8kg, the other at least 1kg',
+      },
+    ],
+    completeness: {
+      productType: 'generic',
+      covered: ['mechanical'],
+      missing: ['safety', 'power', 'environmental', 'verification'],
+    },
+  },
 };
 
 // ── Sample mode flag ────────────────────────────────────────────────────────
@@ -809,9 +867,20 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         total: 2,
       };
     }
+    if (path === '/requirements/quality') return s.requirementsReport;
     return undefined;
   }
   if (method === 'post') {
+    const fixMatch = path.match(/^\/requirements\/([^/]+)\/fix$/);
+    if (fixMatch) {
+      const req = s.requirementsReport.requirements.find((r) => r.id === fixMatch[1]);
+      if (!req) return undefined;
+      return {
+        proposedText: `The drone shall fly at a cruise speed of at least 8 m/s.`,
+        rationale: 'weak_modal: should; ambiguous: fast',
+        conclusions: ['The drone shall fly at a cruise speed of at least 8 m/s.'],
+      };
+    }
     if (path === '/chat/threads') {
       const thread = {
         id: `sample-thread-${Date.now()}`,

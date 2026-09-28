@@ -5,6 +5,7 @@ import {
   Boxes,
   Files,
   FlaskConical,
+  ListChecks,
   Package,
   Play,
   ShieldCheck,
@@ -37,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'ENGINEERING',
     items: [
       { to: '/twin', label: 'Digital twin', icon: Box },
+      { to: '/requirements', label: 'Requirements', icon: ListChecks },
       { to: '/bom', label: 'Bill of materials', icon: Package },
       { to: '/sim', label: 'Simulation', icon: FlaskConical },
       { to: '/files', label: 'Files & artifacts', icon: Files },
@@ -52,6 +54,7 @@ export const SECTION_LABELS: Record<string, string> = {
   sessions: 'Agent sessions',
   runs: 'Runs',
   approvals: 'Approvals',
+  requirements: 'Requirements',
   bom: 'Bill of materials',
   sim: 'Simulation',
   twin: 'Digital twin',

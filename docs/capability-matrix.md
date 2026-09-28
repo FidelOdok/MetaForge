@@ -172,7 +172,7 @@ This is what lets a constraint expression like
 `wp.metadata.get('mass_kg', 0) <= 4.5` read a real measured value instead of
 always the vacuous-pass default (FORGE-100).
 
-## Dashboard routes (12)
+## Dashboard routes (13)
 
 Served by Vite under `dashboard/` — boot with
 `docker compose up gateway dashboard` and open `localhost:5173`.
@@ -184,6 +184,7 @@ Served by Vite under `dashboard/` — boot with
 | `/sessions` | Workflow run list | `GET /v1/sessions` |
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |
 | `/approvals` | Pending change-proposal review | gateway approvals API |
+| `/requirements` | Per-requirement quality flags (clarity/atomicity/quantified/traceability/verification-readiness), pairwise numeric-bound conflict detection with the conflicting pair highlighted, and a per-product-type completeness checklist (FORGE-257, gap G-A1); "Fix with AI" proposes a rewrite via the Requirement Author agent (never applied automatically) | `GET /v1/requirements/quality`, `POST /v1/requirements/{id}/fix` |
 | `/bom` | BOM viewer, with a flat/hierarchical toggle (FORGE-267): the hierarchical view derives an EBOM from the product hierarchy, quantities multiplied down the CONTAINS tree | `GET /v1/bom/...`, `GET /v1/bom/hierarchical` |
 | `/sim` | Load-case editor + list (FORGE-278), with a 3D geometric face picker for fixed/load faces (FORGE-277); FEA results list with a numeric side-by-side version-compare panel (FORGE-279 — a mesh contour/colorMap overlay is deferred pending Twin mesh persistence), per project | `GET/POST /v1/simulation/load-cases`, `POST /v1/simulation/named-faces`, `GET /v1/simulation/results` |
 | `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB; its Structure tab (FORGE-261) shows the product hierarchy tree-table with per-node mass/cost rollups; its Assembly tab's mates/joints are editable in place (add/delete, base/follower picked from the assembly's own part list) and persist directly onto the node with no live FreeCAD session or re-export needed (FORGE-271) | `GET /v1/twin/files/...`, `GET /v1/twin/hierarchy`, `PATCH /v1/twin/nodes/{id}/assembly-joints` |

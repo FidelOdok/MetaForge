@@ -888,6 +888,34 @@
         "title": "CompileResponse",
         "type": "object"
       },
+      "CompletenessView": {
+        "description": "Dashboard-facing camelCase over the reused ``CompletenessResult``\n(left untouched -- its own field names stay snake_case internally).",
+        "properties": {
+          "covered": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Covered",
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "productType": {
+            "title": "Producttype",
+            "type": "string"
+          }
+        },
+        "required": [
+          "productType"
+        ],
+        "title": "CompletenessView",
+        "type": "object"
+      },
       "ComponentHealth": {
         "description": "Health snapshot for one downstream dependency.",
         "properties": {
@@ -937,6 +965,39 @@
         ],
         "title": "ConfidenceTier",
         "type": "string"
+      },
+      "ConflictPairView": {
+        "properties": {
+          "aId": {
+            "title": "Aid",
+            "type": "string"
+          },
+          "aName": {
+            "title": "Aname",
+            "type": "string"
+          },
+          "bId": {
+            "title": "Bid",
+            "type": "string"
+          },
+          "bName": {
+            "title": "Bname",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "aId",
+          "aName",
+          "bId",
+          "bName",
+          "detail"
+        ],
+        "title": "ConflictPairView",
+        "type": "object"
       },
       "ConsolidationMode": {
         "description": "How the orchestrator behaves on a given pass.",
@@ -1897,6 +1958,39 @@
           "created_at"
         ],
         "title": "FileLinkResponse",
+        "type": "object"
+      },
+      "FixRequirementResponse": {
+        "properties": {
+          "conclusions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conclusions",
+            "type": "array"
+          },
+          "proposedText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposedtext"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposedText",
+          "rationale",
+          "conclusions"
+        ],
+        "title": "FixRequirementResponse",
         "type": "object"
       },
       "FromTextRequest": {
@@ -3882,6 +3976,100 @@
           }
         },
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "RequirementRecordView": {
+        "description": "One requirement's identity + quality diagnostics, dashboard-facing\ncamelCase over the reused, already-shipped ``RequirementQualityRecord``\n(left untouched -- its own field names stay snake_case internally).",
+        "properties": {
+          "atomicity": {
+            "title": "Atomicity",
+            "type": "string"
+          },
+          "clarity": {
+            "title": "Clarity",
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quantified": {
+            "title": "Quantified",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "traceability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceability"
+          },
+          "verificationReady": {
+            "title": "Verificationready",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "text",
+          "severity",
+          "clarity",
+          "atomicity",
+          "quantified",
+          "traceability",
+          "verificationReady"
+        ],
+        "title": "RequirementRecordView",
+        "type": "object"
+      },
+      "RequirementSetQualityReport": {
+        "properties": {
+          "completeness": {
+            "$ref": "#/components/schemas/CompletenessView"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictPairView"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementRecordView"
+            },
+            "title": "Requirements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "completeness"
+        ],
+        "title": "RequirementSetQualityReport",
         "type": "object"
       },
       "RevisionDiff": {
@@ -9683,6 +9871,101 @@
         "summary": "Unlink Work Product",
         "tags": [
           "projects"
+        ]
+      }
+    },
+    "/v1/requirements/quality": {
+      "get": {
+        "operationId": "get_requirement_quality_v1_requirements_quality_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "product_type",
+            "required": false,
+            "schema": {
+              "default": "generic",
+              "title": "Product Type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementSetQualityReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Requirement Quality",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/v1/requirements/{requirement_id}/fix": {
+      "post": {
+        "description": "Generate a proposed rewrite for one flawed requirement -- diagnoses\nwith the same deterministic linter the quality report already used,\nthen asks the Requirement Author agent for a corrected version linked\nback to the original via REFINES. Never writes anything itself; the\ncaller applies the resulting patch through the normal review path.",
+        "operationId": "propose_requirement_fix_v1_requirements__requirement_id__fix_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requirement_id",
+            "required": true,
+            "schema": {
+              "title": "Requirement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixRequirementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Requirement Fix",
+        "tags": [
+          "requirements"
         ]
       }
     },
