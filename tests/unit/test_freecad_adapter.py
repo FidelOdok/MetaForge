@@ -46,6 +46,23 @@ def server_with_mocks() -> FreecadServer:
             },
         }
     )
+    s._execute_list_named_faces = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "mesh_file": "/tmp/freecad/bracket.inp",
+            "faces": [
+                {
+                    "name": "Surface1",
+                    "element_type": "CPS3",
+                    "num_elements": 2,
+                    "num_nodes": 4,
+                    "bbox_mm": {"min": [0.0, 0.0, 0.0], "max": [10.0, 10.0, 0.0]},
+                    "centroid_mm": [5.0, 5.0, 0.0],
+                    "area_mm2": 100.0,
+                    "normal": [0.0, 0.0, 1.0],
+                },
+            ],
+        }
+    )
     s._execute_boolean = AsyncMock(  # type: ignore[method-assign]
         return_value={
             "output_file": "/tmp/freecad/body_union.step",
@@ -188,16 +205,17 @@ class TestFreecadServer:
         assert server.version == "0.2.0"
 
     def test_registers_all_tools(self, server: FreecadServer) -> None:
-        # 6 stateless (incl. describe_step_file, MET-629) + 8 auth + 8 feature
-        # + 4 asm + 2 inspect + 2 param + script + 7 skills + import_step
-        # (FORGE-231) = 45.
-        assert len(server.tool_ids) == 45
+        # 7 stateless (incl. describe_step_file, MET-629; list_named_faces,
+        # FORGE-277) + 8 auth + 8 feature + 4 asm + 2 inspect + 2 param +
+        # script + 7 skills + import_step (FORGE-231) = 46.
+        assert len(server.tool_ids) == 46
 
     def test_tool_ids(self, server: FreecadServer) -> None:
         expected = {
             # stateless file-based
             "freecad.export_geometry",
             "freecad.generate_mesh",
+            "freecad.list_named_faces",
             "freecad.boolean_operation",
             "freecad.get_properties",
             "freecad.describe_step_file",
@@ -246,6 +264,25 @@ class TestFreecadServer:
             "freecad.set_expression",
         }
         assert set(server.tool_ids) == expected
+
+
+# ---------------------------------------------------------------------------
+# TestListNamedFaces
+# ---------------------------------------------------------------------------
+
+
+class TestListNamedFaces:
+    async def test_list_named_faces_success(self, server_with_mocks: FreecadServer) -> None:
+        result = await server_with_mocks.list_named_faces({"mesh_file": "/tmp/freecad/bracket.inp"})
+        assert result["mesh_file"] == "/tmp/freecad/bracket.inp"
+        assert result["faces"][0]["name"] == "Surface1"
+        assert result["faces"][0]["centroid_mm"] == [5.0, 5.0, 0.0]
+
+    async def test_list_named_faces_missing_mesh_file_raises(
+        self, server_with_mocks: FreecadServer
+    ) -> None:
+        with pytest.raises(ValueError, match="mesh_file is required"):
+            await server_with_mocks.list_named_faces({"mesh_file": ""})
 
 
 # ---------------------------------------------------------------------------
@@ -1202,7 +1239,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 45
+        assert len(response["result"]["tools"]) == 46
 
     async def test_tool_call_export(self, server_with_mocks: FreecadServer) -> None:
         request = _make_jsonrpc(
@@ -1249,7 +1286,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "freecad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.2.0"
-        assert response["result"]["tools_available"] == 45
+        assert response["result"]["tools_available"] == 46
 
     async def test_tool_list_filter_by_capability(self, server: FreecadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "cad_export"})

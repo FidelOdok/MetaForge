@@ -1979,6 +1979,102 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HierarchicalBomLineResponse": {
+        "description": "One derived EBOM line, in the dashboard's camelCase shape.",
+        "properties": {
+          "componentId": {
+            "title": "Componentid",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "hierarchyNodeId": {
+            "title": "Hierarchynodeid",
+            "type": "string"
+          },
+          "manufacturer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manufacturer"
+          },
+          "partNumber": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partnumber"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "unitCost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unitcost"
+          }
+        },
+        "required": [
+          "hierarchyNodeId",
+          "path",
+          "quantity",
+          "source",
+          "componentId",
+          "description"
+        ],
+        "title": "HierarchicalBomLineResponse",
+        "type": "object"
+      },
+      "HierarchicalBomResponse": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchicalBomLineResponse"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lines",
+          "total"
+        ],
+        "title": "HierarchicalBomResponse",
+        "type": "object"
+      },
       "HierarchyNodeResponse": {
         "description": "One HierarchyNode, in the dashboard's camelCase shape.",
         "properties": {
@@ -3326,6 +3422,88 @@
           "source"
         ],
         "title": "ModelsResponse",
+        "type": "object"
+      },
+      "NamedFace": {
+        "description": "One geometric face of a generated mesh (FORGE-277).\n\nMirrors ``freecad.list_named_faces``'/``generate_mesh``'s ``faces``\ntable (FORGE-239) in the dashboard's camelCase shape -- real\ncoordinates for a face, not just its opaque gmsh-assigned name.",
+        "properties": {
+          "areaMm2": {
+            "title": "Areamm2",
+            "type": "number"
+          },
+          "bboxMm": {
+            "additionalProperties": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Bboxmm",
+            "type": "object"
+          },
+          "centroidMm": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Centroidmm",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "normal": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Normal",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "centroidMm",
+          "normal",
+          "areaMm2",
+          "bboxMm"
+        ],
+        "title": "NamedFace",
+        "type": "object"
+      },
+      "NamedFacesRequest": {
+        "description": "Body for ``POST /v1/simulation/named-faces``.",
+        "properties": {
+          "meshFile": {
+            "minLength": 1,
+            "title": "Meshfile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "meshFile"
+        ],
+        "title": "NamedFacesRequest",
+        "type": "object"
+      },
+      "NamedFacesResponse": {
+        "properties": {
+          "faces": {
+            "items": {
+              "$ref": "#/components/schemas/NamedFace"
+            },
+            "title": "Faces",
+            "type": "array"
+          },
+          "meshFile": {
+            "title": "Meshfile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "meshFile",
+          "faces"
+        ],
+        "title": "NamedFacesResponse",
         "type": "object"
       },
       "OkResponse": {
@@ -4777,6 +4955,106 @@
           "provider"
         ],
         "title": "SetSelectionRequest",
+        "type": "object"
+      },
+      "SimulationResultListResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SimulationResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "total"
+        ],
+        "title": "SimulationResultListResponse",
+        "type": "object"
+      },
+      "SimulationResultResponse": {
+        "description": "One FEA result, in the dashboard's camelCase shape (FORGE-279).",
+        "properties": {
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "loadCase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadcase"
+          },
+          "maxDisplacementMm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxdisplacementmm"
+          },
+          "maxVonMisesMpa": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxvonmisesmpa"
+          },
+          "meshStats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meshstats"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "projectId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "SimulationResultResponse",
         "type": "object"
       },
       "SourceDeleteResponse": {
@@ -6519,6 +6797,56 @@
           }
         },
         "summary": "List Bom",
+        "tags": [
+          "bom"
+        ]
+      }
+    },
+    "/v1/bom/hierarchical": {
+      "get": {
+        "description": "Derive the hierarchical BOM (EBOM) -- FORGE-267, gap G-C3 -- from\nevery \"product\"-kind HierarchyNode's CONTAINS tree in a project.\n\nEmpty (not an error) when the project has no product hierarchy yet\n(FORGE-260's tools haven't been used for it) -- matches the flat BOM's\nown convention.",
+        "operationId": "list_hierarchical_bom_v1_bom_hierarchical_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchicalBomResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Hierarchical Bom",
         "tags": [
           "bom"
         ]
@@ -9749,6 +10077,98 @@
           }
         },
         "summary": "Create Load Case",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/named-faces": {
+      "post": {
+        "description": "Named-face geometry for an already-generated mesh (FORGE-277).\n\nBacks the dashboard's geometric boundary-condition face picker: given a\nmesh file path (from an earlier ``freecad.generate_mesh`` call, e.g.\nsurfaced in a forge chat turn), returns each named surface group's real\ncentroid/normal/area/bbox so the dashboard can render pickable face\npatches instead of a blind \"type the gmsh group name\" text field.",
+        "operationId": "list_named_faces_v1_simulation_named_faces_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NamedFacesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedFacesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Named Faces",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/results": {
+      "get": {
+        "description": "List FEA results, optionally scoped to a project (FORGE-279).\n\nEmpty (not a 404) when the project has none yet, matching\n``list_load_cases``. Creation is agent-driven only (see module\ndocstring) \u2014 there is no corresponding POST.",
+        "operationId": "list_simulation_results_v1_simulation_results_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationResultListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Simulation Results",
         "tags": [
           "simulation"
         ]

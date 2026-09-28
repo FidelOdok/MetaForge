@@ -1044,6 +1044,28 @@ class FreecadOperations:
                 "faces": faces,
             }
 
+    def list_named_faces(self, mesh_file: str) -> dict[str, Any]:
+        """Re-derive the per-face geometry table for an already-generated mesh (FORGE-277).
+
+        ``generate_mesh`` computes this ``faces`` table once, inline, at
+        mesh-generation time (FORGE-239). This is the same computation
+        exposed standalone, so a caller that already has an ``.inp`` mesh
+        file path (from an earlier ``generate_mesh`` call) can re-fetch the
+        face table -- e.g. for a dashboard face picker -- without re-running
+        gmsh. Pure text parsing of the ``.inp`` file -- unlike ``generate_mesh``
+        itself, this needs neither FreeCAD nor gmsh.
+        """
+        if not Path(mesh_file).exists():
+            raise FileNotFoundError(f"Mesh file not found: {mesh_file}")
+        if Path(mesh_file).suffix.lower() != ".inp":
+            raise ValueError(
+                f"list_named_faces only supports .inp mesh files (CalculiX/Abaqus "
+                f"format) -- got {mesh_file!r}. Named surface groups are not parsed "
+                f"from .unv/.stl output."
+            )
+        faces = _parse_inp_face_table(mesh_file)
+        return {"mesh_file": mesh_file, "faces": faces}
+
     # ------------------------------------------------------------------
     # File-based ops (retire the adapter's NotImplementedError stubs)
     # ------------------------------------------------------------------

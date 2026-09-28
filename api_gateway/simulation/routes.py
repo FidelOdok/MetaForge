@@ -1,4 +1,4 @@
-"""Load-case work-product API (FORGE-278).
+"""Load-case + simulation-result work-product API (FORGE-278, FORGE-279).
 
 A load case (material, supports, loads, source of loads) is persisted as a
 first-class ``LOAD_CASE`` work product -- the same generic document-recorder
@@ -12,6 +12,22 @@ project) and ``POST /v1/simulation/load-cases`` (create) for the dashboard's
 Sim tab. Read-only fields the dashboard's list needs (material, node sets,
 force vector) live in ``metadata`` -- mirrored from ``content`` so the list
 renders without fetching each work product's blob.
+
+FORGE-279: ``GET /v1/simulation/results`` lists ``SIMULATION_RESULT`` work
+products the same way -- FORGE-246 already persists these (agent-side, via
+``twin.record_document(document_type='simulation_result')`` after a
+``calculix.extract_results`` run) with ``max_von_mises_mpa``,
+``max_displacement_mm``, ``load_case`` (a free-text name of which load case
+produced it) and an optional ``mesh_stats`` object flattened onto
+``metadata``; this route is the piece FORGE-246 didn't add, a read path the
+dashboard's Sim tab can list and compare from. There is deliberately no
+``POST`` here -- creation stays exactly the agent-driven
+``twin.record_document`` path (a result without a real FEA run behind it
+would be worse than no result at all).
+
+FORGE-277: ``POST /v1/simulation/named-faces`` is unrelated to load cases/
+results but lives here too -- it backs the load-case dialog's face picker,
+bridging to the ``freecad.list_named_faces`` MCP tool.
 """
 
 from __future__ import annotations
@@ -63,6 +79,51 @@ class LoadCaseResponse(BaseModel):
 class LoadCaseListResponse(BaseModel):
     loadCases: list[LoadCaseResponse]  # noqa: N815
     total: int
+
+
+class SimulationResultResponse(BaseModel):
+    """One FEA result, in the dashboard's camelCase shape (FORGE-279)."""
+
+    id: str
+    name: str
+    maxVonMisesMpa: float | None = None  # noqa: N815
+    maxDisplacementMm: float | None = None  # noqa: N815
+    loadCase: str | None = None  # noqa: N815 — free-text name, not a load-case node id
+    meshStats: dict[str, Any] | None = None  # noqa: N815
+    projectId: str  # noqa: N815
+    createdAt: str  # noqa: N815
+    updatedAt: str  # noqa: N815
+
+
+class SimulationResultListResponse(BaseModel):
+    results: list[SimulationResultResponse]
+    total: int
+
+
+class NamedFace(BaseModel):
+    """One geometric face of a generated mesh (FORGE-277).
+
+    Mirrors ``freecad.list_named_faces``'/``generate_mesh``'s ``faces``
+    table (FORGE-239) in the dashboard's camelCase shape -- real
+    coordinates for a face, not just its opaque gmsh-assigned name.
+    """
+
+    name: str
+    centroidMm: list[float]  # noqa: N815 — dashboard contract is camelCase
+    normal: list[float]
+    areaMm2: float  # noqa: N815
+    bboxMm: dict[str, list[float]]  # noqa: N815 — {"min": [x,y,z], "max": [x,y,z]}
+
+
+class NamedFacesResponse(BaseModel):
+    meshFile: str  # noqa: N815
+    faces: list[NamedFace]
+
+
+class NamedFacesRequest(BaseModel):
+    """Body for ``POST /v1/simulation/named-faces``."""
+
+    meshFile: str = Field(min_length=1)  # noqa: N815
 
 
 class CreateLoadCaseRequest(BaseModel):
@@ -158,3 +219,93 @@ async def create_load_case(body: CreateLoadCaseRequest) -> LoadCaseResponse:
             raise HTTPException(status_code=500, detail="Load case created but not readable back")
         logger.info("load_case_created", node_id=result["node_id"], project_id=body.projectId)
         return _wp_to_load_case(wp)
+
+
+def _wp_to_simulation_result(wp: WorkProduct) -> SimulationResultResponse:
+    md = wp.metadata or {}
+    return SimulationResultResponse(
+        id=str(wp.id),
+        name=wp.name,
+        maxVonMisesMpa=md.get("max_von_mises_mpa"),
+        maxDisplacementMm=md.get("max_displacement_mm"),
+        loadCase=md.get("load_case"),
+        meshStats=md.get("mesh_stats") if isinstance(md.get("mesh_stats"), dict) else None,
+        projectId=str(wp.project_id) if wp.project_id else "",
+        createdAt=wp.created_at.isoformat(),
+        updatedAt=wp.updated_at.isoformat(),
+    )
+
+
+@router.get("/results", response_model=SimulationResultListResponse)
+async def list_simulation_results(project_id: str | None = None) -> SimulationResultListResponse:
+    """List FEA results, optionally scoped to a project (FORGE-279).
+
+    Empty (not a 404) when the project has none yet, matching
+    ``list_load_cases``. Creation is agent-driven only (see module
+    docstring) — there is no corresponding POST.
+    """
+    with tracer.start_as_current_span("simulation.list_simulation_results") as span:
+        scoped: UUID | None = None
+        if project_id:
+            try:
+                scoped = UUID(project_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid project_id format")
+            span.set_attribute("simulation.project_id", project_id)
+        wps = await _twin.list_work_products(
+            work_product_type=WorkProductType.SIMULATION_RESULT, project_id=scoped
+        )
+        results = [_wp_to_simulation_result(wp) for wp in wps]
+        # Newest first — a version-compare view wants the latest runs up top.
+        results.sort(key=lambda r: r.createdAt, reverse=True)
+        span.set_attribute("simulation.count", len(results))
+        logger.info("simulation_results_listed", count=len(results), project_id=project_id)
+        return SimulationResultListResponse(results=results, total=len(results))
+
+
+@router.post("/named-faces", response_model=NamedFacesResponse)
+async def list_named_faces(body: NamedFacesRequest) -> NamedFacesResponse:
+    """Named-face geometry for an already-generated mesh (FORGE-277).
+
+    Backs the dashboard's geometric boundary-condition face picker: given a
+    mesh file path (from an earlier ``freecad.generate_mesh`` call, e.g.
+    surfaced in a forge chat turn), returns each named surface group's real
+    centroid/normal/area/bbox so the dashboard can render pickable face
+    patches instead of a blind "type the gmsh group name" text field.
+    """
+    from api_gateway.chat.routes import get_mcp_bridge
+
+    with tracer.start_as_current_span("simulation.list_named_faces") as span:
+        span.set_attribute("simulation.mesh_file", body.meshFile)
+        bridge = get_mcp_bridge()
+        try:
+            envelope = await bridge.invoke("freecad.list_named_faces", {"mesh_file": body.meshFile})
+        except Exception as exc:  # noqa: BLE001 — surface a clean 502 with the cause
+            logger.warning("named_faces_tool_failed", mesh_file=body.meshFile, error=str(exc))
+            span.record_exception(exc)
+            raise HTTPException(
+                status_code=502, detail=f"freecad.list_named_faces failed: {exc}"
+            ) from exc
+
+        if isinstance(envelope, dict) and envelope.get("status") == "error":
+            err = envelope.get("error") or envelope
+            logger.warning("named_faces_tool_failed", mesh_file=body.meshFile, error=str(err))
+            raise HTTPException(status_code=502, detail=f"freecad.list_named_faces failed: {err}")
+
+        data = envelope.get("data", envelope) if isinstance(envelope, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        raw_faces = data.get("faces", [])
+        faces = [
+            NamedFace(
+                name=f["name"],
+                centroidMm=f["centroid_mm"],
+                normal=f["normal"],
+                areaMm2=f["area_mm2"],
+                bboxMm=f["bbox_mm"],
+            )
+            for f in raw_faces
+        ]
+        span.set_attribute("simulation.face_count", len(faces))
+        logger.info("named_faces_listed", mesh_file=body.meshFile, count=len(faces))
+        return NamedFacesResponse(meshFile=data.get("mesh_file", body.meshFile), faces=faces)

@@ -71,6 +71,7 @@ when the gateway supplies their backend).
 | `freecad` | `freecad.describe_step_file` | Per-component breakdown of a multipart assembly file (Label/volume/area/bbox per named part, not just the flattened aggregate) (MET-629) | unit-verified (MET-629) |
 | `freecad` | `freecad.export_geometry` | FreeCAD STEP / STL / IGES export | _none yet_ |
 | `freecad` | `freecad.generate_mesh` | FreeCAD-driven mesh generation; `element_order` (1 or 2) selects linear (C3D4) or quadratic (C3D10) tetrahedra — second-order elements capture bending stress more accurately per element (FORGE-280) | _none yet_ |
+| `freecad` | `freecad.list_named_faces` | Re-fetch an already-generated mesh's per-face geometry table (name, bbox, centroid, area, normal) without re-running gmsh — backs the dashboard's geometric boundary-condition face picker (FORGE-277) | unit-verified (FORGE-277) |
 | `kicad` (opt-in) | `kicad.run_erc` | Electrical rules check | _none yet_ |
 | `kicad` | `kicad.run_drc` | Design rules check | _none yet_ |
 | `kicad` | `kicad.export_bom` | Bill of materials export | _none yet_ |
@@ -183,8 +184,8 @@ Served by Vite under `dashboard/` — boot with
 | `/sessions` | Workflow run list | `GET /v1/sessions` |
 | `/sessions/:id` | Session detail, agent messages | `GET /v1/sessions/{id}` |
 | `/approvals` | Pending change-proposal review | gateway approvals API |
-| `/bom` | BOM viewer | `GET /v1/bom/...` |
-| `/sim` | Load-case editor + list, per project (FORGE-278) | `GET/POST /v1/simulation/load-cases` |
+| `/bom` | BOM viewer, with a flat/hierarchical toggle (FORGE-267): the hierarchical view derives an EBOM from the product hierarchy, quantities multiplied down the CONTAINS tree | `GET /v1/bom/...`, `GET /v1/bom/hierarchical` |
+| `/sim` | Load-case editor + list (FORGE-278), with a 3D geometric face picker for fixed/load faces (FORGE-277); FEA results list with a numeric side-by-side version-compare panel (FORGE-279 — a mesh contour/colorMap overlay is deferred pending Twin mesh persistence), per project | `GET/POST /v1/simulation/load-cases`, `POST /v1/simulation/named-faces`, `GET /v1/simulation/results` |
 | `/twin` | 3D viewer (R3F / Three.js) for STEP/GLB; its Structure tab (FORGE-261) shows the product hierarchy tree-table with per-node mass/cost rollups | `GET /v1/twin/files/...`, `GET /v1/twin/hierarchy` |
 | `/files` | Legacy file browser | gateway files API |
 | `/knowledge` | Ingested-sources table (sortable, filterable) | `GET /api/v1/knowledge/sources` |

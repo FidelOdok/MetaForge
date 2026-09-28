@@ -1448,3 +1448,44 @@ class TestGenerateMeshFacesField:
             result = ops.generate_mesh(str(step_file), output_format="stl")
 
         assert result["faces"] == []
+
+
+class TestListNamedFaces:
+    """FORGE-277: re-fetch generate_mesh's own 'faces' table for an
+    already-generated mesh, without re-running gmsh (a dashboard face
+    picker or a later turn calls this instead of regenerating)."""
+
+    def test_returns_the_same_face_table_as_generate_mesh(self, tmp_path) -> None:
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+        ops = FreecadOperations()
+
+        result = ops.list_named_faces(str(inp))
+
+        assert result["mesh_file"] == str(inp)
+        assert [f["name"] for f in result["faces"]] == ["Surface1", "Surface2"]
+        assert result["faces"][0]["centroid_mm"] == [5.0, 5.0, 0.0]
+
+    def test_does_not_require_freecad(self, tmp_path) -> None:
+        """Pure text parsing -- unlike generate_mesh, this needs neither
+        FreeCAD nor gmsh, so it must work even when HAS_FREECAD is False."""
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(_FACE_TABLE_FIXTURE, encoding="utf-8")
+        ops = FreecadOperations()
+
+        with patch("tool_registry.tools.freecad.operations.HAS_FREECAD", False):
+            result = ops.list_named_faces(str(inp))
+
+        assert len(result["faces"]) == 2
+
+    def test_missing_file_raises(self, tmp_path) -> None:
+        ops = FreecadOperations()
+        with pytest.raises(FileNotFoundError):
+            ops.list_named_faces(str(tmp_path / "nope.inp"))
+
+    def test_non_inp_extension_raises(self, tmp_path) -> None:
+        stl = tmp_path / "mesh.stl"
+        stl.write_text("solid\nendsolid\n", encoding="utf-8")
+        ops = FreecadOperations()
+        with pytest.raises(ValueError, match="only supports .inp"):
+            ops.list_named_faces(str(stl))
