@@ -84,6 +84,36 @@ test.describe('Digital Twin Viewer', () => {
   });
 });
 
+test.describe('Requirements', () => {
+  test('renders quality flags, conflicts, and completeness from the sample workspace', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const panel = page.getByTestId('requirements-panel');
+    const table = panel.getByRole('table');
+    await expect(table.getByText('mass_limit')).toBeVisible();
+    await expect(table.getByText('vague_speed')).toBeVisible();
+
+    // Completeness: mechanical is covered, safety is flagged missing.
+    const completeness = page.getByTestId('requirements-completeness');
+    await expect(completeness).toContainText('mechanical');
+    await expect(completeness).toContainText('missing: safety');
+
+    // Conflicts: the two mass-bound requirements contradict each other.
+    const conflicts = page.getByTestId('requirements-conflicts');
+    await expect(conflicts).toContainText('mass_limit');
+    await expect(conflicts).toContainText('mass_floor');
+
+    // "Fix with AI" appears on any row with an issue (failing flags or a
+    // conflict) -- click it for the vague_speed row and see a proposal.
+    const speedRow = table.getByRole('row', { name: /vague_speed/ });
+    await speedRow.getByRole('button', { name: 'Fix with AI' }).click();
+    await expect(page.getByText(/cruise speed of at least 8 m\/s/)).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+});
+
 test.describe('Design Assistant', () => {
   test('renders page content', async ({ page }) => {
     await page.goto('/assistant');
