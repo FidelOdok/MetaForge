@@ -11,7 +11,12 @@ on:
 jobs:
   check:
     name: Typecheck & Test
-    runs-on: [self-hosted, linux, fidel-dev]
+    # GitHub-hosted — see the note in ci.yml. This workflow has a second
+    # reason: the "check" job's bun regression test silently skipped on the
+    # self-hosted runner because bun was not usable on its PATH
+    # (`spawn bun EACCES`), which is the kind of quiet no-op a shared,
+    # hand-maintained box produces (FORGE-308).
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: tui
@@ -28,7 +33,7 @@ jobs:
 
   binary:
     name: Build single binary (bun)
-    runs-on: [self-hosted, linux, fidel-dev]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: tui
