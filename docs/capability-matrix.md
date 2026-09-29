@@ -26,6 +26,57 @@ they simply have no row here yet. Every one of the 97 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
+### Tool profiles
+
+All 97 tools are served by default. Every MCP client caps how many tools
+it will carry, though, and the ones that do not error simply drop the
+overflow — which leaves the model behaving as though the missing
+capability does not exist.
+
+`--profile` serves a named subset instead:
+
+| Profile | Tools | For |
+|---|---|---|
+| `core` | 30 | Projects, sessions, twin reads and the records that are not domain-specific |
+| `mechanical` | 29 | CAD authoring across both kernels, plus geometry commit |
+| `simulation` | 29 | FEA, load cases, meshes and the evidence they produce |
+| `electronics` | 25 | Schematic and board checks, component search, sourcing |
+| `robotics` | 30 | Assemblies, URDF/SDF/USD export, simulators |
+
+```bash
+python -m metaforge.mcp --transport http --profile mechanical
+```
+
+The sets live in `mcp_core/profiles.py` and are held between 20 and 40
+tools by a test rather than trimmed at runtime — a profile that outgrows
+its ceiling is a decision about what to drop, and silently dropping it is
+the failure profiles exist to prevent. An unknown profile name stops the
+server rather than falling back to serving everything.
+
+### When the list is short
+
+`tools/list` never drops an adapter quietly. If an adapter cannot answer
+— its container is down, or it returns something that is not JSON — the
+tools it would have contributed are missing from the list, and the
+response says so in `_meta`:
+
+```json
+{
+  "tools": [...],
+  "_meta": {
+    "unavailableAdapters": [
+      {"adapter_id": "calculix", "error": "adapter container is down (-32001)"}
+    ],
+    "profile": {"name": "mechanical", "toolCount": 12, "missing": ["cadquery.create_parametric"]}
+  }
+}
+```
+
+`_meta` is absent when there is nothing to report, so its presence is
+itself the signal. `profile.missing` names tools the profile asked for
+that no loaded adapter registers, which is a configuration mistake rather
+than a smaller profile.
+
 ### Tool annotations
 
 Every tool reports `readOnlyHint`, `destructiveHint`, `idempotentHint`

@@ -31,6 +31,7 @@ from typing import Any
 import structlog
 
 from mcp_core.annotations import annotations_for
+from mcp_core.profiles import tools_for_profile
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
@@ -116,8 +117,16 @@ class UnifiedMcpServer:
         version: str = "0.1.0",
         session_capture: SessionCapture | None = None,
         tool_registry: ToolRegistry | None = None,
+        profile: str | None = None,
     ) -> None:
         self._adapters = list(adapters)
+        # FORGE-339: when set, ``tools/list`` serves only this profile's
+        # tools. Validated here rather than on first request — a typo in a
+        # start-up flag should stop the server, not quietly serve a profile
+        # nobody asked for or, worse, serve everything.
+        if profile is not None:
+            tools_for_profile(profile)
+        self._profile = profile
         self._version = version
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
@@ -303,6 +312,7 @@ class UnifiedMcpServer:
         """
         legacy = await self._tool_list(params)
         mutations_on = self._twin_mutations_enabled()
+        allowed = set(tools_for_profile(self._profile)) if self._profile else None
         mcp_tools: list[dict[str, Any]] = []
         for entry in legacy.get("tools", []):
             tool_id = entry.get("tool_id") or entry.get("name", "")
@@ -321,8 +331,29 @@ class UnifiedMcpServer:
                 title=entry.get("name") or None,
                 twin_mutations_enabled=mutations_on,
             )
+            if allowed is not None and tool_id not in allowed:
+                continue
             mcp_tools.append(mcp_tool)
-        return {"tools": mcp_tools}
+
+        result: dict[str, Any] = {"tools": mcp_tools}
+        # Whatever the client cannot see, it should at least be able to ask
+        # about. `_meta` is the spec's own extension point and clients that
+        # do not read it are no worse off than before.
+        meta: dict[str, Any] = {}
+        if unavailable := legacy.get("unavailable_adapters"):
+            meta["unavailableAdapters"] = unavailable
+        if allowed is not None:
+            served = {t["name"] for t in mcp_tools}
+            meta["profile"] = {
+                "name": self._profile,
+                "toolCount": len(mcp_tools),
+                # A profile naming a tool no loaded adapter registers is a
+                # configuration mistake, not a smaller profile. Say so.
+                "missing": sorted(allowed - served),
+            }
+        if meta:
+            result["_meta"] = meta
+        return result
 
     def _twin_mutations_enabled(self) -> bool:
         """Whether the twin adapter currently accepts mutating Cypher.
@@ -393,23 +424,46 @@ class UnifiedMcpServer:
             }
         )
         manifests: list[dict[str, Any]] = []
+        # FORGE-339: an adapter that cannot list its tools used to vanish
+        # from the aggregate -- a warning for the raising case, and nothing
+        # at all for a malformed response. The client saw a shorter list with
+        # no indication anything was missing, and a model reads a missing
+        # tool as a capability the system does not have.
+        #
+        # Adapters being down is normal here (the CAD/FEA containers answer
+        # -32001 routinely), so this does not fail the call. It reports the
+        # gap in-band instead: never silent is not the same as always fatal.
+        unavailable: list[dict[str, str]] = []
         for adapter in self._adapters:
+            adapter_id = str(getattr(adapter, "adapter_id", "?"))
             try:
                 sub_response_text = await adapter.handle_request(sub_request)
             except Exception as exc:
-                logger.warning(
-                    "unified_mcp_tool_list_subcall_failed",
-                    adapter_id=getattr(adapter, "adapter_id", "?"),
+                logger.error(
+                    "unified_mcp_tool_list_adapter_unavailable",
+                    adapter_id=adapter_id,
                     error=str(exc),
                 )
+                unavailable.append({"adapter_id": adapter_id, "error": str(exc)})
                 continue
             try:
                 sub_response = json.loads(sub_response_text)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                logger.error(
+                    "unified_mcp_tool_list_adapter_malformed",
+                    adapter_id=adapter_id,
+                    error=str(exc),
+                )
+                unavailable.append(
+                    {"adapter_id": adapter_id, "error": f"malformed tool/list response: {exc}"}
+                )
                 continue
             adapter_tools = sub_response.get("result", {}).get("tools", [])
             manifests.extend(adapter_tools)
-        return {"tools": manifests}
+        result: dict[str, Any] = {"tools": manifests}
+        if unavailable:
+            result["unavailable_adapters"] = unavailable
+        return result
 
     async def _tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route + capture. Single funnel for ``tools/call`` and ``tool/call``.
@@ -628,6 +682,7 @@ async def build_unified_server(
     memory_client: Any = None,
     memory_insight_store: Any = None,
     twin_allow_mutations: bool = False,
+    profile: str | None = None,
     agent_session_store: Any = None,
     capture_sessions: bool = False,
     decision_recorder: Any = None,
@@ -696,5 +751,8 @@ async def build_unified_server(
         else None
     )
     return UnifiedMcpServer(
-        adapters=registry.list_adapter_servers(), session_capture=capture, tool_registry=registry
+        adapters=registry.list_adapter_servers(),
+        session_capture=capture,
+        tool_registry=registry,
+        profile=profile,
     )

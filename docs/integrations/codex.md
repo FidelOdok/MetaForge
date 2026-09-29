@@ -208,6 +208,27 @@ single `event: done` block.
   same dashboard applies whether the calls came over stdio, HTTP, or
   SSE.
 
+## Keeping the tool list a size Codex can use
+
+All 97 tools are served by default. If that is more than you want in
+context, start the server with a profile:
+
+```bash
+python -m metaforge.mcp --transport http --profile mechanical
+```
+
+`core`, `mechanical`, `simulation`, `electronics` and `robotics` are each
+between 20 and 40 tools. An unknown name stops the server rather than
+quietly serving everything.
+
+Whatever the reason a tool is not in the list, the response says so.
+An adapter whose container is down contributes nothing, but appears under
+`_meta.unavailableAdapters`; a profile naming a tool no loaded adapter
+registers appears under `_meta.profile.missing`. `_meta` is absent when
+there is nothing to report, so seeing it at all means something is worth
+looking at — `python -m metaforge.mcp --transport http` with no
+adapters down and no profile set returns none.
+
 ## Tool annotations and unknown-tool errors
 
 Every tool on `tools/list` carries the MCP annotation hints, so Codex

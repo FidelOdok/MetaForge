@@ -154,6 +154,27 @@ in any CAD viewer to confirm.
 Routes through `calculix.run_fea`. Captures the run via the MET-331
 `SimulationCapture` layer when wired into the gateway path.
 
+## Keeping the tool list a size Claude Code can use
+
+All 97 tools are served by default. If that is more than you want in
+context, start the server with a profile:
+
+```bash
+python -m metaforge.mcp --transport stdio --profile mechanical
+```
+
+`core`, `mechanical`, `simulation`, `electronics` and `robotics` are each
+between 20 and 40 tools. An unknown name stops the server rather than
+quietly serving everything.
+
+Whatever the reason a tool is not in the list, the response says so.
+An adapter whose container is down contributes nothing, but appears under
+`_meta.unavailableAdapters`; a profile naming a tool no loaded adapter
+registers appears under `_meta.profile.missing`. `_meta` is absent when
+there is nothing to report, so seeing it at all means something is worth
+looking at — `python -m metaforge.mcp --transport stdio` with no
+adapters down and no profile set returns none.
+
 ## Tool annotations and unknown-tool errors
 
 Every tool on `tools/list` carries the MCP annotation hints, so Claude Code
