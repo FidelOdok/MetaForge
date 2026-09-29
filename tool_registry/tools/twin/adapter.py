@@ -286,6 +286,7 @@ class TwinServer(McpToolServer):
         self._design_loop_reader = design_loop_reader
         self._design_loop_approver = design_loop_approver
         self._register_tools()
+        self._register_thread_questions()
         if decision_recorder is not None:
             self._register_record_decision()
         if geometry_recorder is not None:
@@ -3896,6 +3897,130 @@ class TwinServer(McpToolServer):
                 candidate_materials if isinstance(candidate_materials, list) else None
             ),
             delta_fraction=float(delta_fraction),
+        )
+
+    # ------------------------------------------------------------------
+    # Digital-thread questions (FORGE-357)
+    # ------------------------------------------------------------------
+    #
+    # twin.thread_for can already answer both of these — but only if the
+    # caller knows which way to walk. Its own docstring says a requirement
+    # "sees nothing with outgoing-only traversal", and outgoing is the
+    # default. So a model asking "what verifies REQ-3?" calls thread_for with
+    # the defaults, gets an empty subgraph, and reports that nothing verifies
+    # it. The traversal was wrong; the answer looked complete.
+    #
+    # The direction is a property of the question, not something the asker
+    # should have to know. These two name the question and encode the walk.
+
+    #: Edges that mean "this supports/verifies that".
+    _VERIFIES_EDGES = ("satisfies", "verifies", "validates", "supports", "implements")
+    #: Edges that mean "this contains/depends on that".
+    _USED_BY_EDGES = ("contains", "composed_of", "depends_on", "derives_from", "references")
+
+    def _register_thread_questions(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.what_verifies",
+                adapter_id="twin",
+                name="What Verifies This",
+                description=(
+                    "What evidence, tests or claims support a requirement or "
+                    "constraint. Walks the thread in the direction these edges "
+                    "actually point (evidence SATISFIES a requirement, so the "
+                    "requirement is the target) — twin.thread_for with its "
+                    "default outgoing walk returns nothing for a requirement, "
+                    "which reads as 'unverified' rather than 'asked the wrong "
+                    "way'. Returns an explicit empty result with `verified: "
+                    "false` when there genuinely is nothing."
+                ),
+                capability="twin_thread",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The requirement or constraint being asked about.",
+                        },
+                        "depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
+                    },
+                    "required": ["node_id"],
+                },
+            ),
+            handler=self.what_verifies,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.where_used",
+                adapter_id="twin",
+                name="Where Is This Used",
+                description=(
+                    "Which assemblies, designs or work products depend on this "
+                    "node. Walks incoming edges, because containment points "
+                    "parent-to-child and the part is the target. Use before "
+                    "changing or superseding something, to see what a change "
+                    "reaches."
+                ),
+                capability="twin_thread",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The part or work product being asked about.",
+                        },
+                        "depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
+                    },
+                    "required": ["node_id"],
+                },
+            ),
+            handler=self.where_used,
+        )
+
+    async def _thread_question(
+        self, arguments: dict[str, Any], *, edge_types: tuple[str, ...], answer_key: str
+    ) -> dict[str, Any]:
+        raw_id = arguments.get("node_id")
+        if not raw_id:
+            raise ValueError("node_id is required")
+        try:
+            node_id = UUID(str(raw_id))
+        except (ValueError, AttributeError) as exc:
+            raise ValueError(f"node_id must be a valid UUID: {exc}") from exc
+
+        depth = int(arguments.get("depth", 2))
+        if depth < 1 or depth > 5:
+            raise ValueError("depth must be between 1 and 5 inclusive")
+
+        subgraph = await self._twin.get_subgraph(
+            node_id, depth=depth, edge_types=list(edge_types), direction="incoming"
+        )
+        result = serialise_subgraph(subgraph)
+        # Everything except the node that was asked about.
+        related = [n for n in result.get("nodes", []) if str(n.get("id")) != str(node_id)]
+        result[answer_key] = bool(related)
+        result["related_count"] = len(related)
+        if not related:
+            # Say which question was asked and how it was walked, so an empty
+            # answer is legible as "nothing recorded" rather than as a tool
+            # that did not work.
+            result["note"] = (
+                f"Nothing found. Walked incoming edges of type "
+                f"{', '.join(edge_types)} to depth {depth}. This means nothing "
+                f"is recorded, not that the question could not be asked."
+            )
+        return result
+
+    async def what_verifies(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._thread_question(
+            arguments, edge_types=self._VERIFIES_EDGES, answer_key="verified"
+        )
+
+    async def where_used(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._thread_question(
+            arguments, edge_types=self._USED_BY_EDGES, answer_key="used"
         )
 
     # ------------------------------------------------------------------

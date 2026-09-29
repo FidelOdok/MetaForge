@@ -138,7 +138,10 @@ class TestDetectMutations:
 
 
 class TestRegistration:
-    def test_registers_five_tools(self) -> None:
+    def test_registers_the_base_tools(self) -> None:
+        # The set available with no injected providers. FORGE-357's two
+        # thread questions are here because they need none -- they read
+        # `self._twin`, which every TwinServer has.
         srv = TwinServer(twin=_FakeTwin())
         assert srv.adapter_id == "twin"
         assert sorted(srv.tool_ids) == [
@@ -147,6 +150,8 @@ class TestRegistration:
             "twin.get_node",
             "twin.query_cypher",
             "twin.thread_for",
+            "twin.what_verifies",
+            "twin.where_used",
         ]
 
 

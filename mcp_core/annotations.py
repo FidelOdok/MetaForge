@@ -73,6 +73,10 @@ READ_ONLY: frozenset[str] = frozenset(
         "twin.get_node",
         "twin.rank_sensitivity",
         "twin.thread_for",
+        # FORGE-357: named thread questions. Both walk the graph and write
+        # nothing.
+        "twin.what_verifies",
+        "twin.where_used",
     }
 )
 
