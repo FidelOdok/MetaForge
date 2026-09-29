@@ -28,6 +28,7 @@ from typing import Any
 
 import structlog
 
+from mcp_core.annotations import annotations_for
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
@@ -291,17 +292,38 @@ class UnifiedMcpServer:
           ``capability``, ``output_schema``, ``phase``, ``resource_limits``)
         """
         legacy = await self._tool_list(params)
+        mutations_on = self._twin_mutations_enabled()
         mcp_tools: list[dict[str, Any]] = []
         for entry in legacy.get("tools", []):
+            tool_id = entry.get("tool_id") or entry.get("name", "")
             mcp_tool: dict[str, Any] = {
-                "name": entry.get("tool_id") or entry.get("name", ""),
+                "name": tool_id,
                 "description": entry.get("description", ""),
             }
             schema = entry.get("input_schema") or entry.get("inputSchema")
             if schema:
                 mcp_tool["inputSchema"] = schema
+            # FORGE-343: hints the client uses to decide whether a call needs
+            # a human. Unclassified tools inherit the destructive default, so
+            # a new adapter is over-guarded rather than silently waved through.
+            mcp_tool["annotations"] = annotations_for(
+                tool_id,
+                title=entry.get("name") or None,
+                twin_mutations_enabled=mutations_on,
+            )
             mcp_tools.append(mcp_tool)
         return {"tools": mcp_tools}
+
+    def _twin_mutations_enabled(self) -> bool:
+        """Whether the twin adapter currently accepts mutating Cypher.
+
+        Read off the adapter rather than stored here. A second copy of this
+        flag would be a copy that can disagree with the one actually
+        enforcing, and the direction it would disagree in is telling a
+        client that a mutating tool is read-only.
+        """
+        adapter = self._tool_index.get("twin.query_cypher")
+        return bool(getattr(adapter, "_allow_mutations", False))
 
     async def _mcp_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP ``tools/call`` — wraps the legacy aggregate.
