@@ -8,6 +8,7 @@ align, or that thermal zones don't conflict between domains.
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -18,16 +19,50 @@ if TYPE_CHECKING:
     from twin_core.api import TwinAPI
 
 
+class CheckStatus(StrEnum):
+    """The three honest answers a cross-domain check can give.
+
+    ``NO_DATA`` exists because the alternative was reporting a pass
+    (FORGE-361). Every one of these checks used to return ``passed=True``
+    when the thing it was meant to check could not be found — no work
+    products, no mounting holes, no thermal zones, no connectors — so a
+    project with nothing in it scored four passing cross-domain checks.
+
+    A check that could not run is not a check that succeeded. Whether a
+    gate treats "no data" as blocking is the gate's decision to make; it
+    cannot make it if the check has already claimed to pass.
+    """
+
+    PASS = "pass"
+    FAIL = "fail"
+    NO_DATA = "no_data"
+
+
 class CrossDomainCheck(BaseModel):
     """A cross-domain validation check result."""
 
     name: str
     domain_a: str  # e.g., "mechanical"
     domain_b: str  # e.g., "electronics"
-    passed: bool
+    status: CheckStatus
     message: str
     severity: str = "error"  # "error", "warning", "info"
     details: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def passed(self) -> bool:
+        """True only for an actual pass.
+
+        Kept as a property so existing ``if not check.passed`` callers keep
+        working and land on the safe side: NO_DATA reads as not-passed
+        rather than as success.
+        """
+        return self.status is CheckStatus.PASS
+
+    @property
+    def ran(self) -> bool:
+        """False when the check could not be evaluated at all."""
+        return self.status is not CheckStatus.NO_DATA
 
 
 class CrossDomainValidator:
@@ -84,7 +119,7 @@ class CrossDomainValidator:
                         name=getattr(check, "__name__", str(check)),
                         domain_a="unknown",
                         domain_b="unknown",
-                        passed=False,
+                        status=CheckStatus.FAIL,
                         message=str(e),
                         severity="error",
                     )
@@ -120,7 +155,7 @@ class CrossDomainValidator:
                 name="check_pcb_enclosure_fit",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
                 details={"pcb_found": pcb is not None, "enclosure_found": enclosure is not None},
@@ -130,10 +165,37 @@ class CrossDomainValidator:
         enc_dims = enclosure.metadata.get("dimensions", {})
         enc_clearance = enclosure.metadata.get("internal_clearance", 0.0)
 
-        pcb_width = pcb_dims.get("width", 0.0)
-        pcb_height = pcb_dims.get("height", 0.0)
-        enc_width = enc_dims.get("width", 0.0)
-        enc_height = enc_dims.get("height", 0.0)
+        # FORGE-361: these used to default to 0.0. A PCB with no recorded
+        # width became 0mm wide, fitted inside any enclosure, and the check
+        # reported "PCB (0.0x0.0mm) fits" — a confident pass computed from
+        # nothing. It was asymmetric too: a missing *enclosure* dimension
+        # gave available = -0.0 and failed, so the same absence produced
+        # opposite verdicts depending on which side it was on.
+        missing = [
+            label
+            for label, dims, key in (
+                ("pcb.width", pcb_dims, "width"),
+                ("pcb.height", pcb_dims, "height"),
+                ("enclosure.width", enc_dims, "width"),
+                ("enclosure.height", enc_dims, "height"),
+            )
+            if dims.get(key) is None
+        ]
+        if missing:
+            return CrossDomainCheck(
+                name="check_pcb_enclosure_fit",
+                domain_a="electronics",
+                domain_b="mechanical",
+                status=CheckStatus.NO_DATA,
+                message=("Cannot check fit: no recorded " + ", ".join(missing)),
+                severity="info",
+                details={"missing": missing},
+            )
+
+        pcb_width = pcb_dims["width"]
+        pcb_height = pcb_dims["height"]
+        enc_width = enc_dims["width"]
+        enc_height = enc_dims["height"]
 
         # Available internal space = enclosure dimension - 2 * clearance
         available_width = enc_width - 2 * enc_clearance
@@ -171,7 +233,7 @@ class CrossDomainValidator:
             name="check_pcb_enclosure_fit",
             domain_a="electronics",
             domain_b="mechanical",
-            passed=passed,
+            status=CheckStatus.PASS if passed else CheckStatus.FAIL,
             message=message,
             severity="error" if not passed else "info",
             details=details,
@@ -204,7 +266,7 @@ class CrossDomainValidator:
                 name="check_mounting_hole_alignment",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
                 details={"pcb_found": pcb is not None, "enclosure_found": enclosure is not None},
@@ -218,7 +280,7 @@ class CrossDomainValidator:
                 name="check_mounting_hole_alignment",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="No mounting holes or standoffs defined — skipping check",
                 severity="info",
                 details={
@@ -268,7 +330,7 @@ class CrossDomainValidator:
             name="check_mounting_hole_alignment",
             domain_a="electronics",
             domain_b="mechanical",
-            passed=passed,
+            status=CheckStatus.PASS if passed else CheckStatus.FAIL,
             message=message,
             severity="error" if not passed else "info",
             details=details,
@@ -302,7 +364,7 @@ class CrossDomainValidator:
                 name="check_thermal_zones",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
             )
@@ -317,7 +379,7 @@ class CrossDomainValidator:
                 name="check_thermal_zones",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="No thermal zones defined — skipping check",
                 severity="info",
             )
@@ -362,7 +424,7 @@ class CrossDomainValidator:
             name="check_thermal_zones",
             domain_a="electronics",
             domain_b="mechanical",
-            passed=passed,
+            status=CheckStatus.PASS if passed else CheckStatus.FAIL,
             message=message,
             severity="warning" if not passed else "info",
             details={"conflicts": conflicts},
@@ -395,7 +457,7 @@ class CrossDomainValidator:
                 name="check_connector_clearances",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="PCB or enclosure work_product not found — skipping check",
                 severity="info",
             )
@@ -408,7 +470,7 @@ class CrossDomainValidator:
                 name="check_connector_clearances",
                 domain_a="electronics",
                 domain_b="mechanical",
-                passed=True,
+                status=CheckStatus.NO_DATA,
                 message="No connectors defined on PCB — skipping check",
                 severity="info",
             )
@@ -478,7 +540,7 @@ class CrossDomainValidator:
             name="check_connector_clearances",
             domain_a="electronics",
             domain_b="mechanical",
-            passed=passed,
+            status=CheckStatus.PASS if passed else CheckStatus.FAIL,
             message=message,
             severity="error" if not passed else "info",
             details={"issues": issues, "min_clearance_mm": min_clearance},

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from twin_core.constraint_engine.cross_domain import CrossDomainCheck
+from twin_core.constraint_engine.cross_domain import CheckStatus, CrossDomainCheck
 
 if TYPE_CHECKING:
     from twin_core.api import TwinAPI
@@ -50,7 +50,7 @@ async def check_total_weight_budget(
             name="check_total_weight_budget",
             domain_a="mechanical",
             domain_b="electronics",
-            passed=True,
+            status=CheckStatus.NO_DATA,
             message="No weight budget defined — skipping check",
             severity="info",
         )
@@ -61,7 +61,7 @@ async def check_total_weight_budget(
         name="check_total_weight_budget",
         domain_a="mechanical",
         domain_b="electronics",
-        passed=passed,
+        status=CheckStatus.PASS if passed else CheckStatus.FAIL,
         message=(
             f"Total weight {total_weight:.1f}g "
             f"{'within' if passed else 'exceeds'} budget of {weight_budget:.1f}g"
@@ -99,7 +99,7 @@ async def check_power_thermal_consistency(
             name="check_power_thermal_consistency",
             domain_a="electronics",
             domain_b="mechanical",
-            passed=True,
+            status=CheckStatus.NO_DATA,
             message="Power or thermal capacity data not available — skipping check",
             severity="info",
         )
@@ -110,7 +110,7 @@ async def check_power_thermal_consistency(
         name="check_power_thermal_consistency",
         domain_a="electronics",
         domain_b="mechanical",
-        passed=passed,
+        status=CheckStatus.PASS if passed else CheckStatus.FAIL,
         message=(
             f"Total power dissipation {total_power_w:.1f}W "
             f"{'within' if passed else 'exceeds'} "
