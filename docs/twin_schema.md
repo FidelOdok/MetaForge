@@ -869,6 +869,43 @@ Residual computation needs a real predicted value. Rather than trusting a possib
 
 *Source: `digital_twin/calibration/store.py`, `api_gateway/twin/calibration.py`, `api_gateway/twin/device_instance_recorder.py`, `api_gateway/twin/measurement_recorder.py`, `api_gateway/twin/metric_evaluator.py`, `tool_registry/tools/twin/adapter.py`*
 
+### 2.19 DesignLoopIteration -- Closed Design Loop (FORGE-287)
+
+Its own node type: one candidate value evaluated during one closed design loop run (`twin.start_design_loop`, gap G-G1, target lifecycle spec's "dual state machine: propose -> constraint engine -> commit/reject -> next iteration"). Does not reimplement the search -- composes the already-shipped `twin.optimize_parameter` (section 2.17, FORGE-320) unchanged, which already runs a real propose -> evaluate -> revise -> repeat bisection to convergence or proven infeasibility, with an iteration budget (`max_iterations`, default 60). FORGE-320's own gap was that its trace lived only inside one opaque Evidence `result` blob; this ticket persists EVERY candidate it evaluates as a real, queryable node instead.
+
+```python
+class DesignLoopIteration(NodeBase):
+    id: UUID
+    node_type: NodeType = NodeType.DESIGN_LOOP_ITERATION
+    loop_id: UUID
+    iteration_number: int
+    work_product_id: UUID
+    parameter_name: str        # e.g. "wall_thickness_mm"
+    parameter_value: float
+    metric: str                # e.g. "mass_kg" -- the objective being minimised
+    objective_value: float
+    constraints_status: dict[str, float]  # e.g. {"deflection_margin_mm": 0.12, "sf_margin": 0.4}
+    feasible: bool
+    status: str = "candidate"  # "candidate" | "converged" | "infeasible"
+    is_winner: bool = False
+    approved: bool = False
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    created_at: datetime
+```
+
+Deliberately generic field names (`parameter_name`/`parameter_value`/`metric`/`objective_value`), not wall-thickness-specific -- generalising the search itself to other parameters (FORGE-288, a separate, later ticket) reuses this same node type rather than a schema migration. No `"exhausted"` status: `optimize_wall_thickness` silently accepts its best candidate within `max_iterations` rather than distinguishing "ran out of budget" from "converged" -- inventing that distinction here would claim precision the underlying algorithm doesn't have.
+
+Each candidate is linked to the prior one via `EdgeType.SUPERSEDES` (the same edge FORGE-321's revalidation flow already uses for "this is the newer replacement of that") and to the requirement(s) it was evaluated against via `EdgeType.CONSTRAINED_BY`. The winning candidate is index-identified, not value-matched: `already_feasible_at_min` -> `candidates[0]` (the lower-bound check itself was already feasible), `optimal` -> `candidates[-1]` (`winner = eval_at(hi)` is appended right before the optimizer returns) -- matching by `wall_thickness_mm` VALUE would be wrong, since the final `eval_at(hi)` can legitimately re-evaluate to the exact same float as the immediately preceding loop-appended candidate.
+
+`twin.get_design_loop(loop_id)` returns the full iteration timeline (the dashboard's "iteration timeline" requirement). `twin.approve_design_loop(loop_id, approved_by)` records a human's approval of the converged winner -- the "with a human approving at gates" half of this ticket's own yardstick line; raises when the loop never converged (no winning candidate to approve), the same honesty precedent as every other approval gate in this codebase.
+
+`POST /v1/design-loop/start`, `GET /v1/design-loop/{loop_id}`, `POST /v1/design-loop/{loop_id}/approve` expose the same three actions to the dashboard's Requirements page ("Design loop" section, below the evidence matrix) -- reusing the SAME bound optimizer instance `twin.optimize_parameter` uses, so Evidence/Decision recording isn't duplicated between the MCP tool and the REST route.
+
+**Deliberately out of scope** (see FORGE-287's own PR description for the full split): generalising the search beyond a single scalar parameter (FORGE-288); duplicate-commit guards / infeasibility heuristics beyond what the optimizer itself already returns / cost-budget policy tuning (FORGE-291); wiring gate evaluators to block the loop on evidence gaps (FORGE-290); an eval harness (FORGE-292). The loop mechanism runs synchronously to completion in one call (bisection converges in well under a second) rather than exposing a step-by-step "run one iteration" API -- there is no real mid-search moment a human needs to inspect; the real gate is the end-of-loop approval this ticket already builds.
+
+*Source: `twin_core/models/design_loop_iteration.py`, `api_gateway/twin/design_loop.py`, `api_gateway/design_loop/routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/pages/RequirementsPage.tsx`*
+
 ---
 
 ## 3. Edge Types

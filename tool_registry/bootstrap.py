@@ -277,6 +277,9 @@ async def bootstrap_tool_registry(
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
     measurement_recorder: Any = None,
+    design_loop_starter: Any = None,
+    design_loop_reader: Any = None,
+    design_loop_approver: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -414,6 +417,18 @@ async def bootstrap_tool_registry(
             (make_measurement_recorder, FORGE-321). When supplied,
             registers ``twin.record_measurement``. ``None`` skips
             registration (same pattern as ``document_recorder``).
+        design_loop_starter: Optional async ``start(...)``
+            (make_design_loop_starter, FORGE-287). When supplied, registers
+            ``twin.start_design_loop`` -- closed loop: propose -> build ->
+            simulate -> evaluate -> revise -> repeat, persisting every
+            candidate as a real DesignLoopIteration. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        design_loop_reader: Optional async ``get(...)``
+            (make_design_loop_reader, FORGE-287). When supplied, registers
+            ``twin.get_design_loop``. ``None`` skips registration.
+        design_loop_approver: Optional async ``approve(...)``
+            (make_design_loop_approver, FORGE-287). When supplied, registers
+            ``twin.approve_design_loop``. ``None`` skips registration.
 
     Returns:
         The populated ToolRegistry.
@@ -595,6 +610,9 @@ async def bootstrap_tool_registry(
                     parameter_optimizer=parameter_optimizer,
                     device_instance_registrar=device_instance_registrar,
                     measurement_recorder=measurement_recorder,
+                    design_loop_starter=design_loop_starter,
+                    design_loop_reader=design_loop_reader,
+                    design_loop_approver=design_loop_approver,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

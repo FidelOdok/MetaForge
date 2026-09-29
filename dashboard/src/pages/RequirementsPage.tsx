@@ -11,6 +11,11 @@ import {
   useProposeRequirementFix,
   useCreateConstraint,
 } from '../hooks/use-requirements';
+import {
+  useApproveDesignLoop,
+  useDesignLoop,
+  useStartDesignLoop,
+} from '../hooks/use-design-loop';
 import type {
   EvidenceSummary,
   PassFail,
@@ -18,6 +23,7 @@ import type {
   RequirementMatrixStatus,
   RequirementRecord,
 } from '../types/requirements';
+import type { DesignLoopIteration } from '../types/design-loop';
 
 const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
 
@@ -517,6 +523,243 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
   );
 }
 
+function IterationRow({ iteration }: { iteration: DesignLoopIteration }) {
+  const badgeVariant =
+    iteration.status === 'converged' ? 'success' : iteration.status === 'infeasible' ? 'error' : 'default';
+  return (
+    <tr
+      data-testid="design-loop-iteration-row"
+      style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}
+    >
+      <td className="px-3 py-2 font-mono text-xs text-on-surface-variant">
+        {iteration.iteration_number}
+      </td>
+      <td className="px-2 py-2 font-mono text-xs text-on-surface text-right">
+        {iteration.parameter_value.toFixed(4)} <span className="text-on-surface-variant">mm</span>
+      </td>
+      <td className="px-2 py-2 font-mono text-xs text-on-surface text-right">
+        {iteration.objective_value.toFixed(4)} <span className="text-on-surface-variant">kg</span>
+      </td>
+      <td className="px-2 py-2 text-center">
+        <Badge variant={iteration.feasible ? 'success' : 'error'}>
+          {iteration.feasible ? 'feasible' : 'infeasible'}
+        </Badge>
+      </td>
+      <td className="px-2 py-2 text-center">
+        <Badge variant={badgeVariant}>{iteration.status}</Badge>
+      </td>
+      <td className="px-2 py-2 text-center">
+        {iteration.is_winner &&
+          (iteration.approved ? (
+            <Badge variant="success" data-testid="design-loop-approved-badge">
+              approved by {iteration.approved_by}
+            </Badge>
+          ) : (
+            <span className="text-xs text-on-surface-variant">awaiting approval</span>
+          ))}
+      </td>
+    </tr>
+  );
+}
+
+/** FORGE-287 (gap G-G1): the closed design loop's iteration timeline --
+ * propose -> build -> simulate -> evaluate against constraints -> revise ->
+ * repeat, until pass or proven infeasible, with a human approving the
+ * winning candidate at the end. Reuses the same bisection search
+ * twin.optimize_parameter (FORGE-320) already runs, persisting every
+ * candidate it evaluates as a real, queryable DesignLoopIteration instead
+ * of one opaque Evidence blob. */
+function DesignLoopSection({ projectId }: { projectId?: string }) {
+  const toast = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [loopId, setLoopId] = useState<string | null>(null);
+  const [workProductId, setWorkProductId] = useState('');
+  const [loadN, setLoadN] = useState('');
+  const [deflectionLimitMm, setDeflectionLimitMm] = useState('');
+  const [sfLimit, setSfLimit] = useState('2.0');
+
+  const start = useStartDesignLoop();
+  const { data: report, isLoading } = useDesignLoop(loopId ?? undefined);
+  const approve = useApproveDesignLoop();
+
+  const canSubmit =
+    workProductId.trim() !== '' && loadN !== '' && deflectionLimitMm !== '' && !Number.isNaN(Number(loadN));
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    start.mutate(
+      {
+        workProductId: workProductId.trim(),
+        loadN: Number(loadN),
+        deflectionLimitMm: Number(deflectionLimitMm),
+        sfLimit: Number(sfLimit) || 2.0,
+        projectId,
+      },
+      {
+        onSuccess: (result) => {
+          setLoopId(result.loop_id);
+          setShowForm(false);
+          toast.success(`Design loop ${result.status}: ${result.detail}`);
+        },
+        onError: (err) => {
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.error(detail || 'Could not start the design loop');
+        },
+      },
+    );
+  };
+
+  const iterations = report?.iterations ?? [];
+  const winner = iterations.find((it) => it.is_winner);
+
+  return (
+    <div className="mb-6" data-testid="design-loop-section">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+          Design loop
+        </h2>
+        {projectId && !showForm && (
+          <button
+            type="button"
+            data-testid="start-design-loop-button"
+            onClick={() => setShowForm(true)}
+            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            + Start design loop
+          </button>
+        )}
+      </div>
+
+      {projectId && showForm && (
+        <form
+          data-testid="design-loop-form"
+          onSubmit={handleSubmit}
+          className="mb-3 flex flex-wrap items-end gap-2 rounded-lg p-3"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            CAD work product id
+            <input
+              value={workProductId}
+              onChange={(e) => setWorkProductId(e.target.value)}
+              placeholder="work product id"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '220px' }}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Load (N)
+            <input
+              value={loadN}
+              onChange={(e) => setLoadN(e.target.value)}
+              placeholder="100"
+              type="number"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '90px' }}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Deflection limit (mm)
+            <input
+              value={deflectionLimitMm}
+              onChange={(e) => setDeflectionLimitMm(e.target.value)}
+              placeholder="0.5"
+              type="number"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '90px' }}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Safety factor limit
+            <input
+              value={sfLimit}
+              onChange={(e) => setSfLimit(e.target.value)}
+              type="number"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '90px' }}
+            />
+          </label>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={!canSubmit || start.isPending}>
+              {start.isPending ? 'Running…' : 'Run'}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {!loopId && !showForm && (
+        <EmptyState
+          title="No design loop run yet"
+          description="Start one above to iterate a CAD work product's wall thickness toward minimum mass, subject to deflection and safety-factor constraints."
+        />
+      )}
+
+      {loopId && !isLoading && iterations.length > 0 && (
+        <div
+          className="rounded-lg overflow-hidden overflow-x-auto"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                <th className="px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  #
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  wall_thickness_mm
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  mass_kg
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-center" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Feasible
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-center" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Status
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-center" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Approval
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {iterations.map((it) => (
+                <IterationRow key={it.iteration_number} iteration={it} />
+              ))}
+            </tbody>
+          </table>
+          {winner && !winner.approved && (
+            <div className="flex justify-end p-2">
+              <Button
+                size="sm"
+                data-testid="approve-design-loop-button"
+                disabled={approve.isPending}
+                onClick={() =>
+                  approve.mutate(
+                    { loopId, approvedBy: 'fidel.odok@idroneinnovations.com' },
+                    {
+                      onSuccess: () => toast.success('Design loop winner approved'),
+                      onError: () => toast.error('Could not approve the design loop'),
+                    },
+                  )
+                }
+              >
+                {approve.isPending ? 'Approving…' : 'Approve winner'}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequirementsPage() {
   const { activeProjectId } = useActiveProject();
   const [productType, setProductType] = useState('generic');
@@ -556,6 +799,8 @@ export function RequirementsPage() {
       </div>
 
       <RequirementMatrixSection projectId={activeProjectId ?? undefined} />
+
+      <DesignLoopSection projectId={activeProjectId ?? undefined} />
 
       {completeness && (
         <div

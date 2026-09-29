@@ -72,6 +72,9 @@ class TwinServer(McpToolServer):
         parameter_optimizer: Any = None,
         device_instance_registrar: Any = None,
         measurement_recorder: Any = None,
+        design_loop_starter: Any = None,
+        design_loop_reader: Any = None,
+        design_loop_approver: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -263,6 +266,14 @@ class TwinServer(McpToolServer):
         # the residual for calibration. Same injection seam as every
         # recorder above.
         self._measurement_recorder = measurement_recorder
+        # FORGE-287: injected async callables (api_gateway.twin.design_loop)
+        # -- start/read/approve a closed design loop's persisted iteration
+        # timeline. Same injection seam as every recorder above; three
+        # separate callables (not one mega-tool) so the CLI/dashboard can
+        # drive stop/continue/approve step by step.
+        self._design_loop_starter = design_loop_starter
+        self._design_loop_reader = design_loop_reader
+        self._design_loop_approver = design_loop_approver
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -318,6 +329,12 @@ class TwinServer(McpToolServer):
             self._register_device_instance_registrar()
         if measurement_recorder is not None:
             self._register_measurement_recorder()
+        if design_loop_starter is not None:
+            self._register_start_design_loop()
+        if design_loop_reader is not None:
+            self._register_get_design_loop()
+        if design_loop_approver is not None:
+            self._register_approve_design_loop()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4084,6 +4101,189 @@ class TwinServer(McpToolServer):
             ),
             record_decision=bool(record_decision),
         )
+
+    # ------------------------------------------------------------------
+    # twin.start_design_loop / twin.get_design_loop /
+    # twin.approve_design_loop (FORGE-287)
+    # ------------------------------------------------------------------
+
+    def _register_start_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.start_design_loop",
+                adapter_id="twin",
+                name="Start Design Loop",
+                description=(
+                    "Closed loop: propose -> build -> simulate -> evaluate against "
+                    "constraints -> revise -> repeat, until pass or proven infeasible "
+                    "(target lifecycle spec's 'dual state machine', gap G-G1). Runs the "
+                    "same bisection search as twin.optimize_parameter, but persists "
+                    "EVERY candidate it evaluates as a real, queryable DesignLoopIteration "
+                    "-- fetch the timeline afterward with twin.get_design_loop, then "
+                    "approve the winner with twin.approve_design_loop."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "load_n": {"type": "number"},
+                        "deflection_limit_mm": {"type": "number"},
+                        "sf_limit": {
+                            "type": "number",
+                            "description": "Minimum acceptable safety factor. Default 2.0.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "tool_registry.tools.cadquery.materials name, e.g. "
+                                "'aluminum_6061'. Default 'aluminum_6061'."
+                            ),
+                        },
+                        "wall_min_mm": {
+                            "type": "number",
+                            "description": "Search lower bound. Default 0.5.",
+                        },
+                        "wall_max_mm": {
+                            "type": "number",
+                            "description": (
+                                "Search upper bound. Default: half the smaller cross-"
+                                "section extent, minus a margin."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirement (Constraint) ids this loop is evaluated "
+                                "against -- linked to every iteration via CONSTRAINED_BY."
+                            ),
+                        },
+                    },
+                    "required": ["work_product_id", "load_n", "deflection_limit_mm"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "winner": {"type": ["object", "null"]},
+                        "iteration_count": {"type": "integer"},
+                        "iteration_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.start_design_loop,
+        )
+
+    async def start_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.start_design_loop: 'work_product_id' is required")
+        load_n = arguments.get("load_n")
+        if not isinstance(load_n, (int, float)):
+            raise ValueError("twin.start_design_loop: 'load_n' is required (number)")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        if not isinstance(deflection_limit_mm, (int, float)):
+            raise ValueError("twin.start_design_loop: 'deflection_limit_mm' is required (number)")
+        sf_limit = arguments.get("sf_limit", 2.0)
+        material = arguments.get("material", "aluminum_6061")
+        wall_min_mm = arguments.get("wall_min_mm", 0.5)
+        wall_max_mm = arguments.get("wall_max_mm")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        return await self._design_loop_starter(
+            work_product_id=work_product_id,
+            load_n=float(load_n),
+            deflection_limit_mm=float(deflection_limit_mm),
+            sf_limit=float(sf_limit),
+            material=material if isinstance(material, str) else "aluminum_6061",
+            wall_min_mm=float(wall_min_mm),
+            wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    def _register_get_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_design_loop",
+                adapter_id="twin",
+                name="Get Design Loop",
+                description=(
+                    "The full iteration timeline of one twin.start_design_loop run -- "
+                    "every candidate evaluated, its parameter/objective values, "
+                    "feasibility, and (for the winner) approval state."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {"loop_id": {"type": "string"}},
+                    "required": ["loop_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "iterations": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=10),
+            ),
+            handler=self.get_design_loop,
+        )
+
+    async def get_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        loop_id = arguments.get("loop_id")
+        if not loop_id or not isinstance(loop_id, str):
+            raise ValueError("twin.get_design_loop: 'loop_id' is required")
+        return await self._design_loop_reader(loop_id=loop_id)
+
+    def _register_approve_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.approve_design_loop",
+                adapter_id="twin",
+                name="Approve Design Loop",
+                description=(
+                    "Record a human's approval of a converged design loop's winning "
+                    "candidate -- the gate-approval half of the closed loop (gap G-G1). "
+                    "Raises if the loop never converged (no winning candidate to approve)."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "approved_by": {"type": "string"},
+                    },
+                    "required": ["loop_id", "approved_by"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=10),
+            ),
+            handler=self.approve_design_loop,
+        )
+
+    async def approve_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        loop_id = arguments.get("loop_id")
+        if not loop_id or not isinstance(loop_id, str):
+            raise ValueError("twin.approve_design_loop: 'loop_id' is required")
+        approved_by = arguments.get("approved_by")
+        if not approved_by or not isinstance(approved_by, str):
+            raise ValueError("twin.approve_design_loop: 'approved_by' is required")
+        return await self._design_loop_approver(loop_id=loop_id, approved_by=approved_by)
 
     # ------------------------------------------------------------------
     # twin.register_device_instance (FORGE-321)
