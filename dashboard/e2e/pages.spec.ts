@@ -132,6 +132,43 @@ test.describe('Requirements', () => {
       timeout: 10_000,
     });
   });
+
+  test('evidence matrix shows fail/pass/stale status with click-through evidence (FORGE-318)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const matrix = page.getByTestId('requirements-matrix');
+    await expect(matrix).toBeVisible();
+
+    // moving-mass FAIL with real numbers.
+    const massRow = matrix.getByRole('row', { name: /mass_limit/ });
+    await expect(massRow).toContainText('fail');
+    await expect(massRow).toContainText('exceeds limit');
+
+    // deflection-equivalent PASS with tier-0 lineage, revealed on click-through.
+    const speedRow = matrix.getByRole('row', { name: /vague_speed/ });
+    await expect(speedRow).toContainText('pass');
+    await speedRow.getByRole('button', { name: /1 evidence/ }).click();
+    await expect(matrix.getByText('twin.evaluate_metric')).toBeVisible();
+    await expect(matrix.getByText('tier 0')).toBeVisible();
+
+    // Stale evidence flagged even though the underlying claim is supported.
+    const floorRow = matrix.getByRole('row', { name: /mass_floor/ });
+    await expect(floorRow).toContainText('stale');
+
+    // Structure-tab click-through.
+    await expect(matrix.getByRole('link', { name: 'Structure' }).first()).toHaveAttribute(
+      'href',
+      '/twin',
+    );
+
+    // CSV/MD export buttons are present and produce a download.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'Export CSV' }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe('requirement-matrix.csv');
+  });
 });
 
 test.describe('Design Assistant', () => {

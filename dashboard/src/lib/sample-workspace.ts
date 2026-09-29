@@ -716,6 +716,71 @@ const SAMPLE_WORKSPACE_SEED = {
       missing: ['safety', 'power', 'environmental', 'verification'],
     },
   },
+  // FORGE-318: an illustrative evidence matrix -- one FAIL with real
+  // numbers, one PASS with tier-0 lineage, one STALE (evidence went stale
+  // after a change) -- so the sample workspace demonstrates the ticket's
+  // own acceptance example without a live gateway.
+  requirementMatrix: {
+    rows: [
+      {
+        requirementId: 'sample-req-mass-max',
+        requirementName: 'mass_limit',
+        limitText: '<= 0.8 kg',
+        status: 'fail',
+        detail: 'value 0.94 exceeds limit 0.8 (margin -0.14)',
+        artefactIds: ['sample-artefact-frame'],
+        evidence: [
+          {
+            id: 'sample-evidence-mass',
+            method: 'twin.rank_sensitivity',
+            tier: null,
+            value: 0.94,
+            limit: 0.8,
+            margin: -0.14,
+            staleness: 'current',
+          },
+        ],
+      },
+      {
+        requirementId: 'sample-req-speed',
+        requirementName: 'vague_speed',
+        limitText: 'shall fly at ≥ 8 m/s cruise',
+        status: 'pass',
+        detail: 'value 9.2 within limit 8 (margin 1.2)',
+        artefactIds: ['sample-artefact-frame'],
+        evidence: [
+          {
+            id: 'sample-evidence-speed',
+            method: 'twin.evaluate_metric',
+            tier: 0,
+            value: 9.2,
+            limit: 8,
+            margin: 1.2,
+            staleness: 'current',
+          },
+        ],
+      },
+      {
+        requirementId: 'sample-req-mass-min',
+        requirementName: 'mass_floor',
+        limitText: '>= 1 kg',
+        status: 'stale',
+        detail: 'claim is supported, but at least one cited evidence entity is stale',
+        artefactIds: ['sample-artefact-frame'],
+        evidence: [
+          {
+            id: 'sample-evidence-mass-floor',
+            method: 'twin.evaluate_metric',
+            tier: 0,
+            value: 1.05,
+            limit: 1,
+            margin: 0.05,
+            staleness: 'stale',
+          },
+        ],
+      },
+    ],
+  },
   // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
   // the ticket's own acceptance example (an "upper_arm"/"shoulder"
   // interface with a tip_deflection quantity, a mass allocation with an
@@ -949,6 +1014,7 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
       };
     }
     if (path === '/requirements/quality') return s.requirementsReport;
+    if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     return undefined;
   }

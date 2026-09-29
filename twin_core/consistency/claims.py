@@ -88,3 +88,19 @@ async def evaluate_claim(twin: TwinAPI, artefact_id: UUID, requirement_id: UUID)
         evidence_ids=evidence_ids,
         status=status,
     )
+
+
+async def list_claims_for_requirement(twin: TwinAPI, requirement_id: UUID) -> list[Claim]:
+    """All claims recorded against `requirement_id` (FORGE-318's
+    requirement matrix needs "what claims exist for this requirement",
+    not just "evaluate this one known (artefact, requirement) pair" --
+    `evaluate_claim` alone can't answer that without already knowing every
+    artefact id up front). Walks `requirement_id`'s INCOMING edges (claim
+    edges point artefact -> requirement, `claim_recorder.py`) filtered to
+    `metadata["kind"] == CLAIM_EDGE_KIND`, then reuses `evaluate_claim`
+    per match so status is computed live, exactly the same way a
+    single-pair lookup already does -- no separate status logic to drift.
+    """
+    edges = await twin.get_edges(requirement_id, direction="incoming")
+    claim_edges = [e for e in edges if (e.metadata or {}).get("kind") == CLAIM_EDGE_KIND]
+    return [await evaluate_claim(twin, edge.source_id, requirement_id) for edge in claim_edges]

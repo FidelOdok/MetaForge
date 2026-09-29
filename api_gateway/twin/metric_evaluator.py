@@ -228,7 +228,18 @@ def make_metric_evaluator(
                 evidence_type="simulation",
                 producer={"tool": "calculix.run_fea"},
                 inputs=fea_args,
-                result=fea_result,
+                # FORGE-318: an explicit 'tier'/'metric' on the STORED
+                # evidence result -- tier-0's own result already carries
+                # both (Tier0DeflectionResult), but tier-2's raw fea_result
+                # (calculix's own output shape) never named its own tier at
+                # all. The requirement matrix reports "method/tier" per
+                # piece of evidence; without this it would have to guess
+                # tier from producer.tool string matching, which is exactly
+                # the kind of inference this codebase avoids everywhere
+                # else. out["tier2"]["result"] (the caller-facing return
+                # value) is intentionally left as the raw fea_result --
+                # only the persisted Evidence gets the added keys.
+                result={"tier": 2, "metric": tier0.metric, **fea_result},
                 statement=(
                     f"tier-2 FEA escalation for {tier0.metric} (tier-0 margin "
                     f"{tier0.margin_mm:.4g}mm < band {tier0.band_mm:.4g}mm)"
