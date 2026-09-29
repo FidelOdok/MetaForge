@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -69,6 +69,19 @@ class GenerateCadIrInput(BaseModel):
         description=(
             "Persist the generated geometry into the Twin via twin.commit_geometry "
             "immediately (best-effort — failure is reported on the output, not raised)"
+        ),
+    )
+    parameters: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "FORGE-270 (gap G-D2): the caller-supplied values that drove this "
+            "generation (e.g. {'thickness_mm': 2.0}) -- threaded straight through to "
+            "twin.commit_geometry's own 'parameters' argument (already real, "
+            "previously unused by any caller), landing in the committed node's "
+            "metadata.geometry_features.parameters. Recorded so a LATER call with a "
+            "changed value can be recognized as an edit of the same part (a new "
+            "SUPERSEDES-linked version, via commit_geometry's existing same-name "
+            "matching) rather than an untraceable sibling."
         ),
     )
 

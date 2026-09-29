@@ -1016,6 +1016,19 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path.endsWith('/versions')) {
       return { work_product_id: segment(path, 3), revisions: SAMPLE_REVISIONS, total: SAMPLE_REVISIONS.length };
     }
+    if (path.endsWith('/diff') && path.startsWith('/features/')) {
+      // FORGE-270 (gap G-D2): the sample enclosure is the only node with an
+      // illustrative SUPERSEDES-linked prior version -- every other sample
+      // node correctly has none (404 in the real API, null here).
+      if (segment(path, 2) !== 'sample-enclosure') return undefined;
+      return {
+        currentWorkProductId: 'sample-enclosure',
+        previousWorkProductId: 'sample-enclosure-v2',
+        changed: { wall_mm: { from_value: 3, to_value: 2 } },
+        added: {},
+        removed: {},
+      };
+    }
     if (path.endsWith('/model')) {
       return { glb_url: '/samples/flight-controller.glb', metadata: s.modelMetadata, cached: true };
     }

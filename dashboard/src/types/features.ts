@@ -59,3 +59,19 @@ export interface GenerateFeatureResult {
   commit_error: string | null;
   already_committed: boolean;
 }
+
+/** FORGE-270 (gap G-D2): a parameter-level diff between a feature's current
+ * committed work product and the one it SUPERSEDES -- "editing" a feature
+ * is re-generating it with the same name and a changed parameter value. */
+export interface FieldDelta {
+  from_value: unknown;
+  to_value: unknown;
+}
+
+export interface FeatureDiff {
+  currentWorkProductId: string;
+  previousWorkProductId: string;
+  changed: Record<string, FieldDelta>;
+  added: Record<string, unknown>;
+  removed: Record<string, unknown>;
+}

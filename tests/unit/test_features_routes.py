@@ -1,4 +1,5 @@
-"""Unit tests for POST /v1/features/generate (FORGE-269, gap G-D1)."""
+"""Unit tests for POST /v1/features/generate (FORGE-269, gap G-D1) and
+GET /v1/features/{id}/diff (FORGE-270, gap G-D2)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,9 @@ from httpx import ASGITransport, AsyncClient
 
 from skill_registry.mcp_bridge import InMemoryMcpBridge
 from twin_core.api import InMemoryTwinAPI
+
+_STEP_B64_V1 = base64.b64encode(b"ISO-10303-21; v1 geometry").decode("ascii")
+_STEP_B64_V2 = base64.b64encode(b"ISO-10303-21; v2 geometry, different bytes").decode("ascii")
 
 
 def _register_freecad_session_tools(mcp: InMemoryMcpBridge) -> None:
@@ -173,3 +177,59 @@ class TestGenerateFeatureRoute:
             )
         assert resp.status_code == 503
         init_twin(InMemoryTwinAPI.create())
+
+
+class TestFeatureDiffRoute:
+    """GET /v1/features/{work_product_id}/diff (FORGE-270, gap G-D2)."""
+
+    async def _seed_two_versions(self, twin: InMemoryTwinAPI) -> tuple[str, str]:
+        """Two real SUPERSEDES-linked cad_model nodes, same 'name', with
+        different 'parameters' -- exactly what re-generating the same named
+        feature with a changed value produces, via the SAME
+        api_gateway.twin.geometry_recorder path the REST /generate route
+        itself calls through generate_cad_ir."""
+        from api_gateway.twin.geometry_recorder import make_geometry_recorder
+
+        record = make_geometry_recorder(twin)
+        project_id = "33333333-3333-3333-3333-333333333333"
+        v1 = await record(
+            step_base64=_STEP_B64_V1,
+            name="Test Rib",
+            project_id=project_id,
+            parameters={"feature_type": "rib", "thickness_mm": 2.0},
+        )
+        v2 = await record(
+            step_base64=_STEP_B64_V2,
+            name="Test Rib",
+            project_id=project_id,
+            parameters={"feature_type": "rib", "thickness_mm": 3.0},
+        )
+        return v1["node_id"], v2["node_id"]
+
+    async def test_diff_reports_changed_parameter(self, twin, client) -> None:
+        v1_id, v2_id = await self._seed_two_versions(twin)
+        async with client:
+            resp = await client.get(f"/v1/features/{v2_id}/diff")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["currentWorkProductId"] == v2_id
+        assert body["previousWorkProductId"] == v1_id
+        assert body["changed"]["thickness_mm"] == {"from_value": 2.0, "to_value": 3.0}
+        assert body["added"] == {}
+        assert body["removed"] == {}
+
+    async def test_diff_on_first_version_404s(self, twin, client) -> None:
+        v1_id, _v2_id = await self._seed_two_versions(twin)
+        async with client:
+            resp = await client.get(f"/v1/features/{v1_id}/diff")
+        assert resp.status_code == 404
+
+    async def test_diff_on_unknown_node_404s(self, client) -> None:
+        async with client:
+            resp = await client.get("/v1/features/11111111-1111-1111-1111-111111111111/diff")
+        assert resp.status_code == 404
+
+    async def test_diff_on_invalid_id_400s(self, client) -> None:
+        async with client:
+            resp = await client.get("/v1/features/not-a-uuid/diff")
+        assert resp.status_code == 400

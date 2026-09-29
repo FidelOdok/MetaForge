@@ -22,6 +22,7 @@ import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
 import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../hooks/use-twin';
+import { useFeatureDiff } from '../hooks/use-features';
 import { useActiveProject } from '../hooks/use-active-project';
 import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
@@ -517,6 +518,9 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         {/* Revision history (GET /v1/twin/nodes/{id}/versions) */}
         <NodeHistorySection nodeId={node.id} />
 
+        {/* Parameter diff vs. a SUPERSEDES predecessor (FORGE-270) */}
+        <FeatureVersionSection nodeId={node.id} />
+
         {/* Pending design-change proposals for this node (gated apply, MET-548) */}
         <div className="px-3 py-2 flex-shrink-0">
           <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
@@ -615,6 +619,63 @@ function NodeHistorySection({ nodeId }: { nodeId: string }) {
                 {formatRelativeTime(rev.created_at)} · {rev.content_hash.slice(0, 8)}
               </div>
             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── FeatureVersionSection ─────────────────────────────────────────────────────
+/**
+ * FORGE-270 (gap G-D2): "editable parameters on committed parts" -- editing
+ * a parametric feature (FORGE-269) is re-generating it with the same name
+ * and a changed parameter value, which api_gateway.twin.geometry_recorder
+ * already links to its predecessor via a real SUPERSEDES edge. This renders
+ * that edge's parameter diff when one exists -- most work products have
+ * none (created once, never re-generated), so `null` is the common,
+ * expected answer, not a loading/error state.
+ */
+function FeatureVersionSection({ nodeId }: { nodeId: string }) {
+  const { data: diff, isLoading } = useFeatureDiff(nodeId);
+
+  if (isLoading || !diff) return null;
+
+  const changedKeys = Object.keys(diff.changed);
+  const addedKeys = Object.keys(diff.added);
+  const removedKeys = Object.keys(diff.removed);
+  if (changedKeys.length === 0 && addedKeys.length === 0 && removedKeys.length === 0) return null;
+
+  return (
+    <div
+      data-testid="feature-version-diff"
+      className="px-3 py-2 flex-shrink-0"
+      style={{ borderBottom: `1px solid ${KC.border}` }}
+    >
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        Parameter changes vs. previous version
+      </div>
+      <div className="space-y-1" style={{ fontSize: 11 }}>
+        {changedKeys.map((key) => {
+          const delta = diff.changed[key];
+          if (!delta) return null;
+          return (
+            <div key={key} className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+              <span style={{ color: KC.onSurfaceVariant }}>{key}:</span>
+              <span>{String(delta.from_value)}</span>
+              <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+              <span style={{ color: KC.teal }}>{String(delta.to_value)}</span>
+            </div>
+          );
+        })}
+        {addedKeys.map((key) => (
+          <div key={key} className="font-mono" style={{ color: KC.green }}>
+            + {key}: {String(diff.added[key])}
+          </div>
+        ))}
+        {removedKeys.map((key) => (
+          <div key={key} className="font-mono" style={{ color: KC.orange }}>
+            - {key}: {String(diff.removed[key])}
           </div>
         ))}
       </div>
@@ -1296,7 +1357,10 @@ export function TwinViewerPage() {
               inspectorTab === 'overview' ? (
                 <NodeDetail node={node} onClose={() => setSelectedId(null)} />
               ) : inspectorTab === 'history' ? (
-                <NodeHistorySection nodeId={node.id} />
+                <>
+                  <NodeHistorySection nodeId={node.id} />
+                  <FeatureVersionSection nodeId={node.id} />
+                </>
               ) : (
                 <div className="tw-constraints">
                   {linkedConstraints.length ? (

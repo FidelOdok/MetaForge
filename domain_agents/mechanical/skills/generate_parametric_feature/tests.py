@@ -241,6 +241,38 @@ class TestGenerateParametricFeatureHandler:
         assert output.feature_type == "rib"
         assert output.entity_count == 3
 
+    async def test_parameters_threaded_to_commit_including_feature_type(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """FORGE-270 (gap G-D2): the macro's own typed kwargs (plus
+        feature_type, needed to know which macro to re-invoke on a later
+        edit) reach twin.commit_geometry's 'parameters' argument."""
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-789"})
+
+        await handler.execute(
+            GenerateParametricFeatureInput(
+                name="Test Rib",
+                work_product_id=work_product.id,
+                feature={
+                    "feature_type": "rib",
+                    "length_mm": 30.0,
+                    "height_mm": 20.0,
+                    "thickness_mm": 3.0,
+                },
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["parameters"] == {
+            "feature_type": "rib",
+            "length_mm": 30.0,
+            "height_mm": 20.0,
+            "thickness_mm": 3.0,
+        }
+
     async def test_invalid_feature_params_rejected_before_any_mcp_call(self) -> None:
         ctx, handler, work_product = await _make_ctx_and_handler()
 

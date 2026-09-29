@@ -93,6 +93,13 @@ class GenerateParametricFeatureHandler(
                 material=input_data.material,
                 project_id=input_data.project_id,
                 commit=input_data.commit,
+                # FORGE-270 (gap G-D2): record what actually drove this
+                # generation, so a LATER call with a changed value is
+                # recognized as an edit of the same part (a new
+                # SUPERSEDES-linked version) rather than an untraceable
+                # sibling -- and so a diff route can read both revisions'
+                # parameters back out.
+                parameters={**params, "feature_type": feature_type},
             )
             cad_ir_output = await GenerateCadIrHandler(self.context).execute(cad_ir_input)
 
