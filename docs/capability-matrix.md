@@ -80,6 +80,32 @@ and components with no recorded weight contributed nothing to the budget
 they were being checked against. A `no_data` result now names the fields
 it is missing, because "no data" is only useful if it says which.
 
+### MCP resources
+
+The server advertises `resources` on `initialize` and routes
+`resources/list` and `resources/read`. Resources use the `metaforge://`
+scheme:
+
+```
+metaforge://<adapter>/<kind>/<id>
+```
+
+A read routes on the adapter segment the URI already carries, rather than
+asking every adapter and taking the first match — that would make the
+answer depend on the order adapters happen to be constructed in, which no
+caller can see or control.
+
+`resources/list` follows the same rule as `tools/list`: an adapter that
+cannot answer is reported under `_meta.unavailableAdapters`, never quietly
+dropped. A short resource list reads to a model as "that context does not
+exist".
+
+Adapters have been able to register resources since MET-384 and the
+knowledge adapter already did — but until FORGE-355 the unified server
+dispatched neither method and advertised no capability, so a
+spec-compliant client got "Unknown method" and no way to learn they
+existed.
+
 ### Grounding: citing what actually happened
 
 Every `tools/call` response carries a reference in `_meta`:
