@@ -21,13 +21,16 @@ than inheritance.
 
 from __future__ import annotations
 
+import difflib
 import json
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
+from mcp_core.annotations import annotations_for
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
@@ -220,7 +223,15 @@ class UnifiedMcpServer:
                         request_id,
                         _METHOD_NOT_FOUND,
                         str(exc),
-                        {"tool_id": exc.tool_id},
+                        # The suggestions ride in ``data`` as well as the
+                        # message: a client that renders only the message
+                        # still shows them, and one that parses the envelope
+                        # can offer them as choices.
+                        {
+                            "tool_id": exc.tool_id,
+                            "did_you_mean": exc.did_you_mean,
+                            "tool_count": len(self._tool_index),
+                        },
                     )
                 )
             except ToolHandlerError as exc:
@@ -291,17 +302,38 @@ class UnifiedMcpServer:
           ``capability``, ``output_schema``, ``phase``, ``resource_limits``)
         """
         legacy = await self._tool_list(params)
+        mutations_on = self._twin_mutations_enabled()
         mcp_tools: list[dict[str, Any]] = []
         for entry in legacy.get("tools", []):
+            tool_id = entry.get("tool_id") or entry.get("name", "")
             mcp_tool: dict[str, Any] = {
-                "name": entry.get("tool_id") or entry.get("name", ""),
+                "name": tool_id,
                 "description": entry.get("description", ""),
             }
             schema = entry.get("input_schema") or entry.get("inputSchema")
             if schema:
                 mcp_tool["inputSchema"] = schema
+            # FORGE-343: hints the client uses to decide whether a call needs
+            # a human. Unclassified tools inherit the destructive default, so
+            # a new adapter is over-guarded rather than silently waved through.
+            mcp_tool["annotations"] = annotations_for(
+                tool_id,
+                title=entry.get("name") or None,
+                twin_mutations_enabled=mutations_on,
+            )
             mcp_tools.append(mcp_tool)
         return {"tools": mcp_tools}
+
+    def _twin_mutations_enabled(self) -> bool:
+        """Whether the twin adapter currently accepts mutating Cypher.
+
+        Read off the adapter rather than stored here. A second copy of this
+        flag would be a copy that can disagree with the one actually
+        enforcing, and the direction it would disagree in is telling a
+        client that a mutating tool is read-only.
+        """
+        adapter = self._tool_index.get("twin.query_cypher")
+        return bool(getattr(adapter, "_allow_mutations", False))
 
     async def _mcp_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP ``tools/call`` — wraps the legacy aggregate.
@@ -414,12 +446,66 @@ class UnifiedMcpServer:
         )
         return result
 
+    # ── Tool-id resolution (FORGE-343) ────────────────────────────────────
+    #
+    # MetaForge tool ids are dotted (``twin.get_node``) but models routinely
+    # send ``twin_get_node`` or ``twin/get_node``. FORGE-236 fixed exactly
+    # this on the harness side after watching a model read a bare "not
+    # found" as a dead backend; the MCP path — the one every external
+    # harness uses — never got the same treatment.
+
+    @staticmethod
+    def _slug(name: str) -> str:
+        """Collapse every separator so spellings of one tool id agree.
+
+        Splitting on the first separator does not work: ``omniverse_usd``
+        is an adapter id that contains an underscore, so there is no
+        reliable boundary between adapter and tool. Removing the
+        separators entirely sidesteps that.
+        """
+        return re.sub(r"[^a-z0-9]", "", name.lower())
+
+    def _resolve_tool_id(self, requested: str) -> str:
+        """Return the real tool id, or raise naming ones that exist.
+
+        An alias resolves only when it maps to exactly one registered tool.
+        Two candidates means guessing, and guessing which tool to run is how
+        a read turns into a write.
+        """
+        if requested in self._tool_index:
+            return requested
+
+        slug = self._slug(requested)
+        matches = [tid for tid in self._tool_index if self._slug(tid) == slug]
+        if len(matches) == 1:
+            logger.info("mcp_tool_alias_resolved", requested=requested, resolved=matches[0])
+            return matches[0]
+
+        raise ToolNotFoundError(requested, did_you_mean=self._closest_tool_ids(requested))
+
+    def _closest_tool_ids(self, requested: str, limit: int = 5) -> list[str]:
+        """Registered ids closest to what was asked for.
+
+        Matched on the slug so a separator mistake still scores as near,
+        which is the mistake actually observed.
+        """
+        known = sorted(self._tool_index)
+        if not requested:
+            return known[:limit]
+        by_slug = {self._slug(tid): tid for tid in known}
+        close = difflib.get_close_matches(self._slug(requested), list(by_slug), n=limit, cutoff=0.6)
+        if close:
+            return [by_slug[c] for c in close]
+        # Nothing similar: naming the adapter's own tools is still more use
+        # than naming none, when the prefix is recognisable.
+        prefix = requested.split(".")[0].split("_")[0].lower()
+        return [tid for tid in known if tid.lower().startswith(prefix)][:limit]
+
     async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
-        tool_id = params.get("tool_id", "")
-        adapter = self._tool_index.get(tool_id)
-        if adapter is None:
-            raise ToolNotFoundError(tool_id)
+        tool_id = self._resolve_tool_id(params.get("tool_id", ""))
+        adapter = self._tool_index[tool_id]
+        params = {**params, "tool_id": tool_id}
 
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the

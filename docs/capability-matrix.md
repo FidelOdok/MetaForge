@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (65 across 16 adapters)
+## MCP tools (97 across 17 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -16,6 +16,34 @@ loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
 Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
+
+Ninety of the 97 are described in the table below. The seven that are
+not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
+and the five `twin.commit_*` document tools
+(`compliance_checklist`, `design_sketch`, `hazard_analysis`,
+`procurement_record`, `technical_drawing`) — are registered and callable;
+they simply have no row here yet. Every one of the 97 does carry an MCP
+annotation (see below), because that set is checked against the registry
+by a test rather than maintained by hand.
+
+### Tool annotations
+
+Every tool reports `readOnlyHint`, `destructiveHint`, `idempotentHint`
+and `openWorldHint` on `tools/list`, so a harness can tell
+`twin.get_node` from `project.delete` without reading the description.
+
+The classification lives in `mcp_core/annotations.py` and is deliberate,
+never derived from the tool's name — `twin.record_claim` and
+`twin.reject_engineering_change` both read like queries and neither is
+one. A tool nobody has classified inherits MCP's own defaults
+(`readOnlyHint: false`, `destructiveHint: true`), so a new adapter is
+over-guarded rather than silently waved through.
+
+`twin.query_cypher` is the exception worth knowing about: it rejects
+mutating Cypher by default, but the adapter takes `--allow-twin-mutations`,
+and when that is set the tool stops being read-only. The annotation is
+computed per request from the adapter's own flag, so the hint matches
+what the server will actually enforce.
 
 | Adapter | Tool | Purpose | UAT scenario |
 |---|---|---|---|
