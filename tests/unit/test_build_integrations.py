@@ -17,6 +17,7 @@ from scripts.build_integrations import (
     DEFAULT_GATEWAY_URL,
     SLASH_COMMANDS,
     build_claude_code,
+    build_codex,
     plugin_manifest,
 )
 
@@ -123,3 +124,46 @@ class TestEverySkillIsFindable:
     def test_the_scan_finds_the_skills(self) -> None:
         # Guard against the assertion above passing because the glob broke.
         assert len(list(REPO.glob("domain_agents/*/skills/*/definition.json"))) >= 25
+
+
+class TestCodexPackage:
+    """What is generated is what is verified (FORGE-383)."""
+
+    @pytest.fixture(scope="class")
+    def root(self) -> Path:
+        return build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
+
+    def test_the_mcp_block_uses_the_shape_this_repo_documents(self, root: Path) -> None:
+        text = (root / "config.toml").read_text(encoding="utf-8")
+        assert "[[mcp_servers]]" in text
+        assert 'name = "metaforge"' in text
+        assert DEFAULT_GATEWAY_URL in text
+
+    def test_the_authorization_line_is_commented_out(self, root: Path) -> None:
+        # An empty bearer reads as a malformed credential rather than as no
+        # credential, which is a worse failure than omitting the line.
+        line = next(
+            ln
+            for ln in (root / "config.toml").read_text(encoding="utf-8").splitlines()
+            if "authorization" in ln
+        )
+        assert line.lstrip().startswith("#")
+
+    def test_the_same_skills_ship(self, root: Path) -> None:
+        defined = {p.parent.name for p in REPO.glob("domain_agents/*/skills/*/definition.json")}
+        assert {p.name for p in (root / "skills").iterdir() if p.is_dir()} == defined
+
+    def test_no_invented_plugin_manifest(self, root: Path) -> None:
+        # Codex plugins exist, but the packaging format is not publicly
+        # documented. A manifest shaped like a guess would look authoritative
+        # and be wrong, which is worse than not having one. If this test
+        # starts failing because someone added a real manifest, good -- delete
+        # it and say where the format came from.
+        assert not (root / "plugin.json").exists()
+        assert not (root / ".codex-plugin").exists()
+
+    def test_agents_md_states_what_the_server_will_do(self, root: Path) -> None:
+        text = (root / "AGENTS.md").read_text(encoding="utf-8")
+        assert "no_data" in text and "gap, not a pass" in text
+        assert "held for approval" in text
+        assert "unavailableAdapters" in text

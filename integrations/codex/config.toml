@@ -1,0 +1,10 @@
+# Append to ~/.codex/config.toml, then restart Codex CLI.
+#
+# Codex expands ${VAR} from the calling shell's environment. A gateway
+# started without auth needs no `authorization` line at all -- leave it
+# out rather than sending an empty bearer, which reads as a malformed
+# credential instead of as no credential.
+[[mcp_servers]]
+name = "metaforge"
+url  = "http://localhost:8765/mcp"
+# authorization = "Bearer ${METAFORGE_MCP_API_KEY}"
