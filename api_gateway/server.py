@@ -787,6 +787,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_robot_description_recorder,
         make_robot_description_updater,
     )
+    from api_gateway.twin.sensitivity import make_sensitivity_ranker
     from api_gateway.twin.structured_document_recorder import (
         make_compliance_checklist_recorder,
         make_hazard_analysis_recorder,
@@ -821,6 +822,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     revalidation_executor_fn = make_revalidation_executor(
         twin, tool_dispatch={"twin.evaluate_metric": metric_evaluator_fn}
     )
+    sensitivity_ranker_fn = make_sensitivity_ranker(twin, evidence_recorder=evidence_recorder_fn)
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -924,6 +926,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,
+        # FORGE-317: one-at-a-time finite-difference sensitivity ranking.
+        sensitivity_ranker=sensitivity_ranker_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

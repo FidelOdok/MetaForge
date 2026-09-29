@@ -33,6 +33,13 @@ Evidence, escalating to a real ``calculix.run_fea`` MCP call) lives in
 dependency at all, mirroring the twin_core/api_gateway split every other
 piece of this epic (e.g. ``twin_core/consistency/staleness.py`` vs.
 ``api_gateway/twin/evidence_recorder.py``) already uses.
+
+FORGE-317: ``hollow_tube_tip_deflection_mm``/``hollow_tube_mass_kg`` add
+``wall_thickness_mm`` as a real, varyable parameter (the solid-section
+formula above has no concept of it) -- needed so a sensitivity sweep over
+wall thickness means something physical. See
+``twin_core/prediction/sensitivity.py`` for the finite-difference ranking
+built on top of these.
 """
 
 from __future__ import annotations
@@ -83,6 +90,80 @@ def cantilever_tip_deflection_mm(
         raise ValueError("cantilever_tip_deflection_mm: youngs_modulus_mpa must be positive")
     moment_of_inertia_mm4 = width_mm * height_mm**3 / 12.0
     return (load_n * length_mm**3) / (3.0 * youngs_modulus_mpa * moment_of_inertia_mm4)
+
+
+def hollow_rect_moment_of_inertia_mm4(
+    width_mm: float, height_mm: float, wall_thickness_mm: float
+) -> float:
+    """Second moment of area for a rectangular hollow tube (constant wall
+    thickness on all four sides): outer ``width_mm`` x ``height_mm`` minus
+    the inner ``(width_mm - 2t)`` x ``(height_mm - 2t)`` cavity.
+
+    Reduces to the solid-beam value (``width_mm * height_mm**3 / 12``) when
+    ``wall_thickness_mm`` is large enough that no cavity fits -- a thick
+    "hollow" section is, physically, just solid.
+    """
+    if wall_thickness_mm <= 0:
+        raise ValueError("hollow_rect_moment_of_inertia_mm4: wall_thickness_mm must be positive")
+    inner_width_mm = width_mm - 2 * wall_thickness_mm
+    inner_height_mm = height_mm - 2 * wall_thickness_mm
+    if inner_width_mm <= 0 or inner_height_mm <= 0:
+        return width_mm * height_mm**3 / 12.0
+    return (width_mm * height_mm**3 - inner_width_mm * inner_height_mm**3) / 12.0
+
+
+def hollow_tube_tip_deflection_mm(
+    *,
+    length_mm: float,
+    width_mm: float,
+    height_mm: float,
+    wall_thickness_mm: float,
+    load_n: float,
+    youngs_modulus_mpa: float,
+) -> float:
+    """Same cantilever formula as :func:`cantilever_tip_deflection_mm`
+    (``delta = F L^3 / (3 E I)``), with I from
+    :func:`hollow_rect_moment_of_inertia_mm4` instead of the solid-section
+    formula -- FORGE-317's sensitivity analysis needs ``wall_thickness_mm``
+    as a real, varyable parameter, which a solid section has no concept of.
+    """
+    if length_mm <= 0 or width_mm <= 0 or height_mm <= 0:
+        raise ValueError("hollow_tube_tip_deflection_mm: length/width/height must be positive")
+    if load_n < 0:
+        raise ValueError("hollow_tube_tip_deflection_mm: load_n must be non-negative")
+    if youngs_modulus_mpa <= 0:
+        raise ValueError("hollow_tube_tip_deflection_mm: youngs_modulus_mpa must be positive")
+    moment_of_inertia_mm4 = hollow_rect_moment_of_inertia_mm4(
+        width_mm, height_mm, wall_thickness_mm
+    )
+    return (load_n * length_mm**3) / (3.0 * youngs_modulus_mpa * moment_of_inertia_mm4)
+
+
+def hollow_tube_mass_kg(
+    *,
+    length_mm: float,
+    width_mm: float,
+    height_mm: float,
+    wall_thickness_mm: float,
+    density_kg_m3: float,
+) -> float:
+    """Mass of a rectangular hollow tube: outer volume minus the inner
+    cavity's, times density. ``density_kg_m3`` is resolved by the caller
+    (e.g. ``tool_registry.tools.cadquery.materials.resolve_density_kg_m3``,
+    FORGE-234's own material table -- this module stays free of
+    tool_registry imports, same twin_core/api_gateway split as everywhere
+    else in this epic)."""
+    if length_mm <= 0 or width_mm <= 0 or height_mm <= 0:
+        raise ValueError("hollow_tube_mass_kg: length/width/height must be positive")
+    if density_kg_m3 <= 0:
+        raise ValueError("hollow_tube_mass_kg: density_kg_m3 must be positive")
+    inner_width_mm = width_mm - 2 * wall_thickness_mm
+    inner_height_mm = height_mm - 2 * wall_thickness_mm
+    if inner_width_mm <= 0 or inner_height_mm <= 0:
+        volume_mm3 = length_mm * width_mm * height_mm
+    else:
+        volume_mm3 = length_mm * (width_mm * height_mm - inner_width_mm * inner_height_mm)
+    return volume_mm3 * density_kg_m3 / 1e9  # mm^3 -> m^3
 
 
 def evaluate_tip_deflection_tier0(

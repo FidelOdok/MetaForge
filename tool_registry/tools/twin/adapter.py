@@ -67,6 +67,7 @@ class TwinServer(McpToolServer):
         hierarchy_rollup_fn: Any = None,
         metric_evaluator: Any = None,
         revalidation_executor: Any = None,
+        sensitivity_ranker: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -222,6 +223,14 @@ class TwinServer(McpToolServer):
         # needing manual review. Same injection seam as every recorder
         # above; None keeps tool_registry free of api_gateway imports.
         self._revalidation_executor = revalidation_executor
+        # FORGE-317: an injected async ``rank(...)`` (make_sensitivity_ranker)
+        # -- one-at-a-time finite-difference sensitivity of a metric's
+        # margin against named parameters (wall_thickness_mm/length_mm for
+        # tip_deflection, wall_thickness_mm/material for mass), against a
+        # CAD work product's own recorded geometry. Same injection seam as
+        # every recorder above; None keeps tool_registry free of
+        # twin_core.prediction/tool_registry.tools.cadquery imports.
+        self._sensitivity_ranker = sensitivity_ranker
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -267,6 +276,8 @@ class TwinServer(McpToolServer):
             self._register_evaluate_metric()
         if revalidation_executor is not None:
             self._register_execute_revalidation_plan()
+        if sensitivity_ranker is not None:
+            self._register_rank_sensitivity()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -3633,3 +3644,128 @@ class TwinServer(McpToolServer):
         if not ect_id or not isinstance(ect_id, str):
             raise ValueError("twin.execute_revalidation_plan: 'ect_id' is required")
         return await self._revalidation_executor(ect_id)
+
+    # ------------------------------------------------------------------
+    # twin.rank_sensitivity (FORGE-317)
+    # ------------------------------------------------------------------
+
+    def _register_rank_sensitivity(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.rank_sensitivity",
+                adapter_id="twin",
+                name="Rank Parameter Sensitivity",
+                description=(
+                    "One-at-a-time finite-difference sensitivity of a metric's margin "
+                    "against its critical parameters, against a CAD work product's own "
+                    "recorded geometry (spec App. A Solver, step 15). "
+                    "metric='tip_deflection' ranks wall_thickness_mm and length_mm; "
+                    "metric='mass' ranks wall_thickness_mm and candidate materials "
+                    "(swap-and-compare, not a derivative). Records the ranking as "
+                    "Evidence pinned to the work product. wall_thickness_mm has no "
+                    "recorded home on a solid-beam CAD part -- supply the value you "
+                    "want evaluated, this tool does not guess it."
+                ),
+                capability="twin_sensitivity",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {
+                            "type": "string",
+                            "enum": ["tip_deflection", "mass"],
+                        },
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "wall_thickness_mm": {"type": "number"},
+                        "project_id": {"type": "string"},
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "Baseline material name (tool_registry.tools.cadquery."
+                                "materials, e.g. 'aluminum_6061'). Default 'aluminum_6061'."
+                            ),
+                        },
+                        "load_n": {
+                            "type": "number",
+                            "description": "Required for metric='tip_deflection'.",
+                        },
+                        "deflection_limit_mm": {
+                            "type": "number",
+                            "description": "Required for metric='tip_deflection'.",
+                        },
+                        "mass_limit_kg": {
+                            "type": "number",
+                            "description": "Required for metric='mass'.",
+                        },
+                        "candidate_materials": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Materials to rank against for metric='mass'. Default "
+                                "['aluminum_6061', 'steel', 'titanium', 'carbon_fiber']."
+                            ),
+                        },
+                        "delta_fraction": {
+                            "type": "number",
+                            "description": "Finite-difference step as a fraction. Default 0.1.",
+                        },
+                    },
+                    "required": ["metric", "work_product_id", "wall_thickness_mm"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string"},
+                        "baseline_value": {"type": "number"},
+                        "limit": {"type": "number"},
+                        "baseline_margin": {"type": "number"},
+                        "rankings": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.rank_sensitivity,
+        )
+
+    async def rank_sensitivity(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        metric = arguments.get("metric")
+        if not isinstance(metric, str):
+            raise ValueError("twin.rank_sensitivity: 'metric' is required")
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.rank_sensitivity: 'work_product_id' is required")
+        wall_thickness_mm = arguments.get("wall_thickness_mm")
+        if not isinstance(wall_thickness_mm, (int, float)):
+            raise ValueError("twin.rank_sensitivity: 'wall_thickness_mm' is required (number)")
+        project_id = arguments.get("project_id")
+        material = arguments.get("material", "aluminum_6061")
+        load_n = arguments.get("load_n")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        mass_limit_kg = arguments.get("mass_limit_kg")
+        candidate_materials = arguments.get("candidate_materials")
+        delta_fraction = arguments.get("delta_fraction", 0.1)
+        return await self._sensitivity_ranker(
+            metric=metric,
+            work_product_id=work_product_id,
+            wall_thickness_mm=float(wall_thickness_mm),
+            project_id=project_id if isinstance(project_id, str) else None,
+            material=material if isinstance(material, str) else "aluminum_6061",
+            load_n=float(load_n) if isinstance(load_n, (int, float)) else None,
+            deflection_limit_mm=(
+                float(deflection_limit_mm)
+                if isinstance(deflection_limit_mm, (int, float))
+                else None
+            ),
+            mass_limit_kg=float(mass_limit_kg) if isinstance(mass_limit_kg, (int, float)) else None,
+            candidate_materials=(
+                candidate_materials if isinstance(candidate_materials, list) else None
+            ),
+            delta_fraction=float(delta_fraction),
+        )
