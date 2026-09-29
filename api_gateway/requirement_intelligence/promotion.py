@@ -86,11 +86,25 @@ async def attempt_promotion(
     required_claim_ids: list[str],
     k: float = 1.0,
     decided_by: str | None = None,
+    comment: str | None = None,
+    reject: bool = False,
 ) -> dict[str, Any]:
+    """Evaluate ``required_claim_ids`` against live evidence and either
+    promote or refuse (see module docstring). ``reject=True`` is the
+    ticket's own "approve/reject with comment" human-veto path (FORGE-290,
+    gap G-G4): a reviewer can refuse a promotion EVEN IF every required
+    claim is satisfied -- the evidence-gate logic above is a necessary
+    condition for promotion, never a sufficient one that overrides a
+    human's own judgement. Requires ``decided_by`` (who rejected it), the
+    same honesty precedent as promoting requiring a human identity.
+    """
+    if reject and not decided_by:
+        raise ValueError("attempt_promotion: reject=True requires decided_by (who rejected it)")
     with tracer.start_as_current_span("twin.attempt_promotion") as span:
         pid = UUID(project_id)
         span.set_attribute("promotion.level", level)
         span.set_attribute("promotion.required_claim_count", len(required_claim_ids))
+        span.set_attribute("promotion.reject", reject)
 
         matrix_rows = await build_requirement_matrix(twin, pid)
         rows_by_id = {row.requirementId: row for row in matrix_rows}
@@ -133,7 +147,9 @@ async def attempt_promotion(
 
         promoted = False
         blocked_reason: str | None = None
-        if blocking:
+        if reject:
+            blocked_reason = comment or f"rejected by {decided_by}"
+        elif blocking:
             blocked_reason = "; ".join(
                 f"{r.requirement_name} ({r.decision.value}): {r.detail}" for r in blocking
             )
@@ -152,7 +168,10 @@ async def attempt_promotion(
             results=results,
             promoted=promoted,
             blocked_reason=blocked_reason,
-            decided_by=decided_by if promoted else None,
+            # Recorded whether promoted or blocked -- "who made this call"
+            # matters for a refusal too, not only a grant.
+            decided_by=decided_by,
+            comment=comment,
             k=k,
         )
         created = await twin.create_maturity_gate(gate)
@@ -164,6 +183,7 @@ async def attempt_promotion(
             level=level,
             promoted=promoted,
             blocked_reason=blocked_reason,
+            reject=reject,
         )
 
         return {
@@ -171,6 +191,8 @@ async def attempt_promotion(
             "level": level,
             "promoted": promoted,
             "blocked_reason": blocked_reason,
+            "decided_by": decided_by,
+            "comment": comment,
             "results": [
                 {
                     "requirementId": str(r.requirement_id),

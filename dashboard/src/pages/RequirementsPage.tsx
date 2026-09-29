@@ -16,6 +16,7 @@ import {
   useDesignLoop,
   useStartDesignLoop,
 } from '../hooks/use-design-loop';
+import { useAttemptPromotion, usePromotionHistory } from '../hooks/use-promotion';
 import type {
   EvidenceSummary,
   PassFail,
@@ -24,6 +25,7 @@ import type {
   RequirementRecord,
 } from '../types/requirements';
 import type { DesignLoopIteration } from '../types/design-loop';
+import type { AttemptPromotionResult, MaturityLevel } from '../types/promotion';
 
 const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
 
@@ -40,6 +42,13 @@ const EXPECTED_EVIDENCE_TYPES = [
   'datasheet',
   'external_reference',
 ] as const;
+
+const MATURITY_LEVELS: MaturityLevel[] = [
+  'concept',
+  'sim_validated',
+  'physically_validated',
+  'released',
+];
 
 const FIELD_STYLE: React.CSSProperties = {
   background: 'var(--mf-c-191b22)',
@@ -760,6 +769,235 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
   );
 }
 
+function DecisionBadge({ decision }: { decision: string }) {
+  const variant =
+    decision === 'pass' || decision === 'waived'
+      ? 'success'
+      : decision === 'uncertain'
+        ? 'warning'
+        : 'error';
+  return <Badge variant={variant}>{decision}</Badge>;
+}
+
+/** FORGE-290 (gap G-G4): evidence-gated approvals -- gates that evaluate
+ * real measured data (the same live requirement matrix status the evidence
+ * matrix above already renders) and block on `no_data`, plus a human
+ * approve/reject-with-comment veto on top (FORGE-319's own gate only ever
+ * refused on bad evidence; a reviewer can also refuse good evidence). */
+function GateReviewSection({
+  projectId,
+  requirements,
+}: {
+  projectId?: string;
+  requirements: RequirementRecord[];
+}) {
+  const toast = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [level, setLevel] = useState<MaturityLevel>('sim_validated');
+  const [decidedBy, setDecidedBy] = useState('');
+  const [comment, setComment] = useState('');
+  const [lastResult, setLastResult] = useState<AttemptPromotionResult | null>(null);
+
+  const attempt = useAttemptPromotion();
+  const { data: history } = usePromotionHistory(projectId);
+
+  const toggle = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const submit = (reject: boolean) => {
+    if (!projectId || selectedIds.length === 0 || !decidedBy.trim()) return;
+    attempt.mutate(
+      {
+        projectId,
+        level,
+        requiredClaimIds: selectedIds,
+        decidedBy: decidedBy.trim(),
+        comment: comment.trim() || undefined,
+        reject,
+      },
+      {
+        onSuccess: (result) => {
+          setLastResult(result);
+          toast[result.promoted ? 'success' : 'error'](
+            result.promoted ? `Promoted to ${result.level}` : result.blockedReason || 'Blocked',
+          );
+        },
+        onError: (err) => {
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.error(detail || 'Could not evaluate the gate');
+        },
+      },
+    );
+  };
+
+  const canSubmit = !!projectId && selectedIds.length > 0 && decidedBy.trim() !== '';
+
+  return (
+    <div className="mb-6" data-testid="gate-review-section">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+          Gate review
+        </h2>
+        {projectId && !showForm && (
+          <button
+            type="button"
+            data-testid="open-gate-review-button"
+            onClick={() => setShowForm(true)}
+            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            + Attempt promotion
+          </button>
+        )}
+      </div>
+
+      {projectId && showForm && (
+        <div
+          data-testid="gate-review-form"
+          className="mb-3 rounded-lg p-3"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <div className="mb-2 text-xs text-on-surface-variant">Required claims</div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {requirements.map((req) => (
+              <label
+                key={req.id}
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-on-surface"
+                style={{ ...FIELD_STYLE, cursor: 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(req.id)}
+                  onChange={() => toggle(req.id)}
+                />
+                {req.name}
+              </label>
+            ))}
+            {requirements.length === 0 && (
+              <span className="text-xs text-on-surface-variant">No requirements to gate on yet.</span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Level
+              <select
+                value={level}
+                onChange={(e) => setLevel(e.target.value as MaturityLevel)}
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+                style={{ ...FIELD_STYLE, width: '160px' }}
+              >
+                {MATURITY_LEVELS.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              Reviewer
+              <input
+                value={decidedBy}
+                onChange={(e) => setDecidedBy(e.target.value)}
+                placeholder="you@example.com"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '180px' }}
+              />
+            </label>
+            <label className="flex flex-1 flex-col gap-1 text-xs text-on-surface-variant" style={{ minWidth: '200px' }}>
+              Comment
+              <input
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="rationale (optional on approve, becomes the reason on reject)"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={FIELD_STYLE}
+              />
+            </label>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                data-testid="approve-gate-button"
+                disabled={!canSubmit || attempt.isPending}
+                onClick={() => submit(false)}
+              >
+                {attempt.isPending ? 'Evaluating…' : 'Approve'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="reject-gate-button"
+                disabled={!canSubmit || attempt.isPending}
+                onClick={() => submit(true)}
+              >
+                Reject
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lastResult && (
+        <div
+          data-testid="gate-review-result"
+          className="mb-3 rounded-lg p-3"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <div className="mb-2 flex items-center gap-2">
+            <Badge variant={lastResult.promoted ? 'success' : 'error'}>
+              {lastResult.promoted ? 'promoted' : 'blocked'}
+            </Badge>
+            <span className="text-xs text-on-surface-variant">{lastResult.level}</span>
+          </div>
+          {lastResult.blockedReason && (
+            <div className="mb-2 text-xs text-on-surface">{lastResult.blockedReason}</div>
+          )}
+          <div className="flex flex-col gap-1">
+            {lastResult.results.map((r) => (
+              <div key={r.requirementId} className="flex items-center gap-2 text-xs text-on-surface">
+                <DecisionBadge decision={r.decision} />
+                <span>{r.requirementName}</span>
+                <span className="text-on-surface-variant">{r.detail}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {history && history.gates.length > 0 && (
+        <div data-testid="gate-review-history" className="flex flex-col gap-1">
+          {history.gates.map((g) => (
+            <div
+              key={g.gateId}
+              className="flex items-center gap-2 rounded px-2 py-1 text-xs text-on-surface-variant"
+              style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p1)' }}
+            >
+              <Badge variant={g.promoted ? 'success' : 'error'}>{g.promoted ? 'promoted' : 'blocked'}</Badge>
+              <span>{g.level}</span>
+              {g.decidedBy && <span>by {g.decidedBy}</span>}
+              {g.comment && <span>&mdash; {g.comment}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!showForm && !lastResult && (!history || history.gates.length === 0) && (
+        <EmptyState
+          title="No gate attempts yet"
+          description="Attempt a promotion above to gate on real measured data -- blocks on no_data, not just fail."
+        />
+      )}
+    </div>
+  );
+}
+
 export function RequirementsPage() {
   const { activeProjectId } = useActiveProject();
   const [productType, setProductType] = useState('generic');
@@ -801,6 +1039,8 @@ export function RequirementsPage() {
       <RequirementMatrixSection projectId={activeProjectId ?? undefined} />
 
       <DesignLoopSection projectId={activeProjectId ?? undefined} />
+
+      <GateReviewSection projectId={activeProjectId ?? undefined} requirements={requirements} />
 
       {completeness && (
         <div

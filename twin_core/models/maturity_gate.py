@@ -100,4 +100,9 @@ class MaturityGate(NodeBase):
     decided_by: str | None = None
     decided_at: datetime | None = None
     k: float = 1.0
+    # FORGE-290 (gap G-G4): a human reviewer's own rationale -- distinct
+    # from `blocked_reason`, which is system-derived from claim decisions.
+    # Set on either outcome: a reviewer can leave context on an approval
+    # too, not only a rejection.
+    comment: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
