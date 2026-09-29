@@ -257,3 +257,204 @@ def optimize_wall_thickness(
         winner=winner,
         candidates=candidates,
     )
+
+
+# ---------------------------------------------------------------------------
+# Second parameter (FORGE-288, gap G-G2): height_mm, wall_thickness_mm fixed.
+# ---------------------------------------------------------------------------
+#
+# Genuinely generalizes twin.start_design_loop (FORGE-287) beyond the single
+# wall_thickness_mm parameter it shipped with -- proof that the design
+# loop's own candidate-ingestion logic is now parameter-agnostic, not a
+# renamed copy of the same search. Same real physics
+# (twin_core/prediction/evaluator.py's hollow-tube hand-calcs), same
+# monotonic-bisection soundness: for a FIXED wall_thickness_mm, increasing
+# height_mm strictly increases the section's moment of inertia (cubic in
+# height) -- strictly lowering deflection and bending stress -- while ALSO
+# strictly increasing cross-sectional area (outer width*height grows faster
+# than the inner cavity's width*height, since the outer width exceeds the
+# inner one for any wall_thickness_mm > 0). So, exactly as with
+# wall_thickness_mm, the minimum-mass feasible point is the smallest height
+# where both constraints first hold.
+#
+# A parallel CandidateEvaluation/OptimizationResult pair, not a reused one:
+# CandidateEvaluation's own ``wall_thickness_mm`` field would be dishonestly
+# repurposed to mean "height" if shared -- a field name should name what it
+# holds.
+
+
+class TubeHeightCandidateEvaluation(BaseModel):
+    """One height_mm value's full tier-0 evaluation, wall_thickness_mm held
+    fixed."""
+
+    height_mm: float
+    mass_kg: float
+    deflection_mm: float
+    deflection_margin_mm: float
+    stress_mpa: float
+    safety_factor: float
+    sf_margin: float
+    feasible: bool
+
+
+class TubeHeightOptimizationResult(BaseModel):
+    status: str  # "optimal" | "infeasible" | "already_feasible_at_min"
+    detail: str
+    winner: TubeHeightCandidateEvaluation | None = None
+    candidates: list[TubeHeightCandidateEvaluation] = Field(default_factory=list)
+
+
+def _evaluate_height(
+    height_mm: float,
+    *,
+    length_mm: float,
+    width_mm: float,
+    wall_thickness_mm: float,
+    load_n: float,
+    youngs_modulus_mpa: float,
+    density_kg_m3: float,
+    yield_mpa: float,
+    deflection_limit_mm: float,
+    sf_limit: float,
+) -> TubeHeightCandidateEvaluation:
+    deflection_mm = hollow_tube_tip_deflection_mm(
+        length_mm=length_mm,
+        width_mm=width_mm,
+        height_mm=height_mm,
+        wall_thickness_mm=wall_thickness_mm,
+        load_n=load_n,
+        youngs_modulus_mpa=youngs_modulus_mpa,
+    )
+    mass_kg = hollow_tube_mass_kg(
+        length_mm=length_mm,
+        width_mm=width_mm,
+        height_mm=height_mm,
+        wall_thickness_mm=wall_thickness_mm,
+        density_kg_m3=density_kg_m3,
+    )
+    moment_of_inertia_mm4 = hollow_rect_moment_of_inertia_mm4(
+        width_mm, height_mm, wall_thickness_mm
+    )
+    stress_mpa = cantilever_max_bending_stress_mpa(
+        length_mm=length_mm,
+        load_n=load_n,
+        height_mm=height_mm,
+        moment_of_inertia_mm4=moment_of_inertia_mm4,
+    )
+    safety_factor = yield_mpa / stress_mpa if stress_mpa > 0 else float("inf")
+    deflection_margin_mm = deflection_limit_mm - deflection_mm
+    sf_margin = safety_factor - sf_limit
+    return TubeHeightCandidateEvaluation(
+        height_mm=height_mm,
+        mass_kg=mass_kg,
+        deflection_mm=deflection_mm,
+        deflection_margin_mm=deflection_margin_mm,
+        stress_mpa=stress_mpa,
+        safety_factor=safety_factor,
+        sf_margin=sf_margin,
+        feasible=deflection_margin_mm >= 0 and sf_margin >= 0,
+    )
+
+
+def optimize_tube_height(
+    *,
+    length_mm: float,
+    width_mm: float,
+    wall_thickness_mm: float,
+    load_n: float,
+    youngs_modulus_mpa: float,
+    density_kg_m3: float,
+    yield_mpa: float,
+    deflection_limit_mm: float,
+    sf_limit: float = 2.0,
+    height_min_mm: float = 1.0,
+    height_max_mm: float | None = None,
+    tolerance_mm: float = 0.01,
+    max_iterations: int = 60,
+) -> TubeHeightOptimizationResult:
+    """Find the minimum ``height_mm`` (=> minimum mass, for fixed
+    ``wall_thickness_mm``) that satisfies both ``deflection_mm <=
+    deflection_limit_mm`` and ``safety_factor >= sf_limit``. Mirrors
+    :func:`optimize_wall_thickness`'s own bisection structure exactly --
+    see this module's docstring for why bisection is exact here too."""
+    if height_max_mm is None:
+        height_max_mm = width_mm * 4.0
+    if height_min_mm <= 2 * wall_thickness_mm:
+        raise ValueError(
+            "optimize_tube_height: height_min_mm must leave a real cavity above "
+            f"2*wall_thickness_mm ({2 * wall_thickness_mm:.4g}mm)"
+        )
+    if height_max_mm <= height_min_mm:
+        raise ValueError(
+            f"optimize_tube_height: height_max_mm ({height_max_mm:.4g}mm) must exceed "
+            f"height_min_mm ({height_min_mm:.4g}mm)"
+        )
+
+    def eval_at(height_mm: float) -> TubeHeightCandidateEvaluation:
+        return _evaluate_height(
+            height_mm,
+            length_mm=length_mm,
+            width_mm=width_mm,
+            wall_thickness_mm=wall_thickness_mm,
+            load_n=load_n,
+            youngs_modulus_mpa=youngs_modulus_mpa,
+            density_kg_m3=density_kg_m3,
+            yield_mpa=yield_mpa,
+            deflection_limit_mm=deflection_limit_mm,
+            sf_limit=sf_limit,
+        )
+
+    lo_eval = eval_at(height_min_mm)
+    hi_eval = eval_at(height_max_mm)
+    candidates = [lo_eval, hi_eval]
+
+    if lo_eval.feasible:
+        return TubeHeightOptimizationResult(
+            status="already_feasible_at_min",
+            detail=(
+                f"the minimum allowed height ({height_min_mm:.4g}mm) already satisfies "
+                f"both constraints (deflection_margin={lo_eval.deflection_margin_mm:.4g}mm, "
+                f"sf_margin={lo_eval.sf_margin:.4g}) -- no shorter, lighter option was searched"
+            ),
+            winner=lo_eval,
+            candidates=candidates,
+        )
+    if not hi_eval.feasible:
+        return TubeHeightOptimizationResult(
+            status="infeasible",
+            detail=(
+                f"even the maximum allowed height ({height_max_mm:.4g}mm) fails: "
+                f"deflection_margin={hi_eval.deflection_margin_mm:.4g}mm, "
+                f"sf_margin={hi_eval.sf_margin:.4g} -- no height in "
+                f"[{height_min_mm:.4g}, {height_max_mm:.4g}]mm satisfies both constraints "
+                "with this material and load"
+            ),
+            winner=None,
+            candidates=candidates,
+        )
+
+    lo, hi = height_min_mm, height_max_mm
+    for _ in range(max_iterations):
+        if hi - lo <= tolerance_mm:
+            break
+        mid = (lo + hi) / 2.0
+        mid_eval = eval_at(mid)
+        candidates.append(mid_eval)
+        if mid_eval.feasible:
+            hi = mid
+        else:
+            lo = mid
+
+    winner = eval_at(hi)
+    candidates.append(winner)
+    return TubeHeightOptimizationResult(
+        status="optimal",
+        detail=(
+            "minimum feasible height found via bisection: "
+            f"{winner.height_mm:.4g}mm (mass {winner.mass_kg:.4g}kg, "
+            f"deflection_margin={winner.deflection_margin_mm:.4g}mm, "
+            f"sf_margin={winner.sf_margin:.4g})"
+        ),
+        winner=winner,
+        candidates=candidates,
+    )

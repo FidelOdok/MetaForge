@@ -81,6 +81,7 @@ class TwinServer(McpToolServer):
         design_loop_starter: Any = None,
         design_loop_reader: Any = None,
         design_loop_approver: Any = None,
+        tube_height_design_loop_starter: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -285,6 +286,11 @@ class TwinServer(McpToolServer):
         self._design_loop_starter = design_loop_starter
         self._design_loop_reader = design_loop_reader
         self._design_loop_approver = design_loop_approver
+        # FORGE-288: a second real optimizer (height_mm) plugged into the
+        # SAME design-loop persistence/read/approve machinery above --
+        # get_design_loop/approve_design_loop need no separate tube-height
+        # variant, they already work on any DesignLoopIteration by loop_id.
+        self._tube_height_design_loop_starter = tube_height_design_loop_starter
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -349,6 +355,8 @@ class TwinServer(McpToolServer):
             self._register_get_design_loop()
         if design_loop_approver is not None:
             self._register_approve_design_loop()
+        if tube_height_design_loop_starter is not None:
+            self._register_start_tube_height_design_loop()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4439,6 +4447,131 @@ class TwinServer(McpToolServer):
             material=material if isinstance(material, str) else "aluminum_6061",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.start_tube_height_design_loop (FORGE-288)
+    # ------------------------------------------------------------------
+
+    def _register_start_tube_height_design_loop(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.start_tube_height_design_loop",
+                adapter_id="twin",
+                name="Start Tube-Height Design Loop",
+                description=(
+                    "Closed loop over a SECOND real parameter (gap G-G2): sweeps "
+                    "height_mm, wall_thickness_mm held fixed, over the same real "
+                    "hollow-tube hand-calc twin.optimize_parameter/twin.start_design_loop "
+                    "already use. Same closed-loop machinery as twin.start_design_loop "
+                    "(persists every candidate as a real DesignLoopIteration, "
+                    "twin.get_design_loop/twin.approve_design_loop work unchanged) -- "
+                    "proof the loop generalizes beyond a single hardcoded parameter, not "
+                    "a second, separate loop implementation."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "wall_thickness_mm": {
+                            "type": "number",
+                            "description": "Held fixed while height_mm is swept.",
+                        },
+                        "load_n": {"type": "number"},
+                        "deflection_limit_mm": {"type": "number"},
+                        "sf_limit": {
+                            "type": "number",
+                            "description": "Minimum acceptable safety factor. Default 2.0.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "tool_registry.tools.cadquery.materials name, e.g. "
+                                "'aluminum_6061'. Default 'aluminum_6061'."
+                            ),
+                        },
+                        "height_min_mm": {
+                            "type": "number",
+                            "description": "Search lower bound. Default 1.0.",
+                        },
+                        "height_max_mm": {
+                            "type": "number",
+                            "description": "Search upper bound. Default: width_mm * 4.",
+                        },
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirement (Constraint) ids this loop is evaluated "
+                                "against -- linked to every iteration via CONSTRAINED_BY."
+                            ),
+                        },
+                    },
+                    "required": [
+                        "work_product_id",
+                        "wall_thickness_mm",
+                        "load_n",
+                        "deflection_limit_mm",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loop_id": {"type": "string"},
+                        "status": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "winner": {"type": ["object", "null"]},
+                        "iteration_count": {"type": "integer"},
+                        "iteration_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.start_tube_height_design_loop,
+        )
+
+    async def start_tube_height_design_loop(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.start_tube_height_design_loop: 'work_product_id' is required")
+        wall_thickness_mm = arguments.get("wall_thickness_mm")
+        if not isinstance(wall_thickness_mm, (int, float)):
+            raise ValueError(
+                "twin.start_tube_height_design_loop: 'wall_thickness_mm' is required (number)"
+            )
+        load_n = arguments.get("load_n")
+        if not isinstance(load_n, (int, float)):
+            raise ValueError("twin.start_tube_height_design_loop: 'load_n' is required (number)")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        if not isinstance(deflection_limit_mm, (int, float)):
+            raise ValueError(
+                "twin.start_tube_height_design_loop: 'deflection_limit_mm' is required (number)"
+            )
+        sf_limit = arguments.get("sf_limit", 2.0)
+        material = arguments.get("material", "aluminum_6061")
+        height_min_mm = arguments.get("height_min_mm", 1.0)
+        height_max_mm = arguments.get("height_max_mm")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        return await self._tube_height_design_loop_starter(
+            work_product_id=work_product_id,
+            wall_thickness_mm=float(wall_thickness_mm),
+            load_n=float(load_n),
+            deflection_limit_mm=float(deflection_limit_mm),
+            sf_limit=float(sf_limit),
+            material=material if isinstance(material, str) else "aluminum_6061",
+            height_min_mm=float(height_min_mm),
+            height_max_mm=float(height_max_mm) if isinstance(height_max_mm, (int, float)) else None,
             project_id=project_id if isinstance(project_id, str) else None,
             requirement_ids=(
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None

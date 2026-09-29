@@ -173,6 +173,94 @@ class TestMakeDesignLoopStarter:
         assert "decision_node_id" in out
 
 
+class TestTubeHeightDesignLoop:
+    """FORGE-288 (gap G-G2): a second real optimizer (height_mm, wall
+    thickness fixed) plugged into the SAME make_design_loop_starter
+    machinery via parameter_name/candidate_mapper -- proof the
+    generalization is real, not a rename. The full pre-existing
+    TestMakeDesignLoopStarter suite above (unchanged, still passing) is
+    itself the regression proof that the wall-thickness default path is
+    unaffected."""
+
+    async def test_optimal_run_persists_every_candidate_as_height_mm(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        from api_gateway.twin.design_loop import tube_height_candidate_mapper
+        from api_gateway.twin.optimizer import make_tube_height_optimizer
+
+        wp = await _seed_cad(twin)
+        optimize = make_tube_height_optimizer(twin)
+        start = make_design_loop_starter(
+            twin,
+            optimize=optimize,
+            parameter_name="height_mm",
+            candidate_mapper=tube_height_candidate_mapper,
+        )
+        out = await start(
+            work_product_id=str(wp.id),
+            wall_thickness_mm=2.0,
+            load_n=100.0,
+            deflection_limit_mm=0.5,
+            sf_limit=2.0,
+            height_min_mm=5.0,
+        )
+        assert out["status"] == "optimal"
+
+        iterations = await twin.list_design_loop_iterations(UUID(out["loop_id"]))
+        assert len(iterations) == out["iteration_count"]
+        assert all(it.parameter_name == "height_mm" for it in iterations)
+        assert all(it.metric == "mass_kg" for it in iterations)
+        assert all(
+            set(it.constraints_status) == {"deflection_margin_mm", "sf_margin"} for it in iterations
+        )
+
+        winners = [it for it in iterations if it.is_winner]
+        assert len(winners) == 1
+        assert winners[0].status == "converged"
+        assert winners[0].parameter_value > 0
+
+    async def test_infeasible_run_marks_last_iteration(self, twin: InMemoryTwinAPI) -> None:
+        from api_gateway.twin.design_loop import tube_height_candidate_mapper
+        from api_gateway.twin.optimizer import make_tube_height_optimizer
+
+        wp = await _seed_cad(twin)
+        optimize = make_tube_height_optimizer(twin)
+        start = make_design_loop_starter(
+            twin,
+            optimize=optimize,
+            parameter_name="height_mm",
+            candidate_mapper=tube_height_candidate_mapper,
+        )
+        out = await start(
+            work_product_id=str(wp.id),
+            wall_thickness_mm=2.0,
+            load_n=5000.0,
+            deflection_limit_mm=0.001,
+            sf_limit=2.0,
+            height_min_mm=5.0,
+            height_max_mm=50.0,
+        )
+        assert out["status"] == "infeasible"
+        iterations = await twin.list_design_loop_iterations(UUID(out["loop_id"]))
+        assert not any(it.is_winner for it in iterations)
+        assert iterations[-1].status == "infeasible"
+
+    async def test_default_start_still_reads_wall_thickness_unchanged(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """A caller that does NOT pass parameter_name/candidate_mapper gets
+        the exact pre-FORGE-288 wall-thickness behavior -- proves the
+        generalization didn't silently change the default path."""
+        wp = await _seed_cad(twin)
+        start = make_design_loop_starter(twin)
+        out = await start(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert out["status"] == "optimal"
+        iterations = await twin.list_design_loop_iterations(UUID(out["loop_id"]))
+        assert all(it.parameter_name == "wall_thickness_mm" for it in iterations)
+
+
 class TestMakeDesignLoopReader:
     async def test_unknown_loop_raises(self, twin: InMemoryTwinAPI) -> None:
         read = make_design_loop_reader(twin)
@@ -271,6 +359,49 @@ class TestDesignLoopAdapter:
         server = TwinServer(twin=twin, design_loop_approver=make_design_loop_approver(twin))
         with pytest.raises(ValueError, match="approved_by"):
             await server.approve_design_loop({"loop_id": "x"})
+
+    async def test_tube_height_tool_registered_and_returns_shape(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        from api_gateway.twin.design_loop import tube_height_candidate_mapper
+        from api_gateway.twin.optimizer import make_tube_height_optimizer
+
+        wp = await _seed_cad(twin)
+        starter = make_design_loop_starter(
+            twin,
+            optimize=make_tube_height_optimizer(twin),
+            parameter_name="height_mm",
+            candidate_mapper=tube_height_candidate_mapper,
+        )
+        server = TwinServer(twin=twin, tube_height_design_loop_starter=starter)
+        assert "twin.start_tube_height_design_loop" in server.tool_ids
+
+        started = await server.start_tube_height_design_loop(
+            {
+                "work_product_id": str(wp.id),
+                "wall_thickness_mm": 2.0,
+                "load_n": 100.0,
+                "deflection_limit_mm": 0.5,
+                "height_min_mm": 5.0,
+            }
+        )
+        assert started["status"] == "optimal"
+
+    async def test_tube_height_tool_not_registered_when_none_supplied(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        server = TwinServer(twin=twin)
+        assert "twin.start_tube_height_design_loop" not in server.tool_ids
+
+    async def test_tube_height_missing_wall_thickness_rejected(self, twin: InMemoryTwinAPI) -> None:
+        server = TwinServer(
+            twin=twin,
+            tube_height_design_loop_starter=make_design_loop_starter(twin),
+        )
+        with pytest.raises(ValueError, match="wall_thickness_mm"):
+            await server.start_tube_height_design_loop(
+                {"work_product_id": "x", "load_n": 20.0, "deflection_limit_mm": 0.5}
+            )
 
 
 class TestDesignLoopRoutes:

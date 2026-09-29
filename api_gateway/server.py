@@ -778,6 +778,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_design_loop_approver,
         make_design_loop_reader,
         make_design_loop_starter,
+        tube_height_candidate_mapper,
     )
     from api_gateway.twin.design_sketch_recorder import (
         make_design_sketch_approver,
@@ -797,7 +798,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     from api_gateway.twin.measurement_recorder import make_measurement_recorder
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
-    from api_gateway.twin.optimizer import make_wall_thickness_optimizer
+    from api_gateway.twin.optimizer import make_tube_height_optimizer, make_wall_thickness_optimizer
     from api_gateway.twin.revalidation import make_revalidation_executor
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
@@ -859,6 +860,18 @@ async def _init_orchestrator(app: FastAPI) -> None:
     design_loop_starter_fn = make_design_loop_starter(twin, optimize=parameter_optimizer_fn)
     design_loop_reader_fn = make_design_loop_reader(twin)
     design_loop_approver_fn = make_design_loop_approver(twin)
+    # FORGE-288: a second real parameter (height_mm) plugged into the SAME
+    # design-loop machinery above via the generalized parameter_name/metric/
+    # candidate_mapper seam -- proof the loop generalizes, not a copy.
+    tube_height_optimizer_fn = make_tube_height_optimizer(
+        twin, evidence_recorder=evidence_recorder_fn, decision_recorder=decision_recorder
+    )
+    tube_height_design_loop_starter_fn = make_design_loop_starter(
+        twin,
+        optimize=tube_height_optimizer_fn,
+        parameter_name="height_mm",
+        candidate_mapper=tube_height_candidate_mapper,
+    )
 
     # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
     # twin once here, same injected-callable shape as every make_X(twin,
@@ -1046,6 +1059,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_loop_starter=design_loop_starter_fn,
         design_loop_reader=design_loop_reader_fn,
         design_loop_approver=design_loop_approver_fn,
+        # FORGE-288: a second real parameter (height_mm) over the same loop.
+        tube_height_design_loop_starter=tube_height_design_loop_starter_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
