@@ -66,6 +66,7 @@ class StartDesignLoopRequest(BaseModel):
     wallMaxMm: float | None = None  # noqa: N815
     projectId: str | None = None  # noqa: N815
     requirementIds: list[str] | None = None  # noqa: N815
+    maxIterations: int = 60  # noqa: N815
 
 
 @router.post("/start")
@@ -85,6 +86,7 @@ async def start_design_loop(payload: StartDesignLoopRequest) -> dict[str, Any]:
                 wall_max_mm=payload.wallMaxMm,
                 project_id=payload.projectId,
                 requirement_ids=payload.requirementIds,
+                max_iterations=payload.maxIterations,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

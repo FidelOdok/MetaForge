@@ -294,6 +294,14 @@ test.describe('Requirements', () => {
     // Sparkline renders alongside the iteration table (FORGE-288).
     await expect(loopSection.getByTestId('design-loop-sparkline')).toBeVisible();
 
+    // Loop health panel shows the real iteration budget, not tokens
+    // (FORGE-291).
+    const healthPanel = loopSection.getByTestId('loop-health-panel');
+    await expect(healthPanel).toBeVisible();
+    await expect(healthPanel).toContainText('optimal');
+    await expect(healthPanel).toContainText('7 / 60 iterations');
+    await expect(loopSection.getByTestId('loop-duplicate-badge')).not.toBeVisible();
+
     // The converged winner's Decision renders as a card, linked via the
     // real GENERATED_FROM edge (FORGE-289).
     await expect(loopSection.getByTestId('decision-card')).toBeVisible();
@@ -306,6 +314,37 @@ test.describe('Requirements', () => {
     await loopSection.getByTestId('approve-design-loop-button').click();
     await expect(loopSection.getByTestId('design-loop-approved-badge')).toBeVisible();
     await expect(loopSection.getByTestId('approve-design-loop-button')).not.toBeVisible();
+  });
+
+  test('resubmitting the same design loop inputs is flagged as a duplicate (FORGE-291)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const loopSection = page.getByTestId('design-loop-section');
+
+    await loopSection.getByTestId('start-design-loop-button').click();
+    let form = loopSection.getByTestId('design-loop-form');
+    await form.getByLabel('CAD work product id').fill('sample-work-product');
+    await form.getByLabel('Load (N)').fill('800');
+    await form.getByLabel('Deflection limit (mm)').fill('0.5');
+    await form.getByRole('button', { name: 'Run' }).click();
+    await expect(form).not.toBeVisible();
+    await expect(loopSection.getByTestId('loop-duplicate-badge')).not.toBeVisible();
+
+    await loopSection.getByTestId('start-design-loop-button').click();
+    form = loopSection.getByTestId('design-loop-form');
+    await form.getByLabel('CAD work product id').fill('sample-work-product');
+    await form.getByLabel('Load (N)').fill('800');
+    await form.getByLabel('Deflection limit (mm)').fill('0.5');
+    await form.getByRole('button', { name: 'Run' }).click();
+    await expect(form).not.toBeVisible();
+
+    await expect(loopSection.getByTestId('loop-duplicate-badge')).toBeVisible();
+    await expect(loopSection.getByTestId('loop-duplicate-badge')).toContainText(
+      'duplicate of an earlier run',
+    );
+    // Same underlying loop -- no second iteration subtree was created.
+    await expect(loopSection.getByTestId('design-loop-iteration-row')).toHaveCount(7);
   });
 
   test('gate review blocks on unsatisfied claims, then a reviewer can approve or reject with comment (FORGE-290)', async ({

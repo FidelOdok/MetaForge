@@ -933,6 +933,22 @@ Dashboard: a shared `DecisionList`/`DecisionCard` component (`dashboard/src/comp
 
 *Source: `api_gateway/twin/decision_recorder.py`, `api_gateway/twin/optimizer.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/decision_routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/components/shared/DecisionList.tsx`, `dashboard/src/components/viewer/StructureView.tsx`, `dashboard/src/pages/RequirementsPage.tsx`*
 
+### 2.21 Loop quality guards: duplicate detection + iteration budget (FORGE-291, gap G-G5)
+
+The ticket bundles four things under "loop quality guards"; two were already real before this ticket. Grounding (FORGE-98, a chat-harness safeguard flagging a reply that claims a design action with zero tool calls that turn) is general and unrelated to the design loop specifically -- confirmed already shipped, untouched here. Infeasibility detection is also already real: `status="infeasible"` (section 2.19, FORGE-287) already exists and is already persisted/returned; this ticket added no new mechanism for it, only dashboard visibility (below).
+
+The two real, previously-unshipped gaps were a duplicate-commit guard and iteration-budget visibility:
+
+**Duplicate-commit guard.** `DesignLoopIteration` gained `loop_inputs_hash: str | None` -- a sha256 of `{work_product_id, **optimize_kwargs}` (sorted-key JSON, `record_decision` excluded since it toggles a side effect rather than changing the search), stamped on every iteration of a run. Same MET-506 "identical inputs = the same real-world thing" precedent `decision_recorder.py` already established for Decision records, applied here since a design loop has no single work-product node of its own to hash content against. Before running the bisection, `start()` calls the new `twin.find_design_loop_by_inputs_hash(loop_inputs_hash)` (a one-line `list_nodes(node_type=DESIGN_LOOP_ITERATION, filters={"loop_inputs_hash": ..., "iteration_number": 0})`, mirroring `list_design_loop_iterations`'s own shape) -- a hit means this exact loop already ran, and `start()` returns that prior loop's already-persisted result (`{status, winner, loop_id, iteration_count, iteration_ids, duplicate: true}`) instead of spending a bisection and a whole new iteration subtree on a re-submission. The original loop's `status` (`optimal` vs. `already_feasible_at_min` vs. `infeasible`) is reconstructed from the stored iterations alone -- no winner means infeasible; a winner at `iteration_number == 0` means already-feasible-at-min; otherwise optimal -- exactly mirroring the same index-based logic `start()` already uses to mark the winner in the first place (section 2.19).
+
+**Iteration-budget visibility.** `max_iterations` (the bisection's real budget, already a parameter on `twin_core.prediction.optimizer.optimize_wall_thickness`/`optimize_tube_height`, default 60) is now threaded through `api_gateway/twin/optimizer.py`'s wrapper functions and echoed back in the response alongside the already-present `iteration_count`. "Tokens" (the ticket's own dashboard wording, "Loop health panel (tokens, iterations, failures)") is dropped rather than implemented: this loop makes zero LLM calls -- pure deterministic bisection math -- so there is no real per-loop token cost to attribute; `iteration_count`/`max_iterations` is the honest, measurable budget a dashboard can actually show.
+
+Dashboard: `LoopHealthPanel` (`dashboard/src/pages/RequirementsPage.tsx`) renders in the Design Loop section right after a run -- a status pill, `iteration_count / max_iterations`, and a "duplicate of an earlier run" badge when the guard fired. Built from the mutation's own last result rather than the persisted iteration timeline, since `max_iterations`/`duplicate` are properties of one invocation, not persisted loop state -- there is nothing honest to show after a page reload.
+
+**Deliberately out of scope**: any token/cost tracking on the design loop (no real LLM calls inside it to measure); rebuilding infeasibility detection (already shipped, FORGE-287); a generic cross-tool "duplicate call" framework (scoped narrowly to the design loop, matching MET-506's own narrow, per-recorder precedent rather than inventing shared middleware).
+
+*Source: `twin_core/models/design_loop_iteration.py`, `twin_core/api.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/optimizer.py`, `api_gateway/design_loop/routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/pages/RequirementsPage.tsx`*
+
 ---
 
 ## 3. Edge Types

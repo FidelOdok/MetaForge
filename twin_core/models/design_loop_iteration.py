@@ -71,3 +71,13 @@ class DesignLoopIteration(NodeBase):
     approved_by: str | None = None
     approved_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # FORGE-291 (gap G-G5): sha256 of {work_product_id, **optimize_kwargs}
+    # (sorted-key JSON, record_decision excluded), stamped on iteration 0 of
+    # every loop run. Lets make_design_loop_starter detect "this exact loop
+    # already ran" before spending a bisection + a batch of graph writes on
+    # a re-submission -- same MET-506 content-hash precedent
+    # decision_recorder.py already uses for an analogous "identical inputs
+    # = the same real-world thing" problem, applied here instead of there
+    # since a design loop has no single work-product node of its own to
+    # hash against.
+    loop_inputs_hash: str | None = None

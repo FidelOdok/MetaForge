@@ -455,6 +455,15 @@ class TwinAPI(ABC):
         ...
 
     @abstractmethod
+    async def find_design_loop_by_inputs_hash(
+        self, loop_inputs_hash: str
+    ) -> DesignLoopIteration | None:
+        """The iteration-0 node of a PRIOR loop run with this exact
+        ``loop_inputs_hash``, if one exists (FORGE-291's duplicate-commit
+        guard) -- ``None`` when no such run has happened yet."""
+        ...
+
+    @abstractmethod
     async def update_design_loop_iteration(
         self, iteration_id: UUID, updates: dict[str, Any]
     ) -> DesignLoopIteration:
@@ -1199,6 +1208,15 @@ class InMemoryTwinAPI(TwinAPI):
             filters={"loop_id": loop_id},
         )
         return sorted(nodes, key=lambda n: n.iteration_number)  # type: ignore[union-attr]
+
+    async def find_design_loop_by_inputs_hash(
+        self, loop_inputs_hash: str
+    ) -> DesignLoopIteration | None:
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DESIGN_LOOP_ITERATION,
+            filters={"loop_inputs_hash": loop_inputs_hash, "iteration_number": 0},
+        )
+        return nodes[0] if nodes else None  # type: ignore[return-value]
 
     async def update_design_loop_iteration(
         self, iteration_id: UUID, updates: dict[str, Any]

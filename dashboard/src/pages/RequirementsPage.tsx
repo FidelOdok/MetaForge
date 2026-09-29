@@ -26,7 +26,7 @@ import type {
   RequirementMatrixStatus,
   RequirementRecord,
 } from '../types/requirements';
-import type { DesignLoopIteration } from '../types/design-loop';
+import type { DesignLoopIteration, DesignLoopStatus } from '../types/design-loop';
 import type { AttemptPromotionResult, MaturityLevel } from '../types/promotion';
 import type { FeatureType, GenerateFeatureResult } from '../types/features';
 
@@ -574,6 +574,46 @@ function IterationRow({ iteration }: { iteration: DesignLoopIteration }) {
   );
 }
 
+/** FORGE-291 (gap G-G5): the "Loop health panel" the ticket's own dashboard
+ * wording asks for, built from real available data only -- iteration_count
+ * vs. max_iterations (the actual, honest iteration budget; "tokens" doesn't
+ * apply here, this loop makes zero LLM calls), the run's status, and a
+ * "duplicate of an earlier run" badge when this exact call already ran
+ * before (FORGE-291's own duplicate-commit guard). Only rendered right
+ * after a run (the mutation's own last result) -- max_iterations/duplicate
+ * are properties of ONE invocation, not persisted loop state, so there is
+ * nothing honest to show after a page reload. */
+function LoopHealthPanel({
+  status,
+  iterationCount,
+  maxIterations,
+  duplicate,
+}: {
+  status: DesignLoopStatus;
+  iterationCount: number;
+  maxIterations: number;
+  duplicate: boolean;
+}) {
+  const statusVariant = status === 'infeasible' ? 'error' : 'success';
+  return (
+    <div
+      data-testid="loop-health-panel"
+      className="flex flex-wrap items-center gap-2 px-3 py-2"
+      style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <Badge variant={statusVariant}>{status}</Badge>
+      <span className="font-mono text-[11px] text-on-surface-variant">
+        {iterationCount} / {maxIterations} iterations
+      </span>
+      {duplicate && (
+        <Badge variant="warning" data-testid="loop-duplicate-badge">
+          duplicate of an earlier run
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 /** FORGE-288 (gap G-G2): a tiny hand-rolled inline-SVG sparkline plotting
  * objective_value vs iteration_number -- no chart library in this
  * codebase, and the ticket's own "optimisation run view: objective vs
@@ -767,6 +807,14 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
           className="rounded-lg overflow-hidden overflow-x-auto"
           style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
         >
+          {start.data && (
+            <LoopHealthPanel
+              status={start.data.status}
+              iterationCount={start.data.iteration_count}
+              maxIterations={start.data.max_iterations}
+              duplicate={start.data.duplicate}
+            />
+          )}
           <IterationSparkline iterations={iterations} />
           <table className="w-full text-left border-collapse">
             <thead>
