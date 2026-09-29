@@ -272,6 +272,7 @@ async def bootstrap_tool_registry(
     hierarchy_rollup_fn: Any = None,
     metric_evaluator: Any = None,
     revalidation_executor: Any = None,
+    sensitivity_ranker: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -381,6 +382,12 @@ async def bootstrap_tool_registry(
             marked stale, for entities carrying a replayable provenance
             recipe. ``None`` skips registration (same pattern as
             ``document_recorder``).
+        sensitivity_ranker: Optional async ``rank(...)``
+            (make_sensitivity_ranker, FORGE-317). When supplied, registers
+            ``twin.rank_sensitivity`` -- one-at-a-time finite-difference
+            sensitivity of a metric's margin against named parameters,
+            against a CAD work product's real geometry. ``None`` skips
+            registration (same pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -557,6 +564,7 @@ async def bootstrap_tool_registry(
                     hierarchy_rollup_fn=hierarchy_rollup_fn,
                     metric_evaluator=metric_evaluator,
                     revalidation_executor=revalidation_executor,
+                    sensitivity_ranker=sensitivity_ranker,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

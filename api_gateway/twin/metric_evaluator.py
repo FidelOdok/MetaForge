@@ -47,10 +47,12 @@ from twin_core.prediction.evaluator import evaluate_tip_deflection_tier0
 logger = structlog.get_logger(__name__)
 
 
-def _bounding_box_extents_mm(metadata: dict[str, Any]) -> tuple[float, float, float]:
+def bounding_box_extents_mm(metadata: dict[str, Any]) -> tuple[float, float, float]:
     """(length, width, height) mm, sorted descending -- ``length`` is
     treated as the beam's own axis (the longest bounding-box extent, the
-    cantilever-arm-link case this ticket's acceptance criterion targets).
+    cantilever-arm-link case FORGE-315's acceptance criterion targets).
+    Public (FORGE-317): also used by ``api_gateway/twin/sensitivity.py``
+    for the same geometry read, rather than a second implementation.
     Reads the exact shape ``geometry_recorder.py``/MET-630 already writes:
     ``metadata["geometry_features"]["properties"]["bounding_box"]`` ==
     ``{min_x, min_y, min_z, max_x, max_y, max_z}``.
@@ -106,7 +108,7 @@ def make_metric_evaluator(
         wp = await twin.get_work_product(wp_id)
         if wp is None:
             raise ValueError(f"twin.evaluate_metric: no work_product {work_product_id!r}")
-        length_mm, width_mm, height_mm = _bounding_box_extents_mm(wp.metadata)
+        length_mm, width_mm, height_mm = bounding_box_extents_mm(wp.metadata)
 
         tier0 = evaluate_tip_deflection_tier0(
             length_mm=length_mm,

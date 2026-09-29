@@ -612,6 +612,36 @@ revalidation_result: dict[str, Any] | None = None
 
 *Source: `twin_core/transactions/ect.py`, `twin_core/consistency/impact.py`, `api_gateway/twin/revalidation.py`*
 
+### 2.14 Sensitivity Analysis (FORGE-317)
+
+Not a node type -- a computation, invoked via `twin.rank_sensitivity` (target lifecycle spec App. A "Solver" / step 15). One-at-a-time finite differences: perturb one parameter, recompute the metric, measure how far the margin (`limit - value`) moved.
+
+```python
+class ParameterSensitivity(BaseModel):
+    parameter: str
+    is_categorical: bool = False   # True for a discrete axis (e.g. material)
+    baseline_value: float | str
+    perturbed_value: float | str
+    baseline_margin: float
+    perturbed_margin: float
+    sensitivity: float   # delta_margin/delta_parameter (continuous) or raw delta_margin (categorical)
+
+class SensitivityRanking(BaseModel):
+    metric: str
+    baseline_value: float
+    limit: float
+    baseline_margin: float
+    rankings: list[ParameterSensitivity]   # sorted by |sensitivity| descending
+```
+
+`metric="tip_deflection"` ranks `wall_thickness_mm` and `length_mm` against a new rectangular-hollow-tube deflection formula (`twin_core/prediction/evaluator.py`'s `hollow_tube_tip_deflection_mm`, `I = (W H^3 - (W-2t)(H-2t)^3)/12`) -- FORGE-315's own solid-beam model (`cantilever_tip_deflection_mm`) has no wall-thickness concept at all, so this is a real, scoped extension, not free. `metric="mass"` ranks `wall_thickness_mm` (continuous, `hollow_tube_mass_kg`) and a caller-supplied (default: aluminum/steel/titanium/carbon_fiber) set of candidate materials (categorical -- the actual margin delta from swapping material, not a derivative, since "per unit of what" means nothing for a discrete choice). Material density/elastic-modulus lookups reuse `tool_registry.tools.cadquery.materials`' existing `resolve_density_kg_m3`/`resolve_elastic_properties` (FORGE-234's own table) -- not a second material list.
+
+Every ranking is recorded as `twin.record_evidence` (`evidence_type="calculation"`), `valid_against` the work product it was computed from.
+
+**Deliberately out of scope**: a general "sweep any Design IR parameter" engine -- `twin_core/design_ir/` turned out to be a CAD-*authoring* intermediate representation (a sequence of FreeCAD/CadQuery operations), not an engineering-analysis parameter model, and the real yardstick arm's own geometry was authored via a raw `cadquery.execute_script` call rather than through Design IR at all, so there's no live Design IR document to sweep; tier 1 (torque) sensitivity (tier 1 still doesn't exist, FORGE-315's own finding, and isn't needed for either named metric here); a dashboard tornado-chart UI (zero existing chart/ranking UI anywhere in `dashboard/src/` -- same scope cut FORGE-316's own dashboard bullet already established).
+
+*Source: `twin_core/prediction/sensitivity.py`, `api_gateway/twin/sensitivity.py`*
+
 ---
 
 ## 3. Edge Types
