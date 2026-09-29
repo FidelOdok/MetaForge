@@ -226,8 +226,16 @@ A Constraint is a rule that must be satisfied across one or more work products. 
 | `cross_domain` | `bool` | No | Whether constraint spans multiple domains |
 | `source` | `str` | Yes | Free-form string describing origin (e.g., `"user"`, `"agent"`, `"system"`) |
 | `message` | `str` | No | Human-readable description of the constraint |
+| `acceptance_criteria` | `str` | No | What must be true for this requirement to be considered met (FORGE-312) |
+| `verification_method` | `str` | No | How it's verified (e.g. `"FEA"`, `"test"`, `"inspection"`) (FORGE-312) |
 | `last_evaluated` | `datetime` | No | When the constraint was last checked |
 | `metadata` | `dict` | No | Additional context |
+
+`acceptance_criteria`/`verification_method` are real fields (not metadata
+keys) so `twin_core.consistency.gates`'s G7 (Verification Readiness) gate
+can check a critical requirement for both directly. Both fall back to the
+identically-named `metadata` key when empty, for requirements
+`RequirementAuthorAgent` (FORGE-55) wrote before these fields existed.
 
 ```python
 class ConstraintSeverity(StrEnum):
@@ -253,6 +261,8 @@ class Constraint(NodeBase):
     cross_domain: bool = False
     source: str
     message: str = ""
+    acceptance_criteria: str = ""
+    verification_method: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
 ```

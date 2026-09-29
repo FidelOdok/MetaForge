@@ -352,6 +352,66 @@ class TestRiskChecks:
         assert check.status == GateCheckStatus.PASS
 
 
+class TestAssumptionChecks:
+    async def test_no_assumptions_recorded_is_not_evaluated(self, twin, project_id):
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == "assumptions:none-recorded")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_non_safety_critical_assumption_is_never_flagged(self, twin, project_id):
+        await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="ambient temperature is nominal",
+                project_id=project_id,
+                metadata={"value": "20C"},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == "assumptions:none-safety-critical")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_unresolved_safety_critical_assumption_fails(self, twin, project_id):
+        assumption = await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="battery cells are within spec",
+                project_id=project_id,
+                metadata={"safety_critical": True},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"assumption:{assumption.id}")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_safety_critical_assumption_with_expiry_passes(self, twin, project_id):
+        assumption = await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="battery cells are within spec",
+                project_id=project_id,
+                metadata={"safety_critical": True, "expiry": "2026-12-31"},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"assumption:{assumption.id}")
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_safety_critical_assumption_with_resolution_passes(self, twin, project_id):
+        assumption = await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="assumption",
+                statement="battery cells are within spec",
+                project_id=project_id,
+                metadata={"safety_critical": True, "resolution": "confirmed via datasheet rev C"},
+            )
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"assumption:{assumption.id}")
+        assert check.status == GateCheckStatus.PASS
+
+
 class TestNotEvaluatedChecksAlwaysPresent:
     async def test_structural_and_friends_are_always_not_evaluated(self, twin, project_id):
         result = await evaluate_g3_feasibility(twin, project_id)
