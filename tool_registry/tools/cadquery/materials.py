@@ -114,3 +114,53 @@ def resolve_elastic_properties(
             "poissons_ratio explicitly."
         )
     return MATERIAL_ELASTIC_MPA[key]
+
+
+# FORGE-320: yield strength (MPa), for a real safety-factor (yield / max
+# stress) check -- the same material set as MATERIAL_ELASTIC_MPA (a stress
+# check always needs both E and yield together). Room-temperature nominal
+# values for a common temper/grade, not a certified materials database --
+# same caveat as the tables above. carbon_fiber is the same isotropic
+# approximation MATERIAL_ELASTIC_MPA already uses.
+MATERIAL_YIELD_MPA: dict[str, float] = {
+    "aluminum_6061": 276.0,  # T6 temper
+    "aluminum": 95.0,  # annealed, unspecified alloy
+    "steel": 250.0,  # mild/structural steel
+    "stainless_steel": 215.0,  # 304, annealed
+    "titanium": 275.0,  # CP grade 2
+    "brass": 124.0,
+    "copper": 70.0,  # annealed
+    "abs": 40.0,
+    "pla": 50.0,
+    "petg": 50.0,
+    "nylon": 45.0,
+    "polycarbonate": 62.0,
+    "acrylic": 72.0,
+    "carbon_fiber": 600.0,  # isotropic approximation
+    "rubber": 15.0,
+}
+
+
+def resolve_yield_mpa(material: str | None = None, yield_mpa: float | None = None) -> float:
+    """Resolve a yield strength (MPa) for a safety-factor check.
+
+    An explicit ``yield_mpa`` always wins. Otherwise looks up ``material``
+    (same name normalization as :func:`resolve_density_kg_m3`). Same
+    discipline as :func:`resolve_elastic_properties`: an unrecognized or
+    missing material RAISES rather than silently defaulting -- a wrong
+    yield strength feeds directly into a safety-factor number an engineer
+    might trust as real.
+    """
+    if yield_mpa is not None:
+        return yield_mpa
+    if not material:
+        raise ValueError(
+            "resolve_yield_mpa: provide either a recognized material name, or yield_mpa explicitly."
+        )
+    key = material.strip().lower().replace(" ", "_").replace("-", "_")
+    if key not in MATERIAL_YIELD_MPA:
+        raise ValueError(
+            f"resolve_yield_mpa: unknown material {material!r} -- accepted: "
+            f"{sorted(MATERIAL_YIELD_MPA)}, or pass yield_mpa explicitly."
+        )
+    return MATERIAL_YIELD_MPA[key]

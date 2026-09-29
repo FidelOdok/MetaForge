@@ -69,6 +69,7 @@ class TwinServer(McpToolServer):
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
+        parameter_optimizer: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -240,6 +241,14 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._promotion_attempter = promotion_attempter
+        # FORGE-320: an injected async ``optimize(...)``
+        # (make_wall_thickness_optimizer) -- bisection search for the
+        # minimum-mass wall_thickness_mm satisfying deflection/safety-
+        # factor constraints, against a CAD work product's own recorded
+        # geometry. Same injection seam as every recorder above; None
+        # keeps tool_registry free of twin_core.prediction/tool_registry.
+        # tools.cadquery imports.
+        self._parameter_optimizer = parameter_optimizer
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -289,6 +298,8 @@ class TwinServer(McpToolServer):
             self._register_rank_sensitivity()
         if promotion_attempter is not None:
             self._register_attempt_promotion()
+        if parameter_optimizer is not None:
+            self._register_optimize_parameter()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -3876,4 +3887,124 @@ class TwinServer(McpToolServer):
             required_claim_ids=[str(c) for c in required_claim_ids],
             k=float(k),
             decided_by=decided_by if isinstance(decided_by, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.optimize_parameter (FORGE-320)
+    # ------------------------------------------------------------------
+
+    def _register_optimize_parameter(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.optimize_parameter",
+                adapter_id="twin",
+                name="Optimize Wall Thickness",
+                description=(
+                    "Bisection search for the minimum-mass wall_thickness_mm meeting "
+                    "deflection_limit_mm and sf_limit (safety factor), against a CAD work "
+                    "product's own recorded geometry (target lifecycle spec App. A "
+                    "Optimiser, step 10). Both constraints are monotonic in wall "
+                    "thickness, so the winner is the exact minimum feasible value, not a "
+                    "heuristic search. Records the search as Evidence pinned to the work "
+                    "product; when a feasible winner is found, also records it as a "
+                    "Decision (twin.record_decision) with each rejected candidate as an "
+                    "alternative. Does NOT propose or commit a geometry change -- the "
+                    "result is a numeric recommendation only."
+                ),
+                capability="twin_optimization",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id.",
+                        },
+                        "load_n": {"type": "number"},
+                        "deflection_limit_mm": {"type": "number"},
+                        "sf_limit": {
+                            "type": "number",
+                            "description": "Minimum acceptable safety factor. Default 2.0.",
+                        },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "tool_registry.tools.cadquery.materials name, e.g. "
+                                "'aluminum_6061'. Default 'aluminum_6061'."
+                            ),
+                        },
+                        "wall_min_mm": {
+                            "type": "number",
+                            "description": "Search lower bound. Default 0.5.",
+                        },
+                        "wall_max_mm": {
+                            "type": "number",
+                            "description": (
+                                "Search upper bound. Default: half the smaller cross-"
+                                "section extent, minus a margin (leaves a real cavity)."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirement (Constraint) ids to link the resulting "
+                                "Decision to (parent_refs), when a winner is found."
+                            ),
+                        },
+                        "record_decision": {
+                            "type": "boolean",
+                            "description": "Record a Decision when feasible. Default true.",
+                        },
+                    },
+                    "required": ["work_product_id", "load_n", "deflection_limit_mm"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "winner": {"type": ["object", "null"]},
+                        "candidates": {"type": "array", "items": {"type": "object"}},
+                        "material": {"type": "string"},
+                        "evidence_node_id": {"type": "string"},
+                        "decision_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.optimize_parameter,
+        )
+
+    async def optimize_parameter(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.optimize_parameter: 'work_product_id' is required")
+        load_n = arguments.get("load_n")
+        if not isinstance(load_n, (int, float)):
+            raise ValueError("twin.optimize_parameter: 'load_n' is required (number)")
+        deflection_limit_mm = arguments.get("deflection_limit_mm")
+        if not isinstance(deflection_limit_mm, (int, float)):
+            raise ValueError("twin.optimize_parameter: 'deflection_limit_mm' is required (number)")
+        sf_limit = arguments.get("sf_limit", 2.0)
+        material = arguments.get("material", "aluminum_6061")
+        wall_min_mm = arguments.get("wall_min_mm", 0.5)
+        wall_max_mm = arguments.get("wall_max_mm")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        record_decision = arguments.get("record_decision", True)
+        return await self._parameter_optimizer(
+            work_product_id=work_product_id,
+            load_n=float(load_n),
+            deflection_limit_mm=float(deflection_limit_mm),
+            sf_limit=float(sf_limit),
+            material=material if isinstance(material, str) else "aluminum_6061",
+            wall_min_mm=float(wall_min_mm),
+            wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+            record_decision=bool(record_decision),
         )

@@ -274,6 +274,7 @@ async def bootstrap_tool_registry(
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
+    parameter_optimizer: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -396,6 +397,13 @@ async def bootstrap_tool_registry(
             required claims aren't satisfied (or approved-waived), rather
             than only reporting. ``None`` skips registration (same
             pattern as ``document_recorder``).
+        parameter_optimizer: Optional async ``optimize(...)``
+            (make_wall_thickness_optimizer, FORGE-320). When supplied,
+            registers ``twin.optimize_parameter`` -- bisection search for
+            the minimum-mass wall_thickness_mm meeting deflection/safety-
+            factor constraints, against a CAD work product's real geometry.
+            ``None`` skips registration (same pattern as
+            ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -574,6 +582,7 @@ async def bootstrap_tool_registry(
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,
+                    parameter_optimizer=parameter_optimizer,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
