@@ -22,7 +22,12 @@ import structlog
 
 from mcp_core.context import current_context
 from observability.tracing import get_tracer
-from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+from tool_registry.mcp_server.handlers import (
+    ResourceLimits,
+    ResourceManifestEntry,
+    ResourceNotFoundError,
+    ToolManifest,
+)
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.twin.queries import (
     detect_mutations,
@@ -69,6 +74,7 @@ class TwinServer(McpToolServer):
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
+        brief_provider: Any = None,
         parameter_optimizer: Any = None,
         device_instance_registrar: Any = None,
         measurement_recorder: Any = None,
@@ -243,6 +249,11 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._promotion_attempter = promotion_attempter
+        # FORGE-355: renders metaforge://twin/brief/{project_id}. Injected
+        # like every recorder above, because the brief lives in the gateway
+        # (api_gateway.projects.brief) and tool_registry does not import
+        # upward.
+        self._brief_provider = brief_provider
         # FORGE-320: an injected async ``optimize(...)``
         # (make_wall_thickness_optimizer) -- bisection search for the
         # minimum-mass wall_thickness_mm satisfying deflection/safety-
@@ -312,6 +323,8 @@ class TwinServer(McpToolServer):
             self._register_rank_sensitivity()
         if promotion_attempter is not None:
             self._register_attempt_promotion()
+        if brief_provider is not None:
+            self._register_brief_resource()
         if parameter_optimizer is not None:
             self._register_optimize_parameter()
         if device_instance_registrar is not None:
@@ -3849,6 +3862,40 @@ class TwinServer(McpToolServer):
             ),
             delta_fraction=float(delta_fraction),
         )
+
+    # ------------------------------------------------------------------
+    # metaforge://twin/brief/{project_id}  (FORGE-355)
+    # ------------------------------------------------------------------
+
+    _BRIEF_PREFIX = "metaforge://twin/brief/"
+
+    def _register_brief_resource(self) -> None:
+        self.register_resource(
+            manifest=ResourceManifestEntry(
+                uri_template=f"{self._BRIEF_PREFIX}{{project_id}}",
+                adapter_id="twin",
+                name="Project brief",
+                description=(
+                    "What this project is, what has been built in it, and the "
+                    "most recent requirement documents inline. Newest work "
+                    "first. The same brief the chat harness gives its agent."
+                ),
+                mime_type="text/markdown",
+            ),
+            reader=self._read_brief,
+            matcher=lambda uri: uri.startswith(self._BRIEF_PREFIX),
+        )
+
+    async def _read_brief(self, uri: str) -> list[dict[str, Any]]:
+        project_id = uri[len(self._BRIEF_PREFIX) :].strip("/")
+        if not project_id:
+            raise ResourceNotFoundError(uri)
+        brief = await self._brief_provider(project_id)
+        if brief is None:
+            # A project that does not exist and a project with nothing in it
+            # are different answers, and the second one is legitimate.
+            raise ResourceNotFoundError(f"{uri} (no project {project_id!r})")
+        return [{"uri": uri, "mimeType": "text/markdown", "text": brief}]
 
     # ------------------------------------------------------------------
     # twin.attempt_promotion (FORGE-319)

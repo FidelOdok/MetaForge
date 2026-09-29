@@ -852,6 +852,20 @@ async def _init_orchestrator(app: FastAPI) -> None:
     async def promotion_attempter_fn(**kwargs: Any) -> dict[str, Any]:
         return await attempt_promotion(twin, **kwargs)
 
+    # FORGE-355: renders metaforge://twin/brief/{project_id} using the same
+    # builder the chat harness uses, so an MCP client and a chat agent are
+    # briefed identically. Returns None for a project that does not exist --
+    # distinct from a project that exists and is empty, which has a brief.
+    async def brief_provider_fn(project_id: str) -> str | None:
+        from api_gateway.chat.routes import _brief_doc_excerpt
+        from api_gateway.projects.brief import build_project_brief
+        from api_gateway.projects.routes import get_project_backend
+
+        project = await get_project_backend().get_project(project_id)
+        if project is None:
+            return None
+        return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt)
+
     # FORGE-321: device registration; measurement recording (reuses
     # evidence_recorder_fn via a calibration_recorder for residuals).
     device_instance_registrar_fn = make_device_instance_registrar(twin)
@@ -968,6 +982,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         sensitivity_ranker=sensitivity_ranker_fn,
         # FORGE-319: the first real gate that refuses, not just reports.
         promotion_attempter=promotion_attempter_fn,
+        # FORGE-355: the project brief as an MCP resource.
+        brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness
         # satisfying deflection/safety-factor constraints.
         parameter_optimizer=parameter_optimizer_fn,
