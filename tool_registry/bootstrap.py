@@ -270,6 +270,7 @@ async def bootstrap_tool_registry(
     ect_bridge: Any = None,
     hierarchy_node_recorder: Any = None,
     hierarchy_rollup_fn: Any = None,
+    metric_evaluator: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -364,6 +365,13 @@ async def bootstrap_tool_registry(
             mark_rolled_back}_engineering_change`` tools together -- one
             inseparable state machine, so it's all-or-none, unlike the
             independent single-tool recorders above. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        metric_evaluator: Optional async ``evaluate_tip_deflection(...)``
+            (make_metric_evaluator, FORGE-315). When supplied, registers
+            ``twin.evaluate_metric`` -- a tier-0 closed-form hand-calc
+            against a CAD work product's recorded geometry, escalating to
+            a real ``calculix.run_fea`` call when the estimate falls
+            within its error band of a supplied limit. ``None`` skips
             registration (same pattern as ``document_recorder``).
 
     Returns:
@@ -539,6 +547,7 @@ async def bootstrap_tool_registry(
                     ect_bridge=ect_bridge,
                     hierarchy_node_recorder=hierarchy_node_recorder,
                     hierarchy_rollup_fn=hierarchy_rollup_fn,
+                    metric_evaluator=metric_evaluator,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

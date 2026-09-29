@@ -563,6 +563,34 @@ class InterfaceQuantity(BaseModel):
 
 *Source: `twin_core/models/interface.py`*
 
+### 2.12 Tiered Evaluator (FORGE-315)
+
+Not a node type -- a computation, invoked via `twin.evaluate_metric` (spec §30, "prefer the minimum sufficient fidelity; escalate only when evidence quality demands it"). Only `metric="tip_deflection"` is implemented: a tier-0 closed-form cantilever-beam estimate against a CAD `WorkProduct`'s own recorded `geometry_features.properties.bounding_box` (MET-630), escalating to a real tier-2 `calculix.run_fea` call when the estimate's margin to a supplied `limit_mm` falls inside its error band.
+
+```python
+class Tier0DeflectionResult(BaseModel):
+    metric: str = "tip_deflection"
+    tier: int = 0
+    value_mm: float
+    band_mm: float
+    limit_mm: float | None = None
+    margin_mm: float | None = None   # limit - value; sign shows over/under
+    escalate: bool = False           # |margin| < escalation_k * band_mm
+
+def cantilever_tip_deflection_mm(
+    *, length_mm, width_mm, height_mm, load_n, youngs_modulus_mpa
+) -> float:
+    """delta = F L^3 / (3 E I), I = w h^3 / 12."""
+```
+
+The band is a fixed prior (`band_fraction` of `limit_mm`, default 0.2) -- calibrated bands from real measurement residuals are Step 11's own scope (`digital_twin/calibration/`), not this one's. Every tier's result is recorded as `twin.record_evidence`, `valid_against` the work product's current revision (FORGE-314) -- tier-0 as `evidence_type="calculation"`, tier-2 as `"simulation"`.
+
+Tier-2 escalation requires the caller to already have a generated mesh + resolved node sets (`tier2: {mesh_file, fixed_node_set, load_node_set, material, load_force_n}`) -- `twin.evaluate_metric` does not derive FEA boundary conditions on its own. Escalating with no `tier2` args returns a clear `{"attempted": false, "reason": ...}` rather than guessing node-set names for a part it's never seen a load case for (a real, currently-unsolved gap: FORGE-278/239/277 together get a *human* to point-and-click node sets into a reusable `LOAD_CASE` work product, but there is no programmatic path from "a design changed" to "correct boundary conditions" for a genuinely novel part).
+
+A general per-metric tier *registry* (tier 1 hand-calcs, other metrics) and an automatic "runs on every design change" hook are both deliberately out of scope for this ticket -- see `twin_core/prediction/evaluator.py`'s own module docstring for the full rationale. `InterfaceQuantity.predicted` (§2.11) already has `tier`/`evidence` fields anticipating this, but no `PREDICTED_BY` edge writer exists yet to connect a `twin.evaluate_metric` result back to an interface quantity automatically -- still a manual step.
+
+*Source: `twin_core/prediction/evaluator.py`, `api_gateway/twin/metric_evaluator.py`*
+
 ---
 
 ## 3. Edge Types
