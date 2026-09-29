@@ -59,6 +59,19 @@ class NodeType(StrEnum):
     # entirely in metadata; MaturityGate's required_claim_ids/results are
     # structured lists that want real typed fields).
     MATURITY_GATE = "maturity_gate"
+    # FORGE-287 (gap G-G1, target lifecycle spec's "dual state machine:
+    # propose -> constraint engine -> commit/reject -> next iteration"):
+    # one candidate value evaluated during a closed design loop (propose a
+    # parameter value -> evaluate against constraints -> repeat). Its own
+    # NodeType, not a generic EngineeringEntity tag or Evidence row -- an
+    # iteration has real structured state (loop_id, iteration_number,
+    # parameter/objective values, feasibility, approval) a caller queries
+    # by loop, the same reasoning MaturityGate above already used for
+    # itself. Deliberately generic (parameter_name/parameter_value/metric/
+    # objective_value, not wall-thickness-specific fields) so a future
+    # generalisation to other search parameters (FORGE-288) reuses this
+    # same node type rather than needing a schema migration.
+    DESIGN_LOOP_ITERATION = "design_loop_iteration"
 
 
 class WorkProductType(StrEnum):

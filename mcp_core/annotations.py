@@ -69,6 +69,7 @@ READ_ONLY: frozenset[str] = frozenset(
         "twin.constraint_violations",
         "twin.evaluate_metric",
         "twin.find_by_property",
+        "twin.get_design_loop",
         "twin.get_node",
         "twin.rank_sensitivity",
         "twin.thread_for",
@@ -120,6 +121,11 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.record_measurement",
         "twin.register_device_instance",
         "twin.stage_work_product_file",
+        # FORGE-287: composes twin.optimize_parameter (already ADDITIVE
+        # above) unchanged, then persists every candidate it evaluates as a
+        # new DesignLoopIteration node + edges -- pure append, nothing
+        # existing is overwritten.
+        "twin.start_design_loop",
     }
 )
 
@@ -171,6 +177,10 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "project.update",
         "twin.approve_engineering_change",
         "twin.approve_engineering_entity",
+        # Same human-authority-approval family as the two lines above: it
+        # records a person's approval of the design loop's converged
+        # winner, moving project state forward.
+        "twin.approve_design_loop",
         # A maturity-gate promotion is the same family as the approvals
         # above: a human-authority decision that moves project state
         # forward (concept -> sim_validated -> ... -> released). It refuses

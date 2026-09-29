@@ -29,6 +29,7 @@ from api_gateway.chat.tool_approvals import router as tool_approvals_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
+from api_gateway.design_loop.routes import router as design_loop_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
@@ -771,6 +772,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.component_recorder import make_component_recorder
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
+    from api_gateway.twin.design_loop import (
+        make_design_loop_approver,
+        make_design_loop_reader,
+        make_design_loop_starter,
+    )
     from api_gateway.twin.design_sketch_recorder import (
         make_design_sketch_approver,
         make_design_sketch_recorder,
@@ -845,6 +851,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     parameter_optimizer_fn = make_wall_thickness_optimizer(
         twin, evidence_recorder=evidence_recorder_fn, decision_recorder=decision_recorder
     )
+    # FORGE-287: composes the same optimizer above (so its Evidence/Decision
+    # recording isn't duplicated) and layers a persisted, queryable
+    # DesignLoopIteration timeline + approval gate on top.
+    design_loop_starter_fn = make_design_loop_starter(twin, optimize=parameter_optimizer_fn)
+    design_loop_reader_fn = make_design_loop_reader(twin)
+    design_loop_approver_fn = make_design_loop_approver(twin)
 
     # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
     # twin once here, same injected-callable shape as every make_X(twin,
@@ -975,6 +987,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # (residuals feed the calibrated band evaluate_metric now reads).
         device_instance_registrar=device_instance_registrar_fn,
         measurement_recorder=measurement_recorder_fn,
+        # FORGE-287: closed design loop -- persisted, queryable iteration
+        # timeline + approval gate over the same optimizer above.
+        design_loop_starter=design_loop_starter_fn,
+        design_loop_reader=design_loop_reader_fn,
+        design_loop_approver=design_loop_approver_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1021,6 +1038,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.context_adapter import init_context_assembler
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_metrics, init_twin
+    from api_gateway.design_loop.routes import init_design_loop_starter
+    from api_gateway.design_loop.routes import init_twin as init_design_loop_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
     from api_gateway.requirement_intelligence.routes import init_twin as init_requirements_twin
@@ -1118,6 +1137,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_simulation_twin(twin)
     init_hierarchy_twin(twin)
     init_requirements_twin(twin)
+    init_design_loop_twin(twin)
+    # FORGE-287: the dashboard's "start closed design loop" action reuses
+    # the SAME bound optimizer callable wired into bootstrap_tool_registry
+    # above (design_loop_starter_fn), so Evidence/Decision recording isn't
+    # duplicated between the MCP tool and the REST route.
+    init_design_loop_starter(design_loop_starter_fn)
     # Follow-up to MET-740/747: the dashboard's human-approval action for a
     # design_sketch work product (twin.commit_design_sketch is the agent
     # side of this same gate, wired above via bootstrap_tool_registry).
@@ -1590,6 +1615,7 @@ def create_app(
     app.include_router(simulation_router)
     app.include_router(constraint_router)
     app.include_router(requirements_router)
+    app.include_router(design_loop_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

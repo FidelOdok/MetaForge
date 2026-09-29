@@ -233,6 +233,36 @@ test.describe('Requirements', () => {
     await expect(verifiedRow).toContainText('FEA');
     await expect(verifiedRow).toContainText('simulation');
   });
+
+  test('closed design loop runs, shows the iteration timeline, and approves the winner (FORGE-287)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const loopSection = page.getByTestId('design-loop-section');
+    await expect(loopSection).toBeVisible();
+
+    await loopSection.getByTestId('start-design-loop-button').click();
+    const form = loopSection.getByTestId('design-loop-form');
+    await expect(form).toBeVisible();
+
+    await form.getByLabel('CAD work product id').fill('sample-work-product');
+    await form.getByLabel('Load (N)').fill('800');
+    await form.getByLabel('Deflection limit (mm)').fill('0.5');
+    await form.getByRole('button', { name: 'Run' }).click();
+
+    await expect(form).not.toBeVisible();
+    const rows = loopSection.getByTestId('design-loop-iteration-row');
+    await expect(rows.first()).toBeVisible();
+    await expect(rows).toHaveCount(7);
+
+    // Exactly one converged winner, awaiting approval.
+    await expect(loopSection.getByText('awaiting approval')).toBeVisible();
+    await expect(loopSection.getByTestId('design-loop-approved-badge')).not.toBeVisible();
+
+    await loopSection.getByTestId('approve-design-loop-button').click();
+    await expect(loopSection.getByTestId('design-loop-approved-badge')).toBeVisible();
+    await expect(loopSection.getByTestId('approve-design-loop-button')).not.toBeVisible();
+  });
 });
 
 test.describe('Design Assistant', () => {

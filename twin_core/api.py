@@ -25,6 +25,7 @@ from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
+from twin_core.models.design_loop_iteration import DesignLoopIteration
 from twin_core.models.device_instance import DeviceInstance
 from twin_core.models.engineering_change_transaction import EngineeringChangeTransaction
 from twin_core.models.engineering_entity import EngineeringEntity
@@ -431,6 +432,39 @@ class TwinAPI(ABC):
     async def list_maturity_gates(
         self, project_id: UUID | None = None, level: str | None = None
     ) -> list[MaturityGate]: ...
+
+    # --- Design Loop Iterations (FORGE-287) ---
+
+    @abstractmethod
+    async def create_design_loop_iteration(
+        self, iteration: DesignLoopIteration
+    ) -> DesignLoopIteration:
+        """Persist one candidate evaluated during a closed design loop.
+        Callers should go through
+        ``api_gateway.twin.design_loop.make_design_loop_starter`` rather
+        than calling this directly -- same "compositional wrapper, not a
+        bare CRUD call" precedent as ``create_maturity_gate``."""
+        ...
+
+    @abstractmethod
+    async def get_design_loop_iteration(self, iteration_id: UUID) -> DesignLoopIteration | None: ...
+
+    @abstractmethod
+    async def list_design_loop_iterations(self, loop_id: UUID) -> list[DesignLoopIteration]:
+        """All iterations of one loop run, in ``iteration_number`` order."""
+        ...
+
+    @abstractmethod
+    async def update_design_loop_iteration(
+        self, iteration_id: UUID, updates: dict[str, Any]
+    ) -> DesignLoopIteration:
+        """Apply ``updates`` to an iteration's mutable approval fields
+        (approved/approved_by/approved_at) -- used to record a human's
+        approval of the winning candidate. Unlike ``update_constraint``
+        this does NOT bump a revision counter -- an iteration is a
+        historical record of one evaluated candidate, not a FORGE-50
+        controlled entity."""
+        ...
 
     # --- Device Instances (FORGE-321) ---
 
@@ -1141,6 +1175,36 @@ class InMemoryTwinAPI(TwinAPI):
             filters=filters if filters else None,
         )
         return nodes  # type: ignore[return-value]
+
+    # --- Design Loop Iterations (FORGE-287) ---
+
+    async def create_design_loop_iteration(
+        self, iteration: DesignLoopIteration
+    ) -> DesignLoopIteration:
+        existing = await self._graph.get_node(iteration.id)
+        if existing is not None:
+            raise ValueError(f"DesignLoopIteration with ID {iteration.id} already exists")
+        result = await self._graph.add_node(iteration)
+        return result  # type: ignore[return-value]
+
+    async def get_design_loop_iteration(self, iteration_id: UUID) -> DesignLoopIteration | None:
+        node = await self._graph.get_node(iteration_id)
+        if node is not None and isinstance(node, DesignLoopIteration):
+            return node
+        return None
+
+    async def list_design_loop_iterations(self, loop_id: UUID) -> list[DesignLoopIteration]:
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DESIGN_LOOP_ITERATION,
+            filters={"loop_id": loop_id},
+        )
+        return sorted(nodes, key=lambda n: n.iteration_number)  # type: ignore[union-attr]
+
+    async def update_design_loop_iteration(
+        self, iteration_id: UUID, updates: dict[str, Any]
+    ) -> DesignLoopIteration:
+        result = await self._graph.update_node(iteration_id, updates)
+        return result  # type: ignore[return-value]
 
     # --- Device Instances (FORGE-321) ---
 

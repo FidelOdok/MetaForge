@@ -2,6 +2,31 @@ import { AxiosError, type AxiosAdapter, type AxiosInstance, type InternalAxiosRe
 
 /* Offline sample workspace for the digital twin (`?demo=1`). Illustrative data only: no gateway, solver or agent is called. */
 
+// FORGE-287: illustrative shape of one persisted DesignLoopIteration --
+// mirrors twin_core.models.design_loop_iteration.DesignLoopIteration's own
+// field names (snake_case; this mock, unlike the rest of this file, mirrors
+// the REST route's pass-through shape rather than the dashboard's usual
+// camelCase contract, since the real route itself is a thin pass-through).
+interface SampleDesignLoopIteration {
+  iteration_number: number;
+  parameter_name: string;
+  parameter_value: number;
+  metric: string;
+  objective_value: number;
+  constraints_status: Record<string, number>;
+  feasible: boolean;
+  status: 'candidate' | 'converged' | 'infeasible';
+  is_winner: boolean;
+  approved: boolean;
+  approved_by: string | null;
+}
+
+interface SampleDesignLoop {
+  loop_id: string;
+  status: 'optimal' | 'infeasible' | 'already_feasible_at_min';
+  iterations: SampleDesignLoopIteration[];
+}
+
 // Generated from the hosted console sample workspace (illustrative Drone FC data).
 const SAMPLE_WORKSPACE_SEED = {
   nodes: [
@@ -791,6 +816,10 @@ const SAMPLE_WORKSPACE_SEED = {
       },
     ],
   },
+  // FORGE-287 (gap G-G1): started design loops live here, keyed by
+  // loop_id -- empty until the dashboard's "Start design loop" action
+  // creates one (see the POST /design-loop/start handler below).
+  designLoops: {} as Record<string, SampleDesignLoop>,
   // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
   // the ticket's own acceptance example (an "upper_arm"/"shoulder"
   // interface with a tip_deflection quantity, a mass allocation with an
@@ -1026,6 +1055,7 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path === '/requirements/quality') return s.requirementsReport;
     if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
+    if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];
     return undefined;
   }
   if (method === 'post') {
@@ -1066,6 +1096,54 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         expectedEvidence: payload.expectedEvidence ?? '',
       });
       return { constraintId: id, setWorkProductId: `sample-set-${id}` };
+    }
+    if (path === '/design-loop/start') {
+      // FORGE-287: a small, illustrative bisection-like trace -- narrows
+      // toward a converged winner exactly like the real
+      // twin.start_design_loop tool's own bisection search, just without
+      // running the real hand-calc against a real work product.
+      const loopId = `sample-loop-${Date.now()}`;
+      const values = [0.5, 10.25, 5.375, 2.9375, 1.71875, 1.109375, 0.8046875];
+      const iterations: SampleDesignLoopIteration[] = values.map((v, i) => {
+        const feasible = v <= 1.5;
+        const isWinner = i === values.length - 1;
+        return {
+          iteration_number: i,
+          parameter_name: 'wall_thickness_mm',
+          parameter_value: v,
+          metric: 'mass_kg',
+          objective_value: 0.156 + (v - 0.8046875) * 0.18,
+          constraints_status: {
+            deflection_margin_mm: feasible ? 0.02 : -0.31,
+            sf_margin: feasible ? 0.04 : -0.6,
+          },
+          feasible,
+          status: isWinner ? 'converged' : 'candidate',
+          is_winner: isWinner,
+          approved: false,
+          approved_by: null,
+        };
+      });
+      s.designLoops[loopId] = { loop_id: loopId, status: 'optimal', iterations };
+      return {
+        loop_id: loopId,
+        status: 'optimal',
+        detail: 'minimum feasible wall thickness found via bisection: 0.8047mm',
+        winner: iterations[iterations.length - 1],
+        candidates: iterations,
+        iteration_count: iterations.length,
+        iteration_ids: iterations.map((it) => `${loopId}-${it.iteration_number}`),
+      };
+    }
+    const approveLoopMatch = path.match(/^\/design-loop\/([^/]+)\/approve$/);
+    if (approveLoopMatch && approveLoopMatch[1]) {
+      const loop = s.designLoops[approveLoopMatch[1]];
+      if (!loop) return undefined;
+      const winner = loop.iterations.find((it) => it.is_winner);
+      if (!winner) return undefined;
+      winner.approved = true;
+      winner.approved_by = (body.approvedBy as string) ?? 'you';
+      return { ...winner, approved_at: now };
     }
     if (path === '/chat/threads') {
       const thread = {

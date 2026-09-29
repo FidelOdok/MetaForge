@@ -330,6 +330,16 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.maturity_gate import MaturityGate
 
             return MaturityGate.model_validate(data)
+        elif node_type == NodeType.DESIGN_LOOP_ITERATION:
+            # Same FORGE-68 failure mode -- without this branch a
+            # DesignLoopIteration read back from Neo4j degrades to a bare
+            # NodeBase, losing loop_id/parameter_value/status/is_winner
+            # entirely, and list_design_loop_iterations (FORGE-287) would
+            # always look like "not found"/empty against a real deployment
+            # even right after a successful create.
+            from twin_core.models.design_loop_iteration import DesignLoopIteration
+
+            return DesignLoopIteration.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 
