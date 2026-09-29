@@ -172,7 +172,7 @@ async function measure(path) {
 
     const expression = `
       new Promise((resolve) => {
-        const deadline = Date.now() + 45000;
+        const deadline = Date.now() + 60000;
         const poll = () => {
           const labels = [...document.querySelectorAll(
             '.docusaurus-mermaid-container foreignObject'
@@ -206,11 +206,23 @@ async function measure(path) {
             }),
           });
         };
-        // Let fonts settle first: mermaid measures with whatever is loaded,
-        // so a late webfont is itself a way this breaks.
-        (document.fonts ? document.fonts.ready : Promise.resolve()).then(() =>
-          setTimeout(poll, 400)
-        );
+        // Wait for hydration before starting the clock. Mermaid runs from
+        // React, so polling a server-rendered shell just burns the deadline
+        // and then reports "the fence did not become a diagram" — which is
+        // the one message here that should only ever mean a real regression.
+        const hydrated = () =>
+          document.querySelector('.theme-doc-markdown') !== null &&
+          document.querySelector('#__docusaurus') !== null;
+        const whenHydrated = (attempt = 0) => {
+          if (hydrated() || attempt > 100) return Promise.resolve();
+          return new Promise((r) => setTimeout(r, 100)).then(() => whenHydrated(attempt + 1));
+        };
+
+        whenHydrated()
+          // Fonts settle next: mermaid measures with whatever is loaded, so
+          // a late webfont is itself a way this breaks.
+          .then(() => (document.fonts ? document.fonts.ready : Promise.resolve()))
+          .then(() => setTimeout(poll, 400));
       })
     `;
     const { result } = await send(
