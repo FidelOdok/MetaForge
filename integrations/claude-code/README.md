@@ -13,6 +13,7 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 
 ## Commands
 
+- `/metaforge:new`
 - `/metaforge:use`
 - `/metaforge:status`
 - `/metaforge:design`

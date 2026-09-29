@@ -6,8 +6,8 @@ layer rule (``tool_registry`` may not import from ``api_gateway``)
 the adapter defines a structural ``ProjectBackendLike`` protocol; any
 gateway backend that satisfies it can be plugged in unchanged.
 
-Five tools today: ``project.create``, ``project.list``,
-``project.get``, ``project.update``, ``project.delete``.
+Six tools today: ``project.create``, ``project.list``,
+``project.get``, ``project.open``, ``project.update``, ``project.delete``.
 
 Late-binding pattern matches ``KnowledgeServer``: the registry can
 register the adapter before the gateway has finished initialising its
@@ -22,7 +22,9 @@ from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
+from mcp_core.context import bind_current_session_to as _bind_session_project
 from mcp_core.context import current_context
+from mcp_core.project_ref import ProjectRef, ProjectRefError, resolve_project_ref
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -175,6 +177,56 @@ class ProjectServer(McpToolServer):
                 resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=10),
             ),
             handler=self.handle_create,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="project.open",
+                adapter_id="project",
+                name="Open Project",
+                description=(
+                    "Find one project by id, exact name, or unique name "
+                    "substring, and make it this session's active project. "
+                    "Use this when the user names a project in prose "
+                    "('open the arm project') instead of giving a UUID. "
+                    "Several matches is an error listing them, never a "
+                    "guess -- ask the user which one. Check "
+                    "`scope_bound` in the reply: false means the scope "
+                    "did not stick for this client and you must keep "
+                    "passing project_id explicitly."
+                ),
+                capability="project_management",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": (
+                                "Project id, exact name, or a substring that matches "
+                                "exactly one project name."
+                            ),
+                        },
+                    },
+                    "required": ["query"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project": _project_output_schema(),
+                        "scope_bound": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether later calls without an explicit project_id "
+                                "will resolve to this project."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=10),
+            ),
+            handler=self.handle_open,
         )
 
         self.register_tool(
@@ -366,6 +418,42 @@ class ProjectServer(McpToolServer):
     # Handlers
     # ------------------------------------------------------------------
 
+    async def handle_open(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a prose project reference and scope the session to it.
+
+        FORGE-335. Two things that were separately available and never
+        together: the gateway could resolve "the arm project" but only for
+        its own callers, and ``session.start`` could bind a scope but only
+        if you already had the UUID. An MCP client asked to "open the arm
+        project" had to list every project and match it itself, which is
+        how you get a harness that quietly picks the first hit.
+        """
+        with tracer.start_as_current_span("project.mcp.open") as span:
+            query = arguments.get("query")
+            if not query or not isinstance(query, str):
+                raise ValueError("project.open: 'query' is required and must be a string")
+
+            projects = await self.backend.list_projects()
+            candidates = [ProjectRef(id=str(p.id), name=str(p.name)) for p in projects]
+            try:
+                match = resolve_project_ref(query, candidates)
+            except ProjectRefError as exc:
+                # Surfaced as a tool error, not an empty result: "which of
+                # these five" is an answer the model can act on, and an
+                # empty result invites it to create a duplicate instead.
+                raise ValueError(f"project.open: {exc}") from exc
+
+            project = next(p for p in projects if str(p.id) == match.id)
+            bound = _bind_session_project(match.id)
+            span.set_attribute("project.id", match.id)
+            logger.info(
+                "project_mcp_open",
+                project_id=match.id,
+                query=query,
+                scope_bound=bound,
+            )
+            return {"project": _project_to_dict(project), "scope_bound": bound}
+
     async def handle_create(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.create") as span:
             name = arguments.get("name")
@@ -389,13 +477,20 @@ class ProjectServer(McpToolServer):
                 description=description or "",
                 status=status,
             )
+            # FORGE-335: creating a project and then not being in it is the
+            # same papercut as picking one and having it not stick. The
+            # caller's next call is about the thing they just made.
+            bound = _bind_session_project(str(project.id))
             logger.info(
                 "project_mcp_create",
                 project_id=project.id,
                 project_name=name,
                 actor_id=str(actor_id) if actor_id is not None else None,
+                scope_bound=bound,
             )
-            return _project_to_dict(project)
+            out = _project_to_dict(project)
+            out["scope_bound"] = bound
+            return out
 
     async def handle_list(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.list") as span:

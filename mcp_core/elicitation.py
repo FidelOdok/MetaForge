@@ -136,6 +136,11 @@ def approval_request(ask: ApprovalAsk) -> tuple[str, dict[str, Any]]:
         "",
         ask.reason,
     ]
+    if ask.project:
+        # Named before the arguments, not after: once a project is set with
+        # project.open the calls that follow carry no project of their own,
+        # so this is the only place a reviewer learns where the write lands.
+        lines += ["", f"Project: {ask.project}"]
     if ask.arguments:
         lines += ["", "Arguments:", *_summarise_arguments(ask.arguments)]
     lines += ["", f"Requested by: {ask.caller.value}"]

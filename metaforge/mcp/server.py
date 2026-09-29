@@ -941,6 +941,7 @@ class UnifiedMcpServer:
                 arguments=arguments,
                 caller=self._caller,
                 reason=decision.reason,
+                project=_effective_project(arguments),
             )
         )
         if outcome is not ApprovalOutcome.APPROVED:
@@ -1181,6 +1182,25 @@ class UnifiedMcpServer:
                 adapter_count=len(self._adapters),
             )
         return report
+
+
+def _effective_project(arguments: dict[str, Any]) -> str | None:
+    """Which project this call lands in, for the reviewer's benefit.
+
+    An explicit ``project_id`` argument wins, exactly as it does at the data
+    layer. Otherwise it is whatever the session is scoped to -- which since
+    FORGE-335 is the normal case, and is invisible in the arguments.
+    """
+    explicit = arguments.get("project_id")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    try:
+        from mcp_core.context import current_context
+
+        scoped = current_context().project_id
+    except Exception:  # noqa: BLE001 — a missing project must not block approval
+        return None
+    return str(scoped) if scoped else None
 
 
 # ---------------------------------------------------------------------------

@@ -258,6 +258,41 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Naming a project in prose
+
+`project.open` takes what the user said — an id, an exact name, or a
+unique name substring — and makes that project the session's scope.
+`project.create` scopes the session to what it just made, for the same
+reason: creating a project and then not being in it is the same papercut
+as picking one and having it not stick.
+
+**Several matches is an error, never a guess.** The error names them:
+
+```
+project.open: "arm" matches 2 projects: 6-DOF Arm (11111111), Arm Mk2 (22222222) — be more specific or use the id
+```
+
+Silently picking one scopes a design change to the wrong project, and
+nothing downstream can tell that happened. An unknown reference is an
+error too, rather than an empty result, which would invite a second
+project on the same subject — splitting the design thread with nothing to
+reconcile the halves.
+
+The matching is [`mcp_core.project_ref`](https://github.com/FidelOdok/MetaForge/blob/main/mcp_core/project_ref.py),
+shared with the gateway's chat-scope resolution so a human and an agent
+refuse the same ambiguous query with the same sentence.
+
+`project.open` is annotated `readOnlyHint: true`. It persists nothing,
+changes only this session's own view, and is undone by calling it again —
+treating project *selection* as a write would put it behind a human
+approval, which is the one action that makes every later call more
+correctly scoped.
+
+Because it does change where a later write lands, the approval prompt
+names the effective project. Once a scope is set, the calls that follow
+carry no project of their own, so that line is the only place a reviewer
+learns which project a commit writes to.
+
 ### Picking a project, and it sticking
 
 `/metaforge:use` calls `session.start` with a `project_id`. Everything
