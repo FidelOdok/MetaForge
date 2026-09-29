@@ -234,3 +234,24 @@ class TestBuildRequirementMatrix:
         await _seed_requirement(twin, project_id, message="mass <= 4.5 kg")
         rows = await build_requirement_matrix(twin, project_id)
         assert rows[0].limitText == "mass <= 4.5 kg"
+
+    async def test_limit_text_prefers_structured_binding_when_present(self, twin, project_id):
+        # FORGE-259: a real metric/operator/limit/unit binding beats the
+        # free-text message fallback.
+        await twin.create_constraint(
+            Constraint(
+                name="tip_deflection",
+                expression="True",
+                message="a stale free-text description",
+                metric="tip_deflection",
+                operator="<=",
+                limit=0.5,
+                unit="mm",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+                project_id=project_id,
+            )
+        )
+        rows = await build_requirement_matrix(twin, project_id)
+        assert rows[0].limitText == "tip_deflection <= 0.5mm"

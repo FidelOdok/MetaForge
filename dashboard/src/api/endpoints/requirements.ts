@@ -1,5 +1,7 @@
 import apiClient from '../client';
 import type {
+  CreateConstraintPayload,
+  CreateConstraintResult,
   RequirementFixProposal,
   RequirementMatrixReport,
   RequirementSetQualityReport,
@@ -44,5 +46,16 @@ export async function proposeRequirementFix(requirementId: string): Promise<Requ
   const { data } = await apiClient.post<RequirementFixProposal>(
     `/requirements/${requirementId}/fix`,
   );
+  return data;
+}
+
+/** FORGE-259: the constraint editor's "create" action -- errors (e.g. an
+ * unrecognized unit) propagate to the caller rather than being swallowed,
+ * unlike the read endpoints above, since a failed write needs to reach
+ * the form's own error state. */
+export async function createConstraint(
+  payload: CreateConstraintPayload,
+): Promise<CreateConstraintResult> {
+  const { data } = await apiClient.post<CreateConstraintResult>('/requirements/constraints', payload);
   return data;
 }

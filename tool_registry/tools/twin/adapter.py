@@ -1124,7 +1124,15 @@ class TwinServer(McpToolServer):
                     "constraint_set work product summarising the set. Use "
                     "during requirements capture so quantified limits (mass, "
                     "power, cost, safety factor, ...) become machine-checked "
-                    "gate criteria instead of prose."
+                    "gate criteria instead of prose. Each entry needs EITHER a "
+                    "raw 'expression' OR a structured 'metric'+'limit' binding "
+                    "(FORGE-259) -- the latter is what the dashboard's "
+                    "constraint editor writes; live pass/fail/no_data status "
+                    "for a requirement comes from twin.evaluate_metric/Claims "
+                    "(GET /v1/requirements/matrix), never from evaluating this "
+                    "expression, so a structured-only entry records a benign "
+                    "placeholder expression rather than requiring the caller "
+                    "to also hand-write Python."
                 ),
                 capability="twin_constraint_set",
                 input_schema={
@@ -1153,7 +1161,39 @@ class TwinServer(McpToolServer):
                                             'evaluates (e.g. "all(float(wp.metadata.get('
                                             "'mass_g', 0)) <= 60 for wp in "
                                             "ctx.work_products(type='cad_model'))\"). "
-                                            "Must compile; validated at record time."
+                                            "Must compile; validated at record time. "
+                                            "Omit when supplying a structured 'metric'+"
+                                            "'limit' binding instead."
+                                        ),
+                                    },
+                                    "metric": {
+                                        "type": "string",
+                                        "description": (
+                                            "FORGE-259: the property this requirement is "
+                                            "about (e.g. 'tip_deflection', 'moving_mass')."
+                                        ),
+                                    },
+                                    "operator": {
+                                        "type": "string",
+                                        "enum": ["<=", ">=", "==", "<", ">", "!="],
+                                        "description": "Comparison against 'limit'. Default '<='.",
+                                    },
+                                    "limit": {
+                                        "type": "number",
+                                        "description": "The numeric limit 'metric' is compared to.",
+                                    },
+                                    "unit": {
+                                        "type": "string",
+                                        "description": (
+                                            "Must be a unit twin_core.models.quantity "
+                                            "recognizes (e.g. 'mm', 'kg')."
+                                        ),
+                                    },
+                                    "target_node_type": {
+                                        "type": "string",
+                                        "description": (
+                                            "The kind of node 'metric' is measured on "
+                                            "(e.g. 'cad_model'). Free text, not enforced."
                                         ),
                                     },
                                     "severity": {
@@ -1183,7 +1223,7 @@ class TwinServer(McpToolServer):
                                         ),
                                     },
                                 },
-                                "required": ["name", "expression"],
+                                "required": ["name"],
                             },
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},

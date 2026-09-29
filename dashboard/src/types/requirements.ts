@@ -69,3 +69,23 @@ export interface RequirementMatrixRow {
 export interface RequirementMatrixReport {
   rows: RequirementMatrixRow[];
 }
+
+/** FORGE-259: the dashboard constraint editor's payload -- a structured
+ * measured-key binding (metric/operator/limit/unit/target node), no
+ * hand-typed Python expression. */
+export interface CreateConstraintPayload {
+  projectId: string;
+  name: string;
+  metric: string;
+  operator: string;
+  limit: number;
+  unit?: string;
+  targetNodeType?: string;
+  message?: string;
+  severity?: string;
+}
+
+export interface CreateConstraintResult {
+  constraintId: string;
+  setWorkProductId: string | null;
+}

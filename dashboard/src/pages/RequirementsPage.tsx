@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { useActiveProject } from '../hooks/use-active-project';
 import {
   useRequirementMatrix,
   useRequirementQuality,
   useProposeRequirementFix,
+  useCreateConstraint,
 } from '../hooks/use-requirements';
 import type {
   EvidenceSummary,
@@ -16,6 +18,144 @@ import type {
   RequirementMatrixStatus,
   RequirementRecord,
 } from '../types/requirements';
+
+const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
+
+const FIELD_STYLE: React.CSSProperties = {
+  background: 'var(--mf-c-191b22)',
+  border: '1px solid var(--mf-r-65-72-90-0p3)',
+};
+
+/** FORGE-259 (gap G-A3): the constraint editor -- pick metric, operator,
+ * limit, unit, target node directly, no hand-typed Python expression. */
+function NewConstraintForm({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+  const toast = useToast();
+  const createConstraint = useCreateConstraint();
+  const [name, setName] = useState('');
+  const [metric, setMetric] = useState('');
+  const [operator, setOperator] = useState<(typeof OPERATORS)[number]>('<=');
+  const [limit, setLimit] = useState('');
+  const [unit, setUnit] = useState('');
+  const [targetNodeType, setTargetNodeType] = useState('');
+
+  const limitValue = Number(limit);
+  const canSubmit = name.trim() !== '' && metric.trim() !== '' && limit !== '' && !Number.isNaN(limitValue);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    createConstraint.mutate(
+      {
+        projectId,
+        name: name.trim(),
+        metric: metric.trim(),
+        operator,
+        limit: limitValue,
+        unit: unit.trim(),
+        targetNodeType: targetNodeType.trim(),
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Recorded ${name.trim()}`);
+          onDone();
+        },
+        onError: (err) => {
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.error(detail || 'Could not record the constraint');
+        },
+      },
+    );
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      data-testid="new-constraint-form"
+      className="mb-3 flex flex-wrap items-end gap-2 rounded-lg px-3 py-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Name
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="tip_deflection"
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+          style={{ ...FIELD_STYLE, width: '160px' }}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Metric
+        <input
+          value={metric}
+          onChange={(e) => setMetric(e.target.value)}
+          placeholder="tip_deflection"
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+          style={{ ...FIELD_STYLE, width: '160px' }}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Operator
+        <select
+          value={operator}
+          onChange={(e) => setOperator(e.target.value as (typeof OPERATORS)[number])}
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+          style={{ ...FIELD_STYLE, width: '72px' }}
+        >
+          {OPERATORS.map((op) => (
+            <option key={op} value={op}>
+              {op}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Limit
+        <input
+          value={limit}
+          onChange={(e) => setLimit(e.target.value)}
+          placeholder="0.5"
+          inputMode="decimal"
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+          style={{ ...FIELD_STYLE, width: '80px' }}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Unit
+        <input
+          value={unit}
+          onChange={(e) => setUnit(e.target.value)}
+          placeholder="mm"
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+          style={{ ...FIELD_STYLE, width: '72px' }}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Target node type
+        <input
+          value={targetNodeType}
+          onChange={(e) => setTargetNodeType(e.target.value)}
+          placeholder="cad_model"
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+          style={{ ...FIELD_STYLE, width: '140px' }}
+        />
+      </label>
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!canSubmit || createConstraint.isPending}
+        >
+          {createConstraint.isPending ? 'Recording…' : 'Record'}
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
 
 const PRODUCT_TYPES = [
   { value: 'generic', label: 'Generic' },
@@ -227,8 +367,9 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 function RequirementMatrixSection({ projectId }: { projectId?: string }) {
   const { data: matrix, isLoading } = useRequirementMatrix(projectId);
   const rows = matrix?.rows ?? [];
+  const [showForm, setShowForm] = useState(false);
 
-  if (!isLoading && rows.length === 0) return null;
+  if (!isLoading && rows.length === 0 && !showForm && !projectId) return null;
 
   return (
     <div className="mb-6" data-testid="requirements-matrix">
@@ -236,28 +377,50 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
         <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
           Evidence matrix
         </h2>
-        {rows.length > 0 && (
-          <div className="flex gap-2">
+        <div className="flex gap-2">
+          {projectId && !showForm && (
             <button
               type="button"
-              onClick={() => exportMatrixCsv(rows)}
+              data-testid="new-constraint-button"
+              onClick={() => setShowForm(true)}
               className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
               style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
             >
-              Export CSV
+              + New constraint
             </button>
-            <button
-              type="button"
-              onClick={() => exportMatrixMd(rows)}
-              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
-              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
-            >
-              Export MD
-            </button>
-          </div>
-        )}
+          )}
+          {rows.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => exportMatrixCsv(rows)}
+                className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+                style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => exportMatrixMd(rows)}
+                className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+                style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+              >
+                Export MD
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      {!isLoading && (
+      {projectId && showForm && (
+        <NewConstraintForm projectId={projectId} onDone={() => setShowForm(false)} />
+      )}
+      {!isLoading && rows.length === 0 && (
+        <EmptyState
+          title="No structured requirements yet"
+          description="Record one above to see it tracked here."
+        />
+      )}
+      {!isLoading && rows.length > 0 && (
         <div
           className="rounded-lg overflow-hidden overflow-x-auto"
           style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
@@ -403,6 +566,7 @@ export function RequirementsPage() {
 
       {!isLoading && requirements.length > 0 && (
         <div
+          data-testid="requirements-quality-table"
           className="rounded-lg overflow-hidden overflow-x-auto"
           style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
         >

@@ -128,7 +128,14 @@ async def _evidence_summary(
 async def _derive_row(
     twin: TwinAPI, staleness: StalenessEngine, req: Any, claims: list[Claim]
 ) -> RequirementMatrixRow:
-    limit_text = req.message or req.name
+    # FORGE-259: prefer the structured metric/operator/limit/unit binding
+    # (real, machine-set data) over the free-text message/name fallback,
+    # when a requirement has one -- unchanged for every constraint recorded
+    # before this ticket, which has no `metric` set.
+    if req.metric and req.limit is not None:
+        limit_text = f"{req.metric} {req.operator} {req.limit}{req.unit}"
+    else:
+        limit_text = req.message or req.name
 
     if not claims:
         return RequirementMatrixRow(

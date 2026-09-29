@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  createConstraint,
   getRequirementMatrix,
   getRequirementQuality,
   proposeRequirementFix,
 } from '../api/endpoints/requirements';
+import type { CreateConstraintPayload } from '../types/requirements';
 
 export const requirementKeys = {
   all: ['requirements', 'quality'] as const,
@@ -37,6 +39,22 @@ export function useProposeRequirementFix() {
     mutationFn: (requirementId: string) => proposeRequirementFix(requirementId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: requirementKeys.all });
+    },
+  });
+}
+
+/** FORGE-259: the constraint editor's create action -- refetches both the
+ * quality report and the live evidence matrix so the new requirement
+ * shows up immediately (as `no_data`, honestly, until a claim cites it). */
+export function useCreateConstraint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateConstraintPayload) => createConstraint(payload),
+    onSuccess: (_result, payload) => {
+      queryClient.invalidateQueries({ queryKey: requirementKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: requirementKeys.matrixProject(payload.projectId),
+      });
     },
   });
 }
